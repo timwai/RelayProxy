@@ -12,19 +12,19 @@
 >
 > 2026-10-10 基准之后的新增提交，必须查看**相应 SHA** 的 CI 检查；不能沿用基准成功结论。
 
-## 最新状态快照（2026-10-11，按已进入分支的代码核对）
+## 最新状态快照（2026-10-11 23:12 +08:00，按当前分支 HEAD 核对）
 
 | 核对项 | 结果 |
 |---|---|
-| 开发分支 / 当前已验代码提交 | `feat/browser-session-sync` / [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e)（后续文档提交不改业务代码） |
+| 开发分支 / 最新代码提交 | `feat/browser-session-sync` / [`e9aa691`](https://github.com/timwai/RelayProxy/commit/e9aa691963de926af3f7628f138fdbb26da600a5)（修复 IndexedDB 无效日期/共享对象引用的静默失真）；此前 `b504837` 的成功 CI 仅对当时 SHA 有效 |
 | PR 状态 | [#194](https://github.com/timwai/RelayProxy/pull/194)：**Open / Draft / 未合并 main** |
-| 当前新范围自动化 | [Go CI #38108843827](https://github.com/timwai/RelayProxy/actions/runs/38108843827) **success**、[UI CI #38108843828](https://github.com/timwai/RelayProxy/actions/runs/38108843828) **success**、[Network Acceptance #38108843833](https://github.com/timwai/RelayProxy/actions/runs/38108843833) **success**、[Android #38108843829](https://github.com/timwai/RelayProxy/actions/runs/38108843829) **success**；网络 CI 测试通用代理/FakeIP/DNS，不等于真实 Chrome ↔ Agent 的双端验收 |
-| Cookie 同步 P0 | P0-01–07：**3 项已实现·待验收（02/03/04），2 项部分完成（05/06），2 项未开始正式验收（01/07）**。没有一项可视为“已验收” |
-| Cookie 同步 P1 / P2 | P1：**4 项部分完成、2 项未开始**；P2：**4 项未开始** |
+| 当前新范围自动化 | **最新 `e9aa691` 无可确认的 Go/UI/Android CI 结果，不能声称通过。** 截至本次查询，GitHub Actions 最近可见运行创建于 **2026-10-11 07:20 UTC**（例如 [`d9b1698` Go/UI/Android](https://github.com/timwai/RelayProxy/actions?query=branch%3Afeat%2Fbrowser-session-sync) 均 success）；另 [`c4392cb` Go/UI/Network/Android](https://github.com/timwai/RelayProxy/commit/c4392cbb1f) 四项 success，但这些 SHA **均早于**当日 13:52–13:56 UTC 的 IndexedDB v3 新代码。需在最新 HEAD 上触发并核验 Go/UI/Android，且 UI CI 执行进度文档同步检查。 |
+| Cookie 同步 P0 | P0-01–09：**5 项已实现·待验收（02/03/04/08/09）、2 项部分完成（05/06）、2 项未开始正式验收（01/07）**；P0-08 单独为已实现·待真机/安全验收。**0 项已验收，当前不放行** |
+| Cookie 同步 P1 / P2 | P1：**4 项部分完成、1 项被新全量授权流程替代（P1-04）、1 项未开始（P1-05）**；P2：**2 项已实现·待真机/安全验收（P2-01/02）、2 项未开始（P2-03/04）**。IndexedDB v3 新增发布验收项 P0-09，不能以代码完成计为已验收 |
 | A Agent → B Chrome 网络绑定 | NB-01–04 已实现·待真机/安全验收；NB-05 审计与正式准入未开始 |
 | B 本机 Agent（当前已入分支） | NB-06/07/09/10：无鉴权、无 Agent 域名白名单的回环入口；新增普通 HTTP Forward、任意合法 TCP CONNECT 目标/端口及 IPv4/IPv6/内网/单标签域名；复用 Agent **DIRECT/PROXY/REJECT**，Chrome 侧增加与 Cookie 配对独立的全 Profile 代理开关；代码/Go/UI 自动化已通过，真实 Chrome/Agent 尚未验收 |
 | 最新“完整 Chrome 本机 Agent 代理”需求 | **已集成·待真机/安全验收**：原草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 的业务改动已迁入功能分支 [`eaf13e8`](https://github.com/timwai/RelayProxy/commit/eaf13e83029eb0272eda81f99f727e1b07eeef02)，经格式与协议测试修复形成 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e)；Go/UI/Network CI success，不等于全协议浏览器网络接管或 P0 验收 |
-| 上线结论 | **不放行**。仍需草稿代码整合修复、Chrome 实际联机测试、站点兼容、安全审计、跨平台安装/更新与性能验证 |
+| 上线结论 | **不放行**。最新 IndexedDB v3 尚无对应 HEAD CI；P0-01/05/06/07/08/09、NB-05/08/11 仍需真实 Chrome/Agent、失败回滚、安全审计和跨平台发布验收。PR #194 保持 Draft，未合并 main |
 
 ### 核心能力边界（不可混淆）
 
@@ -34,7 +34,7 @@
 
 ### 最近交付与下一步顺序
 
-1. **把 `b7546cf` 草稿规范整合到功能分支**，消除明显测试夹具/编译风险，验证 HTTP GET/POST、CONNECT 非 443、IPv4/IPv6、单标签域名、Agent DIRECT/REJECT/PROXY；开发前/后均须更新本进度表。草稿尚无 CI，不得直接宣称可用。
+1. **先为当前 HEAD `e9aa691` 补齐 Go/UI/Android CI**（必要时单独运行 Network Acceptance）；验证新增 `indexeddb-sync.js`、v3 双端加密与回滚测试，核对 CI 的“进度文档同步”检查。之前 `b504837` 已集成普通 HTTP/CONNECT/Chrome 全局 Agent 代理，旧草稿 `b7546cf` 仅作历史参考；不得再把整合草稿列为未完成工作。
 2. **在 Chrome 中实际验收独立全浏览器代理**：Profile 启停、PAC 站点优先级、浏览器默认代理与其他代理扩展冲突、Chrome 的 loopback bypass、端口变更与 Agent 异常恢复；HTTP/WebSocket、HTTPS、DNS/WebRTC/QUIC 的最终行为须按协议分别验证。
 3. **补上零鉴权回环端口的安全威胁建模和资源/ACL 检查**：含同机其他程序可使用代理、内网 SSRF、DNS 重绑定、连接限额与 Agent Exit 原有访问控制，确认哪些行为是明确用户选择而非意外扩权。
 4. **完成真实 A/B Chrome Cookie 登录与网络出口的双端验收**、故障恢复和独立密码学审查；P0 通过之后再补齐 P1 规则/统计/签名发布，P2 保持延后。
@@ -78,6 +78,8 @@
 | P0-07 | **独立安全审查 / 密码学复核** | **未开始（正式评审）** | [加密信封](../browser/chrome-extension/src/session-envelope.js)、[邀请加密](../browser/chrome-extension/src/envelope.js)和 Server 验签已有开发实现与单测 | 独立审查现有 P-256 ECDH+HKDF+AES-GCM 组合，优先评估标准 HPKE (RFC 9180)；核对签名/密钥绑定、来源 pin、重放、时序、恶意网站、扩展权限、日志、认证降级与密钥轮换；漏洞关闭后复测 |
 | P0-08 | **Chrome 本机 Agent 完整网络代理能力与兼容性验收（新增）** | **已实现·待真机/安全验收** | [Agent 本机入口](../agent/app/browser_local_proxy.go)已支持 HTTP 正向代理、任意 TCP CONNECT Host/IP/端口；[RoutingDialer](../agent/routing/dialer.go)委托现有 DIRECT/PROXY/REJECT；[Chrome PAC](../browser/chrome-extension/src/network-binding.js)支持与 Cookie 配对无关的全 Profile 本机模式；[协议单测](../agent/app/browser_local_proxy_test.go)、[Chrome PAC 测试](../browser/chrome-extension/tests/network-binding.test.mjs)纳入 Go/UI CI | 仍需真实 Windows/macOS Chrome 的 HTTP/HTTPS/WebSocket、IPv4/IPv6、Agent 异常、回环绕过、DNS/WebRTC/QUIC 行为验收，以及无鉴权本机代理的安全/资源审计。Chrome proxy API 不等于透明 VPN，不得声称全协议覆盖 |
 
+| P0-09 | **IndexedDB v3 新增敏感会话面验收** | **已实现·待 CI/真机/安全验收** | [`1334fd4`](https://github.com/timwai/RelayProxy/commit/1334fd4d8f) 新增 v3 双端同意、同 Origin IndexedDB 全量采集/恢复、Schema/记录校验、冲突保护与多库回滚；[`e9aa691`](https://github.com/timwai/RelayProxy/commit/e9aa691963de926af3f7628f138fdbb26da600a5) 对无效日期和别名对象图 fail-closed；[实现](../browser/chrome-extension/src/indexeddb-sync.js)、[模拟测试](../browser/chrome-extension/tests/indexeddb.test.mjs) | 需最新 HEAD Go/UI/Android CI；Windows/macOS 实体 Chrome A/B 验证同源数据库版本/索引/Blob/非导出 CryptoKey/别名对象、打开中的 DB、断线、崩溃/部分回滚、旧 v1/v2 规则不自动升级、大小配额与双端确认。IndexedDB 不保证所有网站能迁移登录，未验收前不得发布 |
+
 ### P0 真机验收矩阵（每格都需要测试记录）
 
 | 场景 | Windows Chrome A → B | macOS Chrome A → B | 不兼容网站/边界 |
@@ -89,6 +91,7 @@
 | Worker 休眠、浏览器重启、网络中断和 ACK 丢失 | 待验证 | 待验证 | 重放与旧 ACK 必须拒绝 |
 | 撤销规则、撤销设备、禁用 Server 功能 | 待验证 | 待验证 | 停止 RelayProxy 同步；网站令牌需网站自身撤销 |
 | DBSC/Passkey/MFA/设备绑定网站 | 待验证 | 待验证 | 明确提示不兼容，不尝试绕过 |
+| IndexedDB v3：多库、版本冲突、Blob/非法日期/别名引用、部分回滚 | 待验证 | 待验证 | 旧配对不可自动扩权；`PARTIAL_ROLLBACK` 必须人工确认 |
 
 ## 二、正式版本应补齐（P1）
 
@@ -99,7 +102,7 @@
 | P1-01 | **完整规则管理** | **部分完成** | [Chrome 配对和撤销 UI](../browser/chrome-extension/src/popup.js)；[Server Web](../server/web/frontend/src/BrowserSync.jsx)目前以设备审批/撤销为主 | Server Web 加规则列表、站点范围（注意 Server 只能看到密文规则标识，不应解密 Origin）、启停/撤销、双端授权时间和筛选；避免让管理员借管理页取得 Cookie |
 | P1-02 | **设备在线/最后同步/失败统计** | **部分完成** | [在线连接映射](../server/browser_sync/relay.go)、[扩展本地状态](../browser/chrome-extension/src/session-sync.js) | 仅用非敏感元数据提供在线/离线、最近接收/应用、失败计数和短期诊断；配合 Server Web 自动刷新，禁止记录 Token 与完整站点策略 |
 | P1-03 | **冲突诊断与一次性确认** | **部分完成** | 已有 `CONFLICT`、持久覆盖开关、`PARTIAL` 手工恢复 | 增加按规则的只读错误码/风险提示、单次覆盖确认（优先替代长期全局许可）、账号切换警示、权限变化时取消等待中的恢复 |
-| P1-04 | **Cookie 名称选择器** | **未开始** | [弹窗](../browser/chrome-extension/src/popup.js)目前手动输入名称；[Cookie 适配器](../browser/chrome-extension/src/cookies.js)已有作用域检查 | 仅在用户授予网站权限后枚举**Cookie 名称与安全属性**供勾选，默认不展示值，不预选所有 Cookie；支持检测作用域不兼容 |
+| P1-04 | **Cookie 名称选择器（需求被新流程替代）** | **需求调整·不再单独实施** | [v2/v3 全量站点 Cookie 采集](../browser/chrome-extension/src/cookies-all.js)、[站点授权选项页](../browser/chrome-extension/src/options.js)已取消新配对手填 Cookie 名称，改为双端明确同意当前站点的全量 Cookie/Storage；旧 v1 名称白名单仍可验证 | 不再按旧设计增加逐名称选择器；需真机验证全量授权提示、Cookie 范围、目标冲突保护、撤销后重配对及 v1→v3 不自动扩权。若重新提出逐名称选择需求，应另开任务评审 |
 | P1-05 | **扩展安装、固定 ID、升级与发布** | **未开始（发布流程）** | [MV3 manifest](../browser/chrome-extension/manifest.json)和[开发者加载说明](../browser/chrome-extension/README.md)存在 | 正式扩展签名/固定 ID（Server Origin 白名单所依赖）、版本兼容策略、密钥和存储迁移、权限变更提示、打包/回滚与升级验证 |
 | P1-06 | **专用审计、规则指标与排错页** | **部分完成** | [Server ACK 元数据](../server/browser_sync/delivery.go)和双端设备审批可查询，但尚不是完整的安全审计系统 | 新增规则生命周期、设备授权、投递结果、错误码的结构化审计和保留期；支持分页、按身份筛选、脱敏导出及清理；排除 Cookie 值、站点凭据和密文快照 |
 
@@ -109,8 +112,8 @@
 
 | ID | 交付项 | 当前状态 | 下一步 / 范围限制 |
 |---|---|---|---|
-| P2-01 | 复杂 Cookie Scope（父域、不同 Path、CHIPS/分区） | **未开始** | 当前实现故意只允许精确 HTTPS 主机、`Secure`、hostOnly、`path=/`、非分区 Cookie。未来按每种作用域单独验签、白名单、冲突与回滚测试，禁止自动放宽权限 |
-| P2-02 | 指定 LocalStorage Key 同步 | **未开始** | 单站点、按 Key 逐项授权、敏感值 E2EE、明确冲突语义；不支持一键复制整个 LocalStorage/IndexedDB |
+| P2-01 | 复杂 Cookie Scope（父域、不同 Path、CHIPS/分区） | **已实现·待真机/安全验收** | [v2/v3 全量 Cookie](../browser/chrome-extension/src/cookies-all.js)支持授权 HTTP(S) Origin 可达的父域 Cookie、非根路径、hostOnly 和受约束的第一方 CHIPS 分区；已有模拟测试，但必须真实 Chrome 119+ 验证多 Path、父域、分区键、冲突/删除归属和回滚，禁止跨站自动扩权。**历史“未开始”不再适用** |
+| P2-02 | 全量 Local/Session Storage 同步（替代旧“指定 Key”需求） | **已实现·待真机/安全验收** | [Web Storage](../browser/chrome-extension/src/web-storage.js)已实现授权 Origin 全部 Local Storage 与**单标签页** Session Storage 的采集/恢复、HMAC 归属与部分失败保护；不需要手动 Key，模拟测试已添加。仍需真实网站登录/登出、标签页关闭/重启、覆盖冲突、4 MiB 限额与 Worker 中断测试；不宣称覆盖所有标签页 |
 | P2-03 | 离线密文邮箱 | **未开始** | 默认关闭；自愿启用、E2EE、短 TTL、容量配额、撤销删除、离线设备审批；当前 Server 不保存完整密文会话，A 离线时 B 不一定可获取最新状态 |
 | P2-04 | 多 Server 实例间在线设备路由 | **未开始** | 当前 [单进程在线连接表](../server/browser_sync/relay.go)；未来需跨实例在线状态/订阅、投递唯一性、ACK 对账、跨节点顺序与故障转移 |
 
@@ -390,3 +393,13 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - 所有 IndexedDB 值只在签名、ECDH/AES-GCM 端到端加密后的 `SESSION_SNAPSHOT` 中传输。Server 只转发密文；Chrome 本地配置持久化仅存按规则 HMAC 的所有权指纹和事务状态，不保存 IndexedDB 的 Token/记录明文。现有双端批准、序号防重放、冲突处理及终态 ACK 不变。
 
 **实现状态：** 代码与模拟 IndexedDB 单元测试加入 PR #194 的功能分支。仍需 Chrome A/B 真实站点验收，包括浏览器重启、同时打开数据库、版本升级冲突、覆盖/回滚、网络断线、Blob 与非导出 CryptoKey；不能将模拟测试等同于真实会话恢复成功。
+
+### 2026-10-11 23:12 +08:00 增量核对：IndexedDB v3、CI 覆盖缺口与发布风险
+
+- **分支与 PR**：[Draft PR #194](https://github.com/timwai/RelayProxy/pull/194) 仍为 Open/Draft，目标 main，HEAD [`e9aa691`](https://github.com/timwai/RelayProxy/commit/e9aa691963de926af3f7628f138fdbb26da600a5)，未合并；本次核对仅修改进度文档，不触及业务代码。
+- **实质新进展**：[`1334fd4`](https://github.com/timwai/RelayProxy/commit/1334fd4d8f) 为新建双端明确授权的 v3 配对增加同源 IndexedDB 全量快照、恢复、冲突/回滚与模拟测试；[`e9aa691`](https://github.com/timwai/RelayProxy/commit/e9aa691963de926af3f7628f138fdbb26da600a5) 修复无效 Date 和共享对象引用可能导致的静默数据失真，改为拒绝该次采集。此前 v2 全量 Cookie、Local Storage、单标签 Session Storage 和 CHIPS 的实现应从历史“未开始”修正为“已实现·待验收”。**新 v3 扩大了可同步的敏感数据范围**，因此新增 P0-09 发布门槛。
+- **新增验收风险**：浏览器 IndexedDB 是有版本、索引、结构化克隆和打开中事务的复杂数据源；现有模拟测试不能证明真实 Chrome 中版本升级、数据库阻塞、跨库回滚、浏览器崩溃及网站登录态一致性。Server 不持有解密密钥，但扩展具有被授权站点的敏感状态访问能力，须复核权限与审计。
+- **CI 证据缺口（未确认通过，不等同于已证实失败）**：查询时 GitHub Actions 可见最新运行创建时间为 **2026-10-11 07:20 UTC**；此后 [`1334fd4` 13:52 UTC](https://github.com/timwai/RelayProxy/commit/1334fd4d8f) 与 [`e9aa691` 13:56 UTC](https://github.com/timwai/RelayProxy/commit/e9aa691963de926af3f7628f138fdbb26da600a5) 的 Go/UI/Android 运行尚无可确认结果。先核对最新 SHA 的 Actions 是否触发、排队或被跳过；若仍无运行，应补跑对应检查并调查 PR 触发器。**不能引用旧 SHA 的 success 宣称 v3 已通过 CI**。
+- **优先次序**：① HEAD CI 与安全回归；② 真机 Chrome A/B 的 v3/旧配对兼容、IndexedDB 事务与冲突；③ 原 P0-01/05/06/07/08 和 NB-11；④ P1 规则管理/发布流程。P2-03 离线邮箱和 P2-04 多实例仍未开始。
+
+| 2026-10-11 | [PR #194 · `1334fd4` → `e9aa691`](https://github.com/timwai/RelayProxy/pull/194) | v3 同源 IndexedDB 全量会话快照/恢复、双端明确批准、4 MiB/4096 记录限额、冲突保护与回滚；后续修复无效日期和共享对象引用失真。最新代码尚无可确认 Go/UI/Android CI；真机验收未完成 | **新增 P0-09 已实现·待 CI/真机/安全验收**；P2-01/02 更新为已实现待验收；P1-04 标注已由新全量授权流程替代；P0-01–08 仍未完成，P2-03/04 未开始 | 维护进度表并记录 CI 覆盖缺口，PR 保持 Draft；不合并 main |

@@ -54,5 +54,7 @@ test('popup quick actions only apply to verified active rules and fail closed',(
   assert.match(js,/rule\.lastTransfer\?\.state === 'PARTIAL'/);
   assert.match(js,/chrome\.runtime\.sendMessage/);
   assert.match(js,/currentWindow:true/);
-  assert.match(js,/checked = !next/);
+  assert.match(js,/await refresh\(\{quiet:true\}\)/);
+  assert.match(js,/sync\.disabled = paused/);
+  assert.match(js,/open\.disabled = paused/);
 });

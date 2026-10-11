@@ -73,6 +73,9 @@ function renderRules(rules, siteOrigin) {
     const buttons = el('div','quick-actions');
     const sync = el('button','small-button primary-button',rule.role === 'source' ? '立即发送' : '请求同步');
     sync.type = 'button';
+    const paused = rule.role === 'target' && rule.lastTransfer?.state === 'PARTIAL';
+    sync.disabled = paused;
+    if (paused) sync.title = '请先在完整设置中检查并恢复暂停的会话';
     sync.addEventListener('click',async()=>{
       sync.disabled = true;
       try {
@@ -86,6 +89,8 @@ function renderRules(rules, siteOrigin) {
     if (rule.role === 'target') {
       const open = el('button','small-button outline-button','同步后打开');
       open.type = 'button';
+      open.disabled = paused;
+      if (paused) open.title = '请先在完整设置中检查并恢复暂停的会话';
       open.addEventListener('click',async()=>{
         open.disabled = true;
         try {await ask('SYNC_THEN_OPEN',{ruleId:rule.id});feedback('已请求同步，成功应用后将打开对应的恢复标签页。');}
@@ -147,7 +152,7 @@ $('quick-proxy').addEventListener('change',async()=>{
   try {
     await ask('SET_LOCAL_AGENT_GLOBAL',{enabled:next,port:localPort});
     feedback(next ? '已为当前 Chrome Profile 启用 Agent 分流。' : '已关闭全局 Agent 代理，网站独立绑定不受影响。');
-  }catch(error){$('quick-proxy').checked = !next;messageError(error);}
+  }catch(error){messageError(error);await refresh({quiet:true});}
   finally{$('quick-proxy').disabled = false;}
 });
 refresh();

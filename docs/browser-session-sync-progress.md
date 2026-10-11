@@ -291,3 +291,9 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **RS-01 — Session Storage 回流同一标签页（已编码，待真实 Chrome 验收）**：v2 的“同步成功后打开网站”不再新建一个 Session Storage 为空的标签页；在接收端恢复并刷新成功后，严格校验目标 HTTPS Origin、排除隐私窗口，再激活承载该次恢复的同一标签页，必要时聚焦所在窗口。新增独立测试覆盖同 tab 激活、域名跳转拒绝和隐私窗口拒绝；不宣称已验证真实网站的 JS 登录态。
 - **RS-02 — Partitioned Cookie / CHIPS（已编码，待 Chrome 多站点实测）**：Chrome Cookie API 默认仅返回未分区 Cookie；新版使用 `getAll({domain,partitionKey:{}})` 取得授权域下的分区和未分区记录，再根据网站的顶层站点及跨站祖先语义筛选。保留支持的分区属性，自动化模拟覆盖第一方 CHIPS 被采集/应用、无关第三方分区不被扩展授权传出。Chrome 需要 119+（Manifest 已声明）。
 - **状态**：以上为新增单元/模拟回归，不能替代真实 A/B Chrome 登录、登出、冲突处理、站点 Cookie/Storage 与 DNS/QUIC/WebRTC 的网络边界记录。P0-01/05/06/07、NB-05/08/11 和整体 PR 发布禁令不变。最终 SHA 的 CI 必须单独核实。
+
+### 2026-10-11 v2 端到端加密数据模拟与登出冲突回归
+
+- **RS-03（新增自动化，待 CI）**：在独立模拟 Chrome Profile A、B 中生成各自的 P-256 身份密钥，A 组合所选 HTTPS Origin 的全路径 Cookie、全部 Local Storage / 单标签页 Session Storage Key，签名加密后 B 通过真实客户端解密、恢复和比对；检查密文不包含原文凭据、篡改被验签拒绝。
+- **RS-04（新增自动化，待 CI）**：已安装的 Storage Key 后续被 B 网站/用户改写，再由 A 发送空值集合时必须拒绝远程删除；旧账号状态不能被静默清除。仅证明模拟存储层行为，不证明真实网站会话失效或保持登录。
+- **门槛**：此测试补充 P0 会话恢复/冲突/登出的自动化证据，但 P0 真机验收、完整 Chrome 网络边界与安全审查仍未通过，PR 保持 Draft，不合并 main。

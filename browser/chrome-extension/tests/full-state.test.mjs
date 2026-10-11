@@ -1,6 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {webcrypto} from 'node:crypto';
+import {getOrCreateIdentity} from '../src/device-identity.js';
+import {encryptSnapshot,decryptSnapshot} from '../src/session-envelope.js';
 import {captureAllCookies,applyAllCookies} from '../src/cookies-all.js';
 import {captureWebStorage,prepareWebStorageRestore} from '../src/web-storage.js';
 
@@ -116,4 +118,48 @@ test('partitioned cookies are included for the authorized top-level site',async(
   const target=profile();use(target);
   await applyAllCookies('partition',snap,policy);
   assert.equal((await captureAllCookies(policy)).cookies[0].value,'ok');
+});
+
+test('v2 A to B end-to-end encrypted snapshot restores Cookie and both Storage kinds',async()=>{
+  const a=profile(),b=profile();
+  use(a);
+  const source=await getOrCreateIdentity();
+  a.page.local.set('auth-key','local-secret-abc');
+  a.page.session.set('tab-auth','session-secret-xyz');
+  await a.chrome.cookies.set({url:'https://example.com/',name:'login',value:'cookie-secret',
+    path:'/account',secure:true,httpOnly:true});
+  const payload={...await captureAllCookies(policy),storage:await captureWebStorage(policy)};
+  use(b);
+  const target=await getOrCreateIdentity();
+  use(a);
+  const rule={ruleId:crypto.randomUUID(),status:'active',
+    sourceBrowserDeviceId:source.deviceId,targetBrowserDeviceId:target.deviceId};
+  const env=await encryptSnapshot(rule,{...target,id:target.deviceId},1,payload);
+  for(const secret of ['cookie-secret','local-secret-abc','session-secret-xyz']){
+    assert.equal(JSON.stringify(env).includes(secret),false);
+  }
+  use(b);
+  const clear=await decryptSnapshot(env,{...source,id:source.deviceId});
+  assert.deepEqual(clear,JSON.parse(JSON.stringify(payload)));
+  const txn=await prepareWebStorageRestore(rule.ruleId,clear.storage,policy);
+  await txn.apply();
+  await applyAllCookies(rule.ruleId,clear,policy);
+  await txn.commit();
+  assert.equal(b.page.local.get('auth-key'),'local-secret-abc');
+  assert.equal(b.page.session.get('tab-auth'),'session-secret-xyz');
+  assert.equal((await captureAllCookies(policy)).cookies.find(c=>c.name==='login').path,'/account');
+  const corrupted={...env,ciphertext:(env.ciphertext[0]==='A'?'B':'A')+env.ciphertext.slice(1)};
+  await assert.rejects(decryptSnapshot(corrupted,{...source,id:source.deviceId}),/签名/);
+});
+
+test('v2 remote logout cannot erase Storage values changed by destination',async()=>{
+  const p=profile();use(p);
+  const first={local:{token:'remote-account'},session:{csrf:'remote-csrf'}};
+  const initial=await prepareWebStorageRestore('logout',first,policy);
+  await initial.apply();await initial.commit();
+  p.page.local.set('token','new-local-account');
+  await assert.rejects(prepareWebStorageRestore('logout',
+    {local:{},session:{}},policy),/CONFLICT/);
+  assert.equal(p.page.local.get('token'),'new-local-account');
+  assert.equal(p.page.session.get('csrf'),'remote-csrf');
 });

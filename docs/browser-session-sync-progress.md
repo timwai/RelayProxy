@@ -119,6 +119,8 @@
 | NB-04 会话应用与网络安全联动 | **已实现·待 CI/真机验收** | 接收网络绑定会话前检查代理已可用，源 Agent 离线保持阻断；真机验证刷新、撤销、扩展冲突及 WebRTC/第三方资源行为 |
 | NB-05 审计与正式准入 | **未开始** | 管理界面、Agent 出口明确启用提示、泄漏面审查、Cookie+IP 与真实网站成功率验收，以及跨实例端点与租约管理 |
 
-| 2026-10-11 | Browser Sync 网络绑定初版（本次提交） | 提供 Server HTTPS CONNECT/Agent OpenTCP 出口与严格的双端绑定授权协议；CI 结果以提交 SHA 为准，不预先标记成功 | 新增 NB-01 至 NB-05，P0-01/05/06/07 仍未验收，正式发布不放行 | 持续更新 |
+| 2026-10-11 | Browser Sync 网络绑定初版（[Server 2b65a1e](https://github.com/timwai/RelayProxy/commit/2b65a1ef7f102df0fd3a67765f346fa3c08ecec7)、[Extension 95addc2](https://github.com/timwai/RelayProxy/commit/95addc259951dbe3c0b38863fd88826dc758146f)） | 提供 Server HTTPS CONNECT/Agent OpenTCP 出口与严格的双端绑定授权协议；CI 结果以提交 SHA 为准，不预先标记成功 | 新增 NB-01 至 NB-05，P0-01/05/06/07 仍未验收，正式发布不放行 | 持续更新 |
 
 Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-extension/src/network-binding.js)、[站点规则 UI](../browser/chrome-extension/src/popup.js)、[Cookie 接收前检查](../browser/chrome-extension/src/session-sync.js) 和 [PAC 单元测试](../browser/chrome-extension/tests/network-binding.test.mjs)。[初次 Go CI #38101561277](https://github.com/timwai/RelayProxy/actions/runs/38101561277) 失败于 `gofmt`；本次使用 CI 差异修正格式并修复数据库单连接循环查询与传递 Relay ACL。完整 CI 状态必须以本次代码提交 SHA 为准。
+
+| 2026-10-11 | 网络绑定完整 CI 复核（本次格式修复） | [Go CI #38101778970](https://github.com/timwai/RelayProxy/actions/runs/38101778970) 因 gofmt 失败；针对 `network_proxy.go` 修复剩余格式差异，后续 CI 必须按此提交 SHA 判断，不沿用既有通过结果 | NB-01–04 仍为已实现、**待完整 CI 与真实 Chrome/Agent 验收**，P0 不放行 | 修复格式阻塞，继续跑完整 Go/UI/Android CI |

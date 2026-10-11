@@ -30,16 +30,16 @@ type networkLease struct {
 	expires  time.Time
 }
 type NetworkProxy struct {
-	Store      *Store
-	Sessions   *session.Manager
-	Advertise  string
-	allowExits map[string]bool
+	Store       *Store
+	Sessions    *session.Manager
+	Advertise   string
+	allowExits  map[string]bool
 	relayPolicy *acl.Policy
-	mu         sync.Mutex
-	leases     map[[32]byte]networkLease
-	server     *http.Server
-	listener   net.Listener
-	slots      chan struct{}
+	mu          sync.Mutex
+	leases      map[[32]byte]networkLease
+	server      *http.Server
+	listener    net.Listener
+	slots       chan struct{}
 }
 
 func NewNetworkProxy(store *Store, sessions *session.Manager, advertise string, exitIDs []string) *NetworkProxy {
@@ -50,6 +50,7 @@ func NewNetworkProxy(store *Store, sessions *session.Manager, advertise string, 
 	return &NetworkProxy{Store: store, Sessions: sessions, Advertise: advertise, allowExits: allowed,
 		leases: make(map[[32]byte]networkLease), slots: make(chan struct{}, 128)}
 }
+
 // Bind the same Relay target ACL as ordinary proxy streams. Agent Exit
 // intersects this with its own host/IP policy before making a DNS connection.
 func (p *NetworkProxy) SetRelayPolicy(policy acl.Policy) { p.relayPolicy = &policy }

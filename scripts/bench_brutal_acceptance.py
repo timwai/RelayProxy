@@ -28,15 +28,23 @@ def parse_variant(value):
         raise argparse.ArgumentTypeError("expected variant=socks5h://host:port")
     name, url = value.split("=", 1)
     parsed = urlsplit(url)
-    if (not name or parsed.scheme not in {"socks5h", "socks5", "http", "https"}
-            or not parsed.hostname or not parsed.port):
-        raise argparse.ArgumentTypeError("proxy must use socks5h, socks5, http or https with host:port")
+    try:
+        valid = bool(name and parsed.scheme in {"socks5h", "socks5", "http", "https"}
+                     and parsed.hostname and parsed.port)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(f"invalid proxy port: {exc}") from exc
+    if not valid or parsed.path or parsed.query or parsed.fragment:
+        raise argparse.ArgumentTypeError("proxy must be socks5h, socks5, http or https with host:port only")
+    if parsed.username is not None or parsed.password is not None:
+        raise argparse.ArgumentTypeError(
+            "proxy URL credentials are forbidden: raw CSV retains proxy endpoints; "
+            "use local proxy listeners without credentials in the URL")
     return name, url
 
 
 def sample(args, proxy, destination):
     command = [
-        "curl", "--disable", "--noproxy", "", "--fail", "--location", "--silent", "--show-error",
+        "curl", "--disable", "--noproxy", "", "--fail", "--silent", "--show-error",
         "--connect-timeout", "15", "--max-time", str(args.timeout),
         "--proxy", proxy, "--output", str(destination),
         "--write-out",
@@ -55,6 +63,8 @@ def sample(args, proxy, destination):
         return {"success": False, "error": (result.stderr or f"curl exit {result.returncode}").strip()[:500]}
     try:
         code, elapsed, downloaded, uploaded, downrate, uprate, connected, ttfb = result.stdout.strip().split("\t")
+        if not 200 <= int(code) < 300:
+            raise ValueError(f"unexpected HTTP status {code}; redirects are not followed")
         elapsed = float(elapsed)
         size = float(uploaded if args.direction == "upload" else downloaded)
         speed = float(uprate if args.direction == "upload" else downrate)

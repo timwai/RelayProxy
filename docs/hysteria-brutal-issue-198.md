@@ -48,9 +48,11 @@ Here `up_mbps` and `down_mbps` are still per-device. `total_up_mbps` and `total_
 - [x] Linux kernel `tc netem` shaped UDP tests (12 Mbps, 20 ms, 0/1/5% *configured random loss*) including concurrent BBR/Brutal sessions at 8 and 16 Mbps targets, qdisc counters and raw logs ([passing netem jobs](https://github.com/timwai/RelayProxy/actions/runs/38100605774)). **Laboratory simulation only, not external WAN/fairness acceptance**.
 - [x] Old/new version *linked protocol binaries* handshakes across QUIC and TLS, including same-version reference; the packaged Agent/Server acceptance remains open.
 - [x] Hysteria2/BBR/Brutal repeatable download/upload CSV sampler supplied; operator-side A/B measurements not yet collected.
+- [x] Operator-run loaded ICMP latency sampler, ≥60s concurrent BBR/Brutal fairness monitor, complete release evidence-matrix validator, and real Linux old/new binary CI provided; real-WAN evidence remains uncollected.
 - [ ] In controlled network tests measure 0%, 1%, 5% loss: target throughput, p50/p95 RTT, goodput, retransmissions, CPU, and coexistence with another BBR flow. **The CI co-active sample exposed significant BBR starvation when Brutal is overcommitted; a real-link fairness acceptance limit must be defined and verified before release.**
 - [ ] A/B Hysteria2 comparison on the same client, server, UDP path, RTT, bandwidth, packet-loss and hardware, repeated >= 5 times per case.
-- [ ] Verify old-client/new-server and new-client/old-server pairings with both QUIC and TLS. The new cross-built gateway/protocol probe in `scripts/ci-brutal-mixed-compat.sh` covers a subset of this requirement, but full packaged Agent/Server pairings remain separate.
+- [x] Verify old/new **actual Linux CLI Agent+Server** pairings with both QUIC and TLS: eight combinations authenticated with real identity approval and private-key signatures ([successful production entrypoint job](https://github.com/timwai/RelayProxy/actions/runs/38106440949)).
+- [ ] Verify old/new **released packages and installers** on Windows/macOS, real business proxy traffic, reconnect, and platform-specific private-key integration. Linux CI process pairing does not fulfill this final requirement.
 - [ ] Review CI artifacts and real-device results before opening/merging the replacement main PR.
 
 ## Binary protocol compatibility smoke
@@ -99,6 +101,82 @@ A dedicated CI runner uses `tc netem rate 12mbit delay 20ms` on its loopback que
 The 0% configured random-loss trial still recorded **720 kernel queue drops** across all transfers: the shaper also drops packets when the queue fills, so the label is not a measurement of zero actual loss. Kernel qdisc counters are recorded before/after in uploaded `brutal-linux-netem-loss-*` CI artifacts. Very large QUIC smoothed RTT values were observed on some overcommitted Brutal runs; this is evidence of queueing pressure, **not** a reliable loaded p95 RTT statistic.
 
 Therefore avoid setting Brutal target above sustainable available capacity, including overhead and competing tenants. An individual Server session cap cannot guarantee fairness across several sessions. Neither aggregate completion rates nor one example justify marking p50/p95 RTT, prolonged flow fairness, or Hysteria2 A/B requirements as passed. For these retain independent, time-synchronized performance sampling on real devices.
+
+## WAN test kit: Hysteria2 same-link A/B and sustained BBR fairness
+
+The test kit now offers **three distinct, operator-run stages** rather than pretending GitHub CI loopback is the real WAN. All three proxies must be real running processes; **the scripts do not download Hysteria2 or configure remote machines**. Hysteria2 client configuration follows [official Hysteria2 client documentation](https://v2.hysteria.network/zh/docs/getting-started/Client/) with \`bandwidth.up\` and \`bandwidth.down\` matching RelayProxy's configured directions, and a local SOCKS5 \`listen\`. Hysteria2 BBR's default preset is *standard*, while RelayProxy's existing controller is *BBR Aggressive*; explicitly record the distinction rather than falsely claiming identical BBR implementations.
+
+**Preparation (physical WAN required):**
+
+- Two independently controlled physical endpoints (Client A and Server B) separated by the real target WAN path. Run Hysteria2 and RelayProxy against equivalent endpoints and the **same test-origin content and comparable UDP path**, with P2P and Public Direct disabled for the RelayProxy baseline. Use three dedicated local SOCKS5 ports, e.g. \`1080\` = RelayProxy BBR, \`1081\` = RelayProxy Brutal and \`1082\` = Hysteria2 Brutal.
+- Set Hysteria2 and RelayProxy Brutal to the **same up/down Mbps**. Match total/per-client server caps, client/server NICs, transport mode, path RTT and effective MTU; avoid different egress paths or proxies. Record \`relay-agent --version\`, Hysteria2 version, SHA256 of each executable and the immutable large HTTP origin fixture. Verify QUIC selected on both RelayProxy cases and preserve raw diagnostics.
+- Externally configure and measure 0%, 1% and 5% loss **on the same WAN bottleneck**, with enough downstream/upstream capacity and spare CPU. Examples include \`tc netem\` at the WAN router; save \`tc -s qdisc show\` before/after and original operator console logs per condition. **Declaring \`--loss-label 5\` does not actually impose 5% packet loss**. Do not apply impairment to production routers.
+- For ICMP RTT choose the *same-path server host IP* responding to \`ping\`; ping independently tests ICMP latency through the shared bottleneck, not precise QUIC stream/ACK RTT. Include unloaded baseline pings and external CPU/RSS/QUIC packet-loss captures in the evidence directory. Use a fixture large enough to remain transferring for the full load interval; avoid caches, HTTP 3xx, compression and variable file contents.
+
+**A. Hysteria2, RelayProxy BBR, and RelayProxy Brutal same-link application throughput + loaded RTT.** For each loss condition and each direction, run at least five independent rounds. The A/B tool captures per-transfer p50/p95 ICMP samples when \`--ping-host\` is supplied, and now rejects trials without at least five responses:
+
+\`\`\`sh
+python3 scripts/bench_brutal_acceptance.py \
+  --variant bbr=socks5h://127.0.0.1:1080 \
+  --variant brutal=socks5h://127.0.0.1:1081 \
+  --variant hysteria2=socks5h://127.0.0.1:1082 \
+  --url https://YOUR-STATIC-ORIGIN.example/1GiB.bin \
+  --expected-sha256 FIXTURE_SHA256 \
+  --ping-host YOUR_SERVER_WAN_IP \
+  --scenario wan-site-a --loss-label 1 \
+  --direction download --runs 5 --output evidence/ab.csv
+
+# Separate upload pass: same URL must accept HTTP PUT; use the same payload
+# size for every proxy and omit --expected-sha256 for upload.
+python3 scripts/bench_brutal_acceptance.py \
+  --variant bbr=socks5h://127.0.0.1:1080 \
+  --variant brutal=socks5h://127.0.0.1:1081 \
+  --variant hysteria2=socks5h://127.0.0.1:1082 \
+  --url https://YOUR-UPLOAD-ORIGIN.example/put \
+  --upload-file evidence/upload-1GiB.bin \
+  --ping-host YOUR_SERVER_WAN_IP \
+  --scenario wan-site-a --loss-label 1 \
+  --direction upload --runs 5 --output evidence/ab.csv
+
+python3 scripts/summarize_brutal_acceptance.py \
+  --input evidence/ab.csv --output evidence/ab-summary.csv
+\`\`\`
+
+Repeat A at **loss=0 and loss=5**, preserving the same \`--scenario\`, exact endpoint identities and comparable fixture lengths. The summary rejects mismatched URLs, inconsistent per-variant proxy endpoints, missing rounds, failed transfers and different payload sizes. Upload origin success indicates a completed PUT; independently verify receipt on the origin when assessing real upload correctness.
+
+**B. Sustained *simultaneous* BBR + Brutal competition, five or more ≥60s rounds per loss condition.** This is a distinct fairness experiment, not another three-way serial A/B. It writes per-interval throughput for both flows, Jain's two-flow index, unloaded/loaded ICMP p50/p95, and rejects early connection completion or inadequate samples:
+
+\`\`\`sh
+python3 scripts/bench_brutal_coexistence.py \
+  --bbr-proxy socks5h://127.0.0.1:1080 \
+  --brutal-proxy socks5h://127.0.0.1:1081 \
+  --url https://YOUR-STATIC-ORIGIN.example/20GiB.bin \
+  --ping-host YOUR_SERVER_WAN_IP \
+  --scenario wan-site-a --loss-label 1 \
+  --rounds 5 --duration 60 --interval 1 \
+  --output-dir evidence/coexistence-1
+\`\`\`
+
+Repeat for 0% and 5%. Result files: \`coexistence-summary.csv\`, \`coexistence-timeseries.csv\`, \`coexistence-metadata.json\`. These are *client-side HTTP goodput* and ICMP observations, not synchronized QUIC sender window samples or CPU/RSS/packet-loss measurements. Keep the independent platform diagnostics; these metrics **do not** establish a WAN release claim on their own.
+
+**C. Machine-check the complete evidence matrix.** Prepare two local JSON files: a manifest containing independent software hashes, physical host hardware/regions/network-path description, origin fixture hash, RTT target, and \`loss_evidence\` mapping for each loss \`0\`, \`1\`, \`5\` to a real on-disk \`impairment_log\`; and an explicitly signed-off policy with numeric \`min_jain\`, \`min_bbr_retention\`, \`max_loaded_icmp_p95_ms\`, \`max_loaded_over_idle_p50_ratio\`, and \`min_duration_s\`. The policy must be defined by the maintainer/operator based on actual link requirements rather than silently imposed by CI.
+
+\`\`\`sh
+python3 scripts/verify_brutal_release_evidence.py \
+  --ab-csv evidence/ab.csv \
+  --coexistence 0=evidence/coexistence-0/coexistence-summary.csv \
+  --coexistence 1=evidence/coexistence-1/coexistence-summary.csv \
+  --coexistence 5=evidence/coexistence-5/coexistence-summary.csv \
+  --manifest evidence/environment.json \
+  --policy evidence/acceptance-policy.json \
+  --output evidence/machine-checks.json
+\`\`\`
+
+The validator requires the full **3 losses × 2 directions × 3 controllers × ≥5 runs** matrix plus five sustained coexistence rounds per loss, comparing BBR coactive throughput to its same-condition serial baseline. A green machine verdict explicitly retains \`human_real_wan_provenance_and_release_signoff_required: true\`. **No genuine measured WAN data or policy approval is available in this repository at present**; keep WAN and final release boxes unchecked. Capture process CPU/RSS, real QUIC loss/retransmissions and loaded end-to-end probe RTT with external tooling before human approval.
+
+## Genuine production binary interoperability (Linux lab verified)
+
+\`scripts/ci-brutal-full-binary-compat.sh\` now **builds actual \`cmd/relay-agent\` and \`cmd/relay-server\` binaries from both main's pre-feature merge base and the feature branch**, rather than only reusing the small linked-protocol probe. It creates an independent temporary SQLite database per pairing, a separate identity login, an Ed25519 installation key with real signed challenge, administrator-approved \`proxy.client\`, TLS loopback certificate, and a real headless Agent process. It requires that each Agent process log its normal successful device approval and that both executables remain alive. Pairings: baseline/baseline, baseline/new, new/baseline and new/new Server/Agent, each forced to \`quic_only\` and \`tcp_only\` (eight cases). [Successful CI execution](https://github.com/timwai/RelayProxy/actions/runs/38106440949) logged all eight PASS lines. This materially advances the release gate, but **does not exercise Windows/macOS distribution packages, signed installers, actual proxy throughput or direct-path/P2P interop**; these remain pending. All data is ephemeral, passwords are never active valid logins, and the certificate bypass is isolated to loopback test configuration.
 
 ## Physical performance acceptance (pending)
 

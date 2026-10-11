@@ -37,6 +37,9 @@ jobs:
       - name: Validate comparison sampler CLI
         if: runner.os == 'Linux'
         run: python3 scripts/bench_brutal_acceptance.py --help > /dev/null
+      - name: Unit-test evidence validation (no real WAN access in CI)
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s scripts -p 'test_brutal_release_evidence.py' -v
       - name: Validate real-WAN long-load sampler with offline tests
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s scripts -p 'test_brutal_coexistence.py' -v

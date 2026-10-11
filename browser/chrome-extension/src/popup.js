@@ -12,8 +12,16 @@ function renderSites(sites) {
   siteSelect.replaceChildren();
   for (const origin of sites) {
     const li = document.createElement('li');
-    li.textContent = origin;
-    list.append(li);
+    li.append(textNode('span',origin));
+    const remove=document.createElement('button');
+    remove.textContent='移除授权';remove.title='停止该站点后续同步';
+    remove.addEventListener('click',async()=>{
+      try { await ask({type:'REMOVE_SITE',siteOrigin:origin});
+        const latest=await getSettings();renderSites(latest.sites);
+        status('已撤销站点同步授权；原网站登录状态未清除。');
+      }catch(error){failure(error);}
+    });
+    li.append(remove);list.append(li);
     const option = document.createElement('option');
     option.value = origin;
     option.textContent = origin;
@@ -49,7 +57,6 @@ async function load() {
   const result = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
   if (!result?.ok) throw new Error(result?.error || 'Extension background unavailable');
   $('device').textContent = result.identity.deviceId;
-  $('extension-id').textContent = chrome.runtime.id;
   $('server').value = result.settings.serverOrigin;
   renderSites(result.settings.sites);
   await refreshSiteChoices();
@@ -120,7 +127,7 @@ $('connect').addEventListener('click', async () => {
   try {
     const result = await chrome.runtime.sendMessage({ type: 'CONNECT_BROWSER' });
     if (!result?.ok) throw new Error(result?.error || '连接失败');
-    status('已完成设备身份认证，刷新设备列表进行配对。尚未开启 Cookie 同步。');
+    status('已完成设备身份认证，刷新设备列表进行配对。请在两端审批配对后同步。');
     await refreshPairing();
   } catch (error) { failure(error); }
 });
@@ -176,16 +183,18 @@ function renderRules(rules) {
     card.append(textNode('p', '对端：' + rule.remoteID));
     if (rule.lastTransfer && ['SENDING','RELAYED','RECEIVED','APPLIED','FAILED','CONFLICT','UNKNOWN','PARTIAL'].includes(rule.lastTransfer.state)) {
       const translated = {SENDING:'正在发送密文',RELAYED:'密文已转发',RECEIVED:'接收端已收到',
-        APPLIED:'Cookie 已应用（网站登录未验证）',FAILED:'同步失败',
+        APPLIED:'站点状态已应用（网站登录未验证）',FAILED:'同步失败',
         CONFLICT:'目标已有不同登录状态',UNKNOWN:'结果尚不确定，可重试或等待对账',
-        PARTIAL:'Cookie 恢复不完整，已暂停接收，必须人工检查'};
+        PARTIAL:'浏览器状态恢复不完整，已暂停接收，必须人工检查'};
       card.append(textNode('p', '最近同步：' + translated[rule.lastTransfer.state]));
     }
     if (!rule.valid) {
       card.append(textNode('p', rule.error || '尚未找到经核验的设备密钥，无法授权。', 'error'));
     } else {
       card.append(textNode('p', '站点：' + rule.policy.siteOrigin));
-      card.append(textNode('p', 'Cookie 名称：' + rule.policy.cookieNames.join(', ')));
+      card.append(textNode('p',Array.isArray(rule.policy.cookieNames) ?
+        '旧版指定 Cookie：'+rule.policy.cookieNames.join(', ') :
+        '同步范围：全部 Cookie / Local Storage / Session Storage（不包含 IndexedDB）'));
       card.append(textNode('div', '配对校验码：' + rule.code, 'code'));
       if (rule.status === 'offered' &&
           ((rule.role === 'target' && !rule.targetApproved) ||
@@ -370,7 +379,7 @@ function renderRules(rules) {
         const label = document.createElement('label');
         const checked = document.createElement('input');
         checked.type = 'checkbox';
-        label.append(checked, textNode('span', '明确允许此规则覆盖接收端同名 Cookie（可能切换账号）'));
+        label.append(checked, textNode('span', '允许覆盖目标端 Cookie 与 Local/Session Storage（可能切换账号）'));
         checked.addEventListener('change', async () => {
           if (checked.checked && !window.confirm('确定允许替换目标网站的现有登录会话吗？')) {
             checked.checked = false; return;
@@ -407,9 +416,8 @@ $('offer-rule').addEventListener('click', async () => {
   try {
     const siteOrigin = $('pair-site').value;
     const targetID = $('target').value;
-    const cookieNames = $('cookie-names').value.split(',').map(v => v.trim()).filter(Boolean);
     if (!targetID || !siteOrigin) throw new Error('请先选择网站与接收设备');
-    const result = await ask({ type: 'CREATE_RULE', siteOrigin, targetID, cookieNames });
+    const result = await ask({ type: 'CREATE_RULE', siteOrigin, targetID });
     status('已创建加密邀请 ' + result.ruleId.slice(0, 8) + '，请双方核对配对校验码。');
     await refreshPairing();
   } catch (error) { failure(error); }

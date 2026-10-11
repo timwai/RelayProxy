@@ -20,6 +20,14 @@ test('exact HTTPS site origin and cookie names only', () => {
   assert.throws(() => validatePolicy({siteOrigin:'https://example.com',cookieNames:['space name']}));
 });
 
+test('v2 policy captures all Cookie and Storage keys only for approved origin',()=>{
+  const policy={siteOrigin:'https://example.com',schemaVersion:2,
+    allCookies:true,localStorage:true,sessionStorage:true};
+  assert.deepEqual(validatePolicy(policy),policy);
+  assert.throws(()=>validatePolicy({...policy,localStorage:false}),/版本|范围/);
+  assert.throws(()=>validatePolicy({...policy,siteOrigin:'http://example.com'}));
+});
+
 test('server origin cannot contain path or credentials', () => {
   assert.equal(parseServerOrigin('https://relay.example.com:8443'), 'https://relay.example.com:8443');
   assert.throws(() => parseServerOrigin('https://relay.example.com/admin'));
@@ -128,9 +136,9 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
     target: {id: target.deviceId, signingPublicKey: target.signingPublicKey,
       encryptionPublicKey: target.encryptionPublicKey, receive:true},
     siteOrigin:'https://example.com',
-    cookieNames:['session','csrf']
   });
-  assert.deepEqual(policy.cookieNames, ['csrf','session']);
+  assert.deepEqual(policy, {siteOrigin:'https://example.com',schemaVersion:2,
+    allCookies:true,localStorage:true,sessionStorage:true});
   use(b);
   const rule = {ruleId:offer.ruleId,sourceBrowserDeviceId:source.deviceId,
     targetBrowserDeviceId:target.deviceId, offer};

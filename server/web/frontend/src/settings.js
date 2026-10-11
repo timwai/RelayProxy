@@ -20,7 +20,6 @@ export const groups = [
     ['sourceCidrs','全局来源 CIDR（每行一条）','lines'],['rateLimitPerMinute','每来源 IP 每分钟上限','number']]},
   {id:'browserSync',title:'浏览器同步',subtitle:'Browser Sync、扩展审批和远程网络绑定（更改需重启）',section:'安全与访问',fields:[
     ['enabled','启用 Browser Sync','checkbox'],
-    ['extensionIds','旧版已信任扩展 ID（每行一条；新扩展建议通过上报审批）','lines'],
     ['networkProxyListen','来源 Agent HTTPS CONNECT 监听地址','text',':21292'],
     ['networkProxyAdvertise','来源代理公网地址','text','relay.example.com:21292'],
     ['allowedExitIds','允许共享的 Agent 出口 ID（每行一条）','lines']]},

@@ -20,13 +20,19 @@ export function validatePolicy(policy) {
   if (!policy || typeof policy !== 'object') throw new Error('站点策略无效');
   const siteOrigin = parseSiteOrigin(policy.siteOrigin);
   if (new URL(siteOrigin).pathname !== '/' || siteOrigin.length > 256) throw new Error('只支持 HTTPS Origin');
-  const raw = policy.cookieNames;
-  if (!Array.isArray(raw) || raw.length < 1 || raw.length > 20) throw new Error('需要选择 1–20 个 Cookie 名称');
-  const cookieNames = [...new Set(raw.map(v => String(v).trim()))].sort();
-  if (cookieNames.length !== raw.length || cookieNames.some(n => n.length > 128 || !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(n))) {
-    throw new Error('Cookie 名称无效或重复');
+  // Legacy invitations remain verifiable without silently widening consent.
+  if (Array.isArray(policy.cookieNames)) {
+    const raw=policy.cookieNames;
+    if (!raw.length || raw.length>20) throw new Error('旧版 Cookie 白名单无效');
+    const cookieNames=[...new Set(raw.map(v=>String(v).trim()))].sort();
+    if(cookieNames.length!==raw.length || cookieNames.some(n=>n.length>128 ||
+        !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(n))) throw new Error('Cookie 名称无效');
+    return {siteOrigin,cookieNames};
   }
-  return { siteOrigin, cookieNames };
+  if(policy.schemaVersion!==2 || policy.allCookies!==true ||
+      policy.localStorage!==true || policy.sessionStorage!==true)
+    throw new Error('会话策略版本或范围无效');
+  return {siteOrigin,schemaVersion:2,allCookies:true,localStorage:true,sessionStorage:true};
 }
 export async function importPublic(spki, algorithm) {
   return crypto.subtle.importKey('spki', fromBase64url(spki), algorithm, true,
@@ -52,11 +58,11 @@ export function offerCanonical(offer, sourceID) {
   return ['browser.sync.v1', 'RULE_OFFER', offer.ruleId, sourceID, offer.targetBrowserDeviceId,
     offer.policyDigest, offer.ephemeralKey, offer.salt, offer.iv, offer.ciphertext].join('\n');
 }
-export async function createEncryptedOffer({ target, siteOrigin, cookieNames }) {
+export async function createEncryptedOffer({ target, siteOrigin }) {
   const identity = await getOrCreateIdentity();
   if (!target?.receive || !target.encryptionPublicKey || !target.signingPublicKey ||
     !target.id || target.id === identity.deviceId) throw new Error('无权选用该接收设备');
-  const policy = validatePolicy({ siteOrigin, cookieNames });
+  const policy = validatePolicy({siteOrigin,schemaVersion:2,allCookies:true,localStorage:true,sessionStorage:true});
   const ruleId = crypto.randomUUID();
   const plaintext = utf8(JSON.stringify(policy));
   const ephemeral = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);

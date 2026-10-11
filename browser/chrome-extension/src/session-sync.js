@@ -1,4 +1,4 @@
-// MV3 worker controller for approved A -> B Cookie-only sync.
+// MV3 worker controller for approved A -> B encrypted website session sync.
 // No credentials are persisted: snapshots exist in memory solely until the
 // signed encrypted message has been produced.
 import { getOrCreateIdentity } from './device-identity.js';
@@ -7,6 +7,8 @@ import { sendControl, onServerPush } from './server-api.js';
 import { decryptEncryptedOffer } from './envelope.js';
 import { encryptSnapshot, decryptSnapshot } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
+import {captureAllCookies,applyAllCookies} from './cookies-all.js';
+import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
 import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence } from './lifecycle.js';
 import {ensureNetworkForRule} from './network-binding.js';
 
@@ -69,7 +71,9 @@ export async function sendSnapshot(ruleId) {
   try{
     const ctx=await ruleContext(ruleId);
     if(!ctx.sourceRole)throw new Error('只有来源设备可以发送登录状态');
-    const payload=await captureCookies(ctx.policy);
+    const payload=ctx.policy.schemaVersion===2
+      ? {...await captureAllCookies(ctx.policy),storage:await captureWebStorage(ctx.policy)}
+      : await captureCookies(ctx.policy);
     const stored=(await chrome.storage.local.get(LAST_SEQUENCE))[LAST_SEQUENCE]||{};
     // The server is authoritative after a crash, upgrade or lost local
     // storage. A lower local counter must never cause silent replay failures.
@@ -126,7 +130,8 @@ export async function requestSnapshot(ruleId) {
   await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
   const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
   const interrupted=(await chrome.storage.local.get('browserSyncRestoreJournal')).browserSyncRestoreJournal||{};
-  if(paused[ruleId]||interrupted[ruleId])
+  const storageInterrupted=(await chrome.storage.local.get('browserSyncStorageRestoreJournal')).browserSyncStorageRestoreJournal||{};
+  if(paused[ruleId]||interrupted[ruleId]||storageInterrupted[ruleId])
     throw new Error('此规则因 Cookie 恢复不完整已暂停，请先检查目标网站');
   const answer=await sendControl('SYNC_REQUEST',{ruleId});
   if(answer.status!=='REQUESTED')throw new Error('来源设备不在线');
@@ -159,6 +164,10 @@ async function handleIncomingSnapshot(envelope) {
       throw new Error('接收设备身份不匹配');
     const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
     if(paused[ruleId])throw new Error('PARTIAL_ROLLBACK: 接收端待人工检查');
+    const restoreKeys=await chrome.storage.local.get(['browserSyncRestoreJournal','browserSyncStorageRestoreJournal']);
+    if(restoreKeys.browserSyncRestoreJournal?.[ruleId]||
+       restoreKeys.browserSyncStorageRestoreJournal?.[ruleId])
+      throw new Error('PARTIAL_ROLLBACK: 上次状态恢复中断');
     const sequences=(await chrome.storage.local.get(LAST_APPLIED))[LAST_APPLIED]||{};
     if(!Number.isSafeInteger(envelope.sequence)||envelope.sequence<=Number(sequences[ruleId]||0))
       throw new Error('旧会话快照已拒绝');
@@ -166,7 +175,24 @@ async function handleIncomingSnapshot(envelope) {
     await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
     const switches=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
     try{
-      await applyCookies(ruleId,payload,ctx.policy,{allowOverwrite:switches[ruleId]===true});
+      if(ctx.policy.schemaVersion===2){
+        const txn=await prepareWebStorageRestore(ruleId,payload.storage,ctx.policy,
+          {allowOverwrite:switches[ruleId]===true});
+        let applied=false;
+        try{
+          await txn.apply();
+          await applyAllCookies(ruleId,payload,ctx.policy,{allowOverwrite:switches[ruleId]===true});
+          applied=true;
+          await txn.commit();
+          await chrome.tabs.reload(txn.tabId).catch(()=>{});
+        }catch(error){
+          const rolledBack=await txn.rollback();
+          if(!rolledBack||applied)throw new Error('PARTIAL_ROLLBACK: Cookie 与 Storage 恢复不完整');
+          throw error;
+        }
+      }else{
+        await applyCookies(ruleId,payload,ctx.policy,{allowOverwrite:switches[ruleId]===true});
+      }
       sequences[ruleId]=envelope.sequence;
       await chrome.storage.local.set({[LAST_APPLIED]:sequences});
       result='APPLIED';
@@ -234,12 +260,15 @@ onServerPush(async message => {
 // Debounced Cookie change events only for active source rules with prior,
 // explicit per-origin permission. The active-rule check happens again at send.
 export async function onCookieChange(cookie) {
-  if(!cookie||cookie.path!=='/'||cookie.hostOnly!==true||
-     cookie.secure!==true||cookie.partitionKey)return;
+  if(!cookie||!cookie.domain)return;
   const hostname=(cookie.domain||'').replace(/^\./,'').toLowerCase();
   const local=(await chrome.storage.local.get('browserSyncLocalOffers')).browserSyncLocalOffers||{};
   for(const [ruleId,policy] of Object.entries(local)){
-    if(new URL(policy.siteOrigin).hostname!==hostname || !policy.cookieNames.includes(cookie.name))continue;
+    const host=new URL(policy.siteOrigin).hostname;
+    if(!(host===hostname||host.endsWith('.'+hostname)))continue;
+    if(policy.schemaVersion!==2 &&
+       (cookie.path!=='/'||!cookie.hostOnly||!cookie.secure||cookie.partitionKey||
+        !policy.cookieNames.includes(cookie.name)))continue;
     clearTimeout(cookieTimers.get(ruleId));
     cookieTimers.set(ruleId,setTimeout(()=>{
       cookieTimers.delete(ruleId);
@@ -309,10 +338,15 @@ export async function resumePausedRestore(ruleId,confirmed) {
   const flags=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
   const journalKey='browserSyncRestoreJournal';
   const journal=(await chrome.storage.local.get(journalKey))[journalKey]||{};
-  if(!flags[ruleId]&&!journal[ruleId])throw new Error('当前规则未处于暂停状态');
+  const storageKey='browserSyncStorageRestoreJournal';
+  const storageJournal=(await chrome.storage.local.get(storageKey))[storageKey]||{};
+  if(!flags[ruleId]&&!journal[ruleId]&&!storageJournal[ruleId])
+    throw new Error('当前规则未处于暂停状态');
   delete flags[ruleId];
   delete journal[ruleId];
-  await chrome.storage.local.set({[PAUSED_RESTORE]:flags,[journalKey]:journal});
+  delete storageJournal[ruleId];
+  await chrome.storage.local.set({[PAUSED_RESTORE]:flags,[journalKey]:journal,
+    [storageKey]:storageJournal});
   await setStatus(ruleId,'UNKNOWN');
   // Do not immediately overwrite a possibly changed website session.
   return {state:'UNKNOWN'};
@@ -324,7 +358,9 @@ export async function forgetRuleLocalState(ruleId) {
   // Removing sync metadata does NOT delete or revoke website Cookies.
   // Credential revocation must be handled by the destination website.
   for(const key of [LAST_SEQUENCE,LAST_APPLIED,ALLOW_OVERRIDE,statusKey,
-      pendingOpenKey,PENDING_DELIVERY,PAUSED_RESTORE,'browserSyncManagedCookieHmacV1','browserSyncLocalOffers']){
+      pendingOpenKey,PENDING_DELIVERY,PAUSED_RESTORE,'browserSyncManagedCookieHmacV1',
+      'browserSyncManagedAllCookieHmacV2','browserSyncManagedWebStorageV2',
+      'browserSyncStorageRestoreJournal','browserSyncLocalOffers']){
     const values=(await chrome.storage.local.get(key))[key]||{};
     if(Object.hasOwn(values,ruleId)){
       delete values[ruleId];

@@ -3,7 +3,7 @@ import {api,json,fmtDate,list} from './api.js';
 
 // Browser identity is separate from Agent enrollment. This screen uses the
 // existing authenticated, admin-only API; it never displays Cookie values.
-export function BrowserSyncAdmin({identities=[]}){
+export function BrowserSyncAdmin({identities=[],onOpenSettings}){
   const [devices,setDevices]=useState([]);
   const [extensions,setExtensions]=useState([]);
   const [loading,setLoading]=useState(true);
@@ -68,15 +68,16 @@ export function BrowserSyncAdmin({identities=[]}){
   return <section className="browser-sync-admin">
     <div className="page-head"><div><h1>浏览器同步</h1>
       <p>独立浏览器设备审批、授权与撤销。会话通过端到端加密中继，Server 不保存 Cookie。</p></div>
+      <div className="form-actions"><button className="btn" onClick={onOpenSettings}>编辑浏览器服务配置</button>
       <button className="btn" onClick={refresh} disabled={loading||!!busy}>
-        {loading?'正在读取…':'刷新设备'}</button></div>
+        {loading?'正在读取…':'刷新设备'}</button></div></div>
     {notice&&<div className="config-help" role="status">{notice}</div>}
     {error&&<div className="err-notice" role="alert">{error}</div>}
     {unavailable?<div className="panel"><h3>浏览器同步未启用</h3>
       <p>Server 返回了 HTTP 404，当前管理 API 中没有浏览器同步设备接口。</p>
       <p>在 Linux Server 上确认运行的是包含 Browser Sync 的新版 relay-server，
         并在实际加载的 Server YAML 中启用 browser_sync.enabled: true、
-        填写当前 Chrome 扩展 ID、开启 server.admin.tls_enabled: true，然后重启 Server。</p>
+        开启 server.admin.tls_enabled: true，然后重启 Server。扩展 ID 由插件上报、管理员审核，无需手动填写。</p>
       <p>如果经 Nginx/Caddy 访问，还要检查 /api/v1/browser-sync/ 路径是否转发到
         <strong> Admin HTTPS 监听端口</strong>，而不是 Agent TCP/QUIC 端口。
         直接访问 Admin HTTPS 的此接口，未登录时应为 HTTP 401，而不是 404。</p></div>:

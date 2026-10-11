@@ -252,3 +252,27 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 扩展 ID 自动上报、管理员授权，不手工填写 | **已实现·待 CI/安全/真实 Chrome 验收** | 新的 chrome-extension Origin 登记通道只允许登记 pending ID；管理员在 Server Web 单独批准/撤销该 ID，**还需单独批准浏览器设备身份、send/receive 权限和双端加密配对**；新增速率限制及 500 pending/已审计记录资源上限；历史 extension_ids 白名单暂保留用于兼容迁移 |
 
 本轮与全 Cookie/Web Storage 相关的实验性代码**未合入功能分支，不计已实现**。PR #194 保持 Draft，未合并 main；CI 完成后逐 SHA 更新状态。
+
+## 十、全量站点状态与无手填流程（2026-10-11，待 CI / 真机验收）
+
+本开发分支增加 v2 端到端加密策略：按已授权的 HTTPS Origin 捕获全部适用的
+Cookie（包括不同 path/domain，符合浏览器权限的分区 Cookie）、Local Storage
+全部 Key，以及**一个当前普通 Chrome 标签页**的 Session Storage 全部 Key；
+不要求手填 Cookie 名称、Storage Key、网站域名或扩展 ID。网站从已打开
+HTTPS 标签页下拉选取，可撤销站点授权；Chrome 扩展以 Origin 自动登记，
+Server Web 批准扩展和设备，配置页编辑 browser_sync 与网络代理相关字段。
+旧版手工 Cookie 白名单规则保留原有收窄语义；重新配对后才启用 v2，
+防止未经双方同意扩大数据传输范围。
+
+Session Storage 是标签页隔离的，不能承诺读取其他标签页或 Chrome 关闭
+后丢失的 Key。IndexedDB、跨 Origin iframe 数据、浏览器密钥链和
+HttpOnly 外的其他浏览器持久数据库不在同步范围。单次 Storage 180 KiB、
+明文 224 KiB（服务端密文 256 KiB）上限，不自动截断；大小超限会报错。
+Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则持有且
+未被本地站点修改的数据、元数据日志和异常时暂停；多 API 操作不是真正原子
+事务，故浏览器在中途退出或网站并发写入时必须人工核验后恢复。
+
+**验收阻塞维持不变**：真实 A/B Chrome 的登录保活、账号冲突、登出与撤销、
+不同域/路径 Cookie、Session Storage 的 tab 语义，及 DNS/QUIC/WebRTC
+边界仍没有实测证据。本次实现与单元测试不等于生产发布，PR #194 保持 Draft，
+不得在通过 CI、独立安全审查和真实设备验收前合并 main。

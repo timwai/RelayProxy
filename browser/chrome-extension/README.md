@@ -147,3 +147,31 @@ Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api
 3. 重启 Linux `relay-server` 进程，查找日志 `[BrowserSync] Browser session relay enabled; extension allowlist size=...` 以及 `[Admin] Web Console & API starting on https://...`。
 4. 在 Linux Server 本机直测 Admin 端口，例如 `curl -k -i --noproxy '*' https://127.0.0.1:20001/api/v1/browser-sync/admin/devices`（按实际 Admin 端口替换）。**未登录时正常返回 401 JSON**；404 为路由尚未注册/版本错误；若直连 401、经公网域名 404，则检查 Nginx/Caddy 的 `/api/v1/browser-sync/` 反向代理路径及端口转发。浏览器同步必须走 **Admin HTTPS**，不能只由反代代理终止 TLS 后以 HTTP 回源，因为服务端扩展入口要求 `r.TLS != nil`。
 5. 管理页面登录后在「设备与身份 → 浏览器同步」重新刷新。A/B 扩展设备注册仍要求配置真实 extension ID、Admin HTTPS origin、设备审批。
+
+## Browser Sync v2: no manual key / extension-ID entry
+
+Choose an open HTTPS tab's origin in the extension popup, grant Chrome host
+permission, choose a receiving device and confirm the E2EE pairing code on
+both devices. New rules capture **every Cookie reachable to that origin**,
+with their paths/domains, plus all Local Storage keys and all Session Storage
+keys in one ordinary, currently open tab. The extension ID is reported via
+its `chrome-extension://` Origin and approved under Server Web → 浏览器同步.
+Server Web → 服务配置 → 浏览器同步 controls service/network settings.
+Legacy named-Cookie rules remain narrow and must be recreated as v2 to
+include all keys.
+
+Important constraints: Session Storage is per-tab, not per-browser or
+across other tabs; a receiving tab may be created in the background to
+restore it. No IndexedDB, Cache Storage, service-worker caches, browser
+profiles, device-bound credentials, or cross-origin third-party sessions are
+exported. Snapshots are AES-GCM encrypted and signed between approved
+devices. The Server never decrypts stored website state. Data larger than
+the per-message limit fails explicitly, never truncates keys. A website
+may invalidate tokens or require device fingerprint, IP or re-login.
+
+Initial target-state conflicts are blocked unless the user explicitly
+allows overriding on B. Source logout deletes only state demonstrably
+owned by that same pairing. Interrupted restores require inspection and
+manual resumption. Chrome real-device end-to-end tests (login persistence,
+logout, conflicting accounts, DNS/QUIC/WebRTC leakage boundaries) remain
+mandatory before merging this draft into main.

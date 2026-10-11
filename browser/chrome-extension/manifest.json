@@ -8,6 +8,7 @@
     "cookies",
     "tabs",
     "storage",
+    "scripting",
     "alarms",
     "proxy",
     "webRequest",

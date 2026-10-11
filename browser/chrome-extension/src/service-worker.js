@@ -140,7 +140,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error('目标设备密钥变更');
         }
         const result = await createEncryptedOffer({
-          target: peer, siteOrigin: message.siteOrigin, cookieNames: message.cookieNames
+          target: peer, siteOrigin: message.siteOrigin
         });
         const response = await sendControl('RULE_OFFER', { offer: result.offer });
         const saved = (await chrome.storage.local.get('browserSyncLocalOffers')).browserSyncLocalOffers || {};
@@ -202,6 +202,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (code !== message.pairingCode) throw new Error('配对校验码已改变，请重新核对');
         await sendControl('RULE_CONFIRM', { ruleId: message.ruleId });
         return { ok: true };
+      }
+      case 'REMOVE_SITE': {
+        const origin=message.siteOrigin;
+        const settings=await getSettings();
+        if(!settings.sites.includes(origin))throw new Error('站点未授权');
+        // Local consent is withdrawn FIRST, including when the server is offline.
+        await updateSettings({sites:settings.sites.filter(s=>s!==origin)});
+        const local=(await chrome.storage.local.get('browserSyncLocalOffers')).browserSyncLocalOffers||{};
+        const ruleIds=new Set(Object.entries(local).filter(([,p])=>p.siteOrigin===origin)
+          .map(([id])=>id));
+        try{
+          const identity=await getOrCreateIdentity();
+          const [reply,peers]=await Promise.all([sendControl('LIST_RULES'),sendControl('LIST_PEERS')]);
+          for(const rule of reply.rules||[]){
+            let policy=local[rule.ruleId];
+            if(!policy&&rule.targetBrowserDeviceId===identity.deviceId){
+              const peer=(peers.peers||[]).find(x=>x.id===rule.sourceBrowserDeviceId);
+              if(peer)try{policy=await decryptEncryptedOffer(rule,peer);}catch{}
+            }
+            if(policy?.siteOrigin!==origin)continue;
+            ruleIds.add(rule.ruleId);
+            if(rule.status!=='revoked')await sendControl('RULE_REVOKE',{ruleId:rule.ruleId});
+          }
+        }catch{
+          // Server revocation cannot be confirmed while disconnected.
+          // ruleContext still fails closed because local website consent is gone.
+        }
+        for(const id of ruleIds){
+          await stopNetworkGuard(id);
+          await forgetRuleLocalState(id);
+        }
+        const url=new URL(origin);
+        await chrome.permissions.remove({origins:[url.protocol+'//'+url.hostname+'/*']});
+        return {ok:true};
       }
       case 'REVOKE_RULE':
         await sendControl('RULE_REVOKE', { ruleId: message.ruleId });

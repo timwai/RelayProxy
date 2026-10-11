@@ -48,7 +48,7 @@ export async function encryptSnapshot(rule, target, sequence, payload) {
   const header = signedHeader(env);
   const key = await sessionAESKey(target.encryptionPublicKey,ephemeral.privateKey,salt,header,'encrypt');
   const raw = utf8(JSON.stringify(payload));
-  if (raw.length > 64*1024) throw new Error('Cookie 快照过大');
+  if (raw.length > 224*1024) throw new Error('站点状态超过 224 KiB 的单次加密传输上限；不会静默丢弃 Key');
   const ciphertext = await crypto.subtle.encrypt({name:'AES-GCM',iv,additionalData:utf8(header)},key,raw);
   env.ciphertext = toBase64url(ciphertext);
   env.signature = toBase64url(await signBytes(utf8(header+'\n'+env.ciphertext)));
@@ -79,6 +79,6 @@ export async function decryptSnapshot(env, source) {
   if(iv.length!==12||fromBase64url(env.encryption.salt).length!==32)throw new Error('加密参数无效');
   const clear=await crypto.subtle.decrypt({name:'AES-GCM',iv,additionalData:utf8(header)},
     key,fromBase64url(env.ciphertext));
-  if(clear.byteLength>64*1024)throw new Error('会话快照超限');
+  if(clear.byteLength>224*1024)throw new Error('会话快照超限');
   return JSON.parse(new TextDecoder().decode(clear));
 }

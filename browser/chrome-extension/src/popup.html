@@ -42,11 +42,11 @@
   <button id="local-agent-apply">应用浏览器代理设置</button>
   <p>无需 Cookie 配对、用户名、密码、Token 或 Agent 域名白名单。HTTP/HTTPS、IP 地址、自定义端口等 TCP 连接按 Agent 分流规则执行；本选项会影响整个 Chrome Profile。来源 A 已授权的站点网络规则优先。</p>
   <label for="device">浏览器设备 ID</label>
-  <div id="device" class="device">正在初始化...</div><div class="device">扩展 ID：<span id="extension-id"></span></div>
+  <div id="device" class="device">正在初始化...</div>
   <label for="server">RelayProxy HTTPS Server</label>
   <input id="server" placeholder="https://relay.example.com">
   <button id="save">保存地址并授权连接</button>
-  <button id="register">上报扩展 ID / 注册浏览器设备</button>
+  <button id="register">上报并申请浏览器设备授权</button>
   <button id="connect">连接 Server</button>
   <label for="site">选择已打开的 HTTPS 网站</label>
   <select id="site"><option value="">请选择标签页</option></select>
@@ -60,11 +60,10 @@
   <select id="target"><option value="">请先连接 Server 并刷新</option></select>
   <label for="pair-site">站点（必须先授予权限）</label>
   <select id="pair-site"><option value="">请先添加允许的网站</option></select>
-  <label for="cookie-names">允许的 Cookie 名称（逗号分隔）</label>
-  <input id="cookie-names" placeholder="例如 session, csrf_token" autocomplete="off">
+  <p class="notice">所选网站的全部 Cookie、Local Storage 和当前标签页的 Session Storage Key 自动同步；无需填写名称。双方必须核对配对校验码。浏览器不保证所有网站均能通过状态复制恢复登录。</p>
   <button id="offer-rule">创建加密配对邀请</button>
   <h2>配对邀请与授权</h2>
-  <p>请通过独立可信渠道比较两台设备显示的校验码，然后才确认。此阶段不传输 Cookie。</p>
+  <p>请通过独立可信渠道比较两台设备显示的校验码，再授权端到端加密状态同步。</p>
   <div id="pairing-rules"></div>
   <div id="message" role="status"></div>
   <script type="module" src="./popup.js"></script>

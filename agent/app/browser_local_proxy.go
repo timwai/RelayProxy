@@ -6,51 +6,37 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"regexp"
+	"net/http/httputil"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 )
 
-// Dedicated 127.0.0.1 Chrome entry; no credential exchange or Agent-side
-// domain allowlist. CONNECT remains limited to syntactically safe public DNS
-// names and TCP/443, with DIRECT fallback forbidden by the native dialer.
-// Other local processes can reach this opt-in listener; never bind publicly.
+// browserLocalProxy is a dedicated, opt-in loopback adapter for Chrome.
+// It is not a separate routing policy: HTTP and CONNECT (all TCP ports,
+// DNS names and IP literals) use the Agent's existing routing engine.
+// No local proxy authentication or destination allowlist is applied.
 type browserLocalDialer interface {
 	DialBrowserNetworkTCP(context.Context, string, uint16) (net.Conn, error)
 }
+
 type browserLocalProxy struct {
-	listen string
-	dialer browserLocalDialer
-	mu     sync.Mutex
-	closed bool
-	server *http.Server
-	active map[net.Conn]struct{}
-	slots  chan struct{}
+	listen   string
+	dialer  browserLocalDialer
+	mu      sync.Mutex
+	closed  bool
+	server  *http.Server
+	active  map[net.Conn]struct{}
+	slots   chan struct{}
 }
 
-var localBrowserDNS = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$`)
-
-func localBrowserAllowedHost(host string) bool {
-	if len(host) > 253 || host != strings.ToLower(host) || !localBrowserDNS.MatchString(host) || net.ParseIP(host) != nil {
-		return false
-	}
-	for _, part := range strings.Split(host, ".") {
-		if len(part) > 63 {
-			return false
-		}
-	}
-	for _, end := range []string{".local", ".internal", ".localhost", ".arpa"} {
-		if strings.HasSuffix(host, end) {
-			return false
-		}
-	}
-	return true
-}
 func newBrowserLocalProxy(listen string, dialer browserLocalDialer) *browserLocalProxy {
-	return &browserLocalProxy{listen: listen, dialer: dialer,
-		active: make(map[net.Conn]struct{}), slots: make(chan struct{}, 64)}
+	return &browserLocalProxy{
+		listen: listen, dialer: dialer, active: make(map[net.Conn]struct{}),
+		slots: make(chan struct{}, 64),
+	}
 }
 func (p *browserLocalProxy) Start() error {
 	host, port, err := net.SplitHostPort(p.listen)
@@ -74,12 +60,47 @@ func (p *browserLocalProxy) Start() error {
 		_ = ln.Close()
 		return net.ErrClosed
 	}
-	p.server = &http.Server{Handler: p, ReadHeaderTimeout: 8 * time.Second, IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192}
+	p.server = &http.Server{
+		Handler: p, ReadHeaderTimeout: 8 * time.Second,
+		IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192,
+	}
 	srv := p.server
 	p.mu.Unlock()
 	go func() { _ = srv.Serve(ln) }()
 	return nil
 }
+
+// A destination can be a DNS name (including local hostnames), IPv4 or IPv6.
+// Do not impose a browser-specific policy on top of Agent routing/exit ACL.
+func browserDestination(authority string, defaultPort uint16) (string, uint16, error) {
+	if authority == "" || strings.ContainsAny(authority, " \t\r\n/@\\") {
+		return "", 0, fmt.Errorf("invalid destination authority")
+	}
+	host, portString, err := net.SplitHostPort(authority)
+	if err != nil {
+		// URL.Host omits the default port for plain HTTP requests.
+		if defaultPort == 0 {
+			return "", 0, fmt.Errorf("destination requires a port")
+		}
+		if strings.HasPrefix(authority, "[") && strings.HasSuffix(authority, "]") {
+			host = strings.TrimSuffix(strings.TrimPrefix(authority, "["), "]")
+		} else if strings.Contains(authority, ":") && net.ParseIP(authority) == nil {
+			return "", 0, fmt.Errorf("invalid destination port")
+		} else {
+			host = authority
+		}
+		return host, defaultPort, nil
+	}
+	if host == "" {
+		return "", 0, fmt.Errorf("empty destination host")
+	}
+	port, err := strconv.ParseUint(portString, 10, 16)
+	if err != nil || port == 0 {
+		return "", 0, fmt.Errorf("invalid destination port")
+	}
+	return host, uint16(port), nil
+}
+
 func (p *browserLocalProxy) track(c net.Conn) bool {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -95,16 +116,73 @@ func (p *browserLocalProxy) untrack(c net.Conn) {
 	p.mu.Unlock()
 	_ = c.Close()
 }
-func (p *browserLocalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	w.Header().Set("Cache-Control", "no-store")
-	if r.Method != http.MethodConnect || r.ProtoMajor != 1 {
-		http.Error(w, "CONNECT required", http.StatusMethodNotAllowed)
+type browserTrackedConn struct {
+	net.Conn
+	proxy *browserLocalProxy
+}
+func (c *browserTrackedConn) Close() error {
+	c.proxy.untrack(c.Conn)
+	return nil
+}
+func (p *browserLocalProxy) serveForwardHTTP(w http.ResponseWriter, r *http.Request) {
+	if r.URL == nil || r.URL.Scheme != "http" || r.URL.Host == "" ||
+		r.URL.User != nil {
+		http.Error(w, "absolute HTTP request required", http.StatusBadRequest)
 		return
 	}
-	host, port, err := net.SplitHostPort(r.Host)
-	if err != nil || port != "443" || !localBrowserAllowedHost(host) ||
-		r.URL == nil || (r.URL.Host != "" && r.URL.Host != r.Host) {
-		http.Error(w, "target forbidden", http.StatusForbidden)
+	_, _, err := browserDestination(r.URL.Host, 80)
+	if err != nil {
+		http.Error(w, "invalid HTTP destination", http.StatusBadRequest)
+		return
+	}
+	// ReverseProxy handles HTTP/1.1 bodies, redirects, chunking and WebSocket
+	// Upgrade. Its transport delegates every new TCP dial to Agent routing.
+	transport := &http.Transport{
+		Proxy: nil, DisableCompression: true, DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			host, port, err := browserDestination(address, 0)
+			if err != nil {
+				return nil, err
+			}
+			conn, err := p.dialer.DialBrowserNetworkTCP(ctx, host, port)
+			if err != nil {
+				return nil, err
+			}
+			if !p.track(conn) {
+				_ = conn.Close()
+				return nil, net.ErrClosed
+			}
+			return &browserTrackedConn{Conn: conn, proxy: p}, nil
+		},
+	}
+	defer transport.CloseIdleConnections()
+	rev := &httputil.ReverseProxy{
+		Transport: transport,
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.URL = newURLCopy(pr.In.URL)
+			pr.Out.Host = pr.In.Host
+			pr.Out.Header.Del("Proxy-Authorization")
+			pr.Out.Header.Del("Proxy-Connection")
+			// Never add X-Forwarded-For: the browser's local address
+			// is irrelevant to the website and must not be leaked.
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, "Agent route unavailable", http.StatusBadGateway)
+		},
+	}
+	rev.ServeHTTP(w, r)
+}
+
+// ReverseProxy rewrites the output request, not the browser's original.
+func newURLCopy(u *url.URL) *url.URL {
+	copy := *u
+	return &copy
+}
+
+func (p *browserLocalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Cache-Control", "no-store")
+	if r.ProtoMajor != 1 {
+		http.Error(w, "unsupported HTTP version", http.StatusHTTPVersionNotSupported)
 		return
 	}
 	select {
@@ -114,8 +192,17 @@ func (p *browserLocalProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "too many streams", http.StatusServiceUnavailable)
 		return
 	}
+	if r.Method != http.MethodConnect {
+		p.serveForwardHTTP(w, r)
+		return
+	}
+	host, port, err := browserDestination(r.Host, 0)
+	if err != nil || r.URL == nil || (r.URL.Host != "" && r.URL.Host != r.Host) {
+		http.Error(w, "invalid CONNECT destination", http.StatusBadRequest)
+		return
+	}
 	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
-	out, err := p.dialer.DialBrowserNetworkTCP(ctx, host, 443)
+	out, err := p.dialer.DialBrowserNetworkTCP(ctx, host, port)
 	cancel()
 	if err != nil || out == nil {
 		if out != nil {

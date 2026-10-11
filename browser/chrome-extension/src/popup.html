@@ -30,8 +30,17 @@
 </head>
 <body><main>
   <h1>RelayProxy Browser Sync</h1>
-  <p>无本机 Agent · 独立浏览器设备</p>
-  <div class="notice">开发预览：仅支持经过双方授权的 HTTPS 精确域名、Secure/Host-only/根路径 Cookie；登录会话可能无法跨设备迁移。请先用授权的测试账号验证。</div>
+  <p>浏览器代理与会话同步彼此独立</p>
+  <div class="notice">浏览器网络代理支持使用本机 Agent 处理 HTTP、HTTPS 和其他 TCP 目标；Cookie 同步仍需独立配对与加密授权。Chrome 原生代理 API 不等于完整 VPN，对 WebRTC/部分 UDP 等流量仍需单独验证。</div>
+  <h2>浏览器网络代理</h2>
+  <label style="display:flex;gap:8px;align-items:center">
+    <input type="checkbox" id="local-agent-all" style="width:auto">
+    让整个 Chrome 使用本机 Agent 分流
+  </label>
+  <label for="local-agent-port">本机 Agent 接入端口</label>
+  <input id="local-agent-port" type="number" min="1024" max="65535" value="21291">
+  <button id="local-agent-apply">应用浏览器代理设置</button>
+  <p>无需 Cookie 配对、用户名、密码、Token 或 Agent 域名白名单。HTTP/HTTPS、IP 地址、自定义端口等 TCP 连接按 Agent 分流规则执行；本选项会影响整个 Chrome Profile。来源 A 已授权的站点网络规则优先。</p>
   <label for="device">浏览器设备 ID</label>
   <div id="device" class="device">正在初始化...</div><div class="device">扩展 ID：<span id="extension-id"></span></div>
   <label for="server">RelayProxy HTTPS Server</label>

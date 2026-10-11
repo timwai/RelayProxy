@@ -217,3 +217,7 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | 未入分支 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57)（以 `031baf9` 为父提交、GitHub Commit API 可查；无 Actions run） | 包括普通 HTTP 正向代理、通用 CONNECT、Chrome 全局本机 Agent 模式等草稿，**没有在 `feat/browser-session-sync` 中，不能计为当前已交付** | 新增 P0-08、NB-09/10/11 跟踪项；下一步必须规范整合、补测试并跑新的 SHA CI |
 | 2026-10-11 | [Draft PR #194](https://github.com/timwai/RelayProxy/pull/194) | 仍 Open/Draft，目标 main，未合并；Cookie 同步仍有真机/密码学审查发布门槛 | **正式发布不放行**；本次只同步进度文档，不把草稿合入主线 |
 
+
+## 九、P0-08 / NB-09–11 集成实施（2026-10-11）
+
+本次从未入分支的草稿 [`b7546cf`](https://github.com/timwai/RelayProxy/commit/b7546cf4bb85de249763672d5d48a5a17cfaba57) 提取 **Agent 浏览器桥接、原生 RoutingDialer 及扩展全 Profile 模式代码**，保留前次已审核的设计/历史进度文档，不覆盖文档变更。当前为**集成候选，非已验收**：拟支持 HTTP 正向代理、合法 TCP CONNECT 地址/端口、Agent 原有 DIRECT/PROXY/REJECT 与独立 Chrome 开关。下一步必须修复测试夹具和格式问题，并以集成代码 SHA 运行 Go/UI/Android/Network CI。**Chrome Proxy API 对 QUIC/UDP/WebRTC/DNS 的边界没有消失**。Cookie 同步双端审批与加密逻辑未改变；远端 A 网络共享认证继续保留。P0-08、NB-09、NB-10 保持**部分完成·待集成测试与真机验收**，NB-11 仍未开始实机验收；PR 继续 Draft。

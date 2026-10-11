@@ -6,7 +6,7 @@ import { registerBrowser, connectBrowser, currentConnectionState, disconnect, se
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
 import { getTrustedPeer, pinPeer } from './rules.js';
 import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, setOverwritePermission, syncThenOpen, forgetRuleLocalState, resumePausedRestore } from './session-sync.js';
-import {parseBoundHost, installNetworkGuard, startNetworkGuard, startLocalNetworkGuard, stopNetworkGuard, selectedNetworkRules, refreshNetworkBinding, registerNetworkAuth} from './network-binding.js';
+import {parseBoundHost, installNetworkGuard, startNetworkGuard, startLocalNetworkGuard, stopNetworkGuard, selectedNetworkRules, localAgentGlobal, setLocalAgentGlobal, refreshNetworkBinding, registerNetworkAuth} from './network-binding.js';
 
 registerNetworkAuth();
 
@@ -39,7 +39,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     switch (message?.type) {
       case 'GET_STATUS': {
         const [identity, settings] = await Promise.all([getOrCreateIdentity(), getSettings()]);
-        return { ok: true, identity, settings, connected: currentConnectionState() === 'AUTHENTICATED', stage: currentConnectionState(), transferEnabled: true };
+        return { ok: true, identity, settings, localAgentProxy:await localAgentGlobal(), connected: currentConnectionState() === 'AUTHENTICATED', stage: currentConnectionState(), transferEnabled: true };
+      }
+      case 'SET_LOCAL_AGENT_GLOBAL': {
+        // User controlled browser-wide proxy. No Cookie pairing or Server
+        // authentication is needed to use a locally running Agent.
+        return {ok:true,localAgentProxy:await setLocalAgentGlobal(
+          message.enabled===true,Number(message.port))};
       }
       case 'SAVE_SERVER': {
         const serverOrigin = parseServerOrigin(message.serverOrigin);

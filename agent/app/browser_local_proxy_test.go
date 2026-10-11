@@ -7,92 +7,130 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
 )
 
 type browserEchoDialer struct{}
-
 func (browserEchoDialer) DialBrowserNetworkTCP(ctx context.Context, host string, port uint16) (net.Conn, error) {
-	if (host != "login.example.com" && host != "other.example.com") || port != 443 {
-		return nil, fmt.Errorf("wrong target")
+	if host == "" || port == 0 {
+		return nil, fmt.Errorf("invalid destination")
 	}
 	c, other := net.Pipe()
 	go func() { defer other.Close(); _, _ = io.Copy(other, other) }()
 	return c, nil
 }
-func TestBrowserLocalProxyGuardsAndTunnel(t *testing.T) {
-	p := newBrowserLocalProxy("127.0.0.1:0", browserEchoDialer{})
-	for _, tt := range []struct {
-		method, host string
-		want         int
-	}{
-		{"GET", "login.example.com:443", 405},
-		{"CONNECT", "127.0.0.1:443", 403},
-		{"CONNECT", "internal.local:443", 403},
-		{"CONNECT", "login.example.com:80", 403},
-		{"CONNECT", "login.example.com:8443", 403},
-	} {
-		r, _ := http.NewRequest(tt.method, "http://127.0.0.1/", nil)
-		r.Host = tt.host
-		w := &browserLocalRecorder{h: http.Header{}}
-		p.ServeHTTP(w, r)
-		if w.code != tt.want {
-			t.Fatalf("%s %s: got %d want %d", tt.method, tt.host, w.code, tt.want)
-		}
-	}
+func newStartedBrowserLocalProxy(t *testing.T, d browserLocalDialer) *browserLocalProxy {
+	t.Helper()
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
-	if err != nil {
-		t.Fatal(err)
-	}
+	if err != nil { t.Fatal(err) }
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
-	p = newBrowserLocalProxy(fmt.Sprintf("127.0.0.1:%d", port), browserEchoDialer{})
-	if err := p.Start(); err != nil {
-		t.Fatal(err)
-	}
-	defer p.Close()
-	c, err := net.Dial("tcp", p.listen)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer c.Close()
-	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-	_, _ = fmt.Fprint(c, "CONNECT other.example.com:443 HTTP/1.1\r\nHost: other.example.com:443\r\n\r\n")
-	reader := bufio.NewReader(c)
-	line, err := reader.ReadString('\n')
-	if err != nil || !strings.Contains(line, "200") {
-		t.Fatalf("CONNECT %q %v", line, err)
-	}
-	for {
-		line, err = reader.ReadString('\n')
-		if err != nil {
-			t.Fatal(err)
-		}
-		if line == "\r\n" {
-			break
+	p := newBrowserLocalProxy(fmt.Sprintf("127.0.0.1:%d", port), d)
+	if err := p.Start(); err != nil { t.Fatal(err) }
+	t.Cleanup(func(){ _ = p.Close() })
+	return p
+}
+func TestBrowserDestinationAllowsAnyPortDomainAndIP(t *testing.T) {
+	for _, tc := range []struct{ authority string; defaultPort uint16; host string; port uint16 }{
+		{"login.example.com:443",0,"login.example.com",443},
+		{"printer.local:8443",0,"printer.local",8443},
+		{"internal:8080",0,"internal",8080},
+		{"10.0.0.12:80",0,"10.0.0.12",80},
+		{"127.0.0.1:5555",0,"127.0.0.1",5555},
+		{"[::1]:9443",0,"::1",9443},
+		{"example.com",80,"example.com",80},
+		{"[::1]",80,"::1",80},
+	} {
+		host,port,err:=browserDestination(tc.authority,tc.defaultPort)
+		if err!=nil || host!=tc.host || port!=tc.port {
+			t.Fatalf("%q => %q:%d %v; want %q:%d",tc.authority,host,port,err,tc.host,tc.port)
 		}
 	}
-	_, _ = c.Write([]byte("hello"))
-	b := make([]byte, 5)
-	if _, err := io.ReadFull(reader, b); err != nil || string(b) != "hello" {
-		t.Fatalf("native relay to non-whitelisted DNS host failed: %q %v", b, err)
-	}
-	if err := p.Close(); err != nil {
-		t.Fatal(err)
-	}
-	_ = c.SetReadDeadline(time.Now().Add(time.Second))
-	if _, err = reader.ReadByte(); err == nil {
-		t.Fatal("proxy stream remained open after shutdown")
+	for _, authority:=range []string{"","example.com:0","example.com:65536","example.com:-2",
+		"example.com:abc","user:password@example.com:443","example.com:80/path"}{
+		if _,_,err:=browserDestination(authority,0);err==nil {
+			t.Fatalf("malformed authority accepted: %q",authority)
+		}
 	}
 }
-
-type browserLocalRecorder struct {
-	h    http.Header
-	code int
+func TestBrowserLocalProxyConnectAnyHostPortWithoutAuth(t *testing.T){
+	p:=newStartedBrowserLocalProxy(t,browserEchoDialer{})
+	for _,dst:=range []string{"other.example.com:8443","127.0.0.1:443","printer.local:80",
+		"10.0.0.10:8080","[::1]:9443","internal:18080"}{
+		c,err:=net.Dial("tcp",p.listen)
+		if err!=nil{t.Fatal(err)}
+		_ = c.SetDeadline(time.Now().Add(5*time.Second))
+		_,_ = fmt.Fprintf(c,"CONNECT %s HTTP/1.1\r\nHost: %s\r\n\r\n",dst,dst)
+		reader:=bufio.NewReader(c)
+		line,err:=reader.ReadString('\n')
+		if err!=nil || !strings.Contains(line,"200"){t.Fatalf("%s CONNECT: %q %v",dst,line,err)}
+		for {
+			line,err=reader.ReadString('\n')
+			if err!=nil{t.Fatal(err)}
+			if line=="\r\n"{break}
+		}
+		_,_ = c.Write([]byte("hello"))
+		b:=make([]byte,5)
+		if _,err=io.ReadFull(reader,b);err!=nil || string(b)!="hello"{
+			t.Fatalf("%s tunnel: %q %v",dst,b,err)
+		}
+		_ = c.Close()
+	}
+	if err:=p.Close();err!=nil{t.Fatal(err)}
 }
-
-func (w *browserLocalRecorder) Header() http.Header         { return w.h }
-func (w *browserLocalRecorder) Write(p []byte) (int, error) { return len(p), nil }
-func (w *browserLocalRecorder) WriteHeader(code int)        { w.code = code }
+type browserHTTPDialer struct{ request chan *http.Request }
+func (d browserHTTPDialer) DialBrowserNetworkTCP(ctx context.Context,host string,port uint16)(net.Conn,error){
+	if host!="printer.local" || port!=8080{return nil,fmt.Errorf("wrong HTTP target %s:%d",host,port)}
+	c,other:=net.Pipe()
+	go func(){
+		defer other.Close()
+		req,err:=http.ReadRequest(bufio.NewReader(other))
+		if err==nil{
+			_,_=io.Copy(io.Discard,req.Body); _ = req.Body.Close()
+			select{case d.request<-req:default:}
+		}
+		_,_=io.WriteString(other,"HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\nworks")
+	}()
+	return c,nil
+}
+func TestBrowserLocalProxyForwardsPlainHTTPWithoutAuth(t *testing.T){
+	requests:=make(chan *http.Request,1)
+	p:=newStartedBrowserLocalProxy(t,browserHTTPDialer{request:requests})
+	transport:=&http.Transport{Proxy:http.ProxyURL(&url.URL{Scheme:"http",Host:p.listen})}
+	defer transport.CloseIdleConnections()
+	client:=http.Client{Transport:transport,Timeout:5*time.Second}
+	resp,err:=client.Get("http://printer.local:8080/path?x=1")
+	if err!=nil{t.Fatal(err)}
+	body,err:=io.ReadAll(resp.Body);_ = resp.Body.Close()
+	if err!=nil || resp.StatusCode!=200 || string(body)!="works"{
+		t.Fatalf("HTTP proxy response %d %q %v",resp.StatusCode,body,err)
+	}
+	select{
+	case req:=<-requests:
+		if req.URL.Path!="/path"||req.Host!="printer.local:8080"{
+			t.Fatalf("HTTP request modified: %s %s",req.URL,req.Host)
+		}
+	case <-time.After(time.Second):t.Fatal("native dialer did not receive HTTP request")
+	}
+}
+type browserLocalRecorder struct{h http.Header;code int}
+func (w *browserLocalRecorder) Header() http.Header{return w.h}
+func (w *browserLocalRecorder) Write(p []byte)(int,error){return len(p),nil}
+func (w *browserLocalRecorder) WriteHeader(code int){w.code=code}
+func TestBrowserLocalProxyRejectsMalformedRequestsOnly(t *testing.T){
+	p:=newBrowserLocalProxy("127.0.0.1:21291",browserEchoDialer{})
+	for _,tc:=range []struct{method,host,rawURL string; want int}{
+		{"GET","example.com:80","http://127.0.0.1/",400},
+		{"CONNECT","example.com:0","http://127.0.0.1/",400},
+		{"CONNECT","example.com:65536","http://127.0.0.1/",400},
+		{"CONNECT","example.com:443","http://127.0.0.1/",500},
+	}{
+		r,_:=http.NewRequest(tc.method,tc.rawURL,nil);r.Host=tc.host
+		w:=&browserLocalRecorder{h:http.Header{}}
+		p.ServeHTTP(w,r)
+		if w.code!=tc.want{t.Fatalf("%s %s: got %d want %d",tc.method,tc.host,w.code,tc.want)}
+	}
+}

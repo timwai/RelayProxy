@@ -29,7 +29,18 @@ async function load() {
   $('extension-id').textContent = chrome.runtime.id;
   $('server').value = result.settings.serverOrigin;
   renderSites(result.settings.sites);
+  $('local-agent-all').checked=!!result.localAgentProxy?.enabled;
+  $('local-agent-port').value=result.localAgentProxy?.port||21291;
 }
+
+$('local-agent-apply').addEventListener('click',async()=>{
+  try{
+    const enabled=$('local-agent-all').checked;
+    const port=Number($('local-agent-port').value);
+    await ask({type:'SET_LOCAL_AGENT_GLOBAL',enabled,port});
+    status(enabled?'Chrome 浏览器代理已交给本机 RelayProxy Agent 的原生分流':'已停用本机 Agent 全浏览器代理，保留独立会话网络规则');
+  }catch(error){failure(error);}
+});
 
 $('save').addEventListener('click', async () => {
   try {

@@ -5,6 +5,7 @@ import {sendControl} from './server-api.js';
 import {getSettings} from './rules.js';
 
 const DESIRED='browserSyncNetworkDesired';
+const LOCAL_GLOBAL='relayBrowserLocalAgentGlobal';
 const CREDS='browserSyncNetworkProxyCredentials';
 // Session-only server pairing validation, NOT local proxy authentication.
 const LOCAL_READY='browserSyncLocalAgentValidated';
@@ -35,7 +36,7 @@ export function proxyEndpoint(host,port){
 // Each paired site selects its own egress. A local Agent entry is still
 // Chromium CONNECT at the Chrome boundary but uses Agent-native routing,
 // not Agent's general-purpose SOCKS/HTTP services.
-export function buildPAC(desired,endpoint=null,local=null){
+export function buildPAC(desired,endpoint=null,local=null,globalLocal=null){
   const map={};
   const target=endpoint||BLACKHOLE;
   if(!/^(HTTPS [a-z0-9.-]+:[0-9]{1,5}|PROXY 127\.0\.0\.1:9)$/.test(target))
@@ -50,13 +51,33 @@ export function buildPAC(desired,endpoint=null,local=null){
       throw new Error('同一域名不能绑定到不同 Agent 出口');
     map[host]=route;
   }
+  const otherwise=globalLocal?.enabled
+    ? 'PROXY 127.0.0.1:'+checkLocalPort(globalLocal.port) : 'DIRECT';
   return 'function FindProxyForURL(url, host) {\n'+
     '  var sites='+JSON.stringify(map)+';\n'+
     '  var key=String(host).toLowerCase();\n'+
-    '  return Object.prototype.hasOwnProperty.call(sites,key) ? sites[key] : "DIRECT";\n}';
+    '  return Object.prototype.hasOwnProperty.call(sites,key) ? sites[key] : '+JSON.stringify(otherwise)+';\n}';
 }
 export async function desiredNetwork(){
   return (await chrome.storage.local.get(DESIRED))[DESIRED]||{};
+}
+export async function localAgentGlobal(){
+  const value=(await chrome.storage.local.get(LOCAL_GLOBAL))[LOCAL_GLOBAL];
+  return value?.enabled ? {enabled:true,port:checkLocalPort(value.port)} :
+    {enabled:false,port:21291};
+}
+// Completely independent of the Browser Sync Cookie pairing and Server.
+// The Agent uses the same routing rules as all other client entry points.
+export async function setLocalAgentGlobal(enabled,port=21291){
+  const previous=await localAgentGlobal();
+  if(enabled)checkLocalPort(port);
+  const next={enabled:!!enabled,port:enabled?port:previous.port};
+  await chrome.storage.local.set({[LOCAL_GLOBAL]:next});
+  // Honor existing A-origin network bindings at higher precedence.
+  const desired=await desiredNetwork();
+  const lease=await currentLease();
+  await applyPAC(desired,lease);
+  return next;
 }
 async function currentLease(){
   return (await chrome.storage.session.get(CREDS))[CREDS]||null;
@@ -71,7 +92,8 @@ function checkLocalPort(port){
 }
 export async function selectedNetworkRules(){return desiredNetwork();}
 async function applyPAC(desired,lease=null){
-  if(!Object.keys(desired).length){
+  const globalLocal=await localAgentGlobal();
+  if(!Object.keys(desired).length && !globalLocal.enabled){
     await chrome.storage.session.remove([CREDS,LOCAL_READY,LEGACY_LOCAL_CREDS]);
     await chrome.proxy.settings.clear({scope:'regular'});
     return;
@@ -79,7 +101,7 @@ async function applyPAC(desired,lease=null){
   const target=lease?proxyEndpoint(lease.host,lease.port):null;
   const local=await localValidated();
   await chrome.proxy.settings.set({scope:'regular',value:{
-    mode:'pac_script',pacScript:{data:buildPAC(desired,target,local),mandatory:true}
+    mode:'pac_script',pacScript:{data:buildPAC(desired,target,local,globalLocal),mandatory:true}
   }});
   const status=await chrome.proxy.settings.get({incognito:false});
   if(status.levelOfControl!=='controlled_by_this_extension')
@@ -88,7 +110,8 @@ async function applyPAC(desired,lease=null){
 export async function installNetworkGuard(){
   const desired=await desiredNetwork();
   await chrome.storage.session.remove(LEGACY_LOCAL_CREDS);
-  if(Object.keys(desired).length)await applyPAC(desired);
+  if(Object.keys(desired).length || (await localAgentGlobal()).enabled)
+    await applyPAC(desired);
 }
 export async function stopNetworkGuard(ruleId){
   const desired=await desiredNetwork();
@@ -159,7 +182,10 @@ export function refreshNetworkBinding({force=false}={}){
   if(refreshing)return refreshing;
   const job=async()=>{
     const desired=await desiredNetwork();
-    if(!Object.keys(desired).length)return {state:'OFF'};
+    if(!Object.keys(desired).length){
+      await applyPAC(desired);
+      return {state:(await localAgentGlobal()).enabled?'LOCAL_GLOBAL':'OFF'};
+    }
     const settings=await getSettings();
     const localRules=Object.entries(desired).filter(([,v])=>v.mode==='local_agent');
     const sourceRules=Object.entries(desired).filter(([,v])=>v.mode!=='local_agent');

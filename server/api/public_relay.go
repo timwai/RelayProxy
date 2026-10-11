@@ -16,6 +16,17 @@ func PublicRelayHandler(push, browser, proxy http.Handler) http.Handler {
                 return
             }
             proxy.ServeHTTP(w, req)
+        // A status-only, non-credentialed check allows Chrome to distinguish
+        // a missing/outdated TLS relay endpoint from a refused WebSocket
+        // Upgrade without exposing Admin routes or enrolled device data.
+        case req.Method == http.MethodGet && req.URL.Path == "/api/v1/browser-sync/health":
+            if browser == nil {
+                http.NotFound(w, req)
+            } else if req.TLS == nil {
+                http.Error(w, "HTTPS required", http.StatusUpgradeRequired)
+            } else {
+                w.WriteHeader(http.StatusNoContent)
+            }
         case req.URL.Path == "/api/v1/browser-sync/extensions/register",
             req.URL.Path == "/api/v1/browser-sync/devices/register",
             req.URL.Path == "/api/v1/browser-sync/ws":

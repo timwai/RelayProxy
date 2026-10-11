@@ -58,3 +58,15 @@ B Chrome  -- HTTPS CONNECT 精确配对域名 -----> Relay Server TLS/TCP
 - 测试无 Agent 本地 opt-in、无 proxy.exit、跨身份、撤销绑定、过期令牌、Agent 离线、目的域名不一致均拒绝，已打开连接及时中断。
 - 测试来源 Chrome 切换 Server Origin 时不向旧地址发送凭据；没有可用出口时不得解除精确站点的 PAC 黑洞保护。
 - 仍需 A/B 两台真实 Chrome、Windows/macOS Agent 和部署 Server 验收，含 TLS 证书、DNS、QUIC、WebRTC 边界；此功能不是完整 VPN。
+
+## 五、WSS 连接故障快速诊断
+
+升级到新的“Browser Sync 仅复用 TLS/TCP Relay”版本后，Chrome 扩展的“RelayProxy HTTPS Server”必须填写公开的 **Server TCP 中继** HTTPS URL（例如 `https://relay.example.com:20000`）；不能误填 Admin Web 的端口，也不能把 QUIC/UDP 可用当作 TCP/WSS 已放行。升级 Server 和 Chrome 扩展并重启 Server 后，先在 B 设备执行：
+
+```bash
+curl -v --http1.1 https://relay.example.com:20000/api/v1/browser-sync/health
+```
+
+新 Server 正常且 Browser Sync 已启用、TLS 证书有效时返回 **HTTP 204**。如果返回 404，检查域名/中继 TCP 端口/运行的 Server 版本和 `browser_sync.enabled`；如果出现证书验证失败，检查完整证书链和匹配域名，不要通过忽略证书验证强行启用浏览器 WSS；如果 TCP 连接失败，检查公网 TCP 防火墙和代理/反代是否支持 HTTP/1.1 WebSocket Upgrade。
+
+Chrome 扩展连接失败后会对同一 TLS 入口发起无身份、无 Cookie 的 HTTP 204 探测，给出上述分类提示。**204 只证明接口可达，不证明设备已被批准或 WebSocket 已成功认证**。如出现 1008，检查扩展 ID 与浏览器设备是否在 Server Web 审批、关联身份及 send/receive 授权；若入口正常但 Upgrade 失败，还应核查中间代理是否允许 WebSocket 升级。

@@ -5,6 +5,28 @@ import { getSettings } from './rules.js';
 
 const endpoint = (base, path) => new URL(path, base).toString();
 
+// Only the status of this non-authenticated probe is inspected. Never fetch
+// or log browser Cookie values, auth tokens, challenge signatures or keys.
+export function browserRelayHealthMessage(status) {
+  if (status === 204) return 'TLS 中继端口可达，但 WSS Upgrade 未完成。请检查 Server Web 中的扩展/设备审批，以及反向代理是否允许 HTTP/1.1 WebSocket Upgrade。';
+  if (status === 404) return '当前地址没有 Browser Sync 中继接口（HTTP 404）。请确认扩展配置的是 Server 的 TLS/TCP 中继端口，并已部署新版 Server、启用 browser_sync。';
+  if (status === 426) return '中继接口要求 HTTPS/TLS（HTTP 426）；请检查 TLS 终止与转发配置。';
+  if (status >= 500) return 'Browser Sync 中继服务返回 HTTP ' + status + '，请检查 Server 日志与服务健康状态。';
+  return '中继地址返回 HTTP ' + status + '，但未确认 Browser Sync TLS/WSS 可用；请核实 Server 版本和接入端口。';
+}
+
+async function diagnoseBrowserWSS(serverOrigin) {
+  try {
+    const response = await fetch(endpoint(serverOrigin, '/api/v1/browser-sync/health'), {
+      method: 'GET', cache: 'no-store', redirect: 'error',
+      signal: AbortSignal.timeout(5000),
+    });
+    return new Error(browserRelayHealthMessage(response.status));
+  } catch {
+    return new Error('无法连接 Browser Sync TLS/TCP 中继。检查 Server TCP 监听端口、防火墙、DNS、Chrome 代理设置及 HTTPS 证书信任；此地址不是 Admin/QUIC 端口。');
+  }
+}
+
 export async function registerBrowser() {
   const settings = await getSettings();
   if (!settings.serverOrigin) throw new Error('请先配置 HTTPS Server');
@@ -74,6 +96,12 @@ async function connectFreshBrowser() {
   return new Promise((resolve, reject) => {
     let authenticated = false;
     let finished = false;
+    let diagnosing = null;
+    const failWithDiagnosis = () => {
+      if (finished || diagnosing) return;
+      diagnosing = diagnoseBrowserWSS(settings.serverOrigin);
+      diagnosing.then(fail, () => fail(new Error('无法建立安全 WSS 连接')));
+    };
     const fail = error => {
       if (finished) return;
       finished = true;
@@ -137,9 +165,14 @@ async function connectFreshBrowser() {
       }
     });
     socket.addEventListener('error', () => {
-      if (!authenticated) fail(new Error('无法建立安全 WSS 连接'));
+      if (!authenticated) failWithDiagnosis();
     });
-    socket.addEventListener('close', () => {
+    socket.addEventListener('close', event => {
+      if (!authenticated && event.code === 1008) {
+        // Chrome exposes authenticated WebSocket close codes, but not HTTP
+        // handshake error responses. Keep security reasons generic here.
+        fail(new Error('Browser Sync WSS 已连接，但设备/扩展审批或签名验证被 Server 拒绝（WebSocket 1008）。请检查 Server Web 审批与两端设备身份。'));
+      }
       if (socket === currentSocket) {
         if (keepalive) clearInterval(keepalive);
         keepalive = null;
@@ -147,7 +180,7 @@ async function connectFreshBrowser() {
         currentSocket = null;
         connectionState = 'DISCONNECTED';
       }
-      if (!authenticated) fail(new Error('Server 拒绝连接或未完成设备审批'));
+      if (!authenticated) failWithDiagnosis();
     });
   });
 }

@@ -134,13 +134,14 @@ def verify(ab_csv, coexistence_paths, manifest, policy):
                 number(entry.get("brutal_coactive_mbps"), label + " Brutal throughput")
                 idle = number(entry.get("idle_icmp_p50_ms"), label + " idle RTT")
                 loaded = number(entry.get("loaded_icmp_p95_ms"), label + " loaded p95")
+                loaded_p50 = number(entry.get("loaded_icmp_p50_ms"), label + " loaded p50")
                 if duration < params.get("min_duration_s", 60):
                     errors.append(f"{label}: insufficient load duration")
                 if jain < params.get("min_jain", 1):
                     errors.append(f"{label}: Jain={jain:.3f} below policy")
                 if loaded > params.get("max_loaded_icmp_p95_ms", float("inf")):
                     errors.append(f"{label}: loaded RTT exceeds policy")
-                if loaded / idle > params.get("max_loaded_over_idle_p50_ratio", float("inf")):
+                if loaded_p50 / idle > params.get("max_loaded_over_idle_p50_ratio", float("inf")):
                     errors.append(f"{label}: loaded RTT inflation exceeds policy")
                 alone = groups.get((loss, "download", "bbr"))
                 if alone:

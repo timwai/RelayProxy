@@ -85,7 +85,11 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
     if(typeof v!=='object'||seen.has(v))return fail();
     seen.add(v);
     try{
-      if(v instanceof Date)return ['d',v.getTime()];
+      if(v instanceof Date){
+        const timestamp=v.getTime();
+        if(!Number.isFinite(timestamp))return fail();
+        return ['d',timestamp];
+      }
       if(v instanceof RegExp)return ['r',v.source,v.flags];
       if(v instanceof ArrayBuffer)return ['B',b64(v)];
       if(ArrayBuffer.isView(v))
@@ -117,7 +121,11 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
       const entries=[];
       for(const [k,item] of Object.entries(v))entries.push([k,await encode(item,depth+1)]);
       return ['o',entries];
-    }finally{seen.delete(v);}
+    }finally{
+      // Deliberately retain references within the snapshot. JSON cannot
+      // represent a structured-clone object graph with shared identities or
+      // cycles; refuse such records rather than silently changing semantics.
+    }
   }
   function decode(e,depth=0){
     if(!Array.isArray(e)||depth>24)fail();

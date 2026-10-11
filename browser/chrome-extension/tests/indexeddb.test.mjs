@@ -162,3 +162,17 @@ test('navigation to an unpaired origin prevents both reads and writes',async()=>
   await assert.rejects(siteIndexedDB(origin,'read'),/导航/);
   await assert.rejects(siteIndexedDB(origin,'write',blank,blank),/导航/);
 });
+
+test('unsupported invalid Date and shared-object graphs are rejected before transmission',async()=>{
+  const factory=fakeIndexedDB();use(factory);
+  const db=await new Promise((resolve,reject)=>{
+    const q=factory.open('bad-graph',1);
+    q.onupgradeneeded=()=>q.result.createObjectStore('items',{keyPath:null,autoIncrement:false});
+    q.onsuccess=()=>resolve(q.result);
+    q.onerror=()=>reject(q.error);
+  });
+  const store=db.transaction('items','readwrite').objectStore('items');
+  store.put({when:new Date(NaN)},'invalid-date');
+  db.close();
+  await assert.rejects(siteIndexedDB(origin,'read'),/无法完整复制/);
+});

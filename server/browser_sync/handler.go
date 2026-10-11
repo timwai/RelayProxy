@@ -242,6 +242,9 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusPolicyViolation, "invalid proof")
 		return
 	}
+	// Signature verification is bound to the HTTPS server origin. Extension
+	// approval is bound separately to the actual chrome-extension:// Origin.
+	extensionOrigin := r.Header.Get("Origin")
 	origin := "https://" + r.Host
 	device, err := h.auth.Verify(proofCtx, proof.DeviceID, origin, nonce, proof.Signature)
 	if err != nil {
@@ -273,8 +276,8 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		current, err := h.Store.deviceAllowed(ctx, device.ID)
-		originID := strings.TrimPrefix(origin, "chrome-extension://")
-		_, legacy := h.extensions[origin]
+		originID := strings.TrimPrefix(extensionOrigin, "chrome-extension://")
+		_, legacy := h.extensions[extensionOrigin]
 		if err != nil || current.ID != device.ID || (!legacy && !h.Store.ExtensionApproved(ctx, originID)) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "browser approval revoked")
 			return

@@ -23,13 +23,13 @@ type browserLocalDialer interface {
 }
 
 type browserLocalProxy struct {
-	listen   string
-	dialer  browserLocalDialer
-	mu      sync.Mutex
-	closed  bool
-	server  *http.Server
-	active  map[net.Conn]struct{}
-	slots   chan struct{}
+	listen string
+	dialer browserLocalDialer
+	mu     sync.Mutex
+	closed bool
+	server *http.Server
+	active map[net.Conn]struct{}
+	slots  chan struct{}
 }
 
 func newBrowserLocalProxy(listen string, dialer browserLocalDialer) *browserLocalProxy {
@@ -116,10 +116,12 @@ func (p *browserLocalProxy) untrack(c net.Conn) {
 	p.mu.Unlock()
 	_ = c.Close()
 }
+
 type browserTrackedConn struct {
 	net.Conn
 	proxy *browserLocalProxy
 }
+
 func (c *browserTrackedConn) Close() error {
 	c.proxy.untrack(c.Conn)
 	return nil

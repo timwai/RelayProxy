@@ -11,8 +11,9 @@ import (
 )
 
 type browserConnection struct {
-	conn *websocket.Conn
-	mu   sync.Mutex
+	conn        *websocket.Conn
+	connectedAt time.Time
+	mu          sync.Mutex
 }
 
 func (c *browserConnection) send(ctx context.Context, message any) error {
@@ -50,6 +51,18 @@ func (h *Handler) DisconnectDevice(id string) {
 		_ = c.conn.Close(websocket.StatusPolicyViolation, "browser authorization revoked")
 	}
 }
+// OnlineSnapshot is a transient observation of authenticated WSS sessions.
+// Only admin handlers call it; no keys or browser messages are exposed.
+func (h *Handler) OnlineSnapshot() map[string]time.Time {
+	h.clientMu.RLock()
+	defer h.clientMu.RUnlock()
+	out := make(map[string]time.Time, len(h.clients))
+	for id, client := range h.clients {
+		out[id] = client.connectedAt
+	}
+	return out
+}
+
 func (h *Handler) destination(id string) *browserConnection {
 	h.clientMu.RLock()
 	defer h.clientMu.RUnlock()

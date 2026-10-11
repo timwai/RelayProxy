@@ -10,7 +10,7 @@ class CoexistenceTests(unittest.TestCase):
 
     def test_overlap_rates_include_stalls(self):
         rows = []
-        for idx in range(20):
+        for idx in range(60):
             rows.append({
                 "phase": "load", "unix_ms": str(1000 + idx * 1000),
                 "bbr_interval_mbps": 0 if idx % 2 else 4,
@@ -21,6 +21,14 @@ class CoexistenceTests(unittest.TestCase):
         self.assertEqual(2, measures[0])
         self.assertEqual(9, measures[1])
         self.assertLess(measures[2], 0.75)
+
+    def test_short_overlap_rejected_even_with_many_samples(self):
+        rows = [{"phase": "load", "unix_ms": str(i * 1000),
+                 "bbr_interval_mbps": 4, "brutal_interval_mbps": 4}
+                for i in range(20)]
+        rates, reason = validate_rates(rows)
+        self.assertIsNone(rates)
+        self.assertIn("sampling span", reason)
 
     def test_incomplete_overlap_rejected(self):
         self.assertIsNone(validate_rates([{

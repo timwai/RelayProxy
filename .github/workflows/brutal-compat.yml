@@ -199,3 +199,42 @@ jobs:
           python-version: "3.12"
       - name: Build and authenticate baseline/new actual CLI executables
         run: python scripts/ci-brutal-native-binary-compat.py
+
+  full-release-archive-check:
+    name: Build and audit full distribution archives (Linux host; six targets)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build actual multi-platform release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/packages
+          export OUT_DIR="${RUNNER_TEMP}/relayproxy-brutal-dist"
+          export VERSION="198.0.0-acceptance"
+          bash scripts/build.sh > evidence/packages/build.log 2>&1 || {
+            tail -n 140 evidence/packages/build.log
+            exit 1
+          }
+      - name: Verify archive integrity and default BBR fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_brutal_release_packages.py \
+            --dist "${RUNNER_TEMP}/relayproxy-brutal-dist" \
+            --report evidence/packages/package-audit.json
+      - name: Archive production build and audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brutal-full-archive-audit
+          path: evidence/packages/
+          if-no-files-found: warn

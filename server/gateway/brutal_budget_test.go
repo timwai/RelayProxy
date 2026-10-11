@@ -14,7 +14,7 @@ func TestBrutalBandwidthBudgetUnlimitedPreservesLegacyBehavior(t *testing.T) {
 	release()
 	release()
 	if budget.clientTx != 0 || budget.serverTx != 0 {
-		t.Fatalf("unlimited budget recorded phantom reservations: %+v", budget)
+		t.Fatalf("unlimited budget recorded phantom reservations: client=%d server=%d", budget.clientTx, budget.serverTx)
 	}
 }
 

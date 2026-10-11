@@ -19,6 +19,10 @@ func TestDeleteRevokedBrowserRemovesDependentRecordsAndAllowsFreshPending(t *tes
 	if err != nil {
 		t.Fatal(err)
 	}
+	// Simulate the advisory identity request persisted by the Chrome extension.
+	if _, err := store.db.ExecContext(ctx, `INSERT INTO browser_sync_identity_requests(device_id,requested_identity_id) VALUES(?,?)`, sourceID, "id_1"); err != nil {
+		t.Fatal(err)
+	}
 	ruleID := uuid.NewString()
 	if err := store.OfferRule(ctx, sourceID, encryptedTestOffer(ruleID, targetID)); err != nil {
 		t.Fatal(err)
@@ -53,6 +57,7 @@ func TestDeleteRevokedBrowserRemovesDependentRecordsAndAllowsFreshPending(t *tes
 	for _, table := range []string{
 		"browser_sync_rules", "browser_sync_rule_offers", "browser_sync_network_bindings",
 		"browser_sync_sequences", "browser_sync_deliveries", "browser_sync_delivery_results",
+		"browser_sync_identity_requests",
 	} {
 		var n int
 		if err := store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&n); err != nil {
@@ -66,7 +71,7 @@ func TestDeleteRevokedBrowserRemovesDependentRecordsAndAllowsFreshPending(t *tes
 	if err != nil {
 		t.Fatalf("old Chrome Profile cannot re-request enrollment: %v", err)
 	}
-	if fresh.State != "pending" || fresh.Send || fresh.Receive || fresh.IdentityID != "" {
+	if fresh.State != "pending" || fresh.Send || fresh.Receive || fresh.IdentityID != "" || fresh.RequestedIdentityID != "" {
 		t.Fatalf("re-enrollment inherited revoked privileges: %+v", fresh)
 	}
 	if err := store.DeleteRevokedDevice(ctx, sourceID); !errors.Is(err, ErrDeleteRequiresRevoke) {

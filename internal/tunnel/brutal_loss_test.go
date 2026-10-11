@@ -212,30 +212,40 @@ func TestBrutalKernelNetemCoexistence(t *testing.T) {
 		t.Skip("requires externally configured Linux tc netem qdisc")
 	}
 	payload := bytes.Repeat([]byte("brutal-bbr-shared-bottleneck"), (4<<20)/len("brutal-bbr-shared-bottleneck")+1)[:4<<20]
-	modes := []string{"bbr", "brutal"}
-	var durations [2]time.Duration
-	var results [2]error
-	var group sync.WaitGroup
-	start := make(chan struct{})
-	for i, mode := range modes {
-		group.Add(1)
-		go func(index int, controller string) {
-			defer group.Done()
-			<-start
-			begin := time.Now()
-			results[index] = transferWithDeterministicLoss(t, payload, 0, controller, 2_000_000)
-			durations[index] = time.Since(begin)
-		}(i, mode)
-	}
-	close(start)
-	group.Wait()
-	for index, mode := range modes {
-		if results[index] != nil {
-			t.Errorf("%s transfer: %v", mode, results[index])
-		} else {
-			t.Logf("shared_netem mode=%s bytes=%d elapsed_ms=%d completion_goodput_mbps=%.3f",
-				mode, len(payload), durations[index].Milliseconds(),
-				float64(len(payload)*8)/durations[index].Seconds()/1e6)
-		}
+	for _, scenario := range []struct {
+		name      string
+		targetBPS uint64
+	}{
+		{name: "overcommit-16mbit", targetBPS: 2_000_000},
+		{name: "under-bottleneck-8mbit", targetBPS: 1_000_000},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			modes := []string{"bbr", "brutal"}
+			var durations [2]time.Duration
+			var results [2]error
+			var group sync.WaitGroup
+			start := make(chan struct{})
+			for i, mode := range modes {
+				group.Add(1)
+				go func(index int, controller string) {
+					defer group.Done()
+					<-start
+					begin := time.Now()
+					results[index] = transferWithDeterministicLoss(t, payload, 0, controller, scenario.targetBPS)
+					durations[index] = time.Since(begin)
+				}(i, mode)
+			}
+			close(start)
+			group.Wait()
+			for index, mode := range modes {
+				if results[index] != nil {
+					t.Errorf("%s transfer: %v", mode, results[index])
+				} else {
+					t.Logf("shared_netem scenario=%s mode=%s target_bps=%d bytes=%d elapsed_ms=%d completion_goodput_mbps=%.3f",
+						scenario.name, mode, scenario.targetBPS, len(payload), durations[index].Milliseconds(),
+						float64(len(payload)*8)/durations[index].Seconds()/1e6)
+				}
+			}
+		})
 	}
 }

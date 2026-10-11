@@ -9,7 +9,7 @@ export const groups = [
     ['brutalDownMbps','Brutal Agent → Server 单设备上限（Mbps）','number'],
     ['brutalTotalUpMbps','Brutal Server → Agent 汇总预算（Mbps）','number'],
     ['brutalTotalDownMbps','Brutal Agent → Server 汇总预算（Mbps）','number'],
-    ['brutalIgnoreClientBandwidth','忽略客户端 Brutal 速率请求（始终 BBR）','checkbox'],
+    ['brutalIgnoreClientBandwidth','QUIC 拥塞控制策略','congestion-select'],
     ['brutalDisableLossCompensation','关闭 Server Brutal 丢包速率补偿','checkbox']]},
   {id:'direct',title:'公网直连',subtitle:'Public Direct QUIC 与 Agent 监听端口',section:'网络能力',fields:[
     ['enabled','启用 Public Direct','checkbox'],['portStart','Agent UDP 端口起始','number'],['portEnd','Agent UDP 端口结束','number']]},

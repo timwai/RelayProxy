@@ -29,10 +29,11 @@ func main() {
 	quicPort := flag.Int("quic-port", 0, "loopback server UDP port")
 	tcpPort := flag.Int("tcp-port", 0, "loopback server TLS port")
 	socksPort := flag.Int("socks-port", 0, "optional local SOCKS5 port for real data-plane test")
+	brutalMbps := flag.Int("brutal-mbps", 0, "test-only explicit Client Brutal rate in both directions")
 	mode := flag.String("mode", "quic_only", "quic_only or tcp_only")
 	flag.Parse()
 	if *dbPath == "" || *agentDir == "" || *quicPort < 1024 || *tcpPort < 1024 ||
-		(*mode != "quic_only" && *mode != "tcp_only") {
+		(*mode != "quic_only" && *mode != "tcp_only") || *brutalMbps < 0 || *brutalMbps > 20 {
 		fmt.Fprintln(os.Stderr, "usage: compat_seed --db DB --agent-dir DIR --quic-port PORT --tcp-port PORT --mode MODE")
 		os.Exit(2)
 	}
@@ -42,13 +43,13 @@ func main() {
 			os.Exit(1)
 		}
 	}
-	if err := run(*dbPath, *agentDir, *quicPort, *tcpPort, *socksPort, *mode); err != nil {
+	if err := run(*dbPath, *agentDir, *quicPort, *tcpPort, *socksPort, *brutalMbps, *mode); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
 	}
 }
 
-func run(dbPath, dir string, quicPort, tcpPort, socksPort int, mode string) error {
+func run(dbPath, dir string, quicPort, tcpPort, socksPort, brutalMbps int, mode string) error {
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
@@ -95,10 +96,10 @@ func run(dbPath, dir string, quicPort, tcpPort, socksPort int, mode string) erro
 	}
 	config := fmt.Sprintf("server:\n  address: 127.0.0.1\n  quic_port: %d\n  tcp_port: %d\n  insecure_tls: true\n"+
 		"device:\n  name: compat-full-agent\n  identity_id: %s\n"+
-		"transport:\n  mode: %s\n  bandwidth:\n    up_mbps: 0\n    down_mbps: 0\n"+
+		"transport:\n  mode: %s\n  bandwidth:\n    up_mbps: %d\n    down_mbps: %d\n"+
 		"p2p:\n  enabled: false\n  mode: relay_only\n"+
 		"direct:\n  public:\n    advertise: \"\"\n"+
-		"proxy:\n  default_exit_id: server\n  socks5:\n    enabled: true\n    listen: 127.0.0.1\n    port: %d\n  http:\n    enabled: false\n", quicPort, tcpPort, identity.ShortID, mode, socksPort)
+		"proxy:\n  default_exit_id: server\n  socks5:\n    enabled: true\n    listen: 127.0.0.1\n    port: %d\n  http:\n    enabled: false\n", quicPort, tcpPort, identity.ShortID, mode, brutalMbps, brutalMbps, socksPort)
 	if err := os.WriteFile(filepath.Join(dir, "relay-agent.yaml"), []byte(config), 0600); err != nil {
 		return err
 	}

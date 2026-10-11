@@ -42,9 +42,13 @@ export async function registerBrowser() {
   const settings = await getSettings();
   if (!settings.serverOrigin) throw new Error('请先配置 HTTPS Server');
   const identity = await getOrCreateIdentity();
+  const requestedIdentityId = (settings.requestedIdentityId || '').trim();
+  const deviceName = (settings.deviceName || '').trim();
+  if (!requestedIdentityId || !deviceName || deviceName.length > 100 || requestedIdentityId.length > 128) throw new Error('请先填写有效的身份 ID 和设备名称');
   const registration = {
     id: identity.deviceId,
-    name: 'Chrome ' + navigator.platform,
+    name: deviceName,
+    requestedIdentityId,
     signingPublicKey: identity.signingPublicKey,
     encryptionPublicKey: identity.encryptionPublicKey,
   };

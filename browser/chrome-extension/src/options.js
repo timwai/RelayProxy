@@ -127,6 +127,8 @@ $('register').addEventListener('click', async () => {
       ? '申请已一次提交。请管理员在 Server Web → 浏览器同步 中选择身份及权限，并点击“批准扩展与设备”。'
       : result.state === 'approved'
       ? '浏览器设备及扩展已获批，现在可以连接 Server。'
+      : result.state === 'revoked'
+      ? '该 Chrome 浏览器设备的旧授权已撤销。请管理员在 Server Web → 浏览器同步删除旧设备（若扩展也已撤销，先清理关联设备，再删除旧扩展），然后重新提交申请。'
       : '浏览器设备状态：' + result.state);
   } catch (error) { failure(error); }
 });

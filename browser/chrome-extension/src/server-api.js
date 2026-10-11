@@ -55,7 +55,16 @@ export async function registerBrowser() {
     method:'POST', cache:'no-store', headers:{'Content-Type':'application/json'},
     body:JSON.stringify(registration),
   });
-  if(!extension.ok) throw new Error('浏览器注册申请失败：HTTP '+extension.status);
+  if(!extension.ok) {
+    // Revoked extension origins cannot re-enter pending automatically:
+    // an administrator must first delete the old revoked extension record.
+    if(extension.status===403){
+      const reason=await extension.text().catch(()=> '');
+      if(reason.includes('revoked extension'))
+        throw new Error('此 Chrome 扩展授权已被撤销。请管理员先在 Server Web 删除关联的已撤销旧设备，再删除已撤销扩展记录，然后重新提交申请。');
+    }
+    throw new Error('浏览器注册申请失败：HTTP '+extension.status);
+  }
   const approval = await extension.json();
   if(approval.id === identity.deviceId && approval.extensionState) {
     return {state:approval.state,extensionState:approval.extensionState,

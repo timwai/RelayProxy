@@ -1,0 +1,8 @@
+{
+  "min_jain": 0.85,
+  "min_bbr_retention": 0.5,
+  "max_loaded_icmp_p95_ms": 150,
+  "max_loaded_over_idle_p50_ratio": 3,
+  "min_duration_s": 60,
+  "warning": "ILLUSTRATIVE ONLY. Owner MUST APPROVE thresholds for the actual real-WAN link; passing is NOT automatic release approval."
+}

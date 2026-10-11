@@ -82,6 +82,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
       .includes(filter.trim().toLowerCase()))
     .sort((a,b)=>({pending:0,approved:1,revoked:2}[a.state]??3)-
       ({pending:0,approved:1,revoked:2}[b.state]??3));
+  const linkedExtensions=new Set(devices.filter(d=>d.extensionId).map(d=>d.extensionId));
   const count=state=>devices.filter(d=>d.state===state).length;
   const states=[['all','全部',devices.length],['pending','待审批',count('pending')],
     ['approved','已批准',count('approved')],['revoked','已撤销',count('revoked')]];
@@ -178,12 +179,18 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
               <td><span className={'badge '+(ext.state==='approved'?'ok':ext.state==='revoked'?'danger':'')}>
                 {ext.state==='pending'?'待审批':ext.state==='approved'?'已批准':'已撤销'}</span></td>
               <td className="browser-sync-actions">
-                {ext.state==='pending'?
+                {ext.state==='pending'&&linkedExtensions.has(ext.id)?
+                  <button type="button" className="btn" onClick={()=>{setView('devices');setStateFilter('pending');}}>
+                    审批关联设备</button>:
+                 ext.state==='pending'?
                   <button type="button" className="btn primary" disabled={!!busy}
                     onClick={()=>extensionAction(ext.id,'approve')}>批准扩展</button>:
                  ext.state==='approved'?
                   <button type="button" className="btn" disabled={!!busy}
                     onClick={()=>extensionAction(ext.id,'revoke')}>撤销</button>:
+                 linkedExtensions.has(ext.id)?
+                  <button type="button" className="btn" onClick={()=>{setView('devices');setStateFilter('all');}}>
+                    先删除关联设备</button>:
                   <button type="button" className="btn danger" disabled={!!busy}
                     onClick={()=>extensionAction(ext.id,'delete')}>删除扩展</button>}
               </td>

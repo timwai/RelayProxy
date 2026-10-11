@@ -169,7 +169,7 @@ async function refreshPairing() {
   }
   if (peers.some(p => p.id === previous && p.receive)) select.value = previous;
   cachedRules = (await ask({ type: 'LIST_RULES' })).rules || [];
-  renderRules(cachedRules);
+  renderRules(cachedRules,peers);
 }
 
 function textNode(tag, content, className) {
@@ -179,7 +179,8 @@ function textNode(tag, content, className) {
   return node;
 }
 
-function renderRules(rules) {
+function renderRules(rules,peers=[]) {
+  const peerNames=new Map(peers.map(peer=>[peer.id,peer.name||'Chrome 浏览器']));
   const parent = $('pairing-rules');
   parent.replaceChildren();
   if (!rules.length) {
@@ -191,7 +192,11 @@ function renderRules(rules) {
     card.className = 'rule';
     const desc = rule.role === 'source' ? '发送端' : '接收端';
     card.append(textNode('strong', desc + ' · ' + ({active:'已启用',offered:'待确认',revoked:'已撤销'}[rule.status]||rule.status)));
-    card.append(textNode('p', '配对设备：' + rule.remoteID));
+    const peerName=peerNames.get(rule.remoteID)||'浏览器设备';
+    const peerId=String(rule.remoteID||'');
+    const peerLabel=textNode('p','配对设备：'+peerName+(peerId?' · '+peerId.slice(0,12)+'…':''));
+    peerLabel.title=peerId;
+    card.append(peerLabel);
     if (rule.lastTransfer && ['SENDING','RELAYED','RECEIVED','APPLIED','FAILED','CONFLICT','UNKNOWN','PARTIAL'].includes(rule.lastTransfer.state)) {
       const translated = {SENDING:'正在发送密文',RELAYED:'密文已转发',RECEIVED:'接收端已收到',
         APPLIED:'站点状态已应用（网站登录未验证）',FAILED:'同步失败',

@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"relayproxy/internal/proxy"
 )
 
 // browserLocalProxy is a dedicated, opt-in loopback adapter for Chrome.
@@ -63,6 +65,11 @@ func (p *browserLocalProxy) Start() error {
 	p.server = &http.Server{
 		Handler: p, ReadHeaderTimeout: 8 * time.Second,
 		IdleTimeout: 30 * time.Second, MaxHeaderBytes: 8192,
+		// Preserve the accepted socket tuple so native Agent process-based
+		// routing can identify Chrome just as with SOCKS5/HTTP entry points.
+		ConnContext: func(ctx context.Context, conn net.Conn) context.Context {
+			return proxy.WithClientConn(ctx, "browser_chrome", conn)
+		},
 	}
 	srv := p.server
 	p.mu.Unlock()

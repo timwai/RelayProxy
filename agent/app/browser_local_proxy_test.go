@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"relayproxy/internal/proxy"
 )
 
 type browserEchoDialer struct{}
@@ -178,5 +180,38 @@ func TestBrowserLocalProxyRejectsMalformedRequestsOnly(t *testing.T) {
 		if w.code != tc.want {
 			t.Fatalf("%s %s: got %d want %d", tc.method, tc.host, w.code, tc.want)
 		}
+	}
+}
+
+type browserClientMetadataDialer struct {
+	info chan proxy.ClientInfo
+}
+
+func (d browserClientMetadataDialer) DialBrowserNetworkTCP(ctx context.Context, host string, port uint16) (net.Conn, error) {
+	select {
+	case d.info <- proxy.ClientFromContext(ctx):
+	default:
+	}
+	return browserEchoDialer{}.DialBrowserNetworkTCP(ctx, host, port)
+}
+
+// Process-based rules require the original Chrome->Agent socket tuple.
+func TestBrowserLocalProxyPreservesChromeSourceTuple(t *testing.T) {
+	observed := make(chan proxy.ClientInfo, 1)
+	p := newStartedBrowserLocalProxy(t, browserClientMetadataDialer{info: observed})
+	c, err := net.Dial("tcp", p.listen)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer c.Close()
+	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
+	_, _ = fmt.Fprint(c, "CONNECT login.example.com:443 HTTP/1.1\r\nHost: login.example.com:443\r\n\r\n")
+	select {
+	case info := <-observed:
+		if info.Entry != "browser_chrome" || !info.Source.IsValid() || !info.Local.IsValid() {
+			t.Fatalf("missing Chrome process lookup metadata: %+v", info)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("browser proxy never attempted native Agent routing")
 	}
 }

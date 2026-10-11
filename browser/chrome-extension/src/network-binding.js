@@ -14,6 +14,7 @@ export function safeHostname(host){
     host===host.toLowerCase() &&
     /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(host) &&
     !['local','internal','localhost','arpa'].some(t=>host.endsWith('.'+t)) &&
+    !/^(?:[0-9]+\\.)+[0-9]+$/.test(host) &&
     !host.split('.').some(t=>t.length>63);
 }
 export function parseBoundHost(origin){

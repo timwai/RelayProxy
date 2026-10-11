@@ -2,6 +2,7 @@ package browsersync
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -95,6 +96,10 @@ func TestNetworkProxyLeaseAuthAndCONNECTIsolation(t *testing.T) {
 	if _, err := proxy.checkToken(""); !errors.Is(err, ErrRuleDenied) {
 		t.Fatalf("anonymous request accepted: %v", err)
 	}
+	encoded := base64.StdEncoding.EncodeToString([]byte("browser:" + token))
+	if got, err := proxy.checkToken("Basic " + encoded); err != nil || got.deviceID != target.ID {
+		t.Fatalf("valid browser token rejected: %v", err)
+	}
 	now := time.Now()
 	proxy.mu.Lock()
 	for hash, value := range proxy.leases {
@@ -102,7 +107,7 @@ func TestNetworkProxyLeaseAuthAndCONNECTIsolation(t *testing.T) {
 		proxy.leases[hash] = value
 	}
 	proxy.mu.Unlock()
-	if _, err := proxy.checkToken("Basic YnJvd3Nlcjo=" + token); err == nil {
+	if _, err := proxy.checkToken("Basic " + encoded); err == nil {
 		t.Fatal("expired token accepted")
 	}
 }

@@ -124,3 +124,5 @@
 Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-extension/src/network-binding.js)、[站点规则 UI](../browser/chrome-extension/src/popup.js)、[Cookie 接收前检查](../browser/chrome-extension/src/session-sync.js) 和 [PAC 单元测试](../browser/chrome-extension/tests/network-binding.test.mjs)。[初次 Go CI #38101561277](https://github.com/timwai/RelayProxy/actions/runs/38101561277) 失败于 `gofmt`；本次使用 CI 差异修正格式并修复数据库单连接循环查询与传递 Relay ACL。完整 CI 状态必须以本次代码提交 SHA 为准。
 
 | 2026-10-11 | 网络绑定完整 CI 复核（本次格式修复） | [Go CI #38101778970](https://github.com/timwai/RelayProxy/actions/runs/38101778970) 因 gofmt 失败；针对 `network_proxy.go` 修复剩余格式差异，后续 CI 必须按此提交 SHA 判断，不沿用既有通过结果 | NB-01–04 仍为已实现、**待完整 CI 与真实 Chrome/Agent 验收**，P0 不放行 | 修复格式阻塞，继续跑完整 Go/UI/Android CI |
+
+| 2026-10-11 | [Chrome PAC 测试修复](https://github.com/timwai/RelayProxy/pull/194) | [UI CI #38101778955](https://github.com/timwai/RelayProxy/actions/runs/38101778955) 在 `network-binding.test.mjs` 检测出 `127.0.0.1` 未被客户端拒绝；补数字型 IPv4 禁止，并使 Go 租约测试使用真实的 Basic 编码以覆盖正常和过期令牌 | NB-03 仍已实现、待完整 CI/真机验收；P0 继续不放行 | 记录回归与修复，不预宣告新提交 CI 成功 |

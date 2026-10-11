@@ -75,7 +75,7 @@ func TestUnifiedEnrollmentRequiresOnlyOneAdminApproval(t *testing.T) {
 	if err != nil || saved.State != "approved" || !saved.Send || saved.Receive ||
 		saved.IdentityID != "id_1" || saved.ExtensionState != "approved" ||
 		!store.ExtensionApproved(ctx, unifiedExtensionID) {
-		t.Fatalf("one admin action did not approve both: %+v %v", saved, err)
+		t.Fatalf("one admin action did not approve the device: %+v %v", saved, err)
 	}
 	if err := store.ApproveEnrollment(ctx, device.ID, "id_1", false, true); err == nil {
 		t.Fatal("already-approved browser was reapproved")
@@ -163,7 +163,7 @@ func TestUnifiedEnrollmentRevokedExtensionCannotEnrollNewDevices(t *testing.T) {
 	}
 }
 
-func TestUnifiedEnrollmentLegacyApprovedDeviceCannotMoveToPendingExtension(t *testing.T) {
+func TestUnifiedEnrollmentLegacyApprovedDeviceCannotClaimAnotherOrigin(t *testing.T) {
 	store := testBrowserStore(t)
 	device := unifiedRegistration(t)
 	ctx := context.Background()

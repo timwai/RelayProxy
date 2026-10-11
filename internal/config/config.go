@@ -138,6 +138,15 @@ type AgentConfigFile struct {
 		CustomExits   []routing.CustomExit `yaml:"custom_exits,omitempty"`
 	} `yaml:"proxy"`
 
+	BrowserSync struct {
+		LocalProxy struct {
+			Enabled bool `yaml:"enabled"`
+			Listen string `yaml:"listen"`
+			Token string `yaml:"token" json:"-"`
+			AllowedHosts []string `yaml:"allowed_hosts"`
+		} `yaml:"local_proxy"`
+	} `yaml:"browser_sync"`
+
 	RDP struct {
 		Enabled *bool  `yaml:"enabled"`
 		Address string `yaml:"address"` // target-local RDP service; defaults to 127.0.0.1:3389
@@ -510,6 +519,9 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	if cfg.GUI.VerificationPopupTimeoutSec == nil {
 		value := 15
 		cfg.GUI.VerificationPopupTimeoutSec = &value
+	}
+	if cfg.BrowserSync.LocalProxy.Listen == "" {
+		cfg.BrowserSync.LocalProxy.Listen = "127.0.0.1:21291"
 	}
 	if cfg.Web.Listen == "" {
 		cfg.Web.Listen = "127.0.0.1"

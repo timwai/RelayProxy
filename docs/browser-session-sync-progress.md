@@ -152,3 +152,13 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | [Go CI #38103289370](https://github.com/timwai/RelayProxy/actions/runs/38103289370) 测试夹具纠正 | 正向 HTTPS CONNECT 集成测试未声明已签名 Agent 本机许可，导致新权限门禁正确拒绝；现将正向路径夹具加入 `CapabilityBrowserNetworkExit`，并保留随后移除 capability 必须拒绝的负向断言 | NB-01/02 自检提升，尚待新的 CI 与真机验收 | 以新 SHA 的 Go/UI/网络回归判断 |
 
 **2026-10-11 安全加固代码基准：[`5c933cc7`](https://github.com/timwai/RelayProxy/commit/5c933cc7e5a9a36f122937d52c23876af7c3b131)。** [Go CI #38103377888](https://github.com/timwai/RelayProxy/actions/runs/38103377888) **success**：gofmt、module 检查、vet、完整 Go 测试（含 Agent 本机同意及撤销 CONNECT 集成）、race 与 benchmark smoke；[UI CI #38103377883](https://github.com/timwai/RelayProxy/actions/runs/38103377883) **success**：Chrome 扩展、Web UI 与 Windows/macOS 桌面回归。[Network Acceptance #38103377885](https://github.com/timwai/RelayProxy/actions/runs/38103377885) **success**（独立 SOCKS5/HTTP、FakeIP/DNS、防泄漏网络回归）；[Android CI #38103377822](https://github.com/timwai/RelayProxy/actions/runs/38103377822) **success**（debug APK 构建）；这些自动化**不是**真实 A Agent/B Chrome 双机验收，NB-05/P0-01/P0-07 仍不能放行。
+
+## 七、B 端本机 Agent 原生代理（新增范围）
+
+| 任务 | 当前状态 | 实现与剩余验收 |
+|---|---|---|
+| NB-06 B Agent 独立本机 Chrome 出口 | **已编码·待 CI/真机验收** | 新增 `browser_sync.local_proxy`：127.0.0.1 专用监听、强制 Basic Token、最多 64 条流、精确站点名单；Agent `RoutingDialer.DialBrowserNetworkTCP` 沿用现有 Relay/QUIC/P2P/自定义出口与分流，DIRECT/REJECT 失败关闭。与通用 SOCKS5/HTTP/透明代理开关解耦 |
+| NB-07 B 扩展按站点选本机/来源 Agent | **已编码·待 CI/真机验收** | 在接收端激活的 Cookie 规则上明确选择 `local_agent` 或 `source_agent`，PAC 按 hostname 映射，二者可同时存在；本机令牌只存在于会话存储，浏览器重启默认黑洞；原有 Cookie-only/来源 Agent 不改变 |
+| NB-08 本地 Agent 发现、权限 UI、真实跨端验证 | **未开始** | 需正式本地配对（避免手工配置长令牌）、GUI 设置和 Token 轮换、真实 Chrome MV3 407 缓存、端口占用/退出/断网、代理规则变化、跨平台 Chrome 以及 DNS/WebRTC/第三方资源审计 |
+
+**本轮新增范围不应误算为已验收。** B Agent 本机出口不保证与来源 A 公网 IP 一致；P0-01/05/06/07 与 NB-05 的生产准入仍然不放行。所有构建和集成测试结果必须按功能提交 SHA 单独填写。

@@ -6,7 +6,7 @@ import { registerBrowser, connectBrowser, currentConnectionState, disconnect, se
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
 import { getTrustedPeer, pinPeer } from './rules.js';
 import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, setOverwritePermission, syncThenOpen, forgetRuleLocalState, resumePausedRestore } from './session-sync.js';
-import {parseBoundHost, installNetworkGuard, startNetworkGuard, stopNetworkGuard, refreshNetworkBinding, registerNetworkAuth} from './network-binding.js';
+import {parseBoundHost, installNetworkGuard, startNetworkGuard, startLocalNetworkGuard, stopNetworkGuard, selectedNetworkRules, refreshNetworkBinding, registerNetworkAuth} from './network-binding.js';
 
 registerNetworkAuth();
 
@@ -105,6 +105,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             if(binding && binding.status!=='none')
               summary.network={...binding,matchingHost:binding.host===parseBoundHost(summary.policy.siteOrigin)};
           }catch{ /* network proxy is optional and disabled by default */ }
+        }
+        const desired=await selectedNetworkRules();
+        for(const summary of rules){
+          if(summary.role==='target'&&summary.valid&&summary.status==='active'&&desired[summary.id]){
+            summary.localNetworkMode=desired[summary.id].mode||'source_agent';
+            summary.localNetworkPort=desired[summary.id].port||null;
+          }
         }
         const transfer = (await chrome.storage.local.get('browserSyncTransferStatus')).browserSyncTransferStatus || {};
         const paused = (await chrome.storage.local.get('browserSyncRestorePaused')).browserSyncRestorePaused || {};
@@ -240,8 +247,52 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'NETWORK_REVOKE':
         await sendControl('NETWORK_REVOKE',{ruleId:message.ruleId});
+        if((await selectedNetworkRules())[message.ruleId]?.mode!=='local_agent')
+          await stopNetworkGuard(message.ruleId);
+        return {ok:true};
+      case 'NETWORK_LOCAL_ENABLE':{
+        if(message.confirmed!==true)throw new Error('必须确认使用 B 设备本机 Agent');
+        const identity=await getOrCreateIdentity();
+        const rules=(await sendControl('LIST_RULES')).rules||[];
+        const rule=rules.find(r=>r.ruleId===message.ruleId&&r.status==='active'&&
+          r.targetBrowserDeviceId===identity.deviceId&&r.keysConfirmed===true);
+        if(!rule)throw new Error('只能为已确认的接收端 Cookie 规则选择本机 Agent');
+        const peers=(await sendControl('LIST_PEERS')).peers||[];
+        const source=peers.find(p=>p.id===rule.sourceBrowserDeviceId);
+        const pinned=source&&await getTrustedPeer(source.id);
+        if(!pinned||pinned.signingPublicKey!==source.signingPublicKey||
+          pinned.encryptionPublicKey!==source.encryptionPublicKey)
+          throw new Error('来源端设备密钥未经核对');
+        const policy=await decryptEncryptedOffer(rule,source);
+        const settings=await getSettings();
+        if(!settings.sites.includes(policy.siteOrigin))
+          throw new Error('站点权限未授权');
+        const port=Number(message.port);
+        const result=await startLocalNetworkGuard(message.ruleId,policy.siteOrigin,port,message.token);
+        return {ok:true,...result};
+      }
+      case 'NETWORK_LOCAL_DISABLE':
         await stopNetworkGuard(message.ruleId);
         return {ok:true};
+      case 'NETWORK_USE_SOURCE':{
+        const ruleID=message.ruleId;
+        const identity=await getOrCreateIdentity();
+        const rules=(await sendControl('LIST_RULES')).rules||[];
+        const rule=rules.find(r=>r.ruleId===ruleID&&r.status==='active'&&
+          r.targetBrowserDeviceId===identity.deviceId&&r.keysConfirmed===true);
+        if(!rule)throw new Error('来源网络规则不可用');
+        const peer=(await sendControl('LIST_PEERS')).peers?.find(p=>p.id===rule.sourceBrowserDeviceId);
+        const pinned=peer&&await getTrustedPeer(peer.id);
+        if(!pinned||pinned.signingPublicKey!==peer.signingPublicKey||
+          pinned.encryptionPublicKey!==peer.encryptionPublicKey)
+          throw new Error('来源端公钥校验失败');
+        const policy=await decryptEncryptedOffer(rule,peer);
+        const binding=(await sendControl('NETWORK_BINDING',{ruleId:ruleID})).binding;
+        if(binding?.status!=='active'||binding.host!==parseBoundHost(policy.siteOrigin))
+          throw new Error('A 的网络绑定尚未授权或已经撤销');
+        await startNetworkGuard(ruleID,policy.siteOrigin);
+        return {ok:true};
+      }
       case 'SEND_SESSION':
         return { ok: true, ...(await sendSnapshot(message.ruleId)) };
       case 'REQUEST_SESSION':

@@ -243,6 +243,62 @@ function renderRules(rules) {
         card.append(revoke);
       }
     }
+    if (rule.status==='active' && rule.valid && rule.role==='target'){
+      const current=rule.localNetworkMode==='local_agent'?'B 本机 Agent':rule.localNetworkMode==='source_agent'?'A 来源 Agent':'未启用';
+      card.append(textNode('p','当前站点网络出口：'+current));
+      const local=document.createElement('button');
+      local.textContent='改用 B 本机 Agent 原生代理';
+      local.disabled=rule.localNetworkMode==='local_agent';
+      local.addEventListener('click',()=>{
+        local.disabled=true;
+        const help=textNode('p','仅访问此 Cookie 规则的 HTTPS 网站；使用 B Agent 的分流和选中出口。需要在 B Agent 配置 browser_sync.local_proxy 并设置相同域名白名单，不依赖其 SOCKS5/HTTP/透明代理开关。');
+        const port=document.createElement('input');
+        port.type='number';port.min='1024';port.max='65535';port.value='21291';
+        port.placeholder='本机监听端口';
+        port.setAttribute('aria-label','B 本机 Agent 监听端口');
+        const token=document.createElement('input');
+        token.type='password';token.autocomplete='off';
+        token.placeholder='B Agent 的本机 Browser Sync 访问令牌';
+        token.setAttribute('aria-label','B 本机 Agent 授权令牌');
+        const confirm=document.createElement('button');confirm.textContent='确认绑定 B 本机 Agent';
+        confirm.addEventListener('click',async()=>{
+          if(!window.confirm('B 的此站点将经过本机 Agent 原生分流，不再经来源 A 的公网出口。DIRECT 规则将阻断而不是泄漏本机 IP。确认？'))return;
+          try{
+            await ask({type:'NETWORK_LOCAL_ENABLE',ruleId:rule.id,
+              port:Number(port.value),token:token.value,confirmed:true});
+            token.value='';
+            status('已切换至 B 本机 Agent。访问令牌仅保留在当前 Chrome 会话中。');
+            await refreshPairing();
+          }catch(error){failure(error);}
+        });
+        card.append(help,port,token,confirm);
+      });
+      card.append(local);
+      if(rule.network?.status==='active'&&rule.network.matchingHost&&rule.localNetworkMode!=='source_agent'){
+        const useSource=document.createElement('button');
+        useSource.textContent='切换回 A 的 Agent 网络出口';
+        useSource.addEventListener('click',async()=>{
+          try{
+            await ask({type:'NETWORK_USE_SOURCE',ruleId:rule.id});
+            status('已改为来源 A Agent 网络出口');
+            await refreshPairing();
+          }catch(error){failure(error);}
+        });
+        card.append(useSource);
+      }
+      if(rule.localNetworkMode==='local_agent'){
+        const stop=document.createElement('button');
+        stop.textContent='停用 B 本机站点代理';
+        stop.addEventListener('click',async()=>{
+          if(!window.confirm('停用后此网站可能从 B 本地网络直连。已同步的 Cookie 不会自动删除。确定？'))return;
+          try{
+            await ask({type:'NETWORK_LOCAL_DISABLE',ruleId:rule.id});
+            await refreshPairing();
+          }catch(error){failure(error);}
+        });
+        card.append(stop);
+      }
+    }
     if (rule.status === 'active' && rule.valid) {
       const sync = document.createElement('button');
       sync.textContent = rule.role === 'source' ? '立即发送加密登录状态' : '从来源设备请求同步';

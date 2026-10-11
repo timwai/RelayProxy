@@ -161,6 +161,26 @@ func (d *RoutingDialer) DialSubscriptionTCP(ctx context.Context, exitID, hostnam
 	return d.tunnel.DialTCP(ctx, exitID, hostname, port)
 }
 
+// DialBrowserNetworkTCP reuses RelayProxy native exit selection and rejects
+// DIRECT or REJECT rules so a paired Cookie cannot leak via B's own IP.
+func (d *RoutingDialer) DialBrowserNetworkTCP(ctx context.Context, host string, port uint16) (net.Conn,error) {
+	if port!=443{return nil,fmt.Errorf("Browser Sync only permits HTTPS TCP/443")}
+	decision,record:=d.begin(ctx,"",host,port,"tcp")
+	if decision.Action!=ActionProxy {
+		err:=fmt.Errorf("Browser Sync requires PROXY routing for %s",host)
+		finishDial(record,decision,err)
+		return nil,err
+	}
+	conn,err:=d.dialTCP(ctx,decision.ExitID,host,port,decision)
+	if err!=nil{finishDial(record,decision,err);return nil,err}
+	if conn==nil{
+		err=fmt.Errorf("Browser Sync dial returned nil")
+		finishDial(record,decision,err)
+		return nil,err
+	}
+	return traffic.WrapConn(conn,record),nil
+}
+
 // DialTCP implements proxy.TunnelDialer.
 // It evaluates routing rules before deciding how to connect.
 func (d *RoutingDialer) DialTCP(ctx context.Context, exitNodeID string, host string, port uint16) (net.Conn, error) {

@@ -36,3 +36,32 @@ test('proxy authentication never cancels ordinary website 401 or unrelated proxi
  assert.deepEqual(proxyAuthDecision({...ordinary,isProxy:true,challenger:{host:'relay.example.com',port:21090}},lease,1000),
    {cancel:true});
 });
+
+test('B local Agent native mode and A origin Agent mode can coexist in one PAC',()=>{
+ const desired={
+  source:{siteOrigin:'https://login.example.com',mode:'source_agent'},
+  local:{siteOrigin:'https://app.example.net',mode:'local_agent',port:21291}
+ };
+ const vmContext=vm.createContext({});
+ vm.runInContext(buildPAC(desired,'HTTPS relay.example.com:21090',{port:21291})+
+   ';this.resolve=FindProxyForURL;',vmContext);
+ assert.equal(vmContext.resolve('https://login.example.com','login.example.com'),'HTTPS relay.example.com:21090');
+ assert.equal(vmContext.resolve('https://app.example.net','app.example.net'),'PROXY 127.0.0.1:21291');
+ assert.equal(vmContext.resolve('https://else.example.net','else.example.net'),'DIRECT');
+ const missing=vm.createContext({});
+ vm.runInContext(buildPAC(desired,'HTTPS relay.example.com:21090')+';this.resolve=FindProxyForURL;',missing);
+ assert.equal(missing.resolve('https://app.example.net','app.example.net'),'PROXY 127.0.0.1:9');
+ assert.throws(()=>buildPAC({
+  first:{siteOrigin:'https://app.example.net',mode:'source_agent'},
+  second:{siteOrigin:'https://app.example.net',mode:'local_agent',port:21291}
+ },'HTTPS relay.example.com:21090',{port:21291}));
+});
+test('local Agent 407 is isolated from A upstream and regular website login',()=>{
+ const local={host:'127.0.0.1',port:21291,username:'relay-browser',password:'local-secret',
+  expiresAt:Number.MAX_SAFE_INTEGER};
+ assert.deepEqual(proxyAuthDecision({isProxy:true,scheme:'basic',
+  challenger:{host:'127.0.0.1',port:21291}},local,1000),
+  {authCredentials:{username:'relay-browser',password:'local-secret'}});
+ assert.deepEqual(proxyAuthDecision({isProxy:false,scheme:'basic',
+  challenger:{host:'login.example.com',port:443}},local,1000),{});
+});

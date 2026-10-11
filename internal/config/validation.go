@@ -3,6 +3,7 @@ package config
 import (
 	"crypto/sha256"
 	"fmt"
+	"regexp"
 	"net"
 	"net/netip"
 	"slices"
@@ -129,6 +130,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Proxy.SOCKS5.Listen = strings.TrimSpace(c.Proxy.SOCKS5.Listen)
 	c.Proxy.HTTP.Listen = strings.TrimSpace(c.Proxy.HTTP.Listen)
 	c.Web.Listen = strings.TrimSpace(c.Web.Listen)
+	c.BrowserSync.LocalProxy.Listen = strings.TrimSpace(c.BrowserSync.LocalProxy.Listen)
 	applyAgentDefaults(c)
 	// QUIC requires TLS. Keep the persisted/desired transport aligned with what
 	// relay-agent can actually run, otherwise tls_enabled=false + auto/quic_only
@@ -150,6 +152,7 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c.Mode != "CLIENT" {
 		return fmt.Errorf("客户端角色由服务端授权，配置文件不再接受 mode")
 	}
+	if err := validateBrowserLocalConfig(c); err != nil {return err}
 	if c.Device.IdentityID != "" && !validIdentityID(c.Device.IdentityID) {
 		return fmt.Errorf("device.identity_id 必须是服务端生成的 16 位小写字母数字组合")
 	}
@@ -362,4 +365,29 @@ func isLoopbackHost(host string) bool {
 	}
 	addr, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(host), "[]"))
 	return err == nil && addr.IsLoopback()
+}
+
+var browserLocalHostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$`)
+
+func browserLocalHostname(host string) bool {
+	if len(host)>253 || host!=strings.ToLower(host) || !browserLocalHostPattern.MatchString(host) || net.ParseIP(host)!=nil{return false}
+	for _,part:=range strings.Split(host,".") {if len(part)>63{return false}}
+	for _,end:=range []string{".local",".internal",".localhost",".arpa"} {
+		if strings.HasSuffix(host,end){return false}
+	}
+	return true
+}
+func validateBrowserLocalConfig(c *AgentConfigFile)error {
+	x:=c.BrowserSync.LocalProxy
+	if !x.Enabled{return nil}
+	host,port,err:=net.SplitHostPort(x.Listen)
+	if err!=nil || host!="127.0.0.1"{return fmt.Errorf("browser_sync.local_proxy.listen must bind 127.0.0.1")}
+	n,err:=strconv.Atoi(port)
+	if err!=nil || n<1024 || n>65535{return fmt.Errorf("browser_sync.local_proxy.listen requires port 1024-65535")}
+	if len(x.Token)<32 || len(x.Token)>128 || strings.TrimSpace(x.Token)!=x.Token || strings.ContainsAny(x.Token,":\r\n"){
+		return fmt.Errorf("browser_sync.local_proxy.token needs 32-128 random characters")
+	}
+	if len(x.AllowedHosts)==0 || len(x.AllowedHosts)>64{return fmt.Errorf("browser_sync.local_proxy.allowed_hosts requires 1-64 exact DNS names")}
+	for _,host:=range x.AllowedHosts{if !browserLocalHostname(host){return fmt.Errorf("invalid browser_sync.local_proxy.allowed_hosts hostname")}}
+	return nil
 }

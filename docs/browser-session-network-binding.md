@@ -58,3 +58,37 @@ browser_sync:
 - [ ] 压力、跨实例、日志脱敏、密钥/凭据生命周期、Agent 本地授权、现有 RDP/P2P/Proxy 全量回归均通过。
 
 参见 [Browser Sync 发布进度](./browser-session-sync-progress.md)。
+## B 端可选：使用本机 Agent 的原生网络出口（独立于 SOCKS5/HTTP/透明代理）
+
+> 新增的本机模式是**可选**的，不影响原有「A Agent 出口」和「B 无 Agent Cookie-only」模式。功能开发预览，尚无双设备真实 Chrome 验收。
+
+B 的 Chrome 扩展在一条**已激活的接收端 Cookie 规则**中可以按站点选：
+
+- **使用 A 来源 Agent**：B Chrome → Server HTTPS CONNECT → A Agent，网站可见 A 的出口 IP；需要 A/B 双端网络授权和 Server 白名单。
+- **使用 B 本机 Agent 原生出口**：B Chrome → 回环专用 CONNECT 适配入口 → B Agent `RoutingDialer` → 已配置的 Relay/P2P/QUIC/自定义出口。**不要求开启通用 SOCKS5、HTTP Proxy 或 WinDivert/Network Extension 透明代理**。Chrome 本身只能使用标准代理协议，此处 HTTP CONNECT 只是 Chrome→Agent 的适配层，**实际代理传输由 RelayProxy Agent 决定**。
+- **Cookie-only**：不绑定代理出口，原有双端 Cookie 同步流程不受影响。
+
+### B Agent 本地配置
+
+在 **B 的** `agent.yaml` 中显式启用独立服务，示例：
+
+```yaml
+browser_sync:
+  local_proxy:
+    enabled: true
+    listen: "127.0.0.1:21291"
+    token: "<本机生成的随机 32 字符以上令牌>"
+    allowed_hosts:
+      - login.example.com
+      - app.example.net
+```
+
+建议在本机通过密码管理器或密码学安全随机数生成器生成 Token，权限限定为当前用户可读。Token 不放到 Server，也不通过 Browser Sync WSS 同步。扩展中点击「改用 B 本机 Agent 原生代理」，填入端口与 Token；仅在 `chrome.storage.session` 保存凭据，Chrome 重启后需重新输入。扩展持久化站点和选择模式，但缺少凭据时 PAC 将该网站指向拒绝连接的黑洞地址。
+
+**本机 Agent 服务端也会检查**：连接来自 127.0.0.1；只允许 HTTP CONNECT 到 Agent 白名单的精确 DNS 主机:443；拒绝数字 IP、内网后缀、未授权 Basic Token；最多 64 条并发连接；转发目标必须命中 Agent 的 **PROXY** 路由，`DIRECT`、`REJECT` 均阻断，避免使用共享 Cookie 时直接暴露 B 的公网 IP。其他非绑定网站的流量保持 Chrome 原有网络。
+
+### 重要限制
+
+Chrome 的 PAC/HTTP CONNECT 不提供整个系统或浏览器的任意协议覆盖；WebRTC、DNS/第三方资源、Service Worker 内部请求仍需真实浏览器防泄漏验收。B 使用本机 Agent 的公网 IP 应当等于 **B Agent 当前选中或分流规则决定的出口 IP**，不必与 A 相同；网站仍可使用设备绑定、Passkey、DBSC 等机制拒绝会话迁移。
+
+不得把本机代理 Token 保存到扩展 `chrome.storage.local`、Server 数据库、日志或网页。若两个本机站点需要不同的 Agent 监听端口或凭据，当前同一 Chrome Profile 仅支持一个本机 Agent 配置，应使用另一个 Profile。切换本机/来源 Agent 时，需要重新验证 Chrome 实际代理控制权。真实 A/B 测试仍在 P0。

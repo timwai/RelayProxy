@@ -655,8 +655,12 @@ func TestP2PCandidateUpdateIsRetriedAfterSignalingFailure(t *testing.T) {
 	messages := make(chan protocol.P2PControlMessage, 4)
 	var count atomic.Int32
 	manager := NewManager(context.Background(), func(_ context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+		// Increment before publishing to the observer: after receiving the
+		// second message, the test must be able to observe the second attempt
+		// without depending on goroutine scheduling (especially on Windows).
+		attempt := count.Add(1)
 		messages <- message
-		if count.Add(1) == 1 {
+		if attempt == 1 {
 			return protocol.P2PControlMessage{}, errors.New("signaling temporarily unavailable")
 		}
 		return protocol.P2PControlMessage{Type: protocol.P2PControlLeaseAck}, nil

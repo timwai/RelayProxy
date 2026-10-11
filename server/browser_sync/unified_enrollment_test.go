@@ -82,6 +82,20 @@ func TestUnifiedEnrollmentRequiresOnlyOneAdminApproval(t *testing.T) {
 	}
 }
 
+func TestUnifiedEnrollmentRequestedIdentityRequiresAdminApproval(t *testing.T) {
+ store := testBrowserStore(t)
+ h := NewHandler(store, nil)
+ device := unifiedRegistration(t)
+ device.RequestedIdentityID = "id_1"
+ if out := postEnrollment(t, h, unifiedExtensionID, device); out.Code != http.StatusAccepted {
+  t.Fatalf("identity preference rejected: %d: %s", out.Code, out.Body)
+ }
+ saved, err := store.Device(context.Background(), device.ID)
+ if err != nil || saved.RequestedIdentityID != "id_1" || saved.IdentityID != "" || saved.State != "pending" || saved.Send || saved.Receive {
+  t.Fatalf("identity preference became an authorization: %+v %v", saved, err)
+ }
+}
+
 func TestUnifiedEnrollmentCannotSetPrivilegesOrSwapExtension(t *testing.T) {
 	store := testBrowserStore(t)
 	h := NewHandler(store, nil)

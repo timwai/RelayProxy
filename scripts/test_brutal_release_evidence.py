@@ -82,6 +82,11 @@ class GateTests(unittest.TestCase):
             }
             accepted = verify(ab, coexistence, manifest, policy)
             self.assertTrue(accepted["machine_checks_passed"], accepted["failures"])
+            # Operator-supplied thresholds must never reduce the fixed 60s floor.
+            weak_policy = dict(policy, min_duration_s=1)
+            weak = verify(ab, coexistence, manifest, weak_policy)
+            self.assertFalse(weak["machine_checks_passed"])
+            self.assertTrue(any("mandatory 60-second" in e for e in weak["failures"]))
             self.assertTrue(accepted["human_real_wan_provenance_and_release_signoff_required"])
             # A p95/idle-p50 ratio of 15 is NOT the p50 inflation ratio.
             # Increasing the real loaded p50 to 40ms must fail a 3x cap.

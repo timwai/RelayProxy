@@ -16,7 +16,7 @@ type SessionDiagnostics struct {
 type QUICDiagnostics struct {
 	CongestionController string  `json:"congestion_controller,omitempty"`
 	CongestionTargetBPS  uint64  `json:"congestion_target_bps,omitempty"`
-	BrutalFallbackReason string `json:"brutal_fallback_reason,omitempty"`
+	BrutalFallbackReason string  `json:"brutal_fallback_reason,omitempty"`
 	MinRTTMS             float64 `json:"min_rtt_ms"`
 	LatestRTTMS          float64 `json:"latest_rtt_ms"`
 	SmoothedRTTMS        float64 `json:"smoothed_rtt_ms"`

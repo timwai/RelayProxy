@@ -7,17 +7,17 @@ import "time"
 // trigger. This is a last-resort safety fuse, not capacity estimation,
 // guaranteed latency protection or global BBR fairness.
 type brutalRTTGuard struct {
-	lastBytes  uint64
+	lastBytes   uint64
 	consecutive int
-	startedAt time.Time
+	startedAt   time.Time
 }
 
 const (
-	brutalGuardMinimumLifetime = 5 * time.Second
-	brutalGuardMinimumSendBytes = 64 * 1024 // meaningful load per 1s sample
+	brutalGuardMinimumLifetime      = 5 * time.Second
+	brutalGuardMinimumSendBytes     = 64 * 1024 // meaningful load per 1s sample
 	brutalGuardAbsoluteRTTInflation = 100 * time.Millisecond
-	brutalGuardRTTMultiplier = 3
-	brutalGuardConsecutiveSamples = 3
+	brutalGuardRTTMultiplier        = 3
+	brutalGuardConsecutiveSamples   = 3
 )
 
 func (g *brutalRTTGuard) sample(now time.Time, minimumRTT, smoothedRTT time.Duration, sentBytes uint64) bool {

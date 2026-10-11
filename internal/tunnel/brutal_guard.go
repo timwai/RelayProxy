@@ -45,7 +45,6 @@ func (g *brutalRTTGuard) sample(now time.Time, minimumRTT, smoothedRTT time.Dura
 	return g.consecutive >= brutalGuardConsecutiveSamples
 }
 
-
 // brutalLossGuard observes *newly sent* packets and newly declared losses,
 // rather than the connection's cumulative counters. quic-go may retract a
 // spurious loss, so a decreasing lost counter resets the sample. Persistent

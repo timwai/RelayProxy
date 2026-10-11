@@ -76,7 +76,8 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1)}
 	sessions.Register(&session.DeviceSession{
 		DeviceID: exitID, IdentityID: "id_1", DeviceName: "Approved Agent",
-		Grants: []string{protocol.CapabilityProxyExit}, Tunnel: echo,
+		Grants:       []string{protocol.CapabilityProxyExit},
+		Capabilities: []string{protocol.CapabilityBrowserNetworkExit}, Tunnel: echo,
 	})
 	t.Cleanup(func() { sessions.Unregister(exitID) })
 	proxy := NewNetworkProxy(store, sessions, "relay.example.com:21090", []string{exitID})

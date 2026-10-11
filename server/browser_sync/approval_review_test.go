@@ -39,6 +39,31 @@ func TestEnrollmentCannotRewritePendingIdentityChoice(t *testing.T) {
 	}
 }
 
+// Replaying public keys from a different Chrome extension cannot rewrite
+// an unbound request or insert an identity hint before the Origin check.
+func TestForeignOriginCannotChangePendingDeviceRequest(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	_, signing := makeKey(t)
+	_, encryption := makeKey(t)
+	device := BrowserDevice{
+		ID: "browser_" + uuid.NewString(), Name: "Origin original",
+		SigningKey: signing, EncryptionKey: encryption,
+	}
+	if _, _, err := store.EnrollExtensionDevice(ctx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", device); err != nil {
+		t.Fatal(err)
+	}
+	spoofed := device
+	spoofed.RequestedIdentityID = "id_spoofed"
+	if _, _, err := store.EnrollExtensionDevice(ctx, "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", spoofed); !errors.Is(err, ErrDeviceConflict) {
+		t.Fatalf("cross-origin enrollment not blocked: %v", err)
+	}
+	saved, err := store.Device(ctx, device.ID)
+	if err != nil || saved.ExtensionID != "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa" || saved.RequestedIdentityID != "" {
+		t.Fatalf("foreign origin rewrote request: %+v %v", saved, err)
+	}
+}
+
 func TestOriginInventoryExistingRegistrationSurvivesQuota(t *testing.T) {
 	store := testBrowserStore(t)
 	ctx := context.Background()

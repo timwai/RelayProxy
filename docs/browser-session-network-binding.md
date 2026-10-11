@@ -89,3 +89,9 @@ curl -i -v --http1.1 --noproxy '*' --max-time 5 \
 新版 Chrome 扩展会分别报告 WebSocket 未触发 `open`、Upgrade 完成后等待 `AUTH_CHALLENGE`、收到了挑战但未发送 `AUTH_PROOF`，以及已发送证明却未收到 `AUTH_OK` 的状态。除了状态码和握手阶段，诊断不输出 Cookie、密钥和代理凭据。
 
 Chrome 扩展连接失败后会对同一 TLS 入口发起无身份、无 Cookie 的 HTTP 204 探测，给出上述分类提示。**204 只证明接口可达，不证明设备已被批准或 WebSocket 已成功认证**。如出现 1008，检查扩展 ID 与浏览器设备是否在 Server Web 审批、关联身份及 send/receive 授权；若入口正常但 Upgrade 失败，还应核查中间代理是否允许 WebSocket 升级。
+
+## 六、Chrome 全局 Agent 代理与 Server 控制平面
+
+在 Chrome 扩展启用“使用本机 RelayProxy Agent 代理全浏览器”时，旧 PAC 会把 `wss://RelayProxy-Server/api/v1/browser-sync/ws` 也发送到本地 Agent；如果该 Agent 的出口仍通过同一个 Server Relay，则可能发生自代理回环。当前 PAC 已对配置的 `RelayProxy HTTPS Server` 主机添加 **DIRECT 启动路径**（仅在启用全局 Agent 代理时）。单独配对的精确网站规则优先级仍更高：即使绑定站点与 Server 域名重合，也不会把必须代理或阻断的站点悄悄改为 DIRECT。
+
+如果公网 TCP 中继本身必须由其他代理链路才能连接，DIRECT 也可能不可达；此时应单独调整 Server 可达性，而不是放宽已配对网站的 fail-closed 代理。修改扩展 Server Origin 后会重新生成 PAC，并清除/验证旧 Server 的临时代理租约。普通 Chrome 全局代理与站点网络绑定仍是独立可选功能。

@@ -50,7 +50,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'SAVE_SERVER': {
         const serverOrigin = parseServerOrigin(message.serverOrigin);
         disconnect();
-        return { ok: true, settings: await updateSettings({ serverOrigin }) };
+        const saved=await updateSettings({ serverOrigin });
+        // Rebuild PAC for the new Relay control-plane host. When a previous
+        // Server had a bound website, refreshNetworkBinding will fail closed
+        // until the new Server verifies that pairing (never reuse old leases).
+        await refreshNetworkBinding({force:true}).catch(()=>{});
+        return { ok: true, settings: saved };
       }
       case 'REGISTER_BROWSER': {
         const result = await registerBrowser();

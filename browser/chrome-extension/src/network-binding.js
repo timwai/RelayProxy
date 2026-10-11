@@ -45,7 +45,7 @@ export function proxyEndpoint(host,port){
 // Each paired site selects its own egress. A local Agent entry is still
 // Chromium CONNECT at the Chrome boundary but uses Agent-native routing,
 // not Agent's general-purpose SOCKS/HTTP services.
-export function buildPAC(desired,endpoint=null,local=null,globalLocal=null){
+export function buildPAC(desired,endpoint=null,local=null,globalLocal=null,serverOrigin=''){
   const map={};
   const target=endpoint||BLACKHOLE;
   if(!/^(HTTPS [a-z0-9.-]+:[0-9]{1,5}|PROXY 127\.0\.0\.1:9)$/.test(target))
@@ -59,6 +59,20 @@ export function buildPAC(desired,endpoint=null,local=null,globalLocal=null){
     if(map[host] && map[host]!==route)
       throw new Error('同一域名不能绑定到不同 Agent 出口');
     map[host]=route;
+  }
+  // The local Agent may itself use this Relay for its tunnel. Sending
+  // the Relay control-plane WSS connection through that same Agent can
+  // create a proxy loop. Bootstrap the configured Relay HTTPS host DIRECT
+  // when using the optional global Chrome proxy. Paired host rules remain
+  // higher precedence and are never silently changed to DIRECT.
+  if(globalLocal?.enabled && serverOrigin){
+    const relayURL=new URL(serverOrigin);
+    if(relayURL.protocol!=='https:' || relayURL.username || relayURL.password ||
+        relayURL.pathname!=='/' || relayURL.search || relayURL.hash)
+      throw new Error('RelayProxy HTTPS Server 地址无效');
+    const relayHost=relayURL.hostname.toLowerCase();
+    if(!Object.prototype.hasOwnProperty.call(map,relayHost))
+      map[relayHost]='DIRECT';
   }
   const otherwise=globalLocal?.enabled
     ? 'PROXY 127.0.0.1:'+checkLocalPort(globalLocal.port) : 'DIRECT';
@@ -109,8 +123,11 @@ async function applyPAC(desired,lease=null){
   }
   const target=lease?proxyEndpoint(lease.host,lease.port):null;
   const local=await localValidated();
+  const settings=await getSettings();
   await chrome.proxy.settings.set({scope:'regular',value:{
-    mode:'pac_script',pacScript:{data:buildPAC(desired,target,local,globalLocal),mandatory:true}
+    mode:'pac_script',pacScript:{
+      data:buildPAC(desired,target,local,globalLocal,settings.serverOrigin),mandatory:true
+    }
   }});
   const status=await chrome.proxy.settings.get({incognito:false});
   if(status.levelOfControl!=='controlled_by_this_extension')

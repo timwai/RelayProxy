@@ -84,3 +84,21 @@ test('relay proxy endpoint derives only from already selected HTTPS Server origi
     'https://relay.example.com/?redirect=evil','https://user:pw@relay.example.com'])
     assert.throws(()=>relayProxyFromServerOrigin(unsafe),undefined,unsafe);
 });
+
+test('global Chrome Agent proxy bypasses its own Relay WSS control hostname without weakening paired sites',()=>{
+ const desired={one:{siteOrigin:'https://login.example.com',mode:'source_agent'}};
+ const script=buildPAC(desired,null,null,{enabled:true,port:21291},'https://relay.example.com:20000');
+ const context=vm.createContext({});
+ vm.runInContext(script+';this.resolve=FindProxyForURL;',context);
+ assert.equal(context.resolve('wss://relay.example.com:20000/api/v1/browser-sync/ws','relay.example.com'),'DIRECT');
+ assert.equal(context.resolve('https://other.example.net','other.example.net'),'PROXY 127.0.0.1:21291');
+ assert.equal(context.resolve('https://login.example.com','login.example.com'),'PROXY 127.0.0.1:9');
+});
+
+test('an explicit paired hostname never becomes DIRECT via Relay bootstrap exception',()=>{
+ const desired={one:{siteOrigin:'https://relay.example.com',mode:'source_agent'}};
+ const script=buildPAC(desired,null,null,{enabled:true,port:21291},'https://relay.example.com:20000');
+ const context=vm.createContext({});
+ vm.runInContext(script+';this.resolve=FindProxyForURL;',context);
+ assert.equal(context.resolve('wss://relay.example.com:20000/','relay.example.com'),'PROXY 127.0.0.1:9');
+});

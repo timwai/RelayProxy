@@ -769,6 +769,8 @@ func TestServerBrutalBandwidthValidateAndPersist(t *testing.T) {
 	cfg := &ServerConfig{}
 	cfg.Tunnel.Bandwidth.UpMbps = 900
 	cfg.Tunnel.Bandwidth.DownMbps = 300
+	cfg.Tunnel.Bandwidth.TotalUpMbps = 480
+	cfg.Tunnel.Bandwidth.TotalDownMbps = 200
 	cfg.Tunnel.Bandwidth.IgnoreClientBandwidth = true
 	cfg.Tunnel.Bandwidth.DisableLossCompensation = true
 	if err := SaveServerConfig(path, cfg); err != nil {
@@ -780,6 +782,8 @@ func TestServerBrutalBandwidthValidateAndPersist(t *testing.T) {
 	}
 	if loaded.Tunnel.Bandwidth.UpMbps != 900 ||
 		loaded.Tunnel.Bandwidth.DownMbps != 300 ||
+		loaded.Tunnel.Bandwidth.TotalUpMbps != 480 ||
+		loaded.Tunnel.Bandwidth.TotalDownMbps != 200 ||
 		!loaded.Tunnel.Bandwidth.IgnoreClientBandwidth ||
 		!loaded.Tunnel.Bandwidth.DisableLossCompensation {
 		t.Fatalf("server Brutal bandwidth changed after persistence: %+v", loaded.Tunnel.Bandwidth)
@@ -792,6 +796,22 @@ func TestServerBrutalBandwidthValidateAndPersist(t *testing.T) {
 	loaded.Tunnel.Bandwidth.DownMbps = 1_000_001
 	if err := NormalizeServerConfig(loaded); err == nil {
 		t.Fatal("oversized server Brutal download bandwidth was accepted")
+	}
+	loaded.Tunnel.Bandwidth.DownMbps = 300
+	for _, scenario := range []struct {
+		name string
+		apply func(*ServerConfig)
+	}{
+		{name: "negative total up", apply: func(cfg *ServerConfig) { cfg.Tunnel.Bandwidth.TotalUpMbps = -1 }},
+		{name: "oversized total down", apply: func(cfg *ServerConfig) { cfg.Tunnel.Bandwidth.TotalDownMbps = 1_000_001 }},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			copy := *loaded
+			scenario.apply(&copy)
+			if err := NormalizeServerConfig(&copy); err == nil {
+				t.Fatal("invalid aggregate bandwidth budget was accepted")
+			}
+		})
 	}
 }
 

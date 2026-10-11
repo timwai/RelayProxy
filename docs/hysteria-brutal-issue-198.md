@@ -26,6 +26,12 @@ The fallback is **one-way for that connection** (no BBR↔Brutal oscillation). D
 
 This is only a **last-resort congestion safety fuse**: it does not guarantee queue-free transit, recognize every competing tenant, estimate path capacity, implement fair queuing, or prevent a short-lived transfer from temporarily monopolizing a link before the guard triggers. Aggregate admission budgets remain necessary and independently configured. The guard's real-world false-positive and reduction-in-bufferbloat behavior still require controlled WAN evidence before default-on.
 
+### Five-round desktop BBR rate estimation (Agent GUI; operator-only)
+
+**Agent → 出口双向测速 →「5 轮 BBR 保守校准」** now repeats the existing authorized speed-test RPC five times, validating each *before* the next. A result is rejected if any direction isn't `relay_quic`, does not report the local QUIC sender as `bbr-aggressive`, contains a protection fallback reason, has invalid throughput or sub-second duration, changes exit identity, or fails to complete five rounds. The accepted 5-round *local application goodput* p10 is multiplied by **0.60** and floored to integer Mbps for a provisional per-direction candidate. No timeout exception, direct/P2P path, TLS fallback, or existing Brutal mode is treated as calibration success.
+
+**Critical limitation:** The Agent-side QUIC diagnostics only prove the **Agent sender's** congestion-controller state; they do *not* independently establish the **Server sender's** active controller for download samples. The GUI therefore states this explicitly and does **not** certify the candidate as a Server BBR baseline, real link-capacity limit, shared tenant headroom, loaded RTT or same-path Hysteria2 performance. It never writes `transport.bandwidth.up_mbps/down_mbps`; this tool remains an **operator-only preliminary estimate**, not an automatic default selection or gate-clearing WAN artifact. The separately collected physical-WAN three-way A/B evidence remains mandatory.
+
 ### Measured-rate proposal from existing BBR baseline (operator-only)
 
 The project already has a bidirectional endpoint speed-test transport in `agent/client/speedtest.go` and `internal/speedtest/speedtest.go`. That is an important starting point, but a single application speed test **does not prove physical available capacity or multi-tenant fairness**. A first fail-closed evidence reducer is now available:

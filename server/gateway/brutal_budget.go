@@ -15,21 +15,43 @@ type brutalBandwidthBudget struct {
 }
 
 func (b *brutalBandwidthBudget) reserve(clientRequest, serverRequest, clientLimit, serverLimit uint64) (clientRate, serverRate uint64, release func()) {
+	clientRate, serverRate, releaseClient, releaseServer := b.reserveDirections(
+		clientRequest, serverRequest, clientLimit, serverLimit)
+	return clientRate, serverRate, func() {
+		releaseClient()
+		releaseServer()
+	}
+}
+
+// reserveDirections returns independent idempotent release functions: a
+// local server QUIC sender that falls back to BBR no longer needs its
+// server->agent Brutal pacing reservation, even if the agent->server
+// direction is still legitimately using Brutal.
+func (b *brutalBandwidthBudget) reserveDirections(clientRequest, serverRequest, clientLimit, serverLimit uint64) (
+	clientRate, serverRate uint64, releaseClient, releaseServer func(),
+) {
 	b.mu.Lock()
 	var clientCharge, serverCharge uint64
 	clientRate, clientCharge = reserveBrutalDirection(clientRequest, clientLimit, &b.clientTx)
 	serverRate, serverCharge = reserveBrutalDirection(serverRequest, serverLimit, &b.serverTx)
 	b.mu.Unlock()
 
-	var once sync.Once
-	return clientRate, serverRate, func() {
-		once.Do(func() {
+	var onceClient, onceServer sync.Once
+	releaseClient = func() {
+		onceClient.Do(func() {
 			b.mu.Lock()
-			defer b.mu.Unlock()
 			b.clientTx -= clientCharge
-			b.serverTx -= serverCharge
+			b.mu.Unlock()
 		})
 	}
+	releaseServer = func() {
+		onceServer.Do(func() {
+			b.mu.Lock()
+			b.serverTx -= serverCharge
+			b.mu.Unlock()
+		})
+	}
+	return clientRate, serverRate, releaseClient, releaseServer
 }
 
 // reserveBrutalDirection grants a target only if its worst-case 1.25x

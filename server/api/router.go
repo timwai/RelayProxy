@@ -358,6 +358,12 @@ func (r *Router) registerRoutes() {
 		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/devices/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRevoke)))
 		r.mux.HandleFunc("DELETE /api/v1/browser-sync/admin/devices/{id}", r.requireAuth(r.requireAdmin(r.handleBrowserSyncDelete)))
 		r.mux.HandleFunc("DELETE /api/v1/browser-sync/admin/extensions/{id}", r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensionDelete)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/status", r.requireAuth(r.requireAdmin(r.handleBrowserSyncStatus)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/rules", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRules)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/rules/{id}/pause", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRuleAction)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/rules/{id}/resume", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRuleAction)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/rules/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRuleAction)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/audit", r.requireAuth(r.requireAdmin(r.handleBrowserSyncAudit)))
 	}
 
 	// Static Web UI Handler

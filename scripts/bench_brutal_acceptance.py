@@ -8,7 +8,10 @@ import argparse
 import csv
 import hashlib
 import random
+import re
+import statistics
 import subprocess
+import threading
 import sys
 import tempfile
 from datetime import datetime, timezone
@@ -19,7 +22,7 @@ FIELDS = [
     "timestamp_utc", "scenario", "loss_label", "direction", "round", "variant",
     "proxy", "url", "success", "http_code", "elapsed_s", "bytes",
     "goodput_mbps", "curl_speed_mbps", "curl_connect_s", "curl_ttfb_s",
-    "checksum_ok", "error",
+    "checksum_ok", "loaded_icmp_p50_ms", "loaded_icmp_p95_ms", "loaded_icmp_samples", "error",
 ]
 
 
@@ -42,6 +45,30 @@ def parse_variant(value):
     return name, url
 
 
+def sampled_ping(host, samples, stopped):
+    # ICMP measures the physical path to the configured host, not the proxy
+    # application's QUIC RTT. Real test hosts must share the same bottleneck.
+    while not stopped.is_set():
+        try:
+            output = subprocess.run(["ping", "-n", "-c", "1", "-W", "1", host],
+                                    capture_output=True, text=True, timeout=3, check=False)
+            if output.returncode == 0:
+                found = re.search(r"time[=<]([0-9]+(?:\.[0-9]+)?)\s*ms", output.stdout)
+                if found:
+                    samples.append(float(found.group(1)))
+        except (OSError, subprocess.TimeoutExpired):
+            pass
+        stopped.wait(0.5)
+
+
+def percentile(values, fraction):
+    ordered = sorted(values)
+    position = (len(ordered) - 1) * fraction
+    low = int(position)
+    high = min(low + 1, len(ordered) - 1)
+    return ordered[low] + (ordered[high] - ordered[low]) * (position - low)
+
+
 def sample(args, proxy, destination):
     command = [
         "curl", "--disable", "--noproxy", "", "--fail", "--silent", "--show-error",
@@ -54,11 +81,22 @@ def sample(args, proxy, destination):
     if args.direction == "upload":
         command += ["--upload-file", str(args.upload_file)]
     command.append(args.url)
+    samples = []
+    stopped = threading.Event()
+    monitor = None
+    if getattr(args, "ping_host", None):
+        monitor = threading.Thread(target=sampled_ping,
+                                   args=(args.ping_host, samples, stopped), daemon=True)
+        monitor.start()
     try:
         result = subprocess.run(command, capture_output=True, text=True,
                                 timeout=args.timeout + 15, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"success": False, "error": str(exc)}
+    finally:
+        stopped.set()
+        if monitor:
+            monitor.join(timeout=5)
     if result.returncode != 0:
         return {"success": False, "error": (result.stderr or f"curl exit {result.returncode}").strip()[:500]}
     try:
@@ -70,6 +108,8 @@ def sample(args, proxy, destination):
         speed = float(uprate if args.direction == "upload" else downrate)
         if elapsed <= 0 or size <= 0:
             raise ValueError("empty transfer or zero elapsed time")
+        if getattr(args, "ping_host", None) and len(samples) < getattr(args, "min_pings", 5):
+            raise ValueError(f"insufficient loaded ICMP RTT samples: {len(samples)}")
         checksum_ok = ""
         if args.expected_sha256:
             digest = hashlib.sha256()
@@ -86,6 +126,9 @@ def sample(args, proxy, destination):
             "curl_speed_mbps": f"{speed * 8 / 1e6:.5f}",
             "curl_connect_s": connected, "curl_ttfb_s": ttfb,
             "checksum_ok": checksum_ok,
+            "loaded_icmp_p50_ms": f"{statistics.median(samples):.3f}" if samples else "",
+            "loaded_icmp_p95_ms": f"{percentile(samples, .95):.3f}" if samples else "",
+            "loaded_icmp_samples": len(samples),
         }
     except (ValueError, TypeError) as exc:
         return {"success": False, "error": str(exc)}
@@ -102,6 +145,8 @@ def main():
     parser.add_argument("--direction", choices=["download", "upload"], default="download")
     parser.add_argument("--upload-file", type=Path, help="for PUT upload tests")
     parser.add_argument("--expected-sha256", help="expected download fixture SHA256")
+    parser.add_argument("--ping-host", help="Linux ICMP endpoint sharing the physical path bottleneck")
+    parser.add_argument("--min-pings", type=int, default=5, help="minimum successful loaded ICMP responses per transfer")
     parser.add_argument("--runs", type=int, default=5)
     parser.add_argument("--timeout", type=int, default=120)
     parser.add_argument("--output", type=Path, required=True)
@@ -110,6 +155,8 @@ def main():
     variants = dict(args.variant)
     if len(args.variant) != 3 or set(variants) != {"bbr", "brutal", "hysteria2"}:
         parser.error("specify exactly one of each: bbr, brutal, hysteria2")
+    if args.min_pings < 3:
+        parser.error("--min-pings must be >= 3")
     if args.runs < 1 or args.timeout < 5:
         parser.error("runs must be >= 1 and timeout >= 5 seconds")
     if args.direction == "upload" and (not args.upload_file or not args.upload_file.is_file()):

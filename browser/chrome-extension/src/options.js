@@ -128,14 +128,12 @@ $('register').addEventListener('click', async () => {
     await updateSettings({requestedIdentityId,deviceName});
     const result = await chrome.runtime.sendMessage({ type: 'REGISTER_BROWSER' });
     if (!result?.ok) throw new Error(result?.error || '设备注册失败');
-    status(result.state === 'extension_pending'
-      ? '当前 Server 为旧版本，需先批准扩展，再次点击注册设备。升级 Server 后可一次审批。'
-      : result.state === 'pending'
+    status(result.state === 'pending'
       ? '申请已提交。请管理员核对身份 ID、设备名称和权限后批准。'
       : result.state === 'approved'
-      ? '浏览器设备及扩展已获批，现在可以连接 Server。'
+      ? '浏览器设备已获批准，可以连接 Server。'
       : result.state === 'revoked'
-      ? '该 Chrome 浏览器设备的旧授权已撤销。请管理员在 Server Web → 浏览器同步删除旧设备（若扩展也已撤销，先清理关联设备，再删除旧扩展），然后重新提交申请。'
+      ? '该浏览器设备已撤销。请管理员在 Server Web 撤销后删除旧设备，再重新提交申请；若曾禁用扩展来源，还需清除历史禁用记录。'
       : '浏览器设备状态：' + result.state);
   } catch (error) { failure(error); }
 });

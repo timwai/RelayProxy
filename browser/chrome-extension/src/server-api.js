@@ -8,7 +8,7 @@ const endpoint = (base, path) => new URL(path, base).toString();
 // Only the status of this non-authenticated probe is inspected. Never fetch
 // or log browser Cookie values, auth tokens, challenge signatures or keys.
 export function browserRelayHealthMessage(status) {
-  if (status === 204) return 'Browser Sync TLS 接口返回 HTTP 204：只代表 HTTPS 入口可达，无法证明 WebSocket Upgrade 或设备认证成功。请检查扩展 Origin 审批、WSS Upgrade 与 Chrome 代理设置。';
+  if (status === 204) return 'Browser Sync TLS 接口返回 HTTP 204：只代表 HTTPS 入口可达，无法证明 WebSocket Upgrade 或设备认证成功。请检查 WSS Upgrade、浏览器设备审批与 Chrome 代理设置。';
   if (status === 404) return '当前地址没有 Browser Sync 中继接口（HTTP 404）。请确认扩展配置的是 Server 的 TLS/TCP 中继端口，并已部署新版 Server、启用 browser_sync。';
   if (status === 426) return '中继接口要求 HTTPS/TLS（HTTP 426）；请检查 TLS 终止与转发配置。';
   if (status >= 500) return 'Browser Sync 中继服务返回 HTTP ' + status + '，请检查 Server 日志与服务健康状态。';
@@ -23,7 +23,7 @@ export function browserWSSFailureMessage(stage, code=0) {
   if(stage==='proof')return 'WSS Upgrade 和 AUTH_CHALLENGE 已成功，但 AUTH_PROOF 未获认证'+suffix+'。请在 Server Web 核实浏览器设备仍获批准、有 send/receive 权限，并检查 Server 与扩展的版本及 Origin 签名是否一致。';
   if(stage==='challenge')return 'WSS Upgrade 已成功，收到 AUTH_CHALLENGE 但未完成 AUTH_PROOF'+suffix+'。请检查浏览器设备的签名密钥、扩展 Service Worker 和 Server 认证日志。';
   if(stage==='hello')return 'WSS Upgrade 已成功，但 AUTH_HELLO 未收到挑战响应'+suffix+'。请检查 Browser Sync 的连接限流、设备 ID 与 Server 日志。';
-  return 'WebSocket 尚未触发 open'+suffix+'。请检查 Chrome 扩展 Origin 是否经 Server 批准，以及中继链路是否保留 HTTP/1.1 Upgrade。';
+  return 'WebSocket 尚未触发 open'+suffix+'。请检查浏览器设备是否获 Server 批准，以及中继链路是否保留 HTTP/1.1 Upgrade。';
 }
 
 async function diagnoseBrowserWSS(serverOrigin) {
@@ -52,39 +52,20 @@ export async function registerBrowser() {
     signingPublicKey: identity.signingPublicKey,
     encryptionPublicKey: identity.encryptionPublicKey,
   };
-  // One consent/request from Chrome; one admin action approves both extension
-  // Origin and this particular device's public keys and capabilities.
-  const extension = await fetch(endpoint(settings.serverOrigin,
-    '/api/v1/browser-sync/extensions/register'),{
+  // A single signed-key device request. Origin is recorded for binding,
+  // not independently approved; older servers must be upgraded.
+  const response = await fetch(endpoint(settings.serverOrigin,
+    '/api/v1/browser-sync/devices/register'), {
     method:'POST', cache:'no-store', headers:{'Content-Type':'application/json'},
     body:JSON.stringify(registration),
   });
-  if(!extension.ok) {
-    // Revoked extension origins cannot re-enter pending automatically:
-    // an administrator must first delete the old revoked extension record.
-    if(extension.status===403){
-      const reason=await extension.text().catch(()=> '');
-      if(reason.includes('revoked extension'))
-        throw new Error('此 Chrome 扩展授权已被撤销。请管理员先在 Server Web 删除关联的已撤销旧设备，再删除已撤销扩展记录，然后重新提交申请。');
-    }
-    throw new Error('浏览器注册申请失败：HTTP '+extension.status);
+  if (!response.ok) {
+    if (response.status===403) throw new Error('浏览器设备申请被拒绝（HTTP 403）。请检查历史扩展禁用记录、设备状态以及 Server 是否已升级为单设备审批版本。');
+    throw new Error('浏览器设备申请失败：HTTP '+response.status);
   }
-  const approval = await extension.json();
-  if(approval.id === identity.deviceId && approval.extensionState) {
-    return {state:approval.state,extensionState:approval.extensionState,
-      extensionId:approval.extensionId};
-  }
-
-  // Older Server builds accept only the extension Origin in this route.
-  // Keep them functional; only an updated Server supports single approval.
-  if(approval.state!=='approved') return {state:'extension_pending',legacy:true};
-  const response = await fetch(endpoint(settings.serverOrigin,
-    '/api/v1/browser-sync/devices/register'), {
-    method:'POST', headers:{'Content-Type':'application/json'},cache:'no-store',
-    body:JSON.stringify(registration),
-  });
-  if(!response.ok) throw new Error('旧版 Server 浏览器设备注册失败：HTTP '+response.status);
-  return {...await response.json(),legacy:true};
+  const result = await response.json();
+  if (result.id !== identity.deviceId) throw new Error('Server 返回的浏览器设备 ID 不一致');
+  return {state:result.state};
 }
 
 let currentSocket = null;

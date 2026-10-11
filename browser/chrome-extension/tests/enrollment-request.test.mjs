@@ -20,7 +20,7 @@ test('one registration request submits browser device and public keys',()=>{
 test('options UI provides one application action, no extension approval',()=>{
   const html=source('options.html');
   const code=source('options.js');
-  assert.match(html,/提交统一授权申请/);
+  assert.match(html,/提交设备授权申请/);
   assert.match(code,/申请已提交/);
   assert.match(code,/身份 ID/);
   assert.doesNotMatch(code,/需要先批准扩展/);

@@ -37,6 +37,9 @@ jobs:
       - name: Validate comparison sampler CLI
         if: runner.os == 'Linux'
         run: python3 scripts/bench_brutal_acceptance.py --help > /dev/null
+      - name: Validate real-WAN long-load sampler with offline tests
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s scripts -p 'test_brutal_coexistence.py' -v
       - name: Validate sampler CSV and summary checks
         if: runner.os == 'Linux'
         run: |
@@ -144,3 +147,20 @@ jobs:
           name: brutal-linux-netem-loss-${{ matrix.loss }}
           path: evidence/
           if-no-files-found: warn
+
+  linux-full-compiled-pairings:
+    name: Full production Agent / Server entrypoints (Linux; 8 pairings)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check production binary pairing script syntax
+        run: bash -n scripts/ci-brutal-full-binary-compat.sh
+      - name: Cross-build and authenticate old/new genuine processes
+        run: bash scripts/ci-brutal-full-binary-compat.sh

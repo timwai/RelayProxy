@@ -36,11 +36,13 @@ func TestBrutalRTTGuardDoesNotTriggerOnIdleOrTransientLoss(t *testing.T) {
 	var guard brutalRTTGuard
 	for second := 0; second < 30; second++ {
 		bytes := uint64(second) * 128 * 1024
+		rtt := 50 * time.Millisecond
 		if second > 8 {
 			bytes = 8 * 128 * 1024 // No sender traffic after 8 s.
+			rtt = 500 * time.Millisecond // Late RTT spike on idle connection.
 		}
 		if guard.sample(start.Add(time.Duration(second)*time.Second),
-			40*time.Millisecond, 500*time.Millisecond, bytes) {
+			40*time.Millisecond, rtt, bytes) {
 			t.Fatalf("idle session should never trip at second %d", second)
 		}
 	}

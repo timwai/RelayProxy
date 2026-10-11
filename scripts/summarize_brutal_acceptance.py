@@ -16,7 +16,7 @@ from pathlib import Path
 VARIANTS = {"bbr", "brutal", "hysteria2"}
 REQUIRED_COLUMNS = {
     "scenario", "loss_label", "direction", "variant", "round", "success",
-    "goodput_mbps", "bytes", "elapsed_s", "checksum_ok",
+    "goodput_mbps", "bytes", "elapsed_s", "checksum_ok", "url", "proxy",
 }
 SUMMARY_FIELDS = [
     "scenario", "loss_label", "direction", "variant", "runs",
@@ -36,6 +36,11 @@ def percentile(values, fraction):
 def summarize(file_path, min_runs=5):
     problems = []
     groups = defaultdict(lambda: defaultdict(dict))
+    origins = {}
+    endpoints = {}
+    payload_sizes = {}
+    checked_downloads = set()
+    unchecked_downloads = set()
     with Path(file_path).open(newline="", encoding="utf-8") as source:
         reader = csv.DictReader(source)
         missing = REQUIRED_COLUMNS - set(reader.fieldnames or [])
@@ -64,6 +69,24 @@ def summarize(file_path, min_runs=5):
                 elapsed = float(row["elapsed_s"])
                 if not all(math.isfinite(x) and x > 0 for x in (goodput, sent_bytes, elapsed)):
                     raise ValueError("nonpositive or invalid transfer metrics")
+                origin = row["url"].strip()
+                endpoint = row["proxy"].strip()
+                if not origin or not endpoint:
+                    raise ValueError("missing origin URL or proxy endpoint")
+                if key in origins and origins[key] != origin:
+                    raise ValueError("different origin URL for same scenario/loss/direction")
+                if (key, name) in endpoints and endpoints[key, name] != endpoint:
+                    raise ValueError("variant proxy endpoint changed between rounds")
+                if key in payload_sizes and payload_sizes[key] != sent_bytes:
+                    raise ValueError("unequal payload sizes across comparable transfers")
+                if key[2] == "download":
+                    if row["checksum_ok"].strip().lower() in {"true", "1"}:
+                        checked_downloads.add(key)
+                    else:
+                        unchecked_downloads.add(key)
+                origins[key] = origin
+                endpoints[key, name] = endpoint
+                payload_sizes[key] = sent_bytes
                 groups[key][name][round_number] = goodput
             except (ValueError, TypeError, KeyError) as exc:
                 problems.append(f"{prefix}: {exc}")
@@ -78,6 +101,11 @@ def summarize(file_path, min_runs=5):
         rounds = {variant: set(values) for variant, values in variants.items()}
         if len({frozenset(v) for v in rounds.values()}) > 1:
             problems.append(f"{key}: variants have nonmatching round numbers")
+        for variant, observed in rounds.items():
+            if observed != set(range(1, max(observed, default=0) + 1)):
+                problems.append(f"{key}/{variant}: missing round numbers in 1..N")
+        if key in checked_downloads and key in unchecked_downloads:
+            problems.append(f"{key}: mixed checked and unchecked downloads")
         baseline = variants.get("hysteria2", {})
         baseline_median = statistics.median(baseline.values()) if baseline else None
         for variant, values in sorted(variants.items()):

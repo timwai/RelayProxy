@@ -55,10 +55,10 @@ func (s *browserEchoTunnel) AcceptStream(ctx context.Context) (tunnel.TunnelStre
 	return nil, ctx.Err()
 }
 func (s *browserEchoTunnel) Transport() tunnel.TransportType { return tunnel.TransportTLS }
-func (s *browserEchoTunnel) RemoteAddr() net.Addr          { return &net.TCPAddr{} }
-func (s *browserEchoTunnel) LocalAddr() net.Addr           { return &net.TCPAddr{} }
-func (s *browserEchoTunnel) Close() error                  { return nil }
-func (s *browserEchoTunnel) Done() <-chan struct{}         { return nil }
+func (s *browserEchoTunnel) RemoteAddr() net.Addr            { return &net.TCPAddr{} }
+func (s *browserEchoTunnel) LocalAddr() net.Addr             { return &net.TCPAddr{} }
+func (s *browserEchoTunnel) Close() error                    { return nil }
+func (s *browserEchoTunnel) Done() <-chan struct{}           { return nil }
 
 func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 	store := testBrowserStore(t)

@@ -136,3 +136,5 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | 代理认证兼容修复 | `webRequest.onAuthRequired` 仅应响应已知 RelayProxy 代理的 Basic 407；网站自身 HTTP 401 与第三方代理认证不可被本扩展取消。增加 [代理认证隔离用例](../browser/chrome-extension/tests/network-binding.test.mjs) | NB-03 已实现待验收，避免普通网站登录回归；P0 状态不变 | 本次新提交须独立通过 CI，真实 Chrome 仍待验证 |
 
 | 2026-10-11 | HTTPS CONNECT→Agent 协议集成用例 | 新增 [HTTPS CONNECT 模拟端到端测试](../server/browser_sync/network_proxy_integration_test.go)：使用真实 TLS 测试代理、短期 Browser Basic 凭据、经 Session Manager 的 Agent TunnelStream OpenTCP 模拟器，验证目标域名:443 与双向字节中继。不等于真实 Chrome 或物理 A Agent 验收 | NB-02 仍为已实现·待真机验收；P0 不放行 | 新 SHA 的 Go CI 尚待核验 |
+
+| 2026-10-11 | [Go CI #38102301709](https://github.com/timwai/RelayProxy/actions/runs/38102301709) 格式修复 | HTTPS CONNECT 集成测试新增后 gofmt 对连续接口方法声明的对齐作了调整；已按 CI 输出修正，不视为业务测试结果 | NB-02 继续待真机/新 SHA CI 验证 | 重新触发 Go/UI/Android CI |

@@ -326,7 +326,8 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		current, err := h.Store.deviceAllowed(ctx, device.ID)
 		originID := strings.TrimPrefix(extensionOrigin, "chrome-extension://")
 		_, legacy := h.extensions[extensionOrigin]
-		if err != nil || current.ID != device.ID || (!legacy && !h.Store.ExtensionApproved(ctx, originID)) {
+		if err != nil || current.ID != device.ID || h.Store.ExtensionRevoked(ctx, originID) ||
+			(!legacy && !h.Store.ExtensionApproved(ctx, originID)) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "browser approval revoked")
 			return
 		}

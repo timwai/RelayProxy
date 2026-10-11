@@ -22,6 +22,7 @@ type BrowserDevice struct {
 	SigningKey     string    `json:"signingPublicKey"`
 	EncryptionKey  string    `json:"encryptionPublicKey"`
 	IdentityID     string    `json:"identityId,omitempty"`
+	RequestedIdentityID string `json:"requestedIdentityId,omitempty"`
 	State          string    `json:"state"`
 	Send           bool      `json:"send"`
 	Receive        bool      `json:"receive"`
@@ -45,6 +46,7 @@ func NewStore(db *sql.DB) (*Store, error) {
     CHECK (state IN ('pending','approved','revoked'))
    )`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_signing_key ON browser_sync_devices(signing_key)`,
+		`CREATE TABLE IF NOT EXISTS browser_sync_identity_requests (device_id TEXT PRIMARY KEY REFERENCES browser_sync_devices(id) ON DELETE CASCADE, requested_identity_id TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS browser_sync_rules (
     id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES browser_sync_devices(id),
     target_id TEXT NOT NULL REFERENCES browser_sync_devices(id),
@@ -98,18 +100,23 @@ func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevi
 	if actual.SigningKey != device.SigningKey || actual.EncryptionKey != device.EncryptionKey {
 		return BrowserDevice{}, ErrDeviceConflict
 	}
+	if device.RequestedIdentityID != "" && actual.State == "pending" {
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO browser_sync_identity_requests(device_id,requested_identity_id) VALUES(?,?) ON CONFLICT(device_id) DO UPDATE SET requested_identity_id=excluded.requested_identity_id`, device.ID, device.RequestedIdentityID); err != nil { return BrowserDevice{}, err }
+		actual.RequestedIdentityID = device.RequestedIdentityID
+	}
 	return actual, nil
 }
 func (s *Store) Device(ctx context.Context, id string) (BrowserDevice, error) {
 	var d BrowserDevice
 	var send, receive int
 	err := s.db.QueryRowContext(ctx, `SELECT d.id,d.name,d.signing_key,d.encryption_key,d.identity_id,d.state,
-    d.can_send,d.can_receive,d.created_at,COALESCE(x.extension_id,''),COALESCE(e.state,'')
+    d.can_send,d.can_receive,d.created_at,COALESCE(x.extension_id,''),COALESCE(e.state,''),COALESCE(ri.requested_identity_id,'')
     FROM browser_sync_devices d
     LEFT JOIN browser_sync_device_extensions x ON x.device_id=d.id
     LEFT JOIN browser_sync_extensions e ON e.extension_id=x.extension_id
+    LEFT JOIN browser_sync_identity_requests ri ON ri.device_id=d.id
     WHERE d.id=?`, id).
-		Scan(&d.ID, &d.Name, &d.SigningKey, &d.EncryptionKey, &d.IdentityID, &d.State, &send, &receive, &d.CreatedAt, &d.ExtensionID, &d.ExtensionState)
+		Scan(&d.ID, &d.Name, &d.SigningKey, &d.EncryptionKey, &d.IdentityID, &d.State, &send, &receive, &d.CreatedAt, &d.ExtensionID, &d.ExtensionState, &d.RequestedIdentityID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return BrowserDevice{}, ErrNotFound
 	}

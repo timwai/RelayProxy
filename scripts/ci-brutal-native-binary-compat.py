@@ -104,10 +104,13 @@ def main():
                             ports.add(get_available_port())
                         quic, tcp, admin, socks, origin_port = sorted(ports)
                         database = case / "lab.db"
+                        brutal_mbps = 4 if (server_version, agent_version, transport) == (
+                            "new", "new", "quic_only") else 0
                         run([binaries[server_version, "seed"], "-db", database,
                              "-agent-dir", agent_dir, "-quic-port", quic,
                              "-tcp-port", tcp, "-socks-port", socks,
-                             "-mode", transport, "-cert-dir", case],
+                             "-brutal-mbps", brutal_mbps, "-mode", transport,
+                             "-cert-dir", case],
                             timeout=30)
                         config = case / "server.yaml"
                         config.write_text(f"""
@@ -205,6 +208,15 @@ logging:
                                     origin_server.shutdown()
                                     origin_server.server_close()
                                     thread.join(timeout=5)
+                                if brutal_mbps:
+                                    logs = [
+                                        (case / "agent.log", "Relay QUIC upload switched to Brutal"),
+                                        (case / "server.log", "Relay QUIC download switched to Brutal"),
+                                    ]
+                                    for log_file, expected in logs:
+                                        if expected not in log_file.read_text(encoding="utf-8", errors="replace"):
+                                            raise RuntimeError(f"new/new QUIC failed to install Brutal: {expected}")
+                                    print("[native-full-bin] new/new QUIC Brutal installed in both directions at 4Mbps")
                                 print(f"[native-full-bin] real SOCKS->Server Exit payload passed os={sys.platform} "
                                       f"server={server_version} agent={agent_version} transport={transport}")
                                 print(f"[native-full-bin] PASS os={sys.platform} "

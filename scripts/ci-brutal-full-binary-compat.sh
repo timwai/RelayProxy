@@ -62,10 +62,15 @@ for combination in old-old old-new new-old new-new; do
     case_dir="$temp/$combination-$transport"
     mkdir -p "$case_dir/agent"
     db="$case_dir/lab.db"
+    brutal_mbps=0
+    if [[ "$combination" == "new-new" && "$transport" == "quic_only" ]]; then
+      brutal_mbps=4
+    fi
     "$temp/$server_version-seed" \
       -db "$db" -agent-dir "$case_dir/agent" \
       -quic-port "$quic_port" -tcp-port "$tcp_port" \
-      -mode "$transport" -socks-port "$socks_port" > "$case_dir/seed.log"
+      -mode "$transport" -socks-port "$socks_port" \
+      -brutal-mbps "$brutal_mbps" > "$case_dir/seed.log"
 
     cat > "$case_dir/server.yaml" <<YAML
 server:
@@ -184,6 +189,17 @@ YAML
       tail -n 55 "$case_dir/server.log" >&2
       tail -n 25 "$case_dir/curl.log" >&2
       exit 1
+    fi
+    if [[ "$brutal_mbps" != "0" ]]; then
+      grep -q 'Relay QUIC upload switched to Brutal' "$case_dir/agent.log" || {
+        echo "Agent did not negotiate Brutal upload on new/new QUIC" >&2
+        exit 1
+      }
+      grep -q 'Relay QUIC download switched to Brutal' "$case_dir/server.log" || {
+        echo "Server did not install Brutal download on new/new QUIC" >&2
+        exit 1
+      }
+      echo "[full-bin] new/new QUIC Brutal installed on both sending endpoints at 4 Mbps"
     fi
     echo "[full-bin] real proxy HTTP payload verified: $combination $transport"
     if ! kill -0 "$server_pid" 2>/dev/null || ! kill -0 "$agent_pid" 2>/dev/null; then

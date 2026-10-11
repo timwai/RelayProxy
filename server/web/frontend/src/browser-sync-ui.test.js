@@ -4,13 +4,14 @@ import {readFileSync} from 'node:fs';
 
 const read=name=>readFileSync(new URL(name,import.meta.url),'utf8');
 
-test('Browser Sync management places device approval and extension records in separate views',()=>{
+test('Browser Sync management approves devices only',()=>{
  const page=read('./BrowserSync.jsx');
- assert.match(page,/setView\('devices'\)/);
- assert.match(page,/setView\('extensions'\)/);
- assert.match(page,/role="tablist"/);
+ assert.doesNotMatch(page,/setView\('devices'\)/);
+ assert.doesNotMatch(page,/setView\('extensions'\)/);
+ assert.doesNotMatch(page,/role="tablist"/);
  assert.match(page,/浏览器设备/);
- assert.match(page,/扩展来源/);
+ assert.match(page,/历史禁用来源/);
+ assert.doesNotMatch(page,/批准扩展/);
  assert.match(page,/stateFilter==='all'/);
  assert.match(page,/aria-pressed=\{stateFilter===id\}/);
  assert.match(page,/setIdentity/);
@@ -19,7 +20,7 @@ test('Browser Sync management places device approval and extension records in se
  assert.match(page,/action\(d\.id,'approve'\)/);
  assert.match(page,/action\(d\.id,'revoke'\)/);
  assert.match(page,/action\(d\.id,'delete'\)/);
- assert.match(page,/extensionAction\(ext\.id,'delete'\)/);
+ assert.match(page,/removeLegacyBlock\(ext\.id\)/);
  assert.doesNotMatch(page,/A\/B|来源 A|接收 B/);
 });
 

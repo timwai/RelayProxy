@@ -99,8 +99,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		id := strings.TrimPrefix(r.Header.Get("Origin"), "chrome-extension://")
 		if r.ContentLength != 0 {
 			// Modern Chrome clients enroll extension Origin and device keys in one
-			// request. This is NOT an approval: neither identity nor capabilities
-			// can be supplied, and both remain pending until an admin approves.
+			// request. The extension Origin is just recorded metadata. Neither
+			// identity nor capabilities can be supplied, and device approval is required.
 			h.registerExtensionDevice(w, r, id)
 			return
 		}

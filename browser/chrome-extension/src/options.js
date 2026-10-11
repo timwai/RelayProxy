@@ -82,7 +82,7 @@ $('save').addEventListener('click', async () => {
         origin.search || origin.hash || origin.username || origin.password) {
       throw new Error('仅支持 HTTPS Server Origin');
     }
-    // Explicit click grants the extension access to the Admin HTTPS origin.
+    // Explicit click grants the extension access to the selected Relay HTTPS origin.
     const pattern = `${origin.protocol}//${origin.hostname}/*`; // Chrome host permission patterns omit ports
     const granted = await chrome.permissions.request({ origins: [pattern] });
     if (!granted) { status('未授予 Server 访问权限。'); return; }

@@ -31,7 +31,7 @@ Chrome 扩展 **完整设置 → 站点授权** 可以从已打开的标签页�
 
 ## 首次接入：一次申请、一次服务端审批
 
-1. 更新 Server 与 Chrome 扩展，进入扩展 **完整设置 → 连接与设备**，保存 Admin HTTPS Server，点击 **提交统一授权申请**。
+1. 更新 Server 与 Chrome 扩展，进入扩展 **完整设置 → 连接与设备**，保存 Relay HTTPS Server，点击 **提交统一授权申请**。
 2. 扩展自动上传自身 Extension ID 和本浏览器设备的签名/加密公钥。**未经管理员审批，此时两者都保持待审核状态**，不会因为知道扩展 ID 就自动获得会话同步权限。
 3. 管理员进入 **Server Web → 浏览器同步 → 浏览器设备与统一审批**，找到设备/扩展组合，在同一行选择活跃身份，勾选发送/接收权限，点击 **批准扩展与设备**。一个请求在数据库事务内完成两项批准。
 4. 浏览器扩展点击 **连接 Server**，然后按原有逻辑配置 HTTPS 站点并进行 A/B 配对校验。**每台新设备仍需分别审批**，网站 Host 授权与双端配对确认不合并或跳过。
@@ -50,7 +50,7 @@ Chrome 扩展 **完整设置 → 站点授权** 可以从已打开的标签页�
 **实时开发进度与发布准入**：[P0 上线前必须完成 / P1 正式版 / P2 后续增强及验证记录](../../docs/browser-session-sync-progress.md)。本 README 描述已经编写的开发功能，不能替代真实 Chrome 验收或安全审查。
 
 
-Chrome 扩展直接连接 RelayProxy Server 的 **Admin HTTPS/WSS** 服务，不需要安装或运行本机 Agent，也不需要 Native Messaging、SOCKS5 或透明代理。
+Chrome 扩展直接连接 RelayProxy Server 的 **TLS/TCP 中继 HTTPS/WSS** 入口，不需要安装或运行本机 Agent，也不需要 Native Messaging、SOCKS5 或透明代理。
 
 > **安全声明：** 同步网站会话 Cookie 相当于向另一台设备授予网站账号访问能力。仅限用户自己拥有或明确授权的账号与设备；生产部署前需完成真实 Chrome 双端验证、安全审计和跨浏览器版本回归。网站设备绑定、DBSC、Passkey、多因素验证等机制不能通过复制 Cookie 绕过。
 
@@ -60,7 +60,7 @@ Chrome 扩展直接连接 RelayProxy Server 的 **Admin HTTPS/WSS** 服务，不
 |---|---|
 | 每个 Chrome Profile 独立设备签名/加密密钥 | 已实现 |
 | Server 独立浏览器设备注册、管理员审批、撤销 | 已实现 |
-| Chrome 通过签名挑战认证 Admin WSS | 已实现 |
+| Chrome 通过签名挑战认证 Relay WSS | 已实现 |
 | A/B 同一 Identity 双端配对及密钥指纹校验 | 已实现 |
 | 指定站点/ Cookie 名称加密邀请 | 已实现 |
 | A 登出后同步删除的 Cookie 安全恢复 | 已实现，B 只清理该规则之前写入且未被修改的 Cookie |
@@ -81,10 +81,12 @@ Chrome 扩展保留最小 Host 权限；所有 Cookie 值只用于内存中的�
 
 ## Server 配置
 
-在 Server Admin HTTPS 监听器上启用独立 Browser Sync API：
+启用 Browser Sync 后，在既有 TLS/TCP 中继端口自动提供受控 HTTPS/WSS 接口；Admin 端口仍单独处理审批：
 
 ```yaml
 server:
+  tls:
+    listen: ":443"
   admin:
     listen: ":8443"
     tls_enabled: true
@@ -95,7 +97,7 @@ browser_sync:
     - "abcdefghijklmnopabcdefghijklmnop" # 改成 chrome://extensions 里的真实扩展 ID
 ```
 
-默认 **`browser_sync.enabled=false`**。使用浏览器信任的 TLS 证书。这里填的是 **Admin HTTPS Origin**，例如 `https://relay.example.com:8443`，不是 TCP/QUIC 隧道端口。无 Agent 模式暂不支持 P2P。
+默认 **`browser_sync.enabled=false`**。使用浏览器信任的 TLS 证书。Chrome 的 RelayProxy HTTPS Server 填的是 **TLS/TCP 中继 HTTPS Origin**，例如 `https://relay.example.com:443`；管理后台继续使用 Admin 端口。站点网络绑定只复用中继端口，无独立网络代理配置。无 Agent 模式无需 P2P。
 
 Browser Sync 设备审批仍由现有 RelayProxy 管理员登录/CSRF 检查保护：
 
@@ -116,7 +118,7 @@ B 设备应由管理员赋予 `receive:true`；A 赋予 `send:true`。浏览器�
 ## 两台 Chrome 的测试流程
 
 1. A/B 在 `chrome://extensions` 开启开发者模式，将本目录作为“已解压扩展”加载。确保两台扩展 ID 与 Server 白名单匹配。
-2. A/B 在扩展独立设置页配置并授权 Admin HTTPS 地址，分别点击 **注册浏览器设备**。
+2. A/B 在扩展独立设置页配置并授权中继 HTTPS 地址，分别点击 **注册浏览器设备**。
 3. 在 Server Admin API 中审批 A（发送）、B（接收），并关联到同一 active Identity。
 4. 两边在扩展独立设置页点击 **连接 Server**。A 点击“请求站点权限”，添加准确的 HTTPS **Origin**，不是带路径/查询参数的 URL。
 5. A 在独立设置页刷新设备、选择 B 和已授权的网站，即可创建全 Cookie / Local Storage / 单标签 Session Storage 的加密配对邀请，无需手填任何 Key 名称或值。
@@ -191,7 +193,7 @@ Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api
    ```
 3. 重启 Linux `relay-server` 进程，查找日志 `[BrowserSync] Browser session relay enabled; extension allowlist size=...` 以及 `[Admin] Web Console & API starting on https://...`。
 4. 在 Linux Server 本机直测 Admin 端口，例如 `curl -k -i --noproxy '*' https://127.0.0.1:20001/api/v1/browser-sync/admin/devices`（按实际 Admin 端口替换）。**未登录时正常返回 401 JSON**；404 为路由尚未注册/版本错误；若直连 401、经公网域名 404，则检查 Nginx/Caddy 的 `/api/v1/browser-sync/` 反向代理路径及端口转发。浏览器同步必须走 **Admin HTTPS**，不能只由反代代理终止 TLS 后以 HTTP 回源，因为服务端扩展入口要求 `r.TLS != nil`。
-5. 管理页面登录后在「设备与身份 → 浏览器同步」重新刷新。A/B 扩展设备注册仍要求配置真实 extension ID、Admin HTTPS origin、设备审批。
+5. 管理页面登录后在「设备与身份 → 浏览器同步」重新刷新。A/B 扩展设备注册仍要求配置真实 extension ID、中继 HTTPS origin、设备审批。
 
 ## Browser Sync v2: no manual key / extension-ID entry
 

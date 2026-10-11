@@ -37,9 +37,9 @@ type NetworkProxy struct {
 }
 
 func NewNetworkProxy(store *Store, sessions *session.Manager) *NetworkProxy {
-	return &NetworkProxy{Store:store,Sessions:sessions,
-		leases:make(map[[32]byte]networkLease),
-		slots:make(chan struct{},128),shutdown:make(chan struct{})}
+	return &NetworkProxy{Store: store, Sessions: sessions,
+		leases: make(map[[32]byte]networkLease),
+		slots: make(chan struct{}, 128), shutdown: make(chan struct{})}
 }
 
 // Bind the same Relay target ACL as ordinary proxy streams. Agent Exit
@@ -257,9 +257,9 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (p *NetworkProxy) Close(ctx context.Context) error {
 	// net/http hijacked CONNECT streams are owned by the public Relay
 	// gateway; signal active watchers and invalidate all leases on shutdown.
-	p.closeOnce.Do(func(){close(p.shutdown)})
+	p.closeOnce.Do(func() { close(p.shutdown) })
 	p.mu.Lock()
-	p.leases=make(map[[32]byte]networkLease)
+	p.leases = make(map[[32]byte]networkLease)
 	p.mu.Unlock()
 	return nil
 }

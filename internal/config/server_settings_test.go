@@ -160,31 +160,38 @@ func TestServerSettingsRejectsStaleConcurrentAndInvalidUpdates(t *testing.T) {
 }
 
 func TestBrowserSyncAutoUsesTLSRelayWithoutNetworkProxyConfig(t *testing.T) {
-    cfg:=&ServerConfig{}
-    cfg.BrowserSync.Enabled=true
-    if err:=NormalizeServerConfig(cfg);err!=nil{
-        t.Fatalf("browser sync should not require proxy configuration: %v",err)
-    }
-    cfg.Server.TLSEnabled=BoolPtr(false)
-    if err:=NormalizeServerConfig(cfg);err==nil{
-        t.Fatal("browser sync accepted plaintext TCP relay")
-    }
+	cfg := &ServerConfig{}
+	cfg.BrowserSync.Enabled = true
+	if err := NormalizeServerConfig(cfg); err != nil {
+		t.Fatalf("browser sync should not require proxy configuration: %v", err)
+	}
+	cfg.Server.TLSEnabled = BoolPtr(false)
+	if err := NormalizeServerConfig(cfg); err == nil {
+		t.Fatal("browser sync accepted plaintext TCP relay")
+	}
 }
 
 func TestLegacyBrowserProxyConfigMigratesAndIsNotReemitted(t *testing.T) {
-    old:=[]byte("browser_sync:\n  enabled: true\n  network_proxy:\n    listen: \"relay\"\n    advertise: \"relay.example.com:443\"\n    allowed_exit_ids:\n      - dev_legacy_agent\n")
-    cfg,err:=parseServerConfig(old)
-    if err!=nil{t.Fatalf("legacy YAML failed migration: %v",err)}
-    if cfg.BrowserSync.LegacyNetworkProxy!=nil{
-        t.Fatal("obsolete network_proxy was retained after normalization")
-    }
-    path:=filepath.Join(t.TempDir(),"server.yaml")
-    if err:=SaveServerConfig(path,cfg);err!=nil{t.Fatal(err)}
-    saved,err:=os.ReadFile(path)
-    if err!=nil{t.Fatal(err)}
-    if strings.Contains(string(saved),"network_proxy") ||
-        strings.Contains(string(saved),"advertise:"){
-        t.Fatalf("obsolete proxy fields persisted: %s",saved)
-    }
-    if _,err:=parseServerConfig(saved);err!=nil{t.Fatalf("migrated config invalid: %v",err)}
+	old := []byte("browser_sync:\n  enabled: true\n  network_proxy:\n    listen: \"relay\"\n    advertise: \"relay.example.com:443\"\n    allowed_exit_ids:\n      - dev_legacy_agent\n")
+	cfg, err := parseServerConfig(old)
+	if err != nil {
+		t.Fatalf("legacy YAML failed migration: %v", err)
+	}
+	if cfg.BrowserSync.LegacyNetworkProxy != nil {
+		t.Fatal("obsolete network_proxy was retained after normalization")
+	}
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	if err := SaveServerConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	saved, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(saved), "network_proxy") {
+		t.Fatalf("obsolete proxy fields persisted: %s", saved)
+	}
+	if _, err := parseServerConfig(saved); err != nil {
+		t.Fatalf("migrated config invalid: %v", err)
+	}
 }

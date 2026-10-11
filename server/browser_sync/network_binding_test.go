@@ -67,8 +67,12 @@ func TestNetworkProxyLeaseAuthAndCONNECTIsolation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, hasAddress:=lease["host"];hasAddress{t.Fatal("obsolete advertise host returned by server")}
-	if _, hasPort:=lease["port"];hasPort{t.Fatal("obsolete advertise port returned by server")}
+	if _, hasAddress := lease["host"]; hasAddress {
+		t.Fatal("obsolete advertise host returned by server")
+	}
+	if _, hasPort := lease["port"]; hasPort {
+		t.Fatal("obsolete advertise port returned by server")
+	}
 	token := lease["token"].(string)
 	if len(token) < 40 {
 		t.Fatal("weak token")

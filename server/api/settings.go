@@ -84,8 +84,8 @@ type DirectSettings struct {
 }
 
 type BrowserSyncSettings struct {
-	Enabled               bool     `json:"enabled"`
-	ExtensionIDs          []string `json:"extensionIds"`
+	Enabled      bool     `json:"enabled"`
+	ExtensionIDs []string `json:"extensionIds"`
 }
 
 type ServerEditableConfig struct {
@@ -175,8 +175,8 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 			UPnPEnabled: c.P2P.UPnPEnabled != nil && *c.P2P.UPnPEnabled,
 		},
 		BrowserSync: BrowserSyncSettings{
-			Enabled:               c.BrowserSync.Enabled,
-			ExtensionIDs:          append([]string{}, c.BrowserSync.ExtensionIDs...),
+			Enabled:      c.BrowserSync.Enabled,
+			ExtensionIDs: append([]string{}, c.BrowserSync.ExtensionIDs...),
 		},
 		Direct: DirectSettings{
 			Enabled:   c.Direct.Enabled != nil && *c.Direct.Enabled,

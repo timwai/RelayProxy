@@ -38,7 +38,7 @@
           <div class="card-heading"><div><h3>服务端连接</h3><p>支持 RelayProxy TCP 中继 HTTPS 入口或独立 Admin HTTPS</p></div><span class="status-pill" id="server-stage">检查中</span></div>
           <div class="field-group"><label for="server">RelayProxy HTTPS Server</label>
             <input id="server" type="url" spellcheck="false" placeholder="https://relay.example.com:443" autocomplete="url">
-            <p class="field-hint">建议填写 TLS 中继地址，例如 https://relay.example.com:443。中继端口仅开放 Browser Sync 注册/WSS，不开放 Server Admin API；也可继续使用原 Admin HTTPS 地址。需授予 Chrome Profile 对该 Origin 的访问权限。</p>
+            <p class="field-hint">推荐使用 TLS/TCP 中继 HTTPS 地址，例如 https://relay.example.com:443。只有此地址才能同时提供 Cookie/Storage 同步与来源 Agent 网络出口；仅同步 Cookie/Storage 时仍可使用旧 Admin HTTPS 地址。中继端口不会开放管理 API。需授予 Chrome Profile 对该 Origin 的访问权限。</p>
           </div>
           <div class="button-row"><button id="save" class="primary-button" type="button">保存地址并授权</button>
             <button id="register" class="secondary-button" type="button">提交统一授权申请</button>

@@ -867,12 +867,12 @@ func TestRelayBrutalAggregateBudgetsAndDisconnectReclaim(t *testing.T) {
 	}
 	sessions := session.NewManager()
 	gateway := NewGateway(GatewayConfig{
-		QUICAddr: "127.0.0.1:0",
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
-		HandshakeTimeout: 3 * time.Second,
-		ServerInstanceID: "brutal-total-budget",
-		AllowLegacyDeviceAuth: true,
-		BrutalTotalUploadBPS: 3_750_000,
+		QUICAddr:               "127.0.0.1:0",
+		TLSConfig:              &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:       3 * time.Second,
+		ServerInstanceID:       "brutal-total-budget",
+		AllowLegacyDeviceAuth:  true,
+		BrutalTotalUploadBPS:   3_750_000,
 		BrutalTotalDownloadBPS: 2_600_000,
 		AuthorizeDevice: func(_ string, hello protocol.DeviceHello) (DeviceAuthorization, error) {
 			return DeviceAuthorization{
@@ -967,12 +967,12 @@ func TestTLSNeverConsumesRelayBrutalBudget(t *testing.T) {
 	}
 	sessions := session.NewManager()
 	gateway := NewGateway(GatewayConfig{
-		TCPAddr: "127.0.0.1:0",
-		TLSConfig: &tls.Config{Certificates: []tls.Certificate{certificate}},
-		HandshakeTimeout: 3 * time.Second,
-		ServerInstanceID: "brutal-tls-budget",
-		AllowLegacyDeviceAuth: true,
-		BrutalTotalUploadBPS: 3_000_000,
+		TCPAddr:                "127.0.0.1:0",
+		TLSConfig:              &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:       3 * time.Second,
+		ServerInstanceID:       "brutal-tls-budget",
+		AllowLegacyDeviceAuth:  true,
+		BrutalTotalUploadBPS:   3_000_000,
 		BrutalTotalDownloadBPS: 3_000_000,
 		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
 			return DeviceAuthorization{State: "approved", DeviceID: "tls-client", ApprovedCapabilities: []string{protocol.CapabilityProxyClient}}, nil

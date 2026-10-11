@@ -17,7 +17,7 @@ const (
 	minSampleCount             = 50
 	minAckRate                 = 0.8
 	congestionWindowMultiplier = 2
-	minimumWindowDatagrams    = 10
+	minimumWindowDatagrams     = 10
 
 	debugEnv           = "HYSTERIA_BRUTAL_DEBUG"
 	debugPrintInterval = 2

@@ -39,7 +39,6 @@ func TestBrutalLossCompensation(t *testing.T) {
 	}
 }
 
-
 type fixedRTTStats struct {
 	congestion.RTTStatsProvider
 	rtt time.Duration

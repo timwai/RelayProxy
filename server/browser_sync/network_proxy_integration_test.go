@@ -163,7 +163,7 @@ func TestNetworkProxyRevocationClosesEstablishedCONNECT(t *testing.T) {
 	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1)}
 	sessions.Register(&session.DeviceSession{
 		DeviceID: exitID, IdentityID: "id_1", DeviceName: "Exit",
-		Grants: []string{protocol.CapabilityProxyExit},
+		Grants:       []string{protocol.CapabilityProxyExit},
 		Capabilities: []string{protocol.CapabilityBrowserNetworkExit}, Tunnel: echo,
 	})
 	t.Cleanup(func() { sessions.Unregister(exitID) })

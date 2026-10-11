@@ -28,14 +28,14 @@ var udpPipeBufferPool = sync.Pool{
 }
 
 type HandlerConfig struct {
-	ACLChecker        *acl.Checker
-	ConnectTimeout    time.Duration
+	ACLChecker          *acl.Checker
+	ConnectTimeout      time.Duration
 	AllowBrowserNetwork bool // explicit local opt-in, separate from ordinary proxy.exit
-	Upstream          UpstreamConfig
-	ResumeEnabled     bool
-	ResumeGrace       time.Duration
-	ResumeMaxSessions int
-	ResumeReplayLimit int
+	Upstream            UpstreamConfig
+	ResumeEnabled       bool
+	ResumeGrace         time.Duration
+	ResumeMaxSessions   int
+	ResumeReplayLimit   int
 }
 
 type Handler struct {

@@ -31,6 +31,18 @@ browser_sync:
 
 要求 Admin HTTPS、TLS Server 证书校验正常；Server 的 21090/TCP 开放给 B Chrome。A Agent 必须正常连接 Server、已获 `proxy.exit` 能力并开启允许外网的 Exit，同时**在 A 端本地配置中明确设置 `exit.browser_network_share: true`，并重启/重连 Agent**。Server 明确列入 `allowed_exit_ids`。浏览器共享出口需要经过 Agent 签名握手的 `browser.network.exit.v1` 和本机独立 `FrameTypeBrowserNetworkTCP` 双重检查，只有普通代理 Exit 授权不足以开放此功能。保持 Browser Sync / network_proxy 默认关闭。此功能不会为 B 创建完整 Agent 设备，也不授予 B 任何 `proxy.client`、RDP 权限。
 
+
+## 常见错误：rule not authorized or invalid
+
+这是旧版 Server 将全部 Browser Sync 授权失败合并显示的一条通用错误，不能据此判断 Cookie 规则有问题。对于“为此 Cookie 规则绑定 Agent 网络”，应依次确认：
+
+1. **Server 的独立网络代理监听已启用**：配置 `browser_sync.network_proxy.listen`、`advertise`、`allowed_exit_ids` 后重启 Server（见上方示例）。仅设置 `browser_sync.enabled: true` 只启用 Cookie/Storage 同步，不会创建 Agent 网络共享入口。
+2. **来源 A 浏览器有 send 权限**：Server Web → 浏览器同步 → 浏览器设备；该配对必须是 `active`，A/B 双端校验码已确认，B 设备具有 `receive` 权限并与 A 使用相同 Identity。
+3. **Agent 出口具备共享能力**：相同身份的 Agent 在线、具备 `proxy.exit`，在 Agent `exit.browser_network_share: true` 后重连；Server `allowed_exit_ids` 中列入准确的 Agent 设备 ID。普通可用的出口不代表它已授权分享浏览器网络。
+4. **目标域名属于受支持的绑定范围**：仅准确 HTTPS 443 的普通 DNS 域名，不支持 HTTP、IP、域名自定义端口。已经撤销或存在先前网络绑定的 Cookie 规则，不可在同一记录上重发不变式冲突的邀请；需要重新配对后再绑定。
+
+新版 Server 将为 `NETWORK_EXITS` 和 `NETWORK_OFFER` 返回专用错误代码（`NETWORK_DISABLED`、`SOURCE_SEND_REQUIRED`、`RULE_INACTIVE`、`BINDING_EXISTS`、`EXIT_NOT_ALLOWED`、`NETWORK_OFFER_DENIED`），扩展在错误消息中直接展示对应原因，不暴露 Cookie/Storage 密文或密钥。升级 Server 才能看到具体原因，单独更新扩展无法消除旧版 Server 的统一错误。
+
 ## 授权和工作流
 
 1. A/B Chrome 完成原 Browser Sync 站点 Cookie 规则配对；A Agent 同身份在线。

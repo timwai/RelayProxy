@@ -110,3 +110,18 @@ func TestNetworkProxyLeaseAuthAndCONNECTIsolation(t *testing.T) {
 		t.Fatal("expired token accepted")
 	}
 }
+
+// Diagnostics must not contain website session data and must not let
+// unapproved clients bypass the normal network binding requirements.
+func TestNetworkRuleErrorCodesExplainDenial(t *testing.T) {
+	for _, code := range []string{
+		"NETWORK_DISABLED", "SOURCE_SEND_REQUIRED", "RULE_INACTIVE",
+		"BINDING_EXISTS", "EXIT_NOT_ALLOWED", "NETWORK_OFFER_DENIED",
+	} {
+		got := networkRuleError("request_1", code, "operator-safe diagnostic")
+		if got["type"] != "RULE_ERROR" || got["requestId"] != "request_1" ||
+			got["code"] != code || got["error"] != "operator-safe diagnostic" {
+			t.Fatalf("incorrect network error envelope for %s: %#v", code, got)
+		}
+	}
+}

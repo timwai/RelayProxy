@@ -396,20 +396,45 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 				payload = map[string]any{"type": "RULES", "requestId": msg.RequestID, "rules": rules}
 			}
 		case "NETWORK_EXITS":
-			if h.network == nil || !current.Send {
-				payload = ruleError(msg.RequestID)
+			if h.network == nil {
+				payload = networkRuleError(msg.RequestID, "NETWORK_DISABLED",
+					"Server 尚未启用 browser_sync.network_proxy；请管理员配置监听地址、证书和出口白名单并重启 Server")
+			} else if !current.Send {
+				payload = networkRuleError(msg.RequestID, "SOURCE_SEND_REQUIRED",
+					"当前来源浏览器未获 send 权限；请管理员检查浏览器设备授权")
 			} else {
 				payload = map[string]any{"type": "NETWORK_EXITS", "requestId": msg.RequestID,
 					"exits": h.network.AvailableExits(ctx, device.ID)}
 			}
 		case "NETWORK_OFFER":
-			if h.network == nil || !current.Send ||
-				!h.network.AllowedExit(current.IdentityID, msg.ExitDeviceID) ||
-				h.Store.OfferNetworkBinding(ctx, device.ID, msg.RuleID, msg.Host, msg.ExitDeviceID) != nil {
-				payload = ruleError(msg.RequestID)
-			} else {
-				payload = map[string]any{"type": "NETWORK_UPDATED", "requestId": msg.RequestID,
-					"ruleId": msg.RuleID, "status": "offered"}
+			switch {
+			case h.network == nil:
+				payload = networkRuleError(msg.RequestID, "NETWORK_DISABLED",
+					"Server 尚未启用 browser_sync.network_proxy；无法创建站点网络绑定")
+			case !current.Send:
+				payload = networkRuleError(msg.RequestID, "SOURCE_SEND_REQUIRED",
+					"当前来源浏览器未获 send 权限")
+			default:
+				// Resolve the precise reason for this authenticated source instead
+				// of conflating configuration, exit permissions and pairing errors.
+				binding, bindErr := h.Store.NetworkBinding(ctx, device.ID, msg.RuleID)
+				switch {
+				case bindErr != nil:
+					payload = networkRuleError(msg.RequestID, "RULE_INACTIVE",
+						"会话配对尚未激活、双端授权不完整或规则已失效；请刷新并检查配对状态")
+				case binding.Status != "none":
+					payload = networkRuleError(msg.RequestID, "BINDING_EXISTS",
+						"此配对已经创建网络绑定；请刷新查看状态，撤销后需重新配对才能更换出口")
+				case !h.network.AllowedExit(current.IdentityID, msg.ExitDeviceID):
+					payload = networkRuleError(msg.RequestID, "EXIT_NOT_ALLOWED",
+						"Agent 出口不可用：检查 Agent 是否在线、是否启用浏览器出口共享、设备身份及 Server allowed_exit_ids")
+				case h.Store.OfferNetworkBinding(ctx, device.ID, msg.RuleID, msg.Host, msg.ExitDeviceID) != nil:
+					payload = networkRuleError(msg.RequestID, "NETWORK_OFFER_DENIED",
+						"网络绑定未创建：请确认 HTTPS 443 域名有效、接收端具备 receive 权限且与来源端身份一致")
+				default:
+					payload = map[string]any{"type": "NETWORK_UPDATED", "requestId": msg.RequestID,
+						"ruleId": msg.RuleID, "status": "offered"}
+				}
 			}
 		case "NETWORK_BINDING":
 			// Existing Cookie-only sessions must work when the optional
@@ -498,6 +523,13 @@ type ruleControlFrame struct {
 	Status       string             `json:"status"`
 	Host         string             `json:"host"`
 	ExitDeviceID string             `json:"exitDeviceId"`
+}
+
+// Codes are fixed, non-secret operator diagnostics, only returned on an
+// already authenticated Browser Sync WebSocket. Cookie values are never logged.
+func networkRuleError(requestID, code, message string) map[string]any {
+	return map[string]any{"type": "RULE_ERROR", "requestId": requestID,
+		"code": code, "error": message}
 }
 
 func ruleError(requestID string) map[string]any {

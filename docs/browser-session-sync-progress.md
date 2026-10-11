@@ -328,3 +328,9 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **SITE-03（实现并补测试）**：HTTP Cookie 仅同步可供明文站点访问的非 `Secure`、非 CHIPS、非 `SameSite=None` 记录；阻断向 HTTP 接收端注入 HTTPS-only Cookie。避免 Cookie 域名枚举时意外扩权。
 - **SITE-04（实现并补测试）**：HTTP 站点的逐站点 Agent 网络绑定按钮隐藏，保持该特性仅支持 HTTPS 443；全 Chrome Agent 代理开关仍独立。Server Admin HTTPS/WSS 必须继续使用 TLS，不能设置 HTTP。
 - **真实验收未完成**：需要实际 A/B Chrome 验证 HTTP 页面 Cookie/Local/Session Storage、生效及登出、冲突覆盖、HTTPS 安全 Cookie 隔离、权限弹窗与跳转，以及 DNS/QUIC/WebRTC 网络边界。PR 仍 Draft、不合并 main。
+
+### 2026-10-11 浏览器网络绑定错误可诊断性
+
+- **NET-ERR-01**：Server 的 `NETWORK_EXITS` 与 `NETWORK_OFFER` 原先把网络代理未配置、来源浏览器无 send 权限、共享 Exit 不可用、网络规则未激活/配对不完整、已存在网络绑定等全部返回 `rule not authorized or invalid`。现通过已认证 WSS 使用固定错误码及不含 Cookie/Token/密钥的文字诊断返回；避免用户无方向重复审批。
+- **NET-ERR-02**：扩展没有可选 Exit 时展示独立网络代理监听、同身份、`proxy.exit`、Agent `exit.browser_network_share`、Server `allowed_exit_ids` 的明确排查步骤。严格保持允许列表与双端审批检查，不为便于连接而允许自动授权。
+- **NET-ERR-03**：新增错误响应合同测试；仍需真实 Server Web/Chrome 与 Agent 出口联调验证。旧版 Server 不认识新诊断码，必须更新 Server 才能收到更细错误。

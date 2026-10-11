@@ -261,10 +261,14 @@ function renderRules(rules) {
       if(rule.role==='source' && (!rule.network || rule.network.status==='none')){
         const action=document.createElement('button');
         action.textContent='为此 Cookie 规则绑定 Agent 网络';
+        action.title='需要 Server 启用网络代理、当前浏览器可发送，以及同身份的共享 Agent Exit 在线';
         action.addEventListener('click',async()=>{
           try{
             const exits=(await ask({type:'NETWORK_EXITS'})).exits||[];
-            if(!exits.length)throw new Error('没有已上线且管理员允许共享的 Agent 出口');
+            if(!exits.length)throw new Error(
+              '当前没有可用 Agent 出口。请检查：① Server browser_sync.network_proxy 的 listen、advertise、allowed_exit_ids；' +
+              '② A Agent 已在线、获得 proxy.exit 权限、设置 exit.browser_network_share: true 并重连；' +
+              '③ A Agent 与来源浏览器属于同一 Identity。');
             const select=document.createElement('select');
             for(const exit of exits){
               const opt=document.createElement('option');

@@ -43,6 +43,9 @@ jobs:
       - name: Validate archive audit and default BBR policy
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s scripts -p 'test_brutal_release_packages.py' -v
+      - name: Unit-test archived old/new unpack validation
+        if: runner.os == 'Linux'
+        run: python3 -m unittest discover -s scripts -p 'test_brutal_packaged_pairings.py' -v
       - name: Test fail-closed Brutal bitrate calibration estimator
         if: runner.os == 'Linux'
         run: python3 -m unittest discover -s scripts -p 'test_recommend_brutal_target.py' -v

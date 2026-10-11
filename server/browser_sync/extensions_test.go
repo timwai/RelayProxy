@@ -7,7 +7,7 @@ import (
 	"testing"
 )
 
-func TestExtensionAutoEnrollmentRequiresAdminApproval(t *testing.T) {
+func TestExtensionOriginRecordedWithoutSeparateApproval(t *testing.T) {
 	store := testBrowserStore(t)
 	const ext = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
 	h := NewHandler(store, nil)
@@ -23,17 +23,14 @@ func TestExtensionAutoEnrollmentRequiresAdminApproval(t *testing.T) {
 		t.Fatalf("extension auto-report failed: %d", got)
 	}
 	items, err := store.Extensions(context.Background())
-	if err != nil || len(items) != 1 || items[0].ID != ext || items[0].State != "pending" {
-		t.Fatalf("expected pending extension approval: %+v %v", items, err)
-	}
-	if got := request("/api/v1/browser-sync/devices/register"); got != http.StatusForbidden {
-		t.Fatalf("unapproved extension registered browser: %d", got)
-	}
-	if err := store.SetExtensionApproved(context.Background(), ext, true); err != nil {
-		t.Fatal(err)
+	if err != nil || len(items) != 1 || items[0].ID != ext || items[0].State != "approved" {
+		t.Fatalf("expected recognized extension origin: %+v %v", items, err)
 	}
 	if got := request("/api/v1/browser-sync/devices/register"); got != http.StatusBadRequest {
-		t.Fatalf("approved extension did not reach signed device registration: %d", got)
+		t.Fatalf("unapproved device request did not reach validation: %d", got)
+	}
+	if got := request("/api/v1/browser-sync/devices/register"); got != http.StatusBadRequest {
+		t.Fatalf("origin metadata did not allow a device to request approval: %d", got)
 	}
 	if err := store.SetExtensionApproved(context.Background(), ext, false); err != nil {
 		t.Fatal(err)

@@ -179,17 +179,29 @@ func (s *Store) Approve(ctx context.Context, id, identityID string, canSend, can
 	return nil
 }
 func (s *Store) Revoke(ctx context.Context, id string) error {
-	result, err := s.db.ExecContext(ctx, `UPDATE browser_sync_devices SET state='revoked', can_send=0, can_receive=0,updated_at=? WHERE id=?`, time.Now().UTC(), id)
+	// Device and its active pairings must be revoked atomically. A partial
+	// write should never leave stale pairing state for subsequent requests.
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	count, _ := result.RowsAffected()
+	defer tx.Rollback()
+	now := time.Now().UTC()
+	result, err := tx.ExecContext(ctx, `UPDATE browser_sync_devices SET state='revoked', can_send=0, can_receive=0,updated_at=? WHERE id=?`, now, id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if count == 0 {
 		return ErrNotFound
 	}
-	// Invalidate pending/active rules as part of the same authorization sweep.
-	_, err = s.db.ExecContext(ctx, `UPDATE browser_sync_rules SET status='revoked', updated_at=? WHERE source_id=? OR target_id=?`, time.Now().UTC(), id, id)
-	return err
+	if _, err := tx.ExecContext(ctx, `UPDATE browser_sync_rules SET status='revoked', updated_at=? WHERE source_id=? OR target_id=?`, now, id, id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 // DeleteRevokedDevice permanently removes a revoked browser and every
 // dependent session/rule record in one transaction. Revocation remains a

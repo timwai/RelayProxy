@@ -15,15 +15,17 @@ var ErrDeviceConflict = errors.New("browser device key mismatch")
 
 // BrowserDevice is entirely separate from the privileged RelayProxy Agent model.
 type BrowserDevice struct {
-	ID            string    `json:"id"`
-	Name          string    `json:"name"`
-	SigningKey    string    `json:"signingPublicKey"`
-	EncryptionKey string    `json:"encryptionPublicKey"`
-	IdentityID    string    `json:"identityId,omitempty"`
-	State         string    `json:"state"`
-	Send          bool      `json:"send"`
-	Receive       bool      `json:"receive"`
-	CreatedAt     time.Time `json:"createdAt"`
+	ID              string    `json:"id"`
+	Name            string    `json:"name"`
+	SigningKey      string    `json:"signingPublicKey"`
+	EncryptionKey   string    `json:"encryptionPublicKey"`
+	IdentityID      string    `json:"identityId,omitempty"`
+	State           string    `json:"state"`
+	Send            bool      `json:"send"`
+	Receive         bool      `json:"receive"`
+	CreatedAt       time.Time `json:"createdAt"`
+	ExtensionID     string    `json:"extensionId,omitempty"`
+	ExtensionState  string    `json:"extensionState,omitempty"`
 }
 
 type Store struct{ db *sql.DB }
@@ -99,8 +101,13 @@ func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevi
 func (s *Store) Device(ctx context.Context, id string) (BrowserDevice, error) {
 	var d BrowserDevice
 	var send, receive int
-	err := s.db.QueryRowContext(ctx, `SELECT id,name,signing_key,encryption_key,identity_id,state,can_send,can_receive,created_at FROM browser_sync_devices WHERE id=?`, id).
-		Scan(&d.ID, &d.Name, &d.SigningKey, &d.EncryptionKey, &d.IdentityID, &d.State, &send, &receive, &d.CreatedAt)
+	err := s.db.QueryRowContext(ctx, `SELECT d.id,d.name,d.signing_key,d.encryption_key,d.identity_id,d.state,
+    d.can_send,d.can_receive,d.created_at,COALESCE(x.extension_id,''),COALESCE(e.state,'')
+    FROM browser_sync_devices d
+    LEFT JOIN browser_sync_device_extensions x ON x.device_id=d.id
+    LEFT JOIN browser_sync_extensions e ON e.extension_id=x.extension_id
+    WHERE d.id=?`, id).
+		Scan(&d.ID, &d.Name, &d.SigningKey, &d.EncryptionKey, &d.IdentityID, &d.State, &send, &receive, &d.CreatedAt, &d.ExtensionID, &d.ExtensionState)
 	if errors.Is(err, sql.ErrNoRows) {
 		return BrowserDevice{}, ErrNotFound
 	}

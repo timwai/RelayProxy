@@ -96,6 +96,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		id := strings.TrimPrefix(r.Header.Get("Origin"), "chrome-extension://")
+		if r.ContentLength != 0 {
+			// Modern Chrome clients enroll extension Origin and device keys in one
+			// request. This is NOT an approval: neither identity nor capabilities
+			// can be supplied, and both remain pending until an admin approves.
+			h.registerExtensionDevice(w, r, id)
+			return
+		}
+		// Preserve extension-only enrollment for older development clients.
 		if _, trusted := h.extensions[r.Header.Get("Origin")]; trusted {
 			writeBrowserJSON(w, http.StatusAccepted, map[string]string{"id": id, "state": "approved"})
 			return
@@ -141,37 +149,72 @@ func (h *Handler) permitRegistration(r *http.Request) bool {
 	return a.count <= 15
 }
 
-func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
-	if !h.permitRegistration(r) {
-		http.Error(w, "enrollment rate limit", http.StatusTooManyRequests)
-		return
-	}
+// readRegistration refuses any requested capability or client-selected identity.
+func readRegistration(w http.ResponseWriter, r *http.Request) (BrowserDevice, bool) {
 	var d BrowserDevice
 	dec := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192))
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&d); err != nil {
 		http.Error(w, "invalid browser registration", http.StatusBadRequest)
-		return
+		return BrowserDevice{}, false
 	}
-	// The request may not supply approval, identities, or capabilities.
-	if d.State != "" || d.IdentityID != "" || d.Send || d.Receive || !d.CreatedAt.IsZero() {
+	if d.State != "" || d.IdentityID != "" || d.Send || d.Receive ||
+		!d.CreatedAt.IsZero() || d.ExtensionID != "" || d.ExtensionState != "" {
 		http.Error(w, "browser privileges cannot be requested during enrollment", http.StatusForbidden)
-		return
+		return BrowserDevice{}, false
 	}
 	if err := ValidateRegistration(d); err != nil {
 		http.Error(w, "invalid device signing or encryption public key", http.StatusBadRequest)
+		return BrowserDevice{}, false
+	}
+	return d, true
+}
+
+func (h *Handler) registerExtensionDevice(w http.ResponseWriter, r *http.Request, extensionID string) {
+	d, ok := readRegistration(w, r)
+	if !ok {
 		return
 	}
-	saved, err := h.Store.Register(r.Context(), d)
+	saved, state, err := h.Store.EnrollExtensionDevice(r.Context(), extensionID, d)
 	if err != nil {
 		if errors.Is(err, ErrDeviceConflict) {
-			http.Error(w, "registered identity key mismatch", http.StatusConflict)
+			http.Error(w, "registered identity key or extension mismatch", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ErrNotFound) {
+			http.Error(w, "revoked extension cannot request enrollment", http.StatusForbidden)
+			return
+		}
+		http.Error(w, "browser enrollment unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	writeBrowserJSON(w, http.StatusAccepted, map[string]string{
+		"id": saved.ID, "state": saved.State, "extensionId": extensionID, "extensionState": state,
+	})
+}
+
+func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+	if !h.permitRegistration(r) {
+		http.Error(w, "enrollment rate limit", http.StatusTooManyRequests)
+		return
+	}
+	d, ok := readRegistration(w, r)
+	if !ok {
+		return
+	}
+	extensionID := strings.TrimPrefix(r.Header.Get("Origin"), "chrome-extension://")
+	saved, state, err := h.Store.EnrollExtensionDevice(r.Context(), extensionID, d)
+	if err != nil {
+		if errors.Is(err, ErrDeviceConflict) {
+			http.Error(w, "registered identity key or extension mismatch", http.StatusConflict)
 			return
 		}
 		http.Error(w, "registration failed", http.StatusInternalServerError)
 		return
 	}
-	writeBrowserJSON(w, http.StatusAccepted, map[string]string{"id": saved.ID, "state": saved.State})
+	writeBrowserJSON(w, http.StatusAccepted, map[string]string{
+		"id": saved.ID, "state": saved.State, "extensionId": extensionID, "extensionState": state,
+	})
 }
 
 type authFrame struct {

@@ -41,12 +41,12 @@
             <p class="field-hint">需要当前 Chrome Profile 授予这个服务端的站点访问权限。</p>
           </div>
           <div class="button-row"><button id="save" class="primary-button" type="button">保存地址并授权</button>
-            <button id="register" class="secondary-button" type="button">上报扩展并申请设备授权</button>
+            <button id="register" class="secondary-button" type="button">提交统一授权申请</button>
             <button id="connect" class="secondary-button" type="button">连接 Server</button></div>
           <div class="divider-line"></div>
           <div class="device-identity"><div><strong>本浏览器设备</strong><p>自动生成的身份 ID，无需手动填写扩展 ID。</p></div>
             <div id="device" class="device-code" title="本设备 ID">正在初始化…</div></div>
-          <p class="field-hint">授权流程：扩展自动上报 → Server Web 审批扩展和浏览器设备 → 此处连接。设备审批与站点同步授权相互独立。</p>
+          <p class="field-hint">授权流程：一次提交扩展来源和设备公钥 → Server Web 一次选择身份、收发权限并批准 → 此处连接。每台新设备仍需独立管理员审批；站点授权与 A/B 双端配对校验另行确认。</p>
         </div>
       </section>
 

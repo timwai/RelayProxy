@@ -117,9 +117,11 @@ $('register').addEventListener('click', async () => {
     const result = await chrome.runtime.sendMessage({ type: 'REGISTER_BROWSER' });
     if (!result?.ok) throw new Error(result?.error || '设备注册失败');
     status(result.state === 'extension_pending'
-      ? '扩展 ID 已自动上报，等待管理员批准该扩展；批准后再次点击注册浏览器设备。'
+      ? '当前 Server 为旧版本，需先批准扩展，再次点击注册设备。升级 Server 后可一次审批。'
       : result.state === 'pending'
-      ? '已注册浏览器设备，等待管理员在 Server 后台审批。'
+      ? '申请已一次提交。请管理员在 Server Web → 浏览器同步 中选择身份及权限，并点击“批准扩展与设备”。'
+      : result.state === 'approved'
+      ? '浏览器设备及扩展已获批，现在可以连接 Server。'
       : '浏览器设备状态：' + result.state);
   } catch (error) { failure(error); }
 });

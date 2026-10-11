@@ -32,7 +32,7 @@ func (r *Router) handleBrowserSyncApprove(w http.ResponseWriter, req *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid approval request")
 		return
 	}
-	if err := r.browserSync.Store.Approve(req.Context(), req.PathValue("id"), body.IdentityID, body.Send, body.Receive); err != nil {
+	if err := r.browserSync.Store.ApproveEnrollment(req.Context(), req.PathValue("id"), body.IdentityID, body.Send, body.Receive); err != nil {
 		if errors.Is(err, browsersync.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "pending browser not found")
 			return

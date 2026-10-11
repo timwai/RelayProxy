@@ -43,7 +43,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
         const caps=capabilities[id]||{send:true,receive:false};
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id)+'/approve',
           json('POST',{identityId:identity[id],send:!!caps.send,receive:!!caps.receive}));
-        setNotice('浏览器设备已审批。');
+        setNotice('已完成审批：关联的 Chrome 扩展和此浏览器设备均已获批。');
       }else{
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id)+'/revoke',
           json('POST',{}));
@@ -57,17 +57,19 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
     setBusy(id);setError('');
     try{
       await api('/browser-sync/admin/extensions/'+encodeURIComponent(id)+'/'+action,json('POST',{}));
-      setNotice(action==='approve'?'Chrome 扩展已批准。现在可注册浏览器设备。':'扩展已撤销，新会话将被拒绝。');
+      setNotice(action==='approve'?'已批准旧版单独上报的扩展；关联设备仍需独立审批。':'扩展已撤销，新会话将被拒绝。');
       await refresh();
     }catch(err){setError(err.message);}
     finally{setBusy('');}
   };
-  const visible=devices.filter(d=>[d.name,d.id,d.identityId,d.state].join(' ').toLowerCase()
+  const visible=devices.filter(d=>[d.name,d.id,d.identityId,d.state,d.extensionId].join(' ').toLowerCase()
     .includes(filter.toLowerCase()));
+  const linkedExtensions=new Set(devices.filter(d=>d.extensionId).map(d=>d.extensionId));
+  const legacyExtensions=extensions.filter(e=>e.state!=='pending'||!linkedExtensions.has(e.id));
   const count=state=>devices.filter(d=>d.state===state).length;
   return <section className="browser-sync-admin">
     <div className="page-head"><div><h1>浏览器同步</h1>
-      <p>独立浏览器设备审批、授权与撤销。会话通过端到端加密中继，Server 不保存 Cookie。</p></div>
+      <p>首次只需一次审批：同时批准扩展身份及当前浏览器设备。会话采用端到端加密，Server 不保存 Cookie。</p></div>
       <div className="form-actions"><button className="btn" onClick={onOpenSettings}>编辑浏览器服务配置</button>
       <button className="btn" onClick={refresh} disabled={loading||!!busy}>
         {loading?'正在读取…':'刷新设备'}</button></div></div>
@@ -83,18 +85,18 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
         直接访问 Admin HTTPS 的此接口，未登录时应为 HTTP 401，而不是 404。</p></div>:
     <>
       <div className="panel">
-        <h3>Chrome 扩展 ID 自动上报审批</h3>
-        <p>Chrome 扩展首次点击“上报扩展 ID / 注册浏览器设备”将登记待审批的 ID，无需人工复制；
-          批准扩展不等于批准设备或 Cookie 读取，设备仍需独立身份授权。</p>
+        <h3>扩展来源管理</h3>
+        <p>新版扩展首次申请时会自动上报扩展 ID 和设备公钥；关联的待审批扩展直接在下方设备列表一次批准。
+          这里保留旧版本只上报扩展 ID 的独立审批，以及已批准扩展的撤销功能。</p>
         <div className="table-wrap"><table><thead><tr><th>扩展 ID</th><th>状态</th><th>操作</th></tr></thead>
-        <tbody>{extensions.map(ext=><tr key={ext.id}>
+        <tbody>{legacyExtensions.map(ext=><tr key={ext.id}>
           <td style={{wordBreak:'break-all'}}>{ext.id}</td><td>{ext.state}</td>
           <td>{ext.state==='pending'?<button className="btn primary" disabled={!!busy}
             onClick={()=>extensionAction(ext.id,'approve')}>批准扩展</button>:
             ext.state==='approved'?<button className="btn" disabled={!!busy}
               onClick={()=>extensionAction(ext.id,'revoke')}>撤销扩展</button>:'已撤销'}</td>
         </tr>)}
-        {!extensions.length&&<tr><td colSpan={3}>暂无已上报的扩展</td></tr>}</tbody></table></div>
+        {!legacyExtensions.length&&<tr><td colSpan={3}>暂无需要单独处理的扩展。关联申请请在下方审批。</td></tr>}</tbody></table></div>
       </div>
       <div className="grid-cards">
         {[['待审批',count('pending')],['已批准',count('approved')],['已撤销',count('revoked')]]
@@ -103,18 +105,23 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
       </div>
       <div className="panel">
         <div className="form-actions" style={{justifyContent:'space-between',alignItems:'center'}}>
-          <div><h3>浏览器设备</h3><p>设备与传统 Agent 完全隔离；仅赋予 browser.sync.send / receive。</p></div>
+          <div><h3>浏览器设备与统一审批</h3><p>选择身份和收发权限后，一次批准该设备及其关联扩展；不授予 Agent 权限。</p></div>
           <input className="input" aria-label="搜索浏览器设备" placeholder="搜索名称、ID 或状态"
             value={filter} onChange={e=>setFilter(e.target.value)}/>
         </div>
         <div className="table-wrap"><table><thead><tr>
-          <th>设备</th><th>状态</th><th>身份 / 权限</th><th>创建时间</th><th>操作</th>
+          <th>设备</th><th>扩展来源</th><th>状态</th><th>身份 / 权限</th><th>创建时间</th><th>操作</th>
         </tr></thead><tbody>
           {visible.length?visible.map(d=>{
             const caps=capabilities[d.id]||{send:true,receive:false};
             return <tr key={d.id}>
               <td><strong>{d.name||'Chrome'}</strong><small style={{display:'block',wordBreak:'break-all'}}>
                 {d.id}</small></td>
+              <td><small style={{display:'block',wordBreak:'break-all'}}>
+                {d.extensionId||'旧版设备'}</small>
+                <span className="badge">{d.extensionState==='pending'?'待统一审批':
+                  d.extensionState==='approved'?'扩展已批准':
+                  d.extensionState==='revoked'?'扩展已撤销':'—'}</span></td>
               <td><span className="badge">{d.state==='pending'?'待审批':
                 d.state==='approved'?'已批准':'已撤销'}</span></td>
               <td>{d.state==='pending'?<div style={{minWidth:170}}>
@@ -131,12 +138,12 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
                   <div>{d.send?'发送':''}{d.send&&d.receive?' / ':''}{d.receive?'接收':''}</div></>}</td>
               <td>{fmtDate(d.createdAt)}</td>
               <td>{d.state==='pending'?<button className="btn primary" disabled={!!busy||!identity[d.id]||
-                  (!caps.send&&!caps.receive)} onClick={()=>action(d.id,'approve')}>批准</button>:
+                  (!caps.send&&!caps.receive)} onClick={()=>action(d.id,'approve')}>{d.extensionId?'批准扩展与设备':'批准设备'}</button>:
                 d.state==='approved'?<button className="btn" disabled={!!busy}
                   onClick={()=>action(d.id,'revoke')}>撤销授权</button>:
                   <span>已失效</span>}</td>
             </tr>;
-          }):<tr><td colSpan={5}>{loading?'正在加载…':'暂无匹配的浏览器设备'}</td></tr>}
+          }):<tr><td colSpan={6}>{loading?'正在加载…':'暂无匹配的浏览器设备'}</td></tr>}
         </tbody></table></div>
       </div>
       <div className="config-help">撤销只会阻止 RelayProxy 后续同步，

@@ -2,6 +2,15 @@
 
 > **代码状态（2026-10-11）**：独立的 Chrome Profile 本机 Agent 代理、HTTP 正向代理、任意合法 TCP CONNECT 地址/端口及原生 DIRECT/PROXY/REJECT 已在 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 集成，Go/UI/Network CI success，但真实 Chrome、WebRTC/UDP/QUIC/DNS/回环绕过及安全验收尚未完成。Cookie 同步仍无需本机 Agent，只有选择本机网络出口才需要安装 B Agent。发布状态仍为 Draft。详情见 [Living Tracker](../../docs/browser-session-sync-progress.md)。
 
+## 首次接入：一次申请、一次服务端审批
+
+1. 更新 Server 与 Chrome 扩展，进入扩展 **完整设置 → 连接与设备**，保存 Admin HTTPS Server，点击 **提交统一授权申请**。
+2. 扩展自动上传自身 Extension ID 和本浏览器设备的签名/加密公钥。**未经管理员审批，此时两者都保持待审核状态**，不会因为知道扩展 ID 就自动获得会话同步权限。
+3. 管理员进入 **Server Web → 浏览器同步 → 浏览器设备与统一审批**，找到设备/扩展组合，在同一行选择活跃身份，勾选发送/接收权限，点击 **批准扩展与设备**。一个请求在数据库事务内完成两项批准。
+4. 浏览器扩展点击 **连接 Server**，然后按原有逻辑配置 HTTPS 站点并进行 A/B 配对校验。**每台新设备仍需分别审批**，网站 Host 授权与双端配对确认不合并或跳过。
+
+已批准扩展可继续接收其他设备的独立 pending 申请；撤销扩展会阻断所有来自该扩展 Origin 的新连接与请求。旧版浏览器或旧版 Server 仍兼容两步申请，升级服务端和扩展后才使用一次审批。原有单独扩展批准功能只供旧版扩展、扩展撤销管理使用。
+
 ## Chrome 扩展界面（独立设置页，2026-10-11）
 
 - **快捷弹窗**：扩展图标打开的 390 px 弹窗只显示 Server 连接状态/连接操作、全 Chrome Agent 代理快捷开关、活跃站点的手动发送/请求同步及“同步后打开”，并优先展示当前 HTTPS 标签页匹配的配对。弹窗不再包含 Server 地址、Agent 端口、站点增删、设备配对、Cookie/Storage 覆盖确认或撤销操作。

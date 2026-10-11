@@ -8,29 +8,37 @@ const endpoint = (base, path) => new URL(path, base).toString();
 export async function registerBrowser() {
   const settings = await getSettings();
   if (!settings.serverOrigin) throw new Error('请先配置 HTTPS Server');
-  // No copy/paste of extension ID: Chrome's Origin header identifies the
-  // extension. Unapproved origins can only queue an admin approval request.
-  const extension=await fetch(endpoint(settings.serverOrigin,'/api/v1/browser-sync/extensions/register'),{
-    method:'POST',cache:'no-store'
+  const identity = await getOrCreateIdentity();
+  const registration = {
+    id: identity.deviceId,
+    name: 'Chrome ' + navigator.platform,
+    signingPublicKey: identity.signingPublicKey,
+    encryptionPublicKey: identity.encryptionPublicKey,
+  };
+  // One consent/request from Chrome; one admin action approves both extension
+  // Origin and this particular device's public keys and capabilities.
+  const extension = await fetch(endpoint(settings.serverOrigin,
+    '/api/v1/browser-sync/extensions/register'),{
+    method:'POST', cache:'no-store', headers:{'Content-Type':'application/json'},
+    body:JSON.stringify(registration),
   });
-  if(!extension.ok)throw new Error('扩展身份上报失败：HTTP '+extension.status);
-  const approval=await extension.json();
-  if(approval.state!=='approved')return {state:'extension_pending'};
-  const id = await getOrCreateIdentity();
+  if(!extension.ok) throw new Error('浏览器注册申请失败：HTTP '+extension.status);
+  const approval = await extension.json();
+  if(approval.id === identity.deviceId && approval.extensionState) {
+    return {state:approval.state,extensionState:approval.extensionState,
+      extensionId:approval.extensionId};
+  }
+
+  // Older Server builds accept only the extension Origin in this route.
+  // Keep them functional; only an updated Server supports single approval.
+  if(approval.state!=='approved') return {state:'extension_pending',legacy:true};
   const response = await fetch(endpoint(settings.serverOrigin,
     '/api/v1/browser-sync/devices/register'), {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    cache: 'no-store',
-    body: JSON.stringify({
-      id: id.deviceId,
-      name: 'Chrome ' + navigator.platform,
-      signingPublicKey: id.signingPublicKey,
-      encryptionPublicKey: id.encryptionPublicKey,
-    }),
+    method:'POST', headers:{'Content-Type':'application/json'},cache:'no-store',
+    body:JSON.stringify(registration),
   });
-  if (!response.ok) throw new Error('浏览器设备注册失败：HTTP ' + response.status);
-  return response.json();
+  if(!response.ok) throw new Error('旧版 Server 浏览器设备注册失败：HTTP '+response.status);
+  return {...await response.json(),legacy:true};
 }
 
 let currentSocket = null;

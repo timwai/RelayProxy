@@ -170,3 +170,10 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | B Agent 本机代理进一步简化：零鉴权、零域名白名单 | 本机 `browser_sync.local_proxy` 只保留 `enabled`、`listen`；移除本机 Basic 407、Token 生成/传输/存储、`allowed_hosts` 配置；Agent 接收合规 HTTPS CONNECT DNS:443 交由现有 PROXY 路由与 Exit ACL，Chrome 端仍依据已确认 Cookie 规则生成精确站点 PAC。新增无凭据连接、任意合规域名、非回环监听拒绝和无 Cookie 权限回归。**风险**：同机其他进程可使用该入口（无独立身份/域名限制），需要安全审查 | NB-06/07 已编码·待 CI/真机/安全验收，P0 不放行 | 本轮提交 CI 另行核验 |
 
 | 2026-10-11 | [`b8e4747`](https://github.com/timwai/RelayProxy/commit/b8e47473f13714ad8d682662eddc4c9f562bf6c7) / [`48ab31a`](https://github.com/timwai/RelayProxy/commit/48ab31aec20ff763f32981aed5067ac26233c849) | 按需求彻底取消 B 本机 Agent 代理 Token/Basic 407 和 `allowed_hosts` 配置，只需 opt-in 的 `enabled` + 回环 `listen`；Chrome PAC 仍按已配对 Cookie 规则的 HTTPS hostname 精确匹配，内网后缀/IP 字面量/非 TCP:443 拒绝，原生 RoutingDialer PROXY/REJECT/DIRECT 逻辑不变。远端 A 代理仍按原设备租约鉴权。清除旧本机凭据并修复遗留的本机 407 测试。**重要残余风险**：任何同机程序都可以使用此回环 CONNECT 中转，需额外安全验收 | NB-06/07 已实现、仍待真机/安全验收；NB-08 仍未完成，P0 状态不变 | [Go CI #38106663749](https://github.com/timwai/RelayProxy/actions/runs/38106663749) success；[UI CI #38106740184](https://github.com/timwai/RelayProxy/actions/runs/38106740184) 因本次最终测试补丁晚于进度文档更新，未通过“进度文档跟进”检查；本提交记录并触发新 CI，不能复用前一 SHA 成功结论 |
+
+**本机 Agent 无鉴权、无域名白名单版本最终自动化核对（代码/进度基准 [`9b8483a`](https://github.com/timwai/RelayProxy/commit/9b8483afaba662a3f679b81186ccaa0fc4d52e40)）：**
+[Go CI #38106813214](https://github.com/timwai/RelayProxy/actions/runs/38106813214) **success**（gofmt、模块检查、vet、全量 Go/本机 CONNECT 测试、race 与 benchmark）；
+[UI CI #38106813210](https://github.com/timwai/RelayProxy/actions/runs/38106813210) **success**（Chrome 扩展完整回归以及 Windows/macOS 构建）；
+[Network Acceptance #38106813211](https://github.com/timwai/RelayProxy/actions/runs/38106813211) **success**；
+[Android CI #38106813202](https://github.com/timwai/RelayProxy/actions/runs/38106813202) **success**。
+本地模式不提供 Agent 端鉴权/域名白名单；该回环代理可被同机其他进程使用。**CI 成功不代表已进行真实 B Chrome ↔ B Agent 登录与出口 IP 验收，更不代表已通过 P0 安全审查；PR #194 保持 Draft，不合并 main。**

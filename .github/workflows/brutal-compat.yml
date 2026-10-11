@@ -73,6 +73,177 @@ jobs:
           npm run build
       - name: Authenticated QUIC, P2P, and Direct tests
         run: go test ./internal/congestion/... ./internal/tunnel ./internal/protocol ./agent/app ./agent/direct ./agent/p2p ./server/gateway ./server/p2p ./mobile/androidcore -count=1 -timeout=15m
+      - name: Repeat UDP partial-frame deadline under Windows scheduling
+        if: runner.os == 'Windows'
+        run: go test ./internal/tunnel -run '^TestUDPStreamCallerDeadlinesAndPartialFrame
+        if: runner.os == 'Linux'
+        run: go test -race ./internal/congestion/... ./internal/tunnel ./agent/direct ./agent/p2p ./server/gateway ./server/p2p -count=1 -timeout=15m
+
+  mixed-binary:
+    name: Pre-Brutal baseline / new binary protocol pairings
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Build baseline/new probes and test QUIC plus TLS
+        run: bash scripts/ci-brutal-mixed-compat.sh
+
+  loss-matrix-evidence:
+    name: Deterministic 0/1/5 percent QUIC loss traces
+    runs-on: ubuntu-24.04
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Run BBR and Brutal lossy transport regression
+        shell: bash
+        run: |
+          set -o pipefail
+          mkdir -p evidence
+          go test -v ./internal/tunnel -run '^TestBrutalDeterministicPacketLoss$' -count=5 -timeout=6m \
+            | tee evidence/deterministic-udp-loss.log
+      - name: Upload deterministic UDP loss diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brutal-synthetic-packet-loss
+          path: evidence/deterministic-udp-loss.log
+          if-no-files-found: warn
+
+  linux-kernel-netem:
+    name: Kernel qdisc delay/rate/loss (${{ matrix.loss }} loss)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 18
+    strategy:
+      fail-fast: false
+      matrix:
+        loss: [0, 1, 5]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Install Linux traffic control
+        run: |
+          if ! command -v tc >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq iproute2
+          fi
+      - name: Exercise UDP sockets over kernel traffic shaping
+        shell: bash
+        env:
+          NETEM_LOSS: ${{ matrix.loss }}
+          RELAYPROXY_BRUTAL_NETEM: "1"
+        run: |
+          set -euo pipefail
+          mkdir -p evidence
+          sudo tc qdisc replace dev lo root netem rate 12mbit delay 20ms loss "${NETEM_LOSS}%"
+          trap 'sudo tc qdisc del dev lo root || true' EXIT
+          sudo tc qdisc show dev lo | grep -q netem
+          sudo tc -s qdisc show dev lo | tee evidence/netem-before.log
+          go test -v ./internal/tunnel -run '^TestBrutalKernelNetem' -count=1 -timeout=3m \
+            | tee evidence/netem-results.log
+          python3 scripts/analyze_brutal_netem.py \
+            --input evidence/netem-results.log \
+            --output evidence/netem-overlap.csv \
+            --loss-label "${NETEM_LOSS}"
+          sudo tc -s qdisc show dev lo | tee evidence/netem-after.log
+      - name: Store per-link UDP impairment and transfer evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brutal-linux-netem-loss-${{ matrix.loss }}
+          path: evidence/
+          if-no-files-found: warn
+
+  linux-full-compiled-pairings:
+    name: Full production Agent / Server entrypoints (Linux; 8 pairings)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 28
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Check production binary pairing script syntax
+        run: bash -n scripts/ci-brutal-full-binary-compat.sh
+      - name: Cross-build and authenticate old/new genuine processes
+        run: bash scripts/ci-brutal-full-binary-compat.sh
+
+  native-full-compiled-pairings:
+    name: Native production Agent / Server entrypoints (${{ matrix.os }}; 8 pairings)
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 35
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest]
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Build and authenticate baseline/new actual CLI executables
+        run: python scripts/ci-brutal-native-binary-compat.py
+
+  full-release-archive-check:
+    name: Build and audit full distribution archives (Linux host; six targets)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 50
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Build actual multi-platform release archives
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p evidence/packages
+          export OUT_DIR="${RUNNER_TEMP}/relayproxy-brutal-dist"
+          export VERSION="198.0.0-acceptance"
+          bash scripts/build.sh > evidence/packages/build.log 2>&1 || {
+            tail -n 140 evidence/packages/build.log
+            exit 1
+          }
+      - name: Verify archive integrity and default BBR fallback
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 scripts/verify_brutal_release_packages.py \
+            --dist "${RUNNER_TEMP}/relayproxy-brutal-dist" \
+            --report evidence/packages/package-audit.json
+      - name: Archive production build and audit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: brutal-full-archive-audit
+          path: evidence/packages/
+          if-no-files-found: warn
+ -count=25 -timeout=5m
       - name: Targeted race regressions (Linux)
         if: runner.os == 'Linux'
         run: go test -race ./internal/congestion/... ./internal/tunnel ./agent/direct ./agent/p2p ./server/gateway ./server/p2p -count=1 -timeout=15m

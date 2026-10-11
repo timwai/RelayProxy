@@ -14,6 +14,8 @@ export const cookieIdentity=c=>JSON.stringify([domainOf(c),String(c.path||'/'),S
 const supportsOrigin=(c,origin)=>{
   const host=hostOf(origin),domain=domainOf(c),site=partitionOf(c);
   if(!domain || !(host===domain || (!c.hostOnly&&host.endsWith('.'+domain))))return false;
+  // A cross-site ancestor partition is not available to this top-level site.
+  if(c.partitionKey?.hasCrossSiteAncestor===true)return false;
   if(!String(c.path).startsWith('/') || typeof c.name!=='string' || typeof c.value!=='string')return false;
   if(site){
     try{
@@ -27,10 +29,11 @@ async function allFor(origin){
   const host=hostOf(origin),labels=host.split('.');
   const suffixes=[host];
   for(let i=1;i<labels.length-1;i++)suffixes.push(labels.slice(i).join('.'));
-  const groups=await Promise.all([
-    chrome.cookies.getAll({url:origin+'/'}),
-    ...suffixes.map(domain=>chrome.cookies.getAll({domain}))
-  ]);
+  // Chrome returns only unpartitioned cookies when partitionKey is omitted.
+  // An empty partitionKey requests all partitions; subsequent filtering
+  // limits the snapshot to the approved site's own top-level context.
+  const groups=await Promise.all(suffixes.map(domain=>
+    chrome.cookies.getAll({domain,partitionKey:{}})));
   const entries=new Map();
   for(const c of groups.flat())if(supportsOrigin(c,origin))entries.set(cookieIdentity(c),c);
   return entries;
@@ -40,7 +43,9 @@ function fromChrome(c){
     path:c.path,secure:!!c.secure,httpOnly:!!c.httpOnly,
     sameSite:c.sameSite||'unspecified',session:!!c.session,
     ...(Number.isFinite(c.expirationDate)&&!c.session?{expirationDate:c.expirationDate}:{}),
-    ...(c.partitionKey?{partitionKey:{topLevelSite:c.partitionKey.topLevelSite}}:{})};
+    ...(c.partitionKey?{partitionKey:{topLevelSite:c.partitionKey.topLevelSite,
+      ...(typeof c.partitionKey.hasCrossSiteAncestor==='boolean'
+        ?{hasCrossSiteAncestor:c.partitionKey.hasCrossSiteAncestor}:{})}}:{})};
 }
 function checked(c,origin){
   if(!c||typeof c!=='object'||!supportsOrigin(c,origin)||
@@ -49,7 +54,10 @@ function checked(c,origin){
     typeof c.httpOnly!=='boolean'||typeof c.session!=='boolean'||
     !['unspecified','no_restriction','lax','strict'].includes(c.sameSite)||
     (c.expirationDate!==undefined&&(!Number.isFinite(c.expirationDate)||c.expirationDate<=Date.now()/1000))||
-    (c.partitionKey&&(!c.partitionKey.topLevelSite||Object.keys(c.partitionKey).length!==1)))
+    (c.partitionKey&&(!c.partitionKey.topLevelSite ||
+      Object.keys(c.partitionKey).some(k=>!['topLevelSite','hasCrossSiteAncestor'].includes(k)) ||
+      (c.partitionKey.hasCrossSiteAncestor!==undefined &&
+       typeof c.partitionKey.hasCrossSiteAncestor!=='boolean'))))
     throw new Error('站点 Cookie 属性无效或超出安全限制');
   return c;
 }

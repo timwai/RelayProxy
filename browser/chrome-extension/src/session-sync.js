@@ -9,6 +9,7 @@ import { encryptSnapshot, decryptSnapshot } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
 import {captureAllCookies,applyAllCookies} from './cookies-all.js';
 import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
+import {showRestoredWebsiteTab} from './session-tabs.js';
 import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence } from './lifecycle.js';
 import {ensureNetworkForRule} from './network-binding.js';
 
@@ -174,6 +175,7 @@ async function handleIncomingSnapshot(envelope) {
     const payload=await decryptSnapshot(envelope,ctx.remote);
     await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
     const switches=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
+    let restoredTabId=null;
     try{
       if(ctx.policy.schemaVersion===2){
         const txn=await prepareWebStorageRestore(ruleId,payload.storage,ctx.policy,
@@ -184,6 +186,7 @@ async function handleIncomingSnapshot(envelope) {
           await applyAllCookies(ruleId,payload,ctx.policy,{allowOverwrite:switches[ruleId]===true});
           applied=true;
           await txn.commit();
+          restoredTabId=txn.tabId;
           await chrome.tabs.reload(txn.tabId).catch(()=>{});
         }catch(error){
           const rolledBack=await txn.rollback();
@@ -201,8 +204,14 @@ async function handleIncomingSnapshot(envelope) {
       if(request) {
         delete pending[ruleId];
         await chrome.storage.local.set({[pendingOpenKey]:pending});
-        if(request.expiresAt>Date.now()&&request.origin===ctx.policy.siteOrigin)
-          chrome.tabs.create({url:ctx.policy.siteOrigin}).catch(()=>{});
+        if(request.expiresAt>Date.now()&&request.origin===ctx.policy.siteOrigin){
+          if(ctx.policy.schemaVersion===2 && restoredTabId!==null){
+            // A new tab would have different sessionStorage and could log B out.
+            await showRestoredWebsiteTab(restoredTabId,ctx.policy.siteOrigin).catch(()=>{});
+          }else{
+            await chrome.tabs.create({url:ctx.policy.siteOrigin}).catch(()=>{});
+          }
+        }
       }
     }catch(error){
       const code=String(error.message||'');

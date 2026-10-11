@@ -24,10 +24,10 @@ function profile(){
       async set(o){for(const [k,v] of Object.entries(o))state.set(k,v);}
     }},
     cookies:{
-      async getAll({url,domain}){
-        return [...jar.values()].filter(c=>domain?
+      async getAll({url,domain,partitionKey}){
+        return [...jar.values()].filter(c=>(partitionKey!==undefined || !c.partitionKey) && (domain?
           c.domain.replace(/^\./,'')===domain :
-          new URL(url).hostname===c.domain.replace(/^\./,'')&&new URL(url).pathname.startsWith(c.path));
+          new URL(url).hostname===c.domain.replace(/^\./,'')&&new URL(url).pathname.startsWith(c.path)));
       },
       async set(d){
         const c={name:d.name,value:d.value,domain:d.domain||new URL(d.url).hostname,
@@ -102,4 +102,18 @@ test('v2 Storage captures every key and blocks unapproved account overwrite',asy
   assert.equal(b.page.session.get('tab-session'),'value');
   assert.equal(Object.keys((await b.chrome.storage.local.get('browserSyncManagedWebStorageV2'))
     .browserSyncManagedWebStorageV2.r.local).length,2);
+});
+
+test('partitioned cookies are included for the authorized top-level site',async()=>{
+  const source=profile();use(source);
+  await source.chrome.cookies.set({url:'https://example.com/',name:'CHIPS',value:'ok',
+    path:'/',secure:true,httpOnly:true,partitionKey:{topLevelSite:'https://example.com',hasCrossSiteAncestor:false}});
+  await source.chrome.cookies.set({url:'https://example.com/',name:'CHIPS',value:'different-site',
+    path:'/',secure:true,httpOnly:true,partitionKey:{topLevelSite:'https://outside.test',hasCrossSiteAncestor:true}});
+  const snap=await captureAllCookies(policy);
+  assert.equal(snap.cookies.length,1);
+  assert.equal(snap.cookies[0].value,'ok');
+  const target=profile();use(target);
+  await applyAllCookies('partition',snap,policy);
+  assert.equal((await captureAllCookies(policy)).cookies[0].value,'ok');
 });

@@ -285,3 +285,9 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - `0c89b83`：Server 更新配置重启比较将 Browser Sync 的 nil/empty 列表规范化，避免意外显示 `browser_sync` 待重启；此前 Go CI 中 `TestServerSettingsPersistsWithoutReplacingRuntime` 暴露该回归。
 - `2a90f68`：单个 Origin 存在多个标签页时，优先当前聚焦 Chrome 窗口的活动标签页读取 Session Storage，再后备其它普通标签页。只能承诺该标签页全部 Key，不能承诺跨标签页汇总。
 - 历史 UI CI 部分步骤已通过 Server/Wails React、Chrome 扩展单元测试，但针对最终 SHA 的完整 Go/UI/Network/Android CI 需重新验证，不能跨提交继承通过状态。安全和功能验收：P0-01、P0-05–08、NB-05、NB-08、NB-11 仍待真实两端 Chrome 会话维持、冲突/登出、跨路径和分区 Cookie，以及 DNS/QUIC/WebRTC 证据；本开发 PR 继续 Draft，不合并 main。
+
+### 2026-10-11 全量状态恢复补强：Session Storage 标签页语义与 CHIPS
+
+- **RS-01 — Session Storage 回流同一标签页（已编码，待真实 Chrome 验收）**：v2 的“同步成功后打开网站”不再新建一个 Session Storage 为空的标签页；在接收端恢复并刷新成功后，严格校验目标 HTTPS Origin、排除隐私窗口，再激活承载该次恢复的同一标签页，必要时聚焦所在窗口。新增独立测试覆盖同 tab 激活、域名跳转拒绝和隐私窗口拒绝；不宣称已验证真实网站的 JS 登录态。
+- **RS-02 — Partitioned Cookie / CHIPS（已编码，待 Chrome 多站点实测）**：Chrome Cookie API 默认仅返回未分区 Cookie；新版使用 `getAll({domain,partitionKey:{}})` 取得授权域下的分区和未分区记录，再根据网站的顶层站点及跨站祖先语义筛选。保留支持的分区属性，自动化模拟覆盖第一方 CHIPS 被采集/应用、无关第三方分区不被扩展授权传出。Chrome 需要 119+（Manifest 已声明）。
+- **状态**：以上为新增单元/模拟回归，不能替代真实 A/B Chrome 登录、登出、冲突处理、站点 Cookie/Storage 与 DNS/QUIC/WebRTC 的网络边界记录。P0-01/05/06/07、NB-05/08/11 和整体 PR 发布禁令不变。最终 SHA 的 CI 必须单独核实。

@@ -252,9 +252,9 @@ func main() {
 		ExitUpstreamID:      cfgFile.Exit.UpstreamExitID,
 		BrowserNetworkShare: cfgFile.Exit.BrowserNetworkShare,
 		BrowserLocalEnabled: cfgFile.BrowserSync.LocalProxy.Enabled,
-		BrowserLocalListen: cfgFile.BrowserSync.LocalProxy.Listen,
-		BrowserLocalToken: cfgFile.BrowserSync.LocalProxy.Token,
-		BrowserLocalHosts: append([]string(nil),cfgFile.BrowserSync.LocalProxy.AllowedHosts...),
+		BrowserLocalListen:  cfgFile.BrowserSync.LocalProxy.Listen,
+		BrowserLocalToken:   cfgFile.BrowserSync.LocalProxy.Token,
+		BrowserLocalHosts:   append([]string(nil), cfgFile.BrowserSync.LocalProxy.AllowedHosts...),
 		ExitEnabled:         cfgFile.Exit.Enabled,
 		ExitUpstream: exit.UpstreamConfig{
 			Mode: cfgFile.Exit.Upstream.Mode, Address: cfgFile.Exit.Upstream.Address,

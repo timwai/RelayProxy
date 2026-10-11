@@ -162,3 +162,5 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | NB-08 本地 Agent 发现、权限 UI、真实跨端验证 | **未开始** | 需正式本地配对（避免手工配置长令牌）、GUI 设置和 Token 轮换、真实 Chrome MV3 407 缓存、端口占用/退出/断网、代理规则变化、跨平台 Chrome 以及 DNS/WebRTC/第三方资源审计 |
 
 **本轮新增范围不应误算为已验收。** B Agent 本机出口不保证与来源 A 公网 IP 一致；P0-01/05/06/07 与 NB-05 的生产准入仍然不放行。所有构建和集成测试结果必须按功能提交 SHA 单独填写。
+
+| 2026-10-11 | [Go CI #38104275166](https://github.com/timwai/RelayProxy/actions/runs/38104275166) 格式修复 | B 本机 Agent 原生桥接的新增文件需要 gofmt；按 CI 差异修正后重新执行 Go/UI/Android/网络回归。真实 Chrome/Agent 仍未验收 | NB-06/07 待 CI 与真机测试，P0 仍不放行 | 修复格式阻塞 |

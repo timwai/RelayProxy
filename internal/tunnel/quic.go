@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -129,6 +130,9 @@ type QUICSession struct {
 	udpWriteBufferBytes      int
 	congestionController     string
 	congestionTargetBPS      uint64
+	brutalGuardRunning       bool
+	brutalGuardTripped       bool
+	brutalFallbackReason     string
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -175,12 +179,68 @@ func (s *QUICSession) UseBrutal(txBPS uint64, disableLossCompensation bool) bool
 	if txBPS == 0 {
 		return false
 	}
-	quicprofile.UseBrutal(s.conn, txBPS, disableLossCompensation)
 	s.diagnosticsMu.Lock()
+	defer s.diagnosticsMu.Unlock()
+	if s.brutalGuardTripped || s.conn.Context().Err() != nil {
+		return false // A tripped connection may never re-enable Brutal.
+	}
+	quicprofile.UseBrutal(s.conn, txBPS, disableLossCompensation)
 	s.congestionController = "brutal"
 	s.congestionTargetBPS = txBPS
-	s.diagnosticsMu.Unlock()
+	if !s.brutalGuardRunning {
+		s.brutalGuardRunning = true
+		go s.monitorBrutalRTT()
+	}
 	return true
+}
+
+// fallbackFromBrutal is idempotent, per sending QUIC connection. It is the
+// emergency circuit-breaker for pathological sustained queueing, not a
+// bandwidth estimator and not a substitute for aggregate fairness policy.
+func (s *QUICSession) fallbackFromBrutal(reason string) bool {
+	if s == nil || s.conn == nil {
+		return false
+	}
+	s.diagnosticsMu.Lock()
+	defer s.diagnosticsMu.Unlock()
+	if s.congestionController != "brutal" || s.brutalGuardTripped {
+		return false
+	}
+	quicprofile.UseDefaultBBR(s.conn)
+	s.congestionController = "bbr-aggressive"
+	s.congestionTargetBPS = 0
+	s.brutalGuardTripped = true
+	s.brutalFallbackReason = reason
+	log.Printf("[BrutalGuard] Reverted QUIC sender to BBR, reason=%s", reason)
+	return true
+}
+
+func (s *QUICSession) monitorBrutalRTT() {
+	const samplingPeriod = time.Second
+	clock := time.NewTicker(samplingPeriod)
+	defer clock.Stop()
+	var guard brutalRTTGuard
+	for {
+		select {
+		case <-s.conn.Context().Done():
+			return
+		case now := <-clock.C:
+			s.diagnosticsMu.Lock()
+			active := s.congestionController == "brutal"
+			s.diagnosticsMu.Unlock()
+			if !active {
+				return
+			}
+			stats := s.conn.ConnectionStats()
+			if guard.sample(now, stats.MinRTT, stats.SmoothedRTT, stats.BytesSent) {
+				reason := fmt.Sprintf("sustained loaded RTT inflation: min=%.1fms smoothed=%.1fms",
+					float64(stats.MinRTT)/float64(time.Millisecond),
+					float64(stats.SmoothedRTT)/float64(time.Millisecond))
+				s.fallbackFromBrutal(reason)
+				return
+			}
+		}
+	}
 }
 
 // UseBrutal configures a TunnelSession when its transport is QUIC.

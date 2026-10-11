@@ -16,6 +16,7 @@ type SessionDiagnostics struct {
 type QUICDiagnostics struct {
 	CongestionController string  `json:"congestion_controller,omitempty"`
 	CongestionTargetBPS  uint64  `json:"congestion_target_bps,omitempty"`
+	BrutalFallbackReason string `json:"brutal_fallback_reason,omitempty"`
 	MinRTTMS             float64 `json:"min_rtt_ms"`
 	LatestRTTMS          float64 `json:"latest_rtt_ms"`
 	SmoothedRTTMS        float64 `json:"smoothed_rtt_ms"`
@@ -60,10 +61,12 @@ func DiagnoseSession(session TunnelSession) *SessionDiagnostics {
 		quicSession.diagnosticsMu.Lock()
 		controller := quicSession.congestionController
 		targetBPS := quicSession.congestionTargetBPS
+		fallbackReason := quicSession.brutalFallbackReason
 		quicSession.diagnosticsMu.Unlock()
 		d.QUIC = &QUICDiagnostics{
 			CongestionController: controller,
 			CongestionTargetBPS:  targetBPS,
+			BrutalFallbackReason: fallbackReason,
 			MinRTTMS:             float64(stats.MinRTT) / float64(time.Millisecond),
 			LatestRTTMS:          float64(stats.LatestRTT) / float64(time.Millisecond),
 			SmoothedRTTMS:        float64(stats.SmoothedRTT) / float64(time.Millisecond),

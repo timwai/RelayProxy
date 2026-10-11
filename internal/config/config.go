@@ -140,8 +140,8 @@ type AgentConfigFile struct {
 
 	BrowserSync struct {
 		LocalProxy struct {
-			Enabled      bool     `yaml:"enabled"`
-			Listen       string   `yaml:"listen"`
+			Enabled bool   `yaml:"enabled"`
+			Listen  string `yaml:"listen"`
 		} `yaml:"local_proxy"`
 	} `yaml:"browser_sync"`
 

@@ -16,7 +16,7 @@
 |---|---|---|---|---|
 | BS-R01 | P1 | 原本来源记录满 500 后，已存在的合法来源再次注册仍先执行容量统计，造成无意义阻塞及失败面 | `server/browser_sync/extensions.go`：先识别已有记录，只有新来源才执行上限检查 | `TestOriginInventoryExistingRegistrationSurvivesQuota` |
 | BS-R02 | P0 | 历史来源禁用状态的数据库查询失败会被视为“未禁用” | `ExtensionOriginAllowed` 明确返回数据库错误；HTTP 阻断、WSS 每条消息处理均 fail-closed | `TestOriginAuthorizationFailsClosedWhenDatabaseUnavailable` |
-| BS-R03 | P0 | WSS 签名验证和发送 AUTH_OK 之间可能发生设备撤销 / 来源禁用 | `handler.go` 在握手完成后重新读取有效设备及来源状态，并继续在每条控制消息复核 | 新增前置授权复核；已有 WSS 集成测试与 Origin 错绑拒绝测试 |
+| BS-R03 | P0 | WSS 签名验证和发送 AUTH_OK 之间可能发生设备撤销 / 来源禁用 | `handler.go` 在握手完成后重新读取有效设备及来源状态，并继续在每条控制消息复核 | 新增握手前置复核、Origin 错绑拒绝和已认证会话撤销断开集成测试 |
 | BS-R04 | P1 | 删除旧设备没有清理新加入的申请身份记录，可能阻止 FK 删除或在重复设备 ID 注册时留下旧请求 | `store.go` 删除设备的同一事务里额外删除 `browser_sync_identity_requests` | `TestDeleteRevokedBrowserRemovesDependentRecordsAndAllowsFreshPending` |
 | BS-R05 | P1 | 设备撤销与配对规则撤销拆成两次数据库写入，数据库故障会留下不一致状态 | `Store.Revoke` 同一事务内更新设备和配对规则；失败整体回滚，API 报错而不误报成功 | `TestRevocationAndPairingAreAtomic`（模拟数据库规则更新失败） |
 | BS-R06 | P1 | 新扩展申请仅持公开密钥可能更改已有 pending 设备的申请身份，或先改请求再发现来源冲突 | 已记录的身份候选值不可被同公钥重试更改；先检查设备绑定 Origin 再变更注册信息 | `TestEnrollmentCannotRewritePendingIdentityChoice`、`TestForeignOriginCannotChangePendingDeviceRequest` |
@@ -32,7 +32,7 @@
 
 ## 检查状态 / 发布门禁
 
-1. **代码修复与回归测试：已提交到 PR 分支。**
+1. **代码修复与回归测试：已提交到 PR 分支。** 审查了 10 份关键文件中的 11 条静态安全/一致性契约，均满足预期；该核对不代替 Go/Node 实际运行。
 2. **自动化测试执行：尚未验收。** 当前环境无法通过 Git DNS 克隆仓库运行 Go / Node 命令；截至审查时 GitHub 最新 SHA 未显示完整的 Actions 成功运行。测试源码提交不等于通过结果。
 3. **真实双机登录维持、冲突、登出、HTTPS/WSS 反向代理、DNS/QUIC/WebRTC 协议边界：尚未验收。**
 4. **发布决定：保持 Draft，不合并 main；待 CI、构建、真实浏览器 / 安全验收有证据后再关闭发布门禁。**

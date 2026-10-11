@@ -28,6 +28,8 @@ Here `up_mbps` and `down_mbps` are still per-device. `total_up_mbps` and `total_
 
 **Defaults:** Both total limits are `0` (unlimited; legacy behavior) and the transport rate hints still default to `0` (BBR). No new Brutal capacity is implicitly enabled. A Server administrator must explicitly configure total limits; they should be **below measured sustainable directional network throughput**, accounting for protocol overhead, shared exits, other tenants and BBR traffic. Limit values are validated as 0–1,000,000 Mbps.
 
+**Web management:** The same six Brutal options (per-device upstream/downstream caps, total upstream/downstream quotas, ignore-client switch, and Server loss-compensation switch) are exposed under **Server Web → 服务配置 → 隧道连接**, and take effect after Server restart. When pool limits reduce a handshake's target, the Server logs a `Relay Brutal aggregate budget clamped` event with the requested and authorized directional rates.
+
 **Scope and limitations:** This guards only authenticated **Relay QUIC** negotiations. It does not reserve or throttle Public Direct, peer-to-peer paths, Hysteria2 running on the same host, TLS/BBR flows, individual destination sockets, or physical NIC traffic. Server target-pool control is a concurrency-safe *admission/target budget*, not actual traffic shaping or dynamic congestion-aware fair queuing. Even with the pool enabled, real-link loaded RTT and BBR coexistence performance must be measured before release.
 
 

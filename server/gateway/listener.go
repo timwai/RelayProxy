@@ -583,9 +583,14 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	heartbeatSec := g.heartbeatForDevice(hello, authorization.ApprovedCapabilities)
 	clientTxBPS, serverTxBPS := authorizedBrutalRates(hello, g.cfg)
 	if sess.Transport() == tunnel.TransportQUIC {
+		requestedClientTxBPS, requestedServerTxBPS := clientTxBPS, serverTxBPS
 		var releaseBrutalBudget func()
 		clientTxBPS, serverTxBPS, releaseBrutalBudget = g.brutalBudget.reserve(
 			clientTxBPS, serverTxBPS, g.cfg.BrutalTotalDownloadBPS, g.cfg.BrutalTotalUploadBPS)
+		if clientTxBPS != requestedClientTxBPS || serverTxBPS != requestedServerTxBPS {
+			log.Printf("[Gateway] Relay Brutal aggregate budget clamped device=%s client_target=%d->%d B/s server_target=%d->%d B/s (zero keeps BBR)",
+				authorization.DeviceID, requestedClientTxBPS, clientTxBPS, requestedServerTxBPS, serverTxBPS)
+		}
 		// Release on handshake rejection, replacement or disconnect, never
 		// merely because the connection stopped carrying application data.
 		defer releaseBrutalBudget()

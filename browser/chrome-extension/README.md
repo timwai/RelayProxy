@@ -131,3 +131,19 @@ Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api
 ## 独立全 Chrome 网络代理（已集成、待真机验收）
 
 普通浏览器网络代理不依赖 Cookie 配对，不额外限定 HTTPS:443、公共 DNS 域名、IP/IPv6/内网地址或 Agent 的 DIRECT/PROXY/REJECT 规则；Chrome 全局代理开关与 HTTP 正向代理已进入分支并有自动化测试。要使用它，必须在 B Agent 上显式开启 `browser_sync.local_proxy`，并通过扩展勾选全 Chrome 代理。**真实 Windows/macOS Chrome、WebSocket、HTTP POST/大流量、Agent 异常及代理覆盖冲突尚未验收**。Cookie 会话的设备批准、双端加密和 Cookie 安全作用域规则继续独立存在。Chrome 代理 API 不是 VPN，UDP/QUIC/WebRTC/部分 DNS 路径需要实测。
+
+## Linux Server Web 的浏览器同步 HTTP 404 排查
+
+**错误「服务端响应无效（HTTP 404）」来自 Server Web 的 `GET /api/v1/browser-sync/admin/devices`**，不是 Chrome Cookie 解密或 WSS 传输失败。开发分支前端在服务端返回非 JSON 404 时会丢失状态，已补保留 HTTP status 的修复；但真正使端点可用仍需更新 Linux Server 二进制和配置。
+
+1. 确认 Linux 当前运行的 `relay-server` 来自 `feat/browser-session-sync` 或包含该功能的正式发布版，不能只更新 Chrome 扩展或 Server React 静态资源。`BrowserSync` 的路由由 Go Server 注册。
+2. 编辑 **Server 运行时真正加载的** YAML（可与 systemd `ExecStart` 中的 `-config` 路径核对），在 Server 现有的 `server.admin` 中设置 `tls_enabled: true`、准备受 Chrome 信任的服务端 TLS 证书和密钥，然后设置：
+   ```yaml
+   browser_sync:
+     enabled: true
+     extension_ids:
+       - "abcdefghijklmnopabcdefghijklmnop" # 换成真实 Chrome 扩展 ID
+   ```
+3. 重启 Linux `relay-server` 进程，查找日志 `[BrowserSync] Browser session relay enabled; extension allowlist size=...` 以及 `[Admin] Web Console & API starting on https://...`。
+4. 在 Linux Server 本机直测 Admin 端口，例如 `curl -k -i --noproxy '*' https://127.0.0.1:20001/api/v1/browser-sync/admin/devices`（按实际 Admin 端口替换）。**未登录时正常返回 401 JSON**；404 为路由尚未注册/版本错误；若直连 401、经公网域名 404，则检查 Nginx/Caddy 的 `/api/v1/browser-sync/` 反向代理路径及端口转发。浏览器同步必须走 **Admin HTTPS**，不能只由反代代理终止 TLS 后以 HTTP 回源，因为服务端扩展入口要求 `r.TLS != nil`。
+5. 管理页面登录后在「设备与身份 → 浏览器同步」重新刷新。A/B 扩展设备注册仍要求配置真实 extension ID、Admin HTTPS origin、设备审批。

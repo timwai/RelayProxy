@@ -236,3 +236,5 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 [Network Acceptance #38109445519](https://github.com/timwai/RelayProxy/actions/runs/38109445519) **success**；
 [Android CI #38109445479](https://github.com/timwai/RelayProxy/actions/runs/38109445479) **success**。
 当前 P0-08、NB-06/07/09/10 均是**已实现·待实体 Chrome/安全验收**；NB-08/11 的 GUI 入口、安全审计和真实浏览器协议兼容仍未完成。**绝不能把本机无鉴权回环代理的 CI 通过等同于 WebRTC/QUIC/DNS 无泄漏，或把本机 TCP 代理当成 OS VPN。** Cookie P0-01–07、P1、P2 其他状态不变；PR #194 保持 Draft，不合并 main。
+
+| 2026-10-11 | Linux Server 管理页 Browser Sync 显示「服务端响应无效（HTTP 404）」 | 确认 `server/web/frontend/src/api.js` 在服务端 HTTP 404 为 HTML/纯文本时丢失 `error.status`，导致管理页 `BrowserSyncAdmin` 的「未启用」状态识别分支失效。修复为解析 JSON 失败也保留 HTTP status，并在 Browser Sync 管理页说明旧 Server、`browser_sync.enabled: false`、Admin HTTPS/TLS、扩展 ID 和反向代理路径等排查项；补 UI 404/200 HTML 响应测试与 Linux Server 示例配置注释 | Browser Sync P0/P1 功能状态不变；Linux 部署诊断体验修复仍须按新 SHA CI 复核、用户本机部署确认 | 本次仅功能分支，正式发布仍不放行 |

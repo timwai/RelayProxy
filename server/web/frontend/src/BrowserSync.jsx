@@ -62,8 +62,13 @@ export function BrowserSyncAdmin({identities=[]}){
     {notice&&<div className="config-help" role="status">{notice}</div>}
     {error&&<div className="err-notice" role="alert">{error}</div>}
     {unavailable?<div className="panel"><h3>浏览器同步未启用</h3>
-      <p>需要在 Server Admin HTTPS 监听器启用 browser_sync.enabled，并配置允许的 Chrome 扩展 ID。</p>
-      <p>旧版本 Server 或尚未启用此功能时，这里不会显示任何浏览器设备。</p></div>:
+      <p>Server 返回了 HTTP 404，当前管理 API 中没有浏览器同步设备接口。</p>
+      <p>在 Linux Server 上确认运行的是包含 Browser Sync 的新版 relay-server，
+        并在实际加载的 Server YAML 中启用 browser_sync.enabled: true、
+        填写当前 Chrome 扩展 ID、开启 server.admin.tls_enabled: true，然后重启 Server。</p>
+      <p>如果经 Nginx/Caddy 访问，还要检查 /api/v1/browser-sync/ 路径是否转发到
+        <strong> Admin HTTPS 监听端口</strong>，而不是 Agent TCP/QUIC 端口。
+        直接访问 Admin HTTPS 的此接口，未登录时应为 HTTP 401，而不是 404。</p></div>:
     <>
       <div className="grid-cards">
         {[['待审批',count('pending')],['已批准',count('approved')],['已撤销',count('revoked')]]

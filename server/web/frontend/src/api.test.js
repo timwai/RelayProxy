@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {validChannelId, validatePortRange, normalizedCapabilities} from './api.js';
+import {api, validChannelId, validatePortRange, normalizedCapabilities} from './api.js';
 test('custom channel ids support only documented characters',()=>{
   assert.equal(validChannelId('notify.api-1'),true);
   assert.equal(validChannelId('中文'),false);
@@ -25,4 +25,26 @@ test('RDP audit timestamps never render missing/epoch as an event', () => {
   for(const invalid of [null,'',0,'1970-01-01T00:00:00Z','not a date'])
     assert.equal(fmtDate(invalid),'—');
   assert.match(fmtDate('2026-10-09T12:34:56Z'),/2026/);
+});
+
+test('HTTP 404 with an HTML/plain-text body preserves status for optional Browser Sync page', async()=>{
+  const originalFetch=globalThis.fetch;
+  let requested='';
+  globalThis.fetch=async(url)=>{
+    requested=url;
+    return {ok:false,status:404,json:async()=>{throw new SyntaxError('Not JSON')}};
+  };
+  try{
+    await assert.rejects(api('/browser-sync/admin/devices'),error=>
+      error.status===404 && error.message==='服务端响应无效（HTTP 404）');
+    assert.equal(requested,'/api/v1/browser-sync/admin/devices');
+  }finally{globalThis.fetch=originalFetch;}
+});
+test('unexpected HTML 200 is not silently treated as an unavailable feature',async()=>{
+  const originalFetch=globalThis.fetch;
+  globalThis.fetch=async()=>({ok:true,status:200,json:async()=>{throw new SyntaxError('Unexpected HTML')}});
+  try{
+    await assert.rejects(api('/browser-sync/admin/devices'),error=>
+      error.status===200 && /服务端响应无效/.test(error.message));
+  }finally{globalThis.fetch=originalFetch;}
 });

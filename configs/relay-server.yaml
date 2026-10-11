@@ -81,5 +81,15 @@ relay_acl:
     domains: []
     cidrs: []
 
+# Browser Sync/Chrome 扩展仍为开发预览，默认关闭。
+# Linux Server 若需测试，请先部署包含 Browser Sync 的新版 relay-server，
+# 把 server.admin.tls_enabled 改为 true，配置浏览器信任的 cert_file/key_file，
+# 然后设置 enabled: true 并加入 chrome://extensions 中看到的真实扩展 ID。
+# 启用后需要重启 Server；/api/v1/browser-sync/admin/devices 未登录应返回 401。
+#browser_sync:
+#  enabled: true
+#  extension_ids:
+#    - "abcdefghijklmnopabcdefghijklmnop"
+
 logging:
   level: "info"

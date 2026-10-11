@@ -52,5 +52,5 @@ test('mixing exit IDs invalidates five otherwise healthy runs',()=>{
 test('a path change during calibration invalidates the result',()=>{
  const list=Array.from({length:5},()=>record());
  list[2].download.path='relay_tls';
- assert.throws(()=>proposeBrutalFromSpeedTests(list),/路径改变/);
+ assert.throws(()=>proposeBrutalFromSpeedTests(list),/测速路径不是固定 Relay QUIC/);
 });

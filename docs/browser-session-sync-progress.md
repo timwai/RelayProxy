@@ -276,3 +276,12 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 不同域/路径 Cookie、Session Storage 的 tab 语义，及 DNS/QUIC/WebRTC
 边界仍没有实测证据。本次实现与单元测试不等于生产发布，PR #194 保持 Draft，
 不得在通过 CI、独立安全审查和真实设备验收前合并 main。
+
+### 2026-10-11 v2 配套回归审查（代码后置文档同步）
+
+- 代码提交 `599f9b3`：Web 设置移除了旧版 Extension ID 的手填字段，配置字段统计测试从 46 调整到 45；原有扩展自动上报审批仍需分别批准扩展和设备。
+- `932ac74`：修复历史扩展 Origin 审批测试的 Go 格式检查；格式问题不意味着自动授权验收通过。
+- `640ae3a`：纠正活动 WSS 控制帧身份检查使用 HTTPS Server Origin 的错误；签名认证继续绑定 Server HTTPS Origin，扩展撤销复核使用真实 `chrome-extension://` Origin，不放松安全门禁。此前 Go CI 在 WSS 集成测试出现 `browser approval revoked`。
+- `0c89b83`：Server 更新配置重启比较将 Browser Sync 的 nil/empty 列表规范化，避免意外显示 `browser_sync` 待重启；此前 Go CI 中 `TestServerSettingsPersistsWithoutReplacingRuntime` 暴露该回归。
+- `2a90f68`：单个 Origin 存在多个标签页时，优先当前聚焦 Chrome 窗口的活动标签页读取 Session Storage，再后备其它普通标签页。只能承诺该标签页全部 Key，不能承诺跨标签页汇总。
+- 历史 UI CI 部分步骤已通过 Server/Wails React、Chrome 扩展单元测试，但针对最终 SHA 的完整 Go/UI/Network/Android CI 需重新验证，不能跨提交继承通过状态。安全和功能验收：P0-01、P0-05–08、NB-05、NB-08、NB-11 仍待真实两端 Chrome 会话维持、冲突/登出、跨路径和分区 Cookie，以及 DNS/QUIC/WebRTC 证据；本开发 PR 继续 Draft，不合并 main。

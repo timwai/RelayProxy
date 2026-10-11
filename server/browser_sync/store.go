@@ -168,25 +168,34 @@ func (s *Store) Approve(ctx context.Context, id, identityID string, canSend, can
 	if id == "" || identityID == "" || (!canSend && !canReceive) {
 		return errors.New("invalid approval")
 	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
 	var status string
-	if err := s.db.QueryRowContext(ctx, `SELECT status FROM identities WHERE id=?`, identityID).Scan(&status); err != nil {
+	if err := tx.QueryRowContext(ctx, `SELECT status FROM identities WHERE id=?`, identityID).Scan(&status); err != nil {
 		return errors.New("identity does not exist")
 	}
 	if status != "active" {
 		return errors.New("identity is not active")
 	}
-	result, err := s.db.ExecContext(ctx, `UPDATE browser_sync_devices SET identity_id=?,state='approved',can_send=?,can_receive=?,updated_at=? WHERE id=? AND state='pending'`,
+	result, err := tx.ExecContext(ctx, `UPDATE browser_sync_devices SET identity_id=?,state='approved',can_send=?,can_receive=?,updated_at=? WHERE id=? AND state='pending'`,
 		identityID, boolInt(canSend), boolInt(canReceive), time.Now().UTC(), id)
 	if err != nil {
 		return err
 	}
-	count, _ := result.RowsAffected()
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
 	if count != 1 {
 		return ErrNotFound
 	}
-	// Legacy approval uses the same audit semantics, without changing
-	// either device permissions or the original approval result.
-	return s.recordApprovedDevice(ctx, id)
+	if err := appendBrowserAudit(ctx, tx, "device_approved", id, "", "", ""); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 func (s *Store) Revoke(ctx context.Context, id string) error {
 	// Device and its active pairings must be revoked atomically. A partial

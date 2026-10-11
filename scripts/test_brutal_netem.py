@@ -35,7 +35,7 @@ class OverlapAnalysisTests(unittest.TestCase):
         lines = [sample("overcommit-16mbit", mode, n, n, 6.0)
                  for mode in ("bbr", "brutal") for n in (0, 250, 500)]
         _, problems = analyze(lines, "0", minimum_overlap_ms=750)
-        self.assertTrue(any("only 250ms" in p for p in problems), problems)
+        self.assertTrue(any("only 500ms" in p for p in problems), problems)
 
     def test_nonmonotonic_receiver_bytes_is_rejected(self):
         lines = [sample("overcommit-16mbit", "brutal", ms, n)

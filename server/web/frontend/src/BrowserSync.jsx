@@ -36,7 +36,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
     if(busy)return;
     if(mode==='revoke'&&!window.confirm('撤销后该浏览器将不能继续同步，相关配对规则也会失效。确定撤销？'))return;
     if(mode==='delete'&&!window.confirm('永久删除已撤销浏览器设备及其全部配对/同步记录？此操作不可恢复，重新注册仍须管理员审批。'))return;
-    if(mode==='approve'&&!(identity[id]||devices.find(d=>d.id===id)?.requestedIdentityId)){
+    if(mode==='approve'&&!activeIdentities.some(item=>item.id===(identity[id]||devices.find(d=>d.id===id)?.requestedIdentityId))){
       setError('请为待审批浏览器选择已启用的身份。');return;
     }
     setBusy(id);setError('');setNotice('');
@@ -74,6 +74,8 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
       .includes(filter.trim().toLowerCase()))
     .sort((a,b)=>({pending:0,approved:1,revoked:2}[a.state]??3)-
       ({pending:0,approved:1,revoked:2}[b.state]??3));
+  const selectedIdentity=id=>identity[id]||devices.find(d=>d.id===id)?.requestedIdentityId||'';
+  const validIdentity=id=>activeIdentities.some(item=>item.id===selectedIdentity(id));
   const linkedExtensions=new Set(devices.filter(d=>d.extensionId).map(d=>d.extensionId));
   const count=state=>devices.filter(d=>d.state===state).length;
   const states=[['all','全部',devices.length],['pending','待审批',count('pending')],
@@ -124,7 +126,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
                   {d.extensionState==='revoked'&&<small className="browser-sync-device-extra">扩展已撤销</small>}</td>
                 <td>{d.state==='pending'?<div className="browser-sync-approve-controls">
                   <select className="input" aria-label={'为 '+(d.name||d.id)+' 选择身份'}
-                    value={identity[d.id]||d.requestedIdentityId||''} onChange={e=>setIdentity(v=>({...v,[d.id]:e.target.value}))}>
+                    value={activeIdentities.some(i=>i.id===(identity[d.id]||d.requestedIdentityId))?selectedIdentity(d.id):''} onChange={e=>setIdentity(v=>({...v,[d.id]:e.target.value}))}>
                     <option value="">选择身份</option>{activeIdentities.map(v=>
                       <option value={v.id} key={v.id}>{v.name||v.id}</option>)}
                   </select>
@@ -139,7 +141,7 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
                     {[d.send?'发送':null,d.receive?'接收':null].filter(Boolean).join(' / ')||'无同步权限'}</small></>}</td>
                 <td className="browser-sync-actions">{d.state==='pending'?
                   <button className="btn primary" type="button"
-                    disabled={!!busy||!(identity[d.id]||d.requestedIdentityId)||(!caps.send&&!caps.receive)}
+                    disabled={!!busy||!validIdentity(d.id)||(!caps.send&&!caps.receive)}
                     onClick={()=>action(d.id,'approve')}>批准</button>:
                   d.state==='approved'?<button className="btn" type="button"
                     disabled={!!busy} onClick={()=>action(d.id,'revoke')}>撤销授权</button>:

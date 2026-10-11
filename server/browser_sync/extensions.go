@@ -226,6 +226,9 @@ func (s *Store) ApproveEnrollment(ctx context.Context, id, identityID string, ca
 	if n != 1 {
 		return ErrNotFound
 	}
+	if err := appendBrowserAudit(ctx, tx, "device_approved", id, "", "", ""); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 

@@ -101,8 +101,13 @@ func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevi
 		return BrowserDevice{}, ErrDeviceConflict
 	}
 	if device.RequestedIdentityID != "" && actual.State == "pending" {
-		if _, err := s.db.ExecContext(ctx, `INSERT INTO browser_sync_identity_requests(device_id,requested_identity_id) VALUES(?,?) ON CONFLICT(device_id) DO UPDATE SET requested_identity_id=excluded.requested_identity_id`, device.ID, device.RequestedIdentityID); err != nil { return BrowserDevice{}, err }
-		actual.RequestedIdentityID = device.RequestedIdentityID
+		// Enrollment has public keys only. They are not proof of possession,
+		// so a second request must not rewrite another pending device's
+		// already-recorded identity preference.
+		if _, err := s.db.ExecContext(ctx, `INSERT INTO browser_sync_identity_requests(device_id,requested_identity_id) VALUES(?,?) ON CONFLICT(device_id) DO NOTHING`, device.ID, device.RequestedIdentityID); err != nil {
+			return BrowserDevice{}, err
+		}
+		return s.Device(ctx, device.ID)
 	}
 	return actual, nil
 }

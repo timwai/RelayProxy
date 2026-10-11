@@ -1,11 +1,16 @@
 import io
+import importlib.util
 from pathlib import Path
 import tarfile
 import tempfile
 import unittest
 import zipfile
 
-from ci_brutal_packaged_pairings import unpack_distributed_archive
+_runner_file = Path(__file__).with_name("ci-brutal-packaged-pairings.py")
+_spec = importlib.util.spec_from_file_location("brutal_packaged_runner", _runner_file)
+_runner = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_runner)
+unpack_distributed_archive = _runner.unpack_distributed_archive
 
 
 class ArchiveInteropTests(unittest.TestCase):

@@ -18,6 +18,9 @@ const (
 
 	CapabilityProxyClient = "proxy.client"
 	CapabilityProxyExit   = "proxy.exit"
+	// Signed, per-connection Agent opt-in for sharing its egress with Chrome-only
+	// Browser Sync recipients. This is a transport declaration, never a grant.
+	CapabilityBrowserNetworkExit = "browser.network.exit.v1"
 	// CapabilityRuntimeState tells the server that this client distinguishes
 	// approved device capabilities from the capabilities currently running.
 	// The active flags keep a control-only session from being advertised as an

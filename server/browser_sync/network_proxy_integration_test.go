@@ -80,6 +80,20 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 	})
 	t.Cleanup(func() { sessions.Unregister(exitID) })
 	proxy := NewNetworkProxy(store, sessions, "relay.example.com:21090", []string{exitID})
+	// Local Agent opt-in is independent from Server allowlist and proxy.exit.
+	identity, err := store.deviceAllowed(ctx, receiver.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !proxy.AllowedExit(identity.IdentityID, exitID) {
+		t.Fatal("signed Agent opt-in and Server allowlist failed")
+	}
+	exitSession, _ := sessions.Get(exitID)
+	exitSession.Capabilities = nil
+	if proxy.AllowedExit(identity.IdentityID, exitID) {
+		t.Fatal("server allowed browser traffic without Agent's signed local opt-in")
+	}
+	exitSession.Capabilities = []string{protocol.CapabilityBrowserNetworkExit}
 	lease, err := proxy.Issue(ctx, receiver.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -131,5 +145,66 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 	}
 	if string(buf) != "hello" {
 		t.Fatalf("unexpected tunneled payload %q", buf)
+	}
+}
+
+func TestNetworkProxyRevocationClosesEstablishedCONNECT(t *testing.T) {
+	store := testBrowserStore(t)
+	source, receiver, ruleID := approvedDeliveryRule(t, store)
+	ctx := context.Background()
+	const exitID = "dev_revoke_stream"
+	if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, "login.example.com", exitID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AcceptNetworkBinding(ctx, receiver.ID, ruleID, "login.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	sessions := session.NewManager()
+	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1)}
+	sessions.Register(&session.DeviceSession{
+		DeviceID: exitID, IdentityID: "id_1", DeviceName: "Exit",
+		Grants: []string{protocol.CapabilityProxyExit},
+		Capabilities: []string{protocol.CapabilityBrowserNetworkExit}, Tunnel: echo,
+	})
+	t.Cleanup(func() { sessions.Unregister(exitID) })
+	proxy := NewNetworkProxy(store, sessions, "relay.example.com:21090", []string{exitID})
+	lease, err := proxy.Issue(ctx, receiver.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(proxy)
+	defer server.Close()
+	config := server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	config.NextProtos = []string{"http/1.1"}
+	conn, err := tls.Dial("tcp", strings.TrimPrefix(server.URL, "https://"), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(9 * time.Second))
+	credentials := base64.StdEncoding.EncodeToString([]byte("browser:" + lease["token"].(string)))
+	if _, err := fmt.Fprintf(conn, "CONNECT login.example.com:443 HTTP/1.1\r\nHost: login.example.com:443\r\nProxy-Authorization: Basic %s\r\n\r\n", credentials); err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	line, err := reader.ReadString('\n')
+	if err != nil || !strings.Contains(line, "200 Connection Established") {
+		t.Fatalf("cannot establish CONNECT stream: %q %v", line, err)
+	}
+	for {
+		line, err = reader.ReadString('\n')
+		if err != nil {
+			t.Fatal(err)
+		}
+		if line == "\r\n" {
+			break
+		}
+	}
+	if err := store.RevokeNetworkBinding(ctx, receiver.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	// The CONNECT must close without waiting 15 minutes for its token TTL.
+	if _, err := reader.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("revoked CONNECT remained active or timed out: %v", err)
 	}
 }

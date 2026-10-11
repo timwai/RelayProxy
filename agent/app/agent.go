@@ -137,6 +137,7 @@ type AgentConfig struct {
 	DefaultExitID         string
 	CustomExits           []routing.CustomExit
 	ExitUpstreamID        string
+	BrowserNetworkShare   bool // signed Agent-local opt-in; default false
 	ExitEnabled           *bool
 	ExitUpstream          exit.UpstreamConfig
 	RDPEnabled            *bool
@@ -472,7 +473,8 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
 		a.exitHandler = exit.NewHandler(exit.HandlerConfig{
 			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
-			ResumeEnabled: cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
+			AllowBrowserNetwork: cfg.BrowserNetworkShare,
+		ResumeEnabled: cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
 			ResumeGrace:   15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: 512 << 10,
 		})
 	}
@@ -652,6 +654,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if handler != nil {
 		requested = append(requested, protocol.CapabilityProxyExit)
 		transportCaps = append(transportCaps, protocol.CapabilityTargetACL)
+		if cfg.BrowserNetworkShare {
+			transportCaps = append(transportCaps, protocol.CapabilityBrowserNetworkExit)
+		}
 	}
 	if cfg.IsRDPEnabled() {
 		requested = append(requested, protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic)
@@ -1235,7 +1240,9 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 		}
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 		header, err := protocol.ReadStreamHeader(stream)
-		if err != nil || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest) {
+		if err != nil || (header.Type != protocol.FrameTypeOpenTCP &&
+			header.Type != protocol.FrameTypeBrowserNetworkTCP &&
+			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest) {
 			<-sem
 			_ = stream.Close()
 			continue

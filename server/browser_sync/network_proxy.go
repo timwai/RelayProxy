@@ -215,6 +215,32 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	deadline := lease.expires
 	_ = client.SetDeadline(deadline)
 	_ = stream.SetDeadline(deadline)
+	// Authorization is not a one-time handshake: revoking either browser
+	// device, its rule, the Exit grant, or the local opt-in must terminate
+	// established CONNECT streams too. Fail closed on DB errors.
+	stopWatch := make(chan struct{})
+	watchStopped := make(chan struct{})
+	go func() {
+		defer close(watchStopped)
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stopWatch:
+				return
+			case <-r.Context().Done():
+			case <-exit.Tunnel.Done():
+			case <-ticker.C:
+				current, checkErr := p.authorizedExit(r.Context(), lease.deviceID, host)
+				if checkErr == nil && current == exit && time.Now().Before(lease.expires) {
+					continue
+				}
+			}
+			_ = client.Close()
+			_ = stream.Close()
+			return
+		}
+	}()
 	done := make(chan struct{}, 2)
 	go func() { _, _ = io.Copy(stream, buffer); done <- struct{}{} }()
 	go func() { _, _ = io.Copy(client, stream); done <- struct{}{} }()
@@ -222,6 +248,8 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	_ = client.Close()
 	_ = stream.Close()
 	<-done
+	close(stopWatch)
+	<-watchStopped
 }
 func (p *NetworkProxy) Start(listen string, tlsConfig *tls.Config) error {
 	if tlsConfig == nil || len(tlsConfig.Certificates) == 0 {

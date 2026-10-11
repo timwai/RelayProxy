@@ -168,6 +168,7 @@ type AgentConfigFile struct {
 		AllowPrivateNetwork bool   `yaml:"allow_private_network"`
 		AllowLoopback       bool   `yaml:"allow_loopback"`
 		UpstreamExitID      string `yaml:"upstream_exit_id,omitempty"`
+		BrowserNetworkShare bool   `yaml:"browser_network_share,omitempty"` // opt-in; false by default
 		Upstream            struct {
 			Mode     string `yaml:"mode"` // direct | socks5 | http | https
 			Address  string `yaml:"address"`

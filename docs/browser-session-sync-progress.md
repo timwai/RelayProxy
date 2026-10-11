@@ -140,3 +140,5 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | [Go CI #38102301709](https://github.com/timwai/RelayProxy/actions/runs/38102301709) 格式修复 | HTTPS CONNECT 集成测试新增后 gofmt 对连续接口方法声明的对齐作了调整；已按 CI 输出修正，不视为业务测试结果 | NB-02 继续待真机/新 SHA CI 验证 | 重新触发 Go/UI/Android CI |
 
 **网络绑定自动化结果（以代码 SHA `d83ebcae273678db00b021f529db28995d5892a3` 为准）：** [Go CI #38102344018](https://github.com/timwai/RelayProxy/actions/runs/38102344018) **success**（格式、tidy、vet、全量 Go 单测、竞态和 benchmark smoke，包含模拟 HTTPS CONNECT→Agent 双向流）；[UI CI #38102344036](https://github.com/timwai/RelayProxy/actions/runs/38102344036) **success**（扩展认证/PAC 单测、Server/Wails、Windows 和 macOS CI）；[Android Client #38102344009](https://github.com/timwai/RelayProxy/actions/runs/38102344009) **success**（debug APK 构建）。**仍缺真实 A Agent + B Chrome 端到端网络测试，P0 和 NB-05 不放行。** 后续文档专用提交不应复用该 SHA 的 CI 结论。
+
+| 2026-10-11 | CONNECT 存量会话即时撤销保护 | Gateway 对每个活动 CONNECT 每 2 秒重新核验配对/身份/Agent 在线状态/已签名本机共享同意，并在任意失败或隧道退出时关闭双方连接；新增 Revocation EOF 的 TLS 集成测试与 Agent 独立帧 ACL/拒绝单测 | NB-01/02 可靠性加强，仍待真实 Agent/Chrome 和全面安全审计 | 以本次代码 SHA 的 CI 实际结果为准 |

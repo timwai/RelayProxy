@@ -157,6 +157,8 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	}{
 		{"tunnel.bandwidth.up_mbps", c.Tunnel.Bandwidth.UpMbps},
 		{"tunnel.bandwidth.down_mbps", c.Tunnel.Bandwidth.DownMbps},
+		{"tunnel.bandwidth.total_up_mbps", c.Tunnel.Bandwidth.TotalUpMbps},
+		{"tunnel.bandwidth.total_down_mbps", c.Tunnel.Bandwidth.TotalDownMbps},
 	} {
 		if item.value < 0 || item.value > 1_000_000 {
 			return fmt.Errorf("%s 必须在 0-1000000 Mbps 之间；0 表示不限制客户端提示", item.name)

@@ -42,6 +42,8 @@ type ServerConfig struct {
 		Bandwidth               struct {
 			UpMbps                  int  `yaml:"up_mbps"`   // server -> agent per-client cap; 0 = unlimited
 			DownMbps                int  `yaml:"down_mbps"` // agent -> server per-client cap; 0 = unlimited
+			TotalUpMbps             int  `yaml:"total_up_mbps"` // sum of Server -> Agent Relay QUIC Brutal target; 0 = unlimited
+			TotalDownMbps           int  `yaml:"total_down_mbps"` // sum of Agent -> Server Relay QUIC Brutal target; 0 = unlimited
 			IgnoreClientBandwidth   bool `yaml:"ignore_client_bandwidth"`
 			DisableLossCompensation bool `yaml:"disable_loss_compensation"`
 		} `yaml:"bandwidth"`

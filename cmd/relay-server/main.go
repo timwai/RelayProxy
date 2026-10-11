@@ -486,6 +486,8 @@ func main() {
 		HeartbeatSec:             cfg.Tunnel.HeartbeatSec,
 		BrutalMaxUploadBPS:       congestion.MbpsToBytesPerSecond(cfg.Tunnel.Bandwidth.UpMbps),
 		BrutalMaxDownloadBPS:     congestion.MbpsToBytesPerSecond(cfg.Tunnel.Bandwidth.DownMbps),
+		BrutalTotalUploadBPS:     congestion.MbpsToBytesPerSecond(cfg.Tunnel.Bandwidth.TotalUpMbps),
+		BrutalTotalDownloadBPS:   congestion.MbpsToBytesPerSecond(cfg.Tunnel.Bandwidth.TotalDownMbps),
 		IgnoreClientBandwidth:    cfg.Tunnel.Bandwidth.IgnoreClientBandwidth,
 		DisableLossCompensation:  cfg.Tunnel.Bandwidth.DisableLossCompensation,
 		RendezvousAddress:        rendezvousAddress,

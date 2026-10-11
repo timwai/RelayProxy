@@ -48,6 +48,8 @@ type GatewayConfig struct {
 	HeartbeatSec             int
 	BrutalMaxUploadBPS       uint64 // server -> agent per-client cap; 0 = unlimited
 	BrutalMaxDownloadBPS     uint64 // agent -> server per-client cap; 0 = unlimited
+	BrutalTotalUploadBPS     uint64 // server -> agent total Relay QUIC Brutal target budget; 0 = unlimited
+	BrutalTotalDownloadBPS   uint64 // agent -> server total Relay QUIC Brutal target budget; 0 = unlimited
 	IgnoreClientBandwidth    bool
 	DisableLossCompensation  bool
 	RendezvousAddress        string
@@ -117,6 +119,7 @@ type Gateway struct {
 	quicListener      *quic.Listener
 	closed            atomic.Bool
 	activeConns       atomic.Int64
+	brutalBudget      brutalBandwidthBudget
 	proxyExitRevision atomic.Uint64
 	ctx               context.Context
 	cancel            context.CancelFunc
@@ -579,8 +582,19 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	sessionID := "sess_" + uuid.New().String()
 	heartbeatSec := g.heartbeatForDevice(hello, authorization.ApprovedCapabilities)
 	clientTxBPS, serverTxBPS := authorizedBrutalRates(hello, g.cfg)
-	if serverTxBPS > 0 && tunnel.UseBrutal(sess, serverTxBPS, g.cfg.DisableLossCompensation) {
-		log.Printf("[Gateway] Relay QUIC download switched to Brutal device=%s target=%d B/s", authorization.DeviceID, serverTxBPS)
+	if sess.Transport() == tunnel.TransportQUIC {
+		var releaseBrutalBudget func()
+		clientTxBPS, serverTxBPS, releaseBrutalBudget = g.brutalBudget.reserve(
+			clientTxBPS, serverTxBPS, g.cfg.BrutalTotalDownloadBPS, g.cfg.BrutalTotalUploadBPS)
+		// Release on handshake rejection, replacement or disconnect, never
+		// merely because the connection stopped carrying application data.
+		defer releaseBrutalBudget()
+		if serverTxBPS > 0 && tunnel.UseBrutal(sess, serverTxBPS, g.cfg.DisableLossCompensation) {
+			log.Printf("[Gateway] Relay QUIC download switched to Brutal device=%s target=%d B/s", authorization.DeviceID, serverTxBPS)
+		}
+	} else {
+		// TLS/yamux cannot enable Brutal or reserve a QUIC rate budget.
+		clientTxBPS, serverTxBPS = 0, 0
 	}
 	welcome := protocol.DeviceAccepted{
 		State:                    "approved",

@@ -3,7 +3,6 @@ package app
 import (
 	"bufio"
 	"context"
-	"encoding/base64"
 	"fmt"
 	"io"
 	"net"
@@ -16,7 +15,7 @@ import (
 type browserEchoDialer struct{}
 
 func (browserEchoDialer) DialBrowserNetworkTCP(ctx context.Context, host string, port uint16) (net.Conn, error) {
-	if host != "login.example.com" || port != 443 {
+	if (host != "login.example.com" && host != "other.example.com") || port != 443 {
 		return nil, fmt.Errorf("wrong target")
 	}
 	c, other := net.Pipe()
@@ -24,24 +23,19 @@ func (browserEchoDialer) DialBrowserNetworkTCP(ctx context.Context, host string,
 	return c, nil
 }
 func TestBrowserLocalProxyGuardsAndTunnel(t *testing.T) {
-	token := "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGH"
-	p := newBrowserLocalProxy("127.0.0.1:0", token, []string{"login.example.com"}, browserEchoDialer{})
-	encoded := base64.StdEncoding.EncodeToString([]byte("relay-browser:" + token))
+	p := newBrowserLocalProxy("127.0.0.1:0", browserEchoDialer{})
 	for _, tt := range []struct {
-		method, host, auth string
-		want               int
+		method, host string
+		want         int
 	}{
-		{"GET", "login.example.com:443", encoded, 405},
-		{"CONNECT", "login.example.com:443", "", 407},
-		{"CONNECT", "login.example.com:443", base64.StdEncoding.EncodeToString([]byte("relay-browser:wrong")), 407},
-		{"CONNECT", "127.0.0.1:443", encoded, 403},
-		{"CONNECT", "other.example.com:443", encoded, 403},
+		{"GET", "login.example.com:443", 405},
+		{"CONNECT", "127.0.0.1:443", 403},
+		{"CONNECT", "internal.local:443", 403},
+		{"CONNECT", "login.example.com:80", 403},
+		{"CONNECT", "login.example.com:8443", 403},
 	} {
 		r, _ := http.NewRequest(tt.method, "http://127.0.0.1/", nil)
 		r.Host = tt.host
-		if tt.auth != "" {
-			r.Header.Set("Proxy-Authorization", "Basic "+tt.auth)
-		}
 		w := &browserLocalRecorder{h: http.Header{}}
 		p.ServeHTTP(w, r)
 		if w.code != tt.want {
@@ -54,7 +48,7 @@ func TestBrowserLocalProxyGuardsAndTunnel(t *testing.T) {
 	}
 	port := ln.Addr().(*net.TCPAddr).Port
 	_ = ln.Close()
-	p = newBrowserLocalProxy(fmt.Sprintf("127.0.0.1:%d", port), token, []string{"login.example.com"}, browserEchoDialer{})
+	p = newBrowserLocalProxy(fmt.Sprintf("127.0.0.1:%d", port), browserEchoDialer{})
 	if err := p.Start(); err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +59,7 @@ func TestBrowserLocalProxyGuardsAndTunnel(t *testing.T) {
 	}
 	defer c.Close()
 	_ = c.SetDeadline(time.Now().Add(5 * time.Second))
-	_, _ = fmt.Fprintf(c, "CONNECT login.example.com:443 HTTP/1.1\r\nHost: login.example.com:443\r\nProxy-Authorization: Basic %s\r\n\r\n", encoded)
+	_, _ = fmt.Fprint(c, "CONNECT other.example.com:443 HTTP/1.1\r\nHost: other.example.com:443\r\n\r\n")
 	reader := bufio.NewReader(c)
 	line, err := reader.ReadString('\n')
 	if err != nil || !strings.Contains(line, "200") {
@@ -83,7 +77,7 @@ func TestBrowserLocalProxyGuardsAndTunnel(t *testing.T) {
 	_, _ = c.Write([]byte("hello"))
 	b := make([]byte, 5)
 	if _, err := io.ReadFull(reader, b); err != nil || string(b) != "hello" {
-		t.Fatalf("native relay failure %q %v", b, err)
+		t.Fatalf("native relay to non-whitelisted DNS host failed: %q %v", b, err)
 	}
 	if err := p.Close(); err != nil {
 		t.Fatal(err)

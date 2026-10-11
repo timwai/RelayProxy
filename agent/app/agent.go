@@ -140,8 +140,6 @@ type AgentConfig struct {
 	BrowserNetworkShare   bool // signed Agent-local opt-in; default false
 	BrowserLocalEnabled   bool
 	BrowserLocalListen    string
-	BrowserLocalToken     string `json:"-"`
-	BrowserLocalHosts     []string
 	ExitEnabled           *bool
 	ExitUpstream          exit.UpstreamConfig
 	RDPEnabled            *bool
@@ -1326,7 +1324,7 @@ func (a *Agent) Start() (err error) {
 			a.mu.Unlock()
 		}
 		if cfg.BrowserLocalEnabled {
-			srv := newBrowserLocalProxy(cfg.BrowserLocalListen, cfg.BrowserLocalToken, cfg.BrowserLocalHosts, a.dialer)
+			srv := newBrowserLocalProxy(cfg.BrowserLocalListen, a.dialer)
 			if err := srv.Start(); err != nil {
 				return fmt.Errorf("Browser Sync local bridge: %w", err)
 			}
@@ -2150,7 +2148,6 @@ func cloneAgentConfig(cfg AgentConfig) AgentConfig {
 	cfg.SOCKS5Enabled, cfg.HTTPEnabled, cfg.ExitEnabled, cfg.RDPEnabled = cloneBool(cfg.SOCKS5Enabled), cloneBool(cfg.HTTPEnabled), cloneBool(cfg.ExitEnabled), cloneBool(cfg.RDPEnabled)
 	cfg.P2PEnabled, cfg.P2PFallback = cloneBool(cfg.P2PEnabled), cloneBool(cfg.P2PFallback)
 	cfg.AccessDomains, cfg.AccessCIDRs = slices.Clone(cfg.AccessDomains), slices.Clone(cfg.AccessCIDRs)
-	cfg.BrowserLocalHosts = slices.Clone(cfg.BrowserLocalHosts)
 	cfg.Routing = routing.CloneConfig(cfg.Routing)
 	cfg.CustomExits = routing.CloneCustomExits(cfg.CustomExits)
 	cfg.DivertConfig.ExcludeProcesses = slices.Clone(cfg.DivertConfig.ExcludeProcesses)

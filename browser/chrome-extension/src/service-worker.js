@@ -268,7 +268,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if(!settings.sites.includes(policy.siteOrigin))
           throw new Error('站点权限未授权');
         const port=Number(message.port);
-        const result=await startLocalNetworkGuard(message.ruleId,policy.siteOrigin,port,message.token);
+        const result=await startLocalNetworkGuard(message.ruleId,policy.siteOrigin,port);
         return {ok:true,...result};
       }
       case 'NETWORK_LOCAL_DISABLE':

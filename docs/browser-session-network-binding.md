@@ -77,18 +77,14 @@ browser_sync:
   local_proxy:
     enabled: true
     listen: "127.0.0.1:21291"
-    token: "<本机生成的随机 32 字符以上令牌>"
-    allowed_hosts:
-      - login.example.com
-      - app.example.net
 ```
 
-建议在本机通过密码管理器或密码学安全随机数生成器生成 Token，权限限定为当前用户可读。Token 不放到 Server，也不通过 Browser Sync WSS 同步。扩展中点击「改用 B 本机 Agent 原生代理」，填入端口与 Token；仅在 `chrome.storage.session` 保存凭据，Chrome 重启后需重新输入。扩展持久化站点和选择模式，但缺少凭据时 PAC 将该网站指向拒绝连接的黑洞地址。
+本机 Agent 不使用用户名、密码、Token 或 Agent 端域名白名单，也不返回 HTTP 407；B 扩展点击「改用 B 本机 Agent 原生代理」即可选择入口端口。Chrome 扩展仍使用**已完成双端设备配对的 Cookie 规则**来生成精确主机名 PAC；浏览器启动和 Server/规则异常时先将绑定域名指向不可用的本机黑洞端口，经确认规则后恢复专用入口。**无鉴权仅适用于 B 本机入口**，A 的远端 Server HTTPS CONNECT 仍要求设备授权和代理租约。
 
-**本机 Agent 服务端也会检查**：连接来自 127.0.0.1；只允许 HTTP CONNECT 到 Agent 白名单的精确 DNS 主机:443；拒绝数字 IP、内网后缀、未授权 Basic Token；最多 64 条并发连接；转发目标必须命中 Agent 的 **PROXY** 路由，`DIRECT`、`REJECT` 均阻断，避免使用共享 Cookie 时直接暴露 B 的公网 IP。其他非绑定网站的流量保持 Chrome 原有网络。
+**本机 Agent 服务端只进行结构与路由限制，不做域名白名单或代理身份验证**：TCP 监听限定为 127.0.0.1；只接受 HTTP CONNECT 到合规 DNS 名称的 443 端口；拒绝 IP 字面量、`.local`、`.internal`、`.localhost`、`.arpa` 后缀与其他非法主机名；最多 64 条并发连接；转发目标必须命中 Agent 的 **PROXY** 路由，`DIRECT`、`REJECT` 均阻断。Agent 使用原生规则判断目标出口，而非维持独立的授权站点名单。Chrome 自身仍仅为已绑定网站设置 PAC，其他网站保持原有网络。
 
 ### 重要限制
 
 Chrome 的 PAC/HTTP CONNECT 不提供整个系统或浏览器的任意协议覆盖；WebRTC、DNS/第三方资源、Service Worker 内部请求仍需真实浏览器防泄漏验收。B 使用本机 Agent 的公网 IP 应当等于 **B Agent 当前选中或分流规则决定的出口 IP**，不必与 A 相同；网站仍可使用设备绑定、Passkey、DBSC 等机制拒绝会话迁移。
 
-不得把本机代理 Token 保存到扩展 `chrome.storage.local`、Server 数据库、日志或网页。若两个本机站点需要不同的 Agent 监听端口或凭据，当前同一 Chrome Profile 仅支持一个本机 Agent 配置，应使用另一个 Profile。切换本机/来源 Agent 时，需要重新验证 Chrome 实际代理控制权。真实 A/B 测试仍在 P0。
+**安全取舍**：由于没有本机鉴权和 Agent 域名白名单，B 机器上的**其他本地程序也可以连接这一回环代理**，并向任何符合目标格式、路由规则允许的公开域名发起 CONNECT。Chrome PAC 的单站点约束只限制扩展管理的浏览器流量，**不是 Agent 监听器的访问控制**；它不能隔离同一台设备上的其他用户或进程。需确保本机系统可信、默认关闭此入口，并在正式发布前复核本地恶意进程、DNS 重绑定、目标内网解析和配额风险。若多个绑定网站使用同一 Chrome Profile，当前只允许一个本机端口；切换本机/来源 Agent 时重新验证浏览器代理控制权。真实 A/B 测试仍在 P0。

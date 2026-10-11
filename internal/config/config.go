@@ -142,8 +142,6 @@ type AgentConfigFile struct {
 		LocalProxy struct {
 			Enabled      bool     `yaml:"enabled"`
 			Listen       string   `yaml:"listen"`
-			Token        string   `yaml:"token" json:"-"`
-			AllowedHosts []string `yaml:"allowed_hosts"`
 		} `yaml:"local_proxy"`
 	} `yaml:"browser_sync"`
 

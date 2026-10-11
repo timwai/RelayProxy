@@ -256,22 +256,17 @@ function renderRules(rules) {
         port.type='number';port.min='1024';port.max='65535';port.value='21291';
         port.placeholder='本机监听端口';
         port.setAttribute('aria-label','B 本机 Agent 监听端口');
-        const token=document.createElement('input');
-        token.type='password';token.autocomplete='off';
-        token.placeholder='B Agent 的本机 Browser Sync 访问令牌';
-        token.setAttribute('aria-label','B 本机 Agent 授权令牌');
         const confirm=document.createElement('button');confirm.textContent='确认绑定 B 本机 Agent';
         confirm.addEventListener('click',async()=>{
           if(!window.confirm('B 的此站点将经过本机 Agent 原生分流，不再经来源 A 的公网出口。DIRECT 规则将阻断而不是泄漏本机 IP。确认？'))return;
           try{
             await ask({type:'NETWORK_LOCAL_ENABLE',ruleId:rule.id,
-              port:Number(port.value),token:token.value,confirmed:true});
-            token.value='';
-            status('已切换至 B 本机 Agent。访问令牌仅保留在当前 Chrome 会话中。');
+              port:Number(port.value),confirmed:true});
+            status('已切换至 B 本机 Agent，无需代理鉴权。');
             await refreshPairing();
           }catch(error){failure(error);}
         });
-        card.append(help,port,token,confirm);
+        card.append(help,port,confirm);
       });
       card.append(local);
       if(rule.network?.status==='active'&&rule.network.matchingHost&&rule.localNetworkMode!=='source_agent'){

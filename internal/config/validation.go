@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
-	"regexp"
 	"slices"
 	"strconv"
 	"strings"
@@ -353,7 +352,6 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)
 	out.Routing = routing.CloneConfig(c.Routing)
 	out.Network.ExcludeProcesses = slices.Clone(c.Network.ExcludeProcesses)
-	out.BrowserSync.LocalProxy.AllowedHosts = slices.Clone(c.BrowserSync.LocalProxy.AllowedHosts)
 	return &out
 }
 
@@ -370,24 +368,6 @@ func isLoopbackHost(host string) bool {
 	return err == nil && addr.IsLoopback()
 }
 
-var browserLocalHostPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$`)
-
-func browserLocalHostname(host string) bool {
-	if len(host) > 253 || host != strings.ToLower(host) || !browserLocalHostPattern.MatchString(host) || net.ParseIP(host) != nil {
-		return false
-	}
-	for _, part := range strings.Split(host, ".") {
-		if len(part) > 63 {
-			return false
-		}
-	}
-	for _, end := range []string{".local", ".internal", ".localhost", ".arpa"} {
-		if strings.HasSuffix(host, end) {
-			return false
-		}
-	}
-	return true
-}
 func validateBrowserLocalConfig(c *AgentConfigFile) error {
 	x := c.BrowserSync.LocalProxy
 	if !x.Enabled {
@@ -400,17 +380,6 @@ func validateBrowserLocalConfig(c *AgentConfigFile) error {
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 1024 || n > 65535 {
 		return fmt.Errorf("browser_sync.local_proxy.listen requires port 1024-65535")
-	}
-	if len(x.Token) < 32 || len(x.Token) > 128 || strings.TrimSpace(x.Token) != x.Token || strings.ContainsAny(x.Token, ":\r\n") {
-		return fmt.Errorf("browser_sync.local_proxy.token needs 32-128 random characters")
-	}
-	if len(x.AllowedHosts) == 0 || len(x.AllowedHosts) > 64 {
-		return fmt.Errorf("browser_sync.local_proxy.allowed_hosts requires 1-64 exact DNS names")
-	}
-	for _, host := range x.AllowedHosts {
-		if !browserLocalHostname(host) {
-			return fmt.Errorf("invalid browser_sync.local_proxy.allowed_hosts hostname")
-		}
 	}
 	return nil
 }

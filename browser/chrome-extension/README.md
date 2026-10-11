@@ -121,3 +121,7 @@ Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api
 上述元数据不会包含 Cookie 内容。Server 的结果保留窗口是短期的，不是离线 Cookie 邮箱，A 离线时 B 仍可能缺少最新源会话。
 
 新增回归测试包含：多枚 Cookie 第二次写入失败、写入期间网站更新、未清除的恢复意图、浏览器序号记录丢失、设备越权查询以及真实 TLS/WSS 断线后的 ACK 恢复。**这些测试仍不能替代两台真实 Chrome 对授权网站的兼容性测试。**
+
+## B 端本机 Agent 可选出口（开发预览）
+
+使用 B 本机 Agent 时，浏览器扩展可为已配对的 HTTPS 会话规则指定独立回环接入端口。Agent `browser_sync.local_proxy` 仅需 `enabled: true` 和 `listen: "127.0.0.1:21291"`，不需要 Token、用户名密码或 Agent 域名白名单，也不依赖通用 SOCKS5/HTTP/透明代理开关；实际出站遵循 Agent 的 Relay/P2P/QUIC/自定义出口路由，DIRECT/REJECT 不会静默直连。**此无鉴权回环代理也可以被同机其他进程使用**，须在可信设备上显式启用。来源 A 的远端网络代理仍保留独立认证。详见 [网络绑定设计](../../docs/browser-session-network-binding.md)。

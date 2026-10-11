@@ -65,3 +65,9 @@ test('local Agent 407 is isolated from A upstream and regular website login',()=
  assert.deepEqual(proxyAuthDecision({isProxy:false,scheme:'basic',
   challenger:{host:'login.example.com',port:443}},local,1000),{});
 });
+
+test('local Agent does not accept or supply proxy authorization',()=>{
+ const local={host:'127.0.0.1',port:21291};
+ assert.deepEqual(proxyAuthDecision({isProxy:true,scheme:'basic',
+   challenger:{host:'127.0.0.1',port:21291}},local,1000),{});
+});

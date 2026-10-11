@@ -6,7 +6,9 @@ import {getSettings} from './rules.js';
 
 const DESIRED='browserSyncNetworkDesired';
 const CREDS='browserSyncNetworkProxyCredentials';
-const LOCAL_CREDS='browserSyncLocalAgentCredentials';
+// Session-only server pairing validation, NOT local proxy authentication.
+const LOCAL_READY='browserSyncLocalAgentValidated';
+const LEGACY_LOCAL_CREDS='browserSyncLocalAgentCredentials';
 const BLACKHOLE='PROXY 127.0.0.1:9';
 let refreshing=null;
 
@@ -59,8 +61,8 @@ export async function desiredNetwork(){
 async function currentLease(){
   return (await chrome.storage.session.get(CREDS))[CREDS]||null;
 }
-async function localCredential(){
-  return (await chrome.storage.session.get(LOCAL_CREDS))[LOCAL_CREDS]||null;
+async function localValidated(){
+  return (await chrome.storage.session.get(LOCAL_READY))[LOCAL_READY]||null;
 }
 function checkLocalPort(port){
   if(!Number.isInteger(port)||port<1024||port>65535)
@@ -70,12 +72,12 @@ function checkLocalPort(port){
 export async function selectedNetworkRules(){return desiredNetwork();}
 async function applyPAC(desired,lease=null){
   if(!Object.keys(desired).length){
-    await chrome.storage.session.remove([CREDS,LOCAL_CREDS]);
+    await chrome.storage.session.remove([CREDS,LOCAL_READY,LEGACY_LOCAL_CREDS]);
     await chrome.proxy.settings.clear({scope:'regular'});
     return;
   }
   const target=lease?proxyEndpoint(lease.host,lease.port):null;
-  const local=await localCredential();
+  const local=await localValidated();
   await chrome.proxy.settings.set({scope:'regular',value:{
     mode:'pac_script',pacScript:{data:buildPAC(desired,target,local),mandatory:true}
   }});
@@ -85,6 +87,7 @@ async function applyPAC(desired,lease=null){
 }
 export async function installNetworkGuard(){
   const desired=await desiredNetwork();
+  await chrome.storage.session.remove(LEGACY_LOCAL_CREDS);
   if(Object.keys(desired).length)await applyPAC(desired);
 }
 export async function stopNetworkGuard(ruleId){
@@ -92,7 +95,7 @@ export async function stopNetworkGuard(ruleId){
   delete desired[ruleId];
   await chrome.storage.local.set({[DESIRED]:desired});
   if(!Object.values(desired).some(x=>x.mode==='local_agent'))
-    await chrome.storage.session.remove(LOCAL_CREDS);
+    await chrome.storage.session.remove(LOCAL_READY);
   await applyPAC(desired);
   if(Object.keys(desired).length)await refreshNetworkBinding({force:true}).catch(()=>{});
 }
@@ -104,21 +107,18 @@ export async function startNetworkGuard(ruleId,siteOrigin){
   await applyPAC(desired); // blackhole first: fail closed
   return refreshNetworkBinding({force:true});
 }
-// The caller must already have checked active paired receiver status and
-// the decrypted Cookie policy. Token is session-only; restart => fail closed.
-export async function startLocalNetworkGuard(ruleId,siteOrigin,port,token){
+// The caller must have checked receiver pairing and decrypted Cookie policy.
+// Loopback CONNECT needs no credentials. PAC remains blocked until validated.
+export async function startLocalNetworkGuard(ruleId,siteOrigin,port=21291){
   parseBoundHost(siteOrigin);
   checkLocalPort(port);
-  if(typeof token!=='string'||token.length<32||token.length>128||/[\r\n:]/.test(token))
-    throw new Error('请输入本机 Agent 配置中的 32–128 位访问令牌');
   const desired=await desiredNetwork();
   desired[ruleId]={mode:'local_agent',siteOrigin,port};
   await chrome.storage.local.set({[DESIRED]:desired});
   // Guard first. If connection or permission checks fail, bound host must
   // not fall through to DIRECT even after Chrome service worker restart.
-  await chrome.storage.session.remove(LOCAL_CREDS);
+  await chrome.storage.session.remove([LOCAL_READY,LEGACY_LOCAL_CREDS]);
   await applyPAC(desired);
-  await chrome.storage.session.set({[LOCAL_CREDS]:{port,token}});
   return refreshNetworkBinding({force:true});
 }
 // Called BEFORE applying Cookie snapshots or issuing a sync request.
@@ -127,9 +127,9 @@ export async function ensureNetworkForRule(ruleId,siteOrigin){
   if(desired[ruleId]?.mode==='local_agent'){
     if(desired[ruleId].siteOrigin!==siteOrigin)throw new Error('本机代理域名与加密 Cookie 规则不一致');
     await refreshNetworkBinding({force:true});
-    const current=await localCredential();
+    const current=await localValidated();
     if(!current || current.port!==desired[ruleId].port)
-      throw new Error('本机 Agent 令牌不可用，网站访问保持阻断');
+      throw new Error('本机 Agent 配对状态未验证，网站访问保持阻断');
     await verifyProxyOwnership();
     return;
   }
@@ -174,10 +174,12 @@ export function refreshNetworkBinding({force=false}={}){
           r.targetBrowserDeviceId===me.deviceId && r.keysConfirmed===true))
           throw new Error('本机 Agent 绑定的 Cookie 规则不再有效');
       }
-      const local=await localCredential();
-      if(!local || !localRules.every(([,r])=>r.port===local.port))
-        throw new Error('本机 Agent 授权令牌不存在，请重新输入；该网站已保持阻断');
+      const port=localRules[0][1].port;
+      if(!localRules.every(([,r])=>r.port===port))
+        throw new Error('当前 Chrome Profile 的本机 Agent 端口必须一致');
+      await chrome.storage.session.set({[LOCAL_READY]:{port}});
     }
+    if(!localRules.length)await chrome.storage.session.remove(LOCAL_READY);
     for(const [ruleId,item] of sourceRules){
       if(!settings.sites.includes(item.siteOrigin))throw new Error('站点授权已失效');
       const answer=await sendControl('NETWORK_BINDING',{ruleId});
@@ -203,7 +205,7 @@ export function refreshNetworkBinding({force=false}={}){
   refreshing=job().catch(async error=>{
     const desired=await desiredNetwork();
     if(Object.keys(desired).length){
-      await chrome.storage.session.remove([CREDS,LOCAL_CREDS]);
+      await chrome.storage.session.remove([CREDS,LOCAL_READY,LEGACY_LOCAL_CREDS]);
       await applyPAC(desired).catch(()=>{});
     }
     throw error;
@@ -225,14 +227,8 @@ export function registerNetworkAuth(){
   chrome.webRequest?.onAuthRequired?.addListener((details,respond)=>{
     (async()=>{
       if(!details.isProxy || details.scheme?.toLowerCase()!=='basic')return {};
-      const local=await localCredential();
-      if(local && String(details.challenger?.host)==='127.0.0.1' &&
-         Number(details.challenger?.port)===local.port){
-        return proxyAuthDecision(details,{host:'127.0.0.1',port:local.port,
-          username:'relay-browser',password:local.token,expiresAt:Number.MAX_SAFE_INTEGER});
-      }
       const lease=await currentLease();
       return proxyAuthDecision(details,lease);
-    })().then(respond,()=>respond({cancel:true}));
+    })().then(respond,()=>respond({}));
   },{urls:['<all_urls>']},['asyncBlocking']);
 }

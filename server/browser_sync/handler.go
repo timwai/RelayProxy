@@ -65,17 +65,13 @@ func (h *Handler) allowOrigin(w http.ResponseWriter, r *http.Request, enrollment
 		http.Error(w, "invalid Chrome extension Origin", http.StatusForbidden)
 		return false
 	}
-	if !enrollment {
-		// Administrator revocation always overrides legacy static allowlists.
-		if h.Store.ExtensionRevoked(r.Context(), id) {
-			http.Error(w, "extension revoked by administrator", http.StatusForbidden)
-			return false
-		}
-		if _, ok := h.extensions[origin]; !ok && !h.Store.ExtensionApproved(r.Context(), id) {
-			http.Error(w, "extension not approved by administrator", http.StatusForbidden)
-			return false
-		}
+	// Legacy origin-wide revocations still block connections, including enrollment.
+	// Origin IDs are only identifiers; never grant a device any access here.
+	if h.Store.ExtensionRevoked(r.Context(), id) {
+		http.Error(w, "extension revoked by administrator", http.StatusForbidden)
+		return false
 	}
+
 	w.Header().Set("Access-Control-Allow-Origin", origin)
 	w.Header().Set("Vary", "Origin")
 	w.Header().Set("Cache-Control", "no-store")
@@ -108,11 +104,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			h.registerExtensionDevice(w, r, id)
 			return
 		}
-		// Preserve extension-only enrollment for older development clients.
-		if _, trusted := h.extensions[r.Header.Get("Origin")]; trusted {
-			writeBrowserJSON(w, http.StatusAccepted, map[string]string{"id": id, "state": "approved"})
-			return
-		}
+		// Older extensions can register the origin first. That does not grant
+		// access; they must also register and obtain device approval.
 		state, err := h.Store.RequestExtension(r.Context(), id)
 		if err != nil {
 			http.Error(w, "extension enrollment unavailable", http.StatusServiceUnavailable)
@@ -241,6 +234,18 @@ func browserRequestOrigin(host string) string {
 	return "https://" + host
 }
 
+// originMatchesDevice rejects a different extension from using an approved
+// browser device ID and signature. Unbound legacy devices require an explicit
+// server-side legacy extension allowlist, never a self-registered origin.
+func (h *Handler) originMatchesDevice(origin string, device BrowserDevice) bool {
+	id := strings.TrimPrefix(origin, "chrome-extension://")
+	if device.ExtensionID != "" {
+		return device.ExtensionID == id
+	}
+	_, legacy := h.extensions[origin]
+	return legacy
+}
+
 func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	select {
 	case h.slots <- struct{}{}:
@@ -302,15 +307,15 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		_ = conn.Close(websocket.StatusPolicyViolation, "invalid proof")
 		return
 	}
-	// Signature verification is bound to the HTTPS server origin. Extension
-	// approval is bound separately to the actual chrome-extension:// Origin.
+	// Signature verification is bound to the HTTPS server origin, and the
+	// approved device must match its registered Chrome extension Origin.
 	extensionOrigin := r.Header.Get("Origin")
 	// Chrome URL.origin canonicalizes HTTPS's default port 443 away.
 	// Host headers coming through a proxy may still contain an explicit :443.
 	// Both must produce the same signed origin or approved browsers fail AUTH_PROOF.
 	origin := browserRequestOrigin(r.Host)
 	device, err := h.auth.Verify(proofCtx, proof.DeviceID, origin, nonce, proof.Signature)
-	if err != nil {
+	if err != nil || !h.originMatchesDevice(extensionOrigin, device) {
 		_ = conn.Close(websocket.StatusPolicyViolation, "not authorized")
 		return
 	}
@@ -340,9 +345,8 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 		}
 		current, err := h.Store.deviceAllowed(ctx, device.ID)
 		originID := strings.TrimPrefix(extensionOrigin, "chrome-extension://")
-		_, legacy := h.extensions[extensionOrigin]
 		if err != nil || current.ID != device.ID || h.Store.ExtensionRevoked(ctx, originID) ||
-			(!legacy && !h.Store.ExtensionApproved(ctx, originID)) {
+			!h.originMatchesDevice(extensionOrigin, current) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "browser approval revoked")
 			return
 		}

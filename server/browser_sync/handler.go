@@ -341,7 +341,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 	}
 	// The browser must be discoverable as an online recipient by the time it
 	// receives AUTH_OK, otherwise a peer can immediately race the registration.
-	client := &browserConnection{conn: conn}
+	client := &browserConnection{conn: conn, connectedAt: time.Now().UTC()}
 	h.attach(device.ID, client)
 	defer h.detach(device.ID, client)
 	if err := client.send(proofCtx, map[string]any{

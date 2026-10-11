@@ -414,6 +414,11 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 		policy := c.RelayPolicy()
 		policy.AccessHosts = append([]string{}, policy.AccessHosts...)
 		policy.AccessCIDRs = append([]string{}, policy.AccessCIDRs...)
+		browserSync := c.BrowserSync
+		// Persisted YAML may normalize an absent list into an empty list.
+		// Both represent the same Browser Sync configuration.
+		browserSync.ExtensionIDs = append([]string{}, browserSync.ExtensionIDs...)
+		browserSync.NetworkProxy.AllowedExitIDs = append([]string{}, browserSync.NetworkProxy.AllowedExitIDs...)
 		return map[string]any{
 			"server.admin.listen": c.Server.Admin.Listen, "server.admin.tls_enabled": c.IsAdminTLSEnabled(),
 			"server.tls_enabled": c.IsTLSEnabled(), "server.tls.listen": c.Server.TLS.Listen, "server.quic.listen": c.Server.QUIC.Listen,
@@ -424,7 +429,7 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 			"p2p":          c.P2P,
 			"direct":       c.Direct,
 			"exit":         c.Exit,
-			"browser_sync": c.BrowserSync,
+			"browser_sync": browserSync,
 			"database":     c.Database,
 		}
 	}

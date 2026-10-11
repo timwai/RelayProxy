@@ -150,7 +150,7 @@ func (b *BrutalSender) updateAckRate(currentTimestamp int64) {
 		if b.canPrintAckRate(currentTimestamp) {
 			b.lastAckPrintTimestamp = currentTimestamp
 			b.debugPrint("Not enough samples (total=%d, ack=%d, loss=%d, rtt=%d)",
-				ackCount+lossCount, ackCount, lossCount, b.rttStats.SmoothedRTT().Milliseconds())
+				ackCount+lossCount, ackCount, lossCount, b.debugRTTMilliseconds())
 		}
 		return
 	}
@@ -160,7 +160,7 @@ func (b *BrutalSender) updateAckRate(currentTimestamp int64) {
 		if b.canPrintAckRate(currentTimestamp) {
 			b.lastAckPrintTimestamp = currentTimestamp
 			b.debugPrint("ACK rate too low: %.2f, clamped to %.2f (total=%d, ack=%d, loss=%d, rtt=%d)",
-				rate, minAckRate, ackCount+lossCount, ackCount, lossCount, b.rttStats.SmoothedRTT().Milliseconds())
+				rate, minAckRate, ackCount+lossCount, ackCount, lossCount, b.debugRTTMilliseconds())
 		}
 		return
 	}
@@ -168,7 +168,7 @@ func (b *BrutalSender) updateAckRate(currentTimestamp int64) {
 	if b.canPrintAckRate(currentTimestamp) {
 		b.lastAckPrintTimestamp = currentTimestamp
 		b.debugPrint("ACK rate: %.2f (total=%d, ack=%d, loss=%d, rtt=%d)",
-			rate, ackCount+lossCount, ackCount, lossCount, b.rttStats.SmoothedRTT().Milliseconds())
+			rate, ackCount+lossCount, ackCount, lossCount, b.debugRTTMilliseconds())
 	}
 }
 
@@ -176,6 +176,15 @@ func (b *BrutalSender) InSlowStart() bool                                 { retu
 func (b *BrutalSender) InRecovery() bool                                  { return false }
 func (b *BrutalSender) MaybeExitSlowStart()                               {}
 func (b *BrutalSender) OnRetransmissionTimeout(packetsRetransmitted bool) {}
+
+// debugRTTMilliseconds is safe during the first ACK events, when quic-go
+// may not yet have assigned an RTT statistics provider.
+func (b *BrutalSender) debugRTTMilliseconds() int64 {
+	if b.rttStats == nil {
+		return 0
+	}
+	return b.rttStats.SmoothedRTT().Milliseconds()
+}
 
 func (b *BrutalSender) canPrintAckRate(currentTimestamp int64) bool {
 	return b.debug && currentTimestamp-b.lastAckPrintTimestamp >= debugPrintInterval

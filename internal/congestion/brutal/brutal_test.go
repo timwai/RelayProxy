@@ -48,3 +48,21 @@ func TestBrutalBeforeRTTStatsInstalled(t *testing.T) {
 		t.Fatal("sender cannot send its initial flight")
 	}
 }
+
+func TestBrutalDebugBeforeRTTStatsInstalled(t *testing.T) {
+	b := NewBrutalSender(1_000_000, false)
+	b.debug = true
+	// Enough ACKs to exercise both the initial sampling and 20% loss
+	// diagnostic branches without installing RTT statistics.
+	b.OnCongestionEventEx(0, monotime.Time(10*time.Second),
+		make([]congestion.AckedPacketInfo, 10), nil)
+	if got := b.debugRTTMilliseconds(); got != 0 {
+		t.Fatalf("uninitialized RTT = %d, want 0", got)
+	}
+	b.OnCongestionEventEx(0, monotime.Time(12*time.Second),
+		make([]congestion.AckedPacketInfo, 80),
+		make([]congestion.LostPacketInfo, 20))
+	if got := b.ackRate; got != 0.8 {
+		t.Fatalf("debug-mode loss compensation = %v, want 0.8", got)
+	}
+}

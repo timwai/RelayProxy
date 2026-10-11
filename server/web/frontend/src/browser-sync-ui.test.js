@@ -15,6 +15,8 @@ test('Browser Sync management approves devices only',()=>{
  assert.match(page,/stateFilter==='all'/);
  assert.match(page,/aria-pressed=\{stateFilter===id\}/);
  assert.match(page,/setIdentity/);
+ assert.match(page,/const validIdentity=id=>activeIdentities\.some/);
+ assert.match(page,/disabled=\{!!busy\|\|!validIdentity\(d\.id\)/);
  assert.match(page,/send:e\.target\.checked/);
  assert.match(page,/receive:e\.target\.checked/);
  assert.match(page,/action\(d\.id,'approve'\)/);

@@ -4,19 +4,21 @@ import "sync"
 
 const minBudgetedBrutalBPS = 125_000 // 1 Mbps; smaller leftover quotas use BBR.
 
-// brutalBandwidthBudget reserves *configured targets*, not actual interface
-// capacity or measured throughput. It never shapes BBR, P2P or Public Direct.
-// A zero limit preserves legacy unlimited-per-server behavior.
+// brutalBandwidthBudget reserves conservative pacing capacity for configured
+// Brutal targets. Loss compensation can increase pacing to 125% of the target
+// (ackRate floor 0.8). UDP/IP overhead and independent BBR traffic are NOT
+// accounted for. Zero budget preserves the original unlimited behavior.
 type brutalBandwidthBudget struct {
 	mu       sync.Mutex
-	clientTx uint64
+	clientTx uint64 // charged B/s, including compensation headroom
 	serverTx uint64
 }
 
 func (b *brutalBandwidthBudget) reserve(clientRequest, serverRequest, clientLimit, serverLimit uint64) (clientRate, serverRate uint64, release func()) {
 	b.mu.Lock()
-	clientRate = reserveBrutalDirection(clientRequest, clientLimit, &b.clientTx)
-	serverRate = reserveBrutalDirection(serverRequest, serverLimit, &b.serverTx)
+	var clientCharge, serverCharge uint64
+	clientRate, clientCharge = reserveBrutalDirection(clientRequest, clientLimit, &b.clientTx)
+	serverRate, serverCharge = reserveBrutalDirection(serverRequest, serverLimit, &b.serverTx)
 	b.mu.Unlock()
 
 	var once sync.Once
@@ -24,30 +26,34 @@ func (b *brutalBandwidthBudget) reserve(clientRequest, serverRequest, clientLimi
 		once.Do(func() {
 			b.mu.Lock()
 			defer b.mu.Unlock()
-			if clientLimit > 0 {
-				b.clientTx -= clientRate
-			}
-			if serverLimit > 0 {
-				b.serverTx -= serverRate
-			}
+			b.clientTx -= clientCharge
+			b.serverTx -= serverCharge
 		})
 	}
 }
 
-func reserveBrutalDirection(request, limit uint64, used *uint64) uint64 {
+// reserveBrutalDirection grants a target only if its worst-case 1.25x
+// loss-compensated pacer fits in the configured aggregate reservation pool.
+// The 4/5 computation avoids multiplication overflow on untrusted values.
+func reserveBrutalDirection(request, limit uint64, used *uint64) (granted, charge uint64) {
 	if request == 0 || limit == 0 {
-		return request
+		return request, 0
 	}
 	if *used >= limit {
-		return 0
+		return 0, 0
 	}
 	available := limit - *used
-	if request > available {
-		request = available
+	maxTarget := available/5*4 + available%5*4/5
+	if request > maxTarget {
+		request = maxTarget
 	}
 	if request < minBudgetedBrutalBPS {
-		return 0
+		return 0, 0
 	}
-	*used += request
-	return request
+	charge = request + request/4
+	if request%4 != 0 {
+		charge++
+	}
+	*used += charge
+	return request, charge
 }

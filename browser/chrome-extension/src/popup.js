@@ -66,7 +66,7 @@ function renderRules(rules, siteOrigin) {
     const info = el('div','rule-info');
     const main = el('div','rule-name');
     main.append(el('strong','',new URL(rule.policy.siteOrigin).hostname + (rule.policy.siteOrigin.startsWith('http://') ? ' · HTTP' : '')),
-      el('span','role-label',rule.role === 'source' ? '来源 A' : '接收 B'));
+      el('span','role-label',rule.role === 'source' ? '发送端' : '接收端'));
     const detail = el('div','rule-detail',STATES[rule.lastTransfer?.state] || '等待同步');
     if (['PARTIAL','CONFLICT','FAILED'].includes(rule.lastTransfer?.state)) detail.classList.add('attention');
     info.append(main,detail);

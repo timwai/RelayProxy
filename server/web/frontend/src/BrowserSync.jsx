@@ -1,18 +1,6 @@
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
 import {api,json,fmtDate,list} from './api.js';
 
-// Browser network sharing is automatically provided by the existing
-// TLS/TCP relay. Only an explicitly opted-in, same-Identity Agent exit can be
-// selected from an approved A/B browser pairing.
-function BrowserNetworkSettings() {
-  return <div className="panel">
-    <h3>Agent 浏览器网络出口</h3>
-    <p>Browser Sync 自动复用 Server 现有 TLS/TCP 中继端口，无需配置单独的代理监听、对外地址或 Agent 白名单。</p>
-    <p className="muted">Chrome 扩展中的 RelayProxy HTTPS Server 使用现有中继 HTTPS 地址，例如 https://relay.example.com:443。Cookie / Storage 同步无需启用 Agent 网络出口。</p>
-    <p className="muted">需要共享网络出口时，在 Agent Web / GUI → 本机出口共享中开启“允许浏览器网络共享”，并确保 Agent 已获得 proxy.exit 授权。A/B 浏览器完成配对后，由来源浏览器选择在线 Agent，再由接收浏览器确认网站绑定。</p>
-  </div>;
-}
-
 // Browser identity is separate from Agent enrollment. This screen uses the
 // existing authenticated, admin-only API; it never displays Cookie values.
 export function BrowserSyncAdmin({identities=[],onOpenSettings}){
@@ -26,6 +14,8 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
   const [identity,setIdentity]=useState({});
   const [capabilities,setCapabilities]=useState({});
   const [filter,setFilter]=useState('');
+  const [view,setView]=useState('devices');
+  const [stateFilter,setStateFilter]=useState('all');
   const activeIdentities=useMemo(()=>list(identities).filter(x=>{
     const state=x.status??x.state;
     return !state||state==='active';
@@ -86,96 +76,123 @@ export function BrowserSyncAdmin({identities=[],onOpenSettings}){
     }catch(err){setError(err.message);}
     finally{setBusy('');}
   };
-  const visible=devices.filter(d=>[d.name,d.id,d.identityId,d.state,d.extensionId].join(' ').toLowerCase()
-    .includes(filter.toLowerCase()));
-  const linkedExtensions=new Set(devices.filter(d=>d.extensionId).map(d=>d.extensionId));
-  const legacyExtensions=extensions.filter(e=>e.state!=='pending'||!linkedExtensions.has(e.id));
+  const visible=devices.filter(d=>
+    (stateFilter==='all'||d.state===stateFilter)&&
+    [d.name,d.id,d.identityId,d.state,d.extensionId].join(' ').toLowerCase()
+      .includes(filter.trim().toLowerCase()))
+    .sort((a,b)=>({pending:0,approved:1,revoked:2}[a.state]??3)-
+      ({pending:0,approved:1,revoked:2}[b.state]??3));
   const count=state=>devices.filter(d=>d.state===state).length;
-  return <section className="browser-sync-admin">
-    <div className="page-head"><div><h1>浏览器同步</h1>
-      <p>首次只需一次审批：同时批准扩展身份及当前浏览器设备。会话采用端到端加密，Server 不保存 Cookie。</p></div>
-      <div className="form-actions"><button className="btn" onClick={onOpenSettings}>编辑浏览器服务配置</button>
-      <button className="btn" onClick={refresh} disabled={loading||!!busy}>
-        {loading?'正在读取…':'刷新设备'}</button></div></div>
+  const states=[['all','全部',devices.length],['pending','待审批',count('pending')],
+    ['approved','已批准',count('approved')],['revoked','已撤销',count('revoked')]];
+  return <section className="browser-sync-admin browser-sync-refined">
+    <div className="page-head">
+      <div><h1>浏览器同步</h1><p>设备授权与同步访问管理</p></div>
+      <div className="form-actions">
+        <button className="btn" type="button" onClick={()=>{setView('devices');refresh();}}
+          disabled={loading||!!busy}>刷新</button>
+        <button className="btn" type="button" onClick={onOpenSettings}>服务配置</button>
+      </div>
+    </div>
     {notice&&<div className="config-help" role="status">{notice}</div>}
     {error&&<div className="err-notice" role="alert">{error}</div>}
-    {unavailable?<div className="panel"><h3>浏览器同步未启用</h3>
-      <p>Server 返回了 HTTP 404，当前管理 API 中没有浏览器同步设备接口。</p>
-      <p>在 Linux Server 上确认运行的是包含 Browser Sync 的新版 relay-server，
-        并在实际加载的 Server YAML 中启用 browser_sync.enabled: true、
-        开启 server.admin.tls_enabled: true，然后重启 Server。扩展 ID 由插件上报、管理员审核，无需手动填写。</p>
-      <p>如果经 Nginx/Caddy 访问，还要检查 /api/v1/browser-sync/ 路径是否转发到
-        <strong> Admin HTTPS 监听端口</strong>，而不是 Agent TCP/QUIC 端口。
-        直接访问 Admin HTTPS 的此接口，未登录时应为 HTTP 401，而不是 404。</p></div>:
-    <>
-      <BrowserNetworkSettings/>
-      <div className="panel">
-        <h3>扩展来源管理</h3>
-        <p>新版扩展首次申请时会自动上报扩展 ID 和设备公钥；关联的待审批扩展直接在下方设备列表一次批准。
-          这里保留旧版本只上报扩展 ID 的独立审批，以及已批准扩展的撤销功能。</p>
-        <div className="table-wrap"><table><thead><tr><th>扩展 ID</th><th>状态</th><th>操作</th></tr></thead>
-        <tbody>{legacyExtensions.map(ext=><tr key={ext.id}>
-          <td style={{wordBreak:'break-all'}}>{ext.id}</td><td>{ext.state}</td>
-          <td>{ext.state==='pending'?<button className="btn primary" disabled={!!busy}
-            onClick={()=>extensionAction(ext.id,'approve')}>批准扩展</button>:
-            ext.state==='approved'?<button className="btn" disabled={!!busy}
-              onClick={()=>extensionAction(ext.id,'revoke')}>撤销扩展</button>:
-              <button className="btn danger" disabled={!!busy}
-                onClick={()=>extensionAction(ext.id,'delete')}>删除旧扩展</button>}</td>
-        </tr>)}
-        {!legacyExtensions.length&&<tr><td colSpan={3}>暂无需要单独处理的扩展。关联申请请在下方审批。</td></tr>}</tbody></table></div>
-      </div>
-      <div className="grid-cards">
-        {[['待审批',count('pending')],['已批准',count('approved')],['已撤销',count('revoked')]]
-          .map(([label,count])=><div className="panel" key={label}><strong>{label}</strong>
-            <div style={{fontSize:26,fontWeight:700,marginTop:8}}>{count}</div></div>)}
+    {unavailable?<div className="panel browser-sync-empty">
+      <h3>浏览器同步暂不可用</h3>
+      <p>请检查 Server 版本，并在服务配置中启用浏览器同步。</p>
+      <button className="btn primary" type="button" onClick={onOpenSettings}>打开服务配置</button>
+    </div>:<>
+      <div className="browser-sync-summary">
+        {states.slice(1).map(([id,label,total])=><button key={id} type="button"
+          className={'browser-sync-stat '+(view==='devices'&&stateFilter===id?'selected':'')}
+          onClick={()=>{setView('devices');setStateFilter(id);}}>
+          <span>{label}</span><strong>{total}</strong>
+        </button>)}
       </div>
       <div className="panel">
-        <div className="form-actions" style={{justifyContent:'space-between',alignItems:'center'}}>
-          <div><h3>浏览器设备与统一审批</h3><p>待审批设备优先显示；撤销后可删除旧设备及配对记录，再由 Chrome 重新申请授权。不授予 Agent 权限。</p></div>
-          <input className="input" aria-label="搜索浏览器设备" placeholder="搜索名称、ID 或状态"
-            value={filter} onChange={e=>setFilter(e.target.value)}/>
+        <div className="browser-sync-toolbar">
+          <div className="browser-sync-views" role="tablist" aria-label="浏览器同步管理">
+            <button type="button" role="tab" aria-selected={view==='devices'}
+              className={'btn '+(view==='devices'?'primary':'')}
+              onClick={()=>setView('devices')}>浏览器设备</button>
+            <button type="button" role="tab" aria-selected={view==='extensions'}
+              className={'btn '+(view==='extensions'?'primary':'')}
+              onClick={()=>setView('extensions')}>扩展来源</button>
+          </div>
+          {view==='devices'&&<input className="input browser-sync-search" aria-label="搜索浏览器设备"
+            placeholder="搜索设备名称或 ID" value={filter} onChange={e=>setFilter(e.target.value)}/>}
         </div>
-        <div className="table-wrap"><table><thead><tr>
-          <th>设备</th><th>扩展来源</th><th>状态</th><th>身份 / 权限</th><th>创建时间</th><th>操作</th>
-        </tr></thead><tbody>
-          {visible.length?visible.map(d=>{
-            const caps=capabilities[d.id]||{send:true,receive:false};
-            return <tr key={d.id}>
-              <td><strong>{d.name||'Chrome'}</strong><small style={{display:'block',wordBreak:'break-all'}}>
-                {d.id}</small></td>
-              <td><small style={{display:'block',wordBreak:'break-all'}}>
-                {d.extensionId||'旧版设备'}</small>
-                <span className="badge">{d.extensionState==='pending'?'待统一审批':
-                  d.extensionState==='approved'?'扩展已批准':
-                  d.extensionState==='revoked'?'扩展已撤销':'—'}</span></td>
-              <td><span className="badge">{d.state==='pending'?'待审批':
-                d.state==='approved'?'已批准':'已撤销'}</span></td>
-              <td>{d.state==='pending'?<div style={{minWidth:170}}>
-                  <select className="input" aria-label="所属身份"
-                    value={identity[d.id]||''} onChange={e=>setIdentity(p=>({...p,[d.id]:e.target.value}))}>
-                    <option value="">选择身份</option>{activeIdentities.map(x=>
-                      <option key={x.id} value={x.id}>{x.name||x.id}</option>)}
+        {view==='devices'?<>
+          <div className="browser-sync-filters" aria-label="按授权状态筛选">
+            {states.map(([id,label,total])=><button key={id} type="button"
+              className={'btn '+(stateFilter===id?'active':'')}
+              aria-pressed={stateFilter===id}
+              onClick={()=>setStateFilter(id)}>{label} <span>{total}</span></button>)}
+          </div>
+          <div className="table-wrap"><table>
+            <thead><tr><th>浏览器设备</th><th>状态</th><th>所属身份 / 权限</th><th>操作</th></tr></thead>
+            <tbody>{visible.map(d=>{
+              const caps=capabilities[d.id]||{send:true,receive:false};
+              return <tr key={d.id}>
+                <td><div className="browser-sync-device-name">{d.name||'Chrome 浏览器'}</div>
+                  <small className="browser-sync-device-id" title={d.id}>{d.id}</small>
+                  <small className="browser-sync-device-extra" title={d.extensionId||''}>
+                    {d.extensionId?'扩展 · '+d.extensionId.slice(0,8)+'…':'旧版扩展'}</small></td>
+                <td><span className={'badge '+(d.state==='approved'?'ok':d.state==='revoked'?'danger':'')}>
+                  {d.state==='pending'?'待审批':d.state==='approved'?'已批准':'已撤销'}</span>
+                  {d.extensionState==='revoked'&&<small className="browser-sync-device-extra">扩展已撤销</small>}</td>
+                <td>{d.state==='pending'?<div className="browser-sync-approve-controls">
+                  <select className="input" aria-label={'为 '+(d.name||d.id)+' 选择身份'}
+                    value={identity[d.id]||''} onChange={e=>setIdentity(v=>({...v,[d.id]:e.target.value}))}>
+                    <option value="">选择身份</option>{activeIdentities.map(v=>
+                      <option value={v.id} key={v.id}>{v.name||v.id}</option>)}
                   </select>
-                  <label style={{display:'block',marginTop:8}}><input type="checkbox" checked={caps.send}
-                    onChange={e=>setCapabilities(p=>({...p,[d.id]:{...caps,send:e.target.checked}}))}/> 允许发送</label>
-                  <label style={{display:'block',marginTop:4}}><input type="checkbox" checked={caps.receive}
-                    onChange={e=>setCapabilities(p=>({...p,[d.id]:{...caps,receive:e.target.checked}}))}/> 允许接收</label>
-                </div>:<><small>{d.identityId||'—'}</small>
-                  <div>{d.send?'发送':''}{d.send&&d.receive?' / ':''}{d.receive?'接收':''}</div></>}</td>
-              <td>{fmtDate(d.createdAt)}</td>
-              <td>{d.state==='pending'?<button className="btn primary" disabled={!!busy||!identity[d.id]||
-                  (!caps.send&&!caps.receive)} onClick={()=>action(d.id,'approve')}>{d.extensionId?'批准扩展与设备':'批准设备'}</button>:
-                d.state==='approved'?<button className="btn" disabled={!!busy}
-                  onClick={()=>action(d.id,'revoke')}>撤销授权</button>:
-                  <button className="btn danger" disabled={!!busy}
-                    onClick={()=>action(d.id,'delete')}>删除旧设备</button>}</td>
-            </tr>;
-          }):<tr><td colSpan={6}>{loading?'正在加载…':'暂无匹配的浏览器设备'}</td></tr>}
-        </tbody></table></div>
+                  <div className="browser-sync-permissions">
+                    <label><input type="checkbox" checked={caps.send}
+                      onChange={e=>setCapabilities(v=>({...v,[d.id]:{...caps,send:e.target.checked}}))}/> 发送</label>
+                    <label><input type="checkbox" checked={caps.receive}
+                      onChange={e=>setCapabilities(v=>({...v,[d.id]:{...caps,receive:e.target.checked}}))}/> 接收</label>
+                  </div>
+                </div>:<><div>{activeIdentities.find(i=>i.id===d.identityId)?.name||d.identityId||'—'}</div>
+                  <small className="browser-sync-device-extra">
+                    {[d.send?'发送':null,d.receive?'接收':null].filter(Boolean).join(' / ')||'无同步权限'}</small></>}</td>
+                <td className="browser-sync-actions">{d.state==='pending'?
+                  <button className="btn primary" type="button"
+                    disabled={!!busy||!identity[d.id]||(!caps.send&&!caps.receive)}
+                    onClick={()=>action(d.id,'approve')}>批准</button>:
+                  d.state==='approved'?<button className="btn" type="button"
+                    disabled={!!busy} onClick={()=>action(d.id,'revoke')}>撤销授权</button>:
+                  <button className="btn danger" type="button" disabled={!!busy}
+                    onClick={()=>action(d.id,'delete')}>删除设备</button>}</td>
+              </tr>;
+            })}
+            {!visible.length&&<tr><td colSpan={4} className="browser-sync-no-data">
+              {loading?'读取中…':'暂无匹配设备'}</td></tr>}</tbody>
+          </table></div>
+        </>:<>
+          <div className="browser-sync-panel-title"><h3>扩展来源</h3>
+            <span className="muted">仅在扩展失效或需要重新申请时管理</span></div>
+          <div className="table-wrap"><table>
+            <thead><tr><th>扩展 ID</th><th>授权状态</th><th>操作</th></tr></thead>
+            <tbody>{extensions.map(ext=><tr key={ext.id}>
+              <td className="browser-sync-extension-id">{ext.id}</td>
+              <td><span className={'badge '+(ext.state==='approved'?'ok':ext.state==='revoked'?'danger':'')}>
+                {ext.state==='pending'?'待审批':ext.state==='approved'?'已批准':'已撤销'}</span></td>
+              <td className="browser-sync-actions">
+                {ext.state==='pending'?
+                  <button type="button" className="btn primary" disabled={!!busy}
+                    onClick={()=>extensionAction(ext.id,'approve')}>批准扩展</button>:
+                 ext.state==='approved'?
+                  <button type="button" className="btn" disabled={!!busy}
+                    onClick={()=>extensionAction(ext.id,'revoke')}>撤销</button>:
+                  <button type="button" className="btn danger" disabled={!!busy}
+                    onClick={()=>extensionAction(ext.id,'delete')}>删除扩展</button>}
+              </td>
+            </tr>)}
+            {!extensions.length&&<tr><td colSpan={3} className="browser-sync-no-data">
+              {loading?'读取中…':'暂无扩展记录'}</td></tr>}</tbody>
+          </table></div>
+        </>}
       </div>
-      <div className="config-help">撤销只会阻止 RelayProxy 后续同步，
-        不会撤销网站服务器已经签发的会话。需要彻底退出时，应使用网站自身的“退出所有设备”。</div>
     </>}
   </section>;
 }

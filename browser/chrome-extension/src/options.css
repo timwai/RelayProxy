@@ -81,3 +81,25 @@ input:not([type=checkbox]):focus,select:focus{border-color:var(--primary);box-sh
 @media(max-width:950px){.settings-layout{grid-template-columns:170px minmax(0,1fr);gap:22px;padding:24px 20px}.topbar-inner{padding:0 20px}.settings-card{padding:19px}.device-identity{flex-direction:column}.device-code{max-width:100%}}
 @media(max-width:700px){.settings-topbar{height:62px}.topbar-divider,.topbar-page{display:none}.settings-layout{display:block;padding:18px 14px 50px}.settings-sidebar{position:static;margin-bottom:23px}.sidebar-label,.sidebar-footer{display:none}.settings-nav{display:flex;flex-direction:row;gap:7px;overflow-x:auto;padding-bottom:6px}.settings-nav a{flex:none;white-space:nowrap;padding:9px 12px;background:var(--surface);border:1px solid var(--border);border-radius:9px}.settings-nav a span{display:none}.page-heading h1{font-size:26px}.settings-section{scroll-margin-top:78px}.form-grid{grid-template-columns:1fr}.settings-card{padding:17px}.card-heading{flex-wrap:wrap}.selection-row select{min-width:100%}.selection-row button{flex:1}.button-row button{flex:1}.settings-footer{padding-bottom:10px}}
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+
+/* V2 navigation builds upon the existing extension settings visual style. */
+.settings-main>.settings-section[hidden]{display:none!important}
+.settings-nav a.active{color:var(--primary-ink);background:var(--soft);font-weight:800}
+.settings-nav a.active span{color:var(--primary-ink)}
+.settings-main .page-heading{margin-bottom:21px}
+.settings-main .settings-section{margin-bottom:0}
+.settings-main .section-heading{margin-bottom:14px}
+.settings-main .settings-card{box-shadow:0 6px 20px rgba(23,46,86,.045)}
+.settings-main .settings-card>.field-hint{margin-top:12px}
+.settings-main .settings-card .button-row{margin-top:14px}
+.settings-main .device-identity{margin-top:4px}
+.settings-main .section-heading .section-index{width:34px;height:34px}
+.settings-main .field-hint{font-size:12px;line-height:1.55}
+.settings-main #pairing-rules{margin-top:8px}
+.settings-main .settings-section .info-inline{margin-top:12px}
+#message:empty{display:none}
+@media(max-width:700px){
+ .settings-nav a.active{border-color:var(--primary);background:var(--soft)}
+ .settings-main .page-heading{margin-bottom:16px}
+ .settings-main .settings-card{padding:18px 16px}
+}

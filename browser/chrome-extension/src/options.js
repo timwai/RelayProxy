@@ -189,9 +189,9 @@ function renderRules(rules) {
   for (const rule of rules) {
     const card = document.createElement('div');
     card.className = 'rule';
-    const desc = rule.role === 'source' ? '来源 A' : '接收 B';
-    card.append(textNode('strong', desc + ' · ' + rule.status));
-    card.append(textNode('p', '对端：' + rule.remoteID));
+    const desc = rule.role === 'source' ? '发送端' : '接收端';
+    card.append(textNode('strong', desc + ' · ' + ({active:'已启用',offered:'待确认',revoked:'已撤销'}[rule.status]||rule.status)));
+    card.append(textNode('p', '配对设备：' + rule.remoteID));
     if (rule.lastTransfer && ['SENDING','RELAYED','RECEIVED','APPLIED','FAILED','CONFLICT','UNKNOWN','PARTIAL'].includes(rule.lastTransfer.state)) {
       const translated = {SENDING:'正在发送密文',RELAYED:'密文已转发',RECEIVED:'接收端已收到',
         APPLIED:'站点状态已应用（网站登录未验证）',FAILED:'同步失败',
@@ -238,7 +238,7 @@ function renderRules(rules) {
             } else {
               await ask({ type: 'CONFIRM_RULE', ruleId: rule.id, confirmed: true, pairingCode: rule.code });
             }
-            status('配对授权已更新。只有状态为 active 的规则才可同步指定 Cookie。');
+            status('配对授权已更新。只允许已激活的配对同步。');
             await refreshPairing();
           } catch (error) { failure(error); }
         });
@@ -247,13 +247,13 @@ function renderRules(rules) {
     }
     if(rule.status==='active' && rule.valid && rule.policy.siteOrigin.startsWith('https://')){
       if(rule.network?.status==='offered' && rule.role==='target'){
-        card.append(textNode('p','来源 A 提议：访问 '+rule.network.host+
+        card.append(textNode('p','来源设备申请：访问 '+rule.network.host+
           ' 时经由 Agent '+rule.network.exitDeviceId+' 出口。仅 HTTPS 443。'));
         const approve=document.createElement('button');
-        approve.textContent='确认并启用 A 的网络出口';
+        approve.textContent='启用来源设备出口';
         approve.disabled=!rule.network.matchingHost;
         approve.addEventListener('click',async()=>{
-          if(!window.confirm('确认让此域名使用 A Agent 的网络？会改变本 Chrome Profile 的代理配置；出口离线将阻断域名访问。'))return;
+          if(!window.confirm('此网站将通过来源设备出口访问；出口离线时会阻断连接。确定启用？'))return;
           try{
             await ask({type:'NETWORK_ACCEPT',ruleId:rule.id,confirmed:true});
             status('网络绑定已授权；该网站通过来源设备 Agent 出口访问。');
@@ -271,8 +271,8 @@ function renderRules(rules) {
             const exits=(await ask({type:'NETWORK_EXITS'})).exits||[];
             if(!exits.length)throw new Error(
               '当前没有可用 Agent 出口。请检查：① Server 已启用 Browser Sync 和 TLS/TCP 中继；' +
-              '② A Agent 已在线、获得 proxy.exit 权限、开启“允许浏览器网络共享”并重连；' +
-              '③ A Agent 与来源浏览器属于同一 Identity。');
+              '② 来源设备 Agent 已开启浏览器网络共享并具有出口权限；' +
+              '③ Agent 与来源浏览器属于同一身份。');
             const select=document.createElement('select');
             for(const exit of exits){
               const opt=document.createElement('option');
@@ -300,7 +300,7 @@ function renderRules(rules) {
         const revoke=document.createElement('button');
         revoke.textContent='撤销网络绑定';
         revoke.addEventListener('click',async()=>{
-          if(!window.confirm('撤销后，该网站可能重新使用 B 本地网络；已同步的 Cookie 不会自动清除。确定吗？'))return;
+          if(!window.confirm('撤销后，此网站可能恢复使用本机网络，已同步的网站登录状态不会自动清除。继续？'))return;
           try{
             await ask({type:'NETWORK_REVOKE',ruleId:rule.id});
             status('网络绑定已撤销。');
@@ -311,25 +311,25 @@ function renderRules(rules) {
       }
     }
     if (rule.status==='active' && rule.valid && rule.role==='target' && rule.policy.siteOrigin.startsWith('https://')){
-      const current=rule.localNetworkMode==='local_agent'?'B 本机 Agent':rule.localNetworkMode==='source_agent'?'A 来源 Agent':'未启用';
+      const current=rule.localNetworkMode==='local_agent'?'本机 Agent':rule.localNetworkMode==='source_agent'?'来源设备 Agent':'未启用';
       card.append(textNode('p','当前站点网络出口：'+current));
       const local=document.createElement('button');
-      local.textContent='改用 B 本机 Agent 原生代理';
+      local.textContent='改用本机 Agent 代理';
       local.disabled=rule.localNetworkMode==='local_agent';
       local.addEventListener('click',()=>{
         local.disabled=true;
-        const help=textNode('p','仅访问此 Cookie 规则的 HTTPS 网站；使用 B Agent 的分流和选中出口。需要在 B Agent 配置 browser_sync.local_proxy 并设置相同域名白名单，不依赖其 SOCKS5/HTTP/透明代理开关。');
+        const help=textNode('p','此网站使用当前设备的 Agent 分流及出口。');
         const port=document.createElement('input');
         port.type='number';port.min='1024';port.max='65535';port.value='21291';
         port.placeholder='本机监听端口';
-        port.setAttribute('aria-label','B 本机 Agent 监听端口');
-        const confirm=document.createElement('button');confirm.textContent='确认绑定 B 本机 Agent';
+        port.setAttribute('aria-label','本机 Agent 监听端口');
+        const confirm=document.createElement('button');confirm.textContent='确认绑定本机 Agent';
         confirm.addEventListener('click',async()=>{
-          if(!window.confirm('B 的此站点将经过本机 Agent 原生分流，不再经来源 A 的公网出口。DIRECT 规则将阻断而不是泄漏本机 IP。确认？'))return;
+          if(!window.confirm('此网站将改用当前设备 Agent 出口；匹配 DIRECT 的规则会被阻断以防止泄漏。确定切换？'))return;
           try{
             await ask({type:'NETWORK_LOCAL_ENABLE',ruleId:rule.id,
               port:Number(port.value),confirmed:true});
-            status('已切换至 B 本机 Agent，无需代理鉴权。');
+            status('已切换至本机 Agent。');
             await refreshPairing();
           }catch(error){failure(error);}
         });
@@ -338,11 +338,11 @@ function renderRules(rules) {
       card.append(local);
       if(rule.network?.status==='active'&&rule.network.matchingHost&&rule.localNetworkMode!=='source_agent'){
         const useSource=document.createElement('button');
-        useSource.textContent='切换回 A 的 Agent 网络出口';
+        useSource.textContent='切换到来源设备出口';
         useSource.addEventListener('click',async()=>{
           try{
             await ask({type:'NETWORK_USE_SOURCE',ruleId:rule.id});
-            status('已改为来源 A Agent 网络出口');
+            status('已切换到来源设备出口');
             await refreshPairing();
           }catch(error){failure(error);}
         });
@@ -350,9 +350,9 @@ function renderRules(rules) {
       }
       if(rule.localNetworkMode==='local_agent'){
         const stop=document.createElement('button');
-        stop.textContent='停用 B 本机站点代理';
+        stop.textContent='停用本机站点代理';
         stop.addEventListener('click',async()=>{
-          if(!window.confirm('停用后此网站可能从 B 本地网络直连。已同步的 Cookie 不会自动删除。确定？'))return;
+          if(!window.confirm('停用后此网站可能使用本机网络直连；已同步的登录状态不会自动清除。确定？'))return;
           try{
             await ask({type:'NETWORK_LOCAL_DISABLE',ruleId:rule.id});
             await refreshPairing();
@@ -445,6 +445,32 @@ $('offer-rule').addEventListener('click', async () => {
     await refreshPairing();
   } catch (error) { failure(error); }
 });
+
+// Task-first navigation: the current page style stays intact, while only the
+// selected panel is displayed. Deep links and the extension popup still work.
+export function activateSettingsSection(sectionId){
+  const panels=[...document.querySelectorAll('.settings-main > .settings-section')];
+  const selected=panels.some(panel=>panel.id===sectionId)?sectionId:'server-section';
+  for(const panel of panels)panel.hidden=panel.id!==selected;
+  for(const link of document.querySelectorAll('.settings-nav a[href^="#"]')){
+    const active=link.getAttribute('href')==='#'+selected;
+    link.classList.toggle('active',active);
+    if(active)link.setAttribute('aria-current','page');
+    else link.removeAttribute('aria-current');
+  }
+  document.querySelector('.settings-main')?.scrollIntoView?.({block:'start'});
+  return selected;
+}
+document.querySelectorAll('.settings-nav a[href^="#"]').forEach(link=>{
+  link.addEventListener('click',event=>{
+    event.preventDefault();
+    const id=link.getAttribute('href').slice(1);
+    if(window.location.hash!=='#'+id)window.location.hash=id;
+    else activateSettingsSection(id);
+  });
+});
+window.addEventListener('hashchange',()=>activateSettingsSection(window.location.hash.slice(1)));
+activateSettingsSection(window.location.hash.slice(1));
 
 load().then(async () => {
   const response=await chrome.runtime.sendMessage({type:'GET_STATUS'});

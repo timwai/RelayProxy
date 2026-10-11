@@ -58,3 +58,25 @@ test('popup quick actions only apply to verified active rules and fail closed',(
   assert.match(js,/sync\.disabled = paused/);
   assert.match(js,/open\.disabled = paused/);
 });
+
+test('full options navigation changes panels without removing pairing, networking, or IndexedDB consent',()=>{
+  const html=asset('options.html'),code=asset('options.js'),css=asset('options.css');
+  const panels=['server-section','proxy-section','sites-section','pairing-section','rules-section'];
+  for(const id of panels){
+    assert.match(html,new RegExp('id="'+id+'"'));
+    assert.match(html,new RegExp('href="#'+id+'"'));
+  }
+  assert.match(code,/activateSettingsSection/);
+  assert.match(code,/panel\.hidden=panel\.id!==selected/);
+  assert.match(code,/hashchange/);
+  assert.match(css,/\.settings-main>\.settings-section\[hidden\]/);
+  assert.match(html,/IndexedDB/);
+  assert.doesNotMatch(html,/A\/B|来源 A|接收 B/);
+  assert.doesNotMatch(code,/来源 A|接收 B|A Agent|B Agent/);
+});
+
+test('popup displays role names rather than A/B device codes',()=>{
+  const code=asset('popup.js');
+  assert.match(code,/rule\.role === 'source' \? '发送端' : '接收端'/);
+  assert.doesNotMatch(code,/来源 A|接收 B/);
+});

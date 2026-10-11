@@ -298,7 +298,62 @@ function Settings({ctx}){
  const clean=!!saved?.config&&!!draft&&configEqual(draft,saved.config);
  if(!admin)return null;
  if(!draft||!saved?.config)return <div className="empty-state">服务配置正在读取。<Action onClick={ctx.refresh}>重试</Action></div>;
- return <><Head title="服务配置" desc="集中管理管理端、隧道、直连、出口及安全策略。保存前可以切换配置分类。"/><div className="settings-layout"><aside className="settings-sidebar">{[...new Set(groups.map(g=>g.section))].map(section=><div className="settings-nav-group" key={section}><div className="settings-nav-label">{section}</div>{groups.filter(g=>g.section===section).map(g=><button type="button" key={g.id} className={'settings-nav-item '+(g.id===settingsTab?'active':'')} onClick={()=>{setSettingsTab(g.id);history.replaceState(null,'','#settings/'+g.id)}}><span className="settings-nav-icon">⚙</span><span><b>{g.title}</b><small>{g.subtitle}</small></span></button>)}</div>)}</aside><div className="settings-main"><div className="settings-heading"><div className="settings-kicker">SERVER SETTINGS / {group.section}</div><h2>{group.title}</h2><p>{group.subtitle}</p></div><div className="config-card"><div className="config-card-head"><span className="config-card-icon">⚙</span><div className="config-card-heading"><h3>{group.title}参数</h3><p>配置项保存后根据运行时要求生效</p></div><Badge tone={clean?'ok':''}>{clean?'已同步':'待保存'}</Badge></div><div className="config-card-content"><div className="config-form-grid">{group.fields.map(([field,label,type,placeholder,opts])=>{const isEnable=type==='checkbox'&&field==='enabled';const disabled=(group.id==='direct'||group.id==='exit'||group.id==='rdp')&&!draft[key]?.enabled&&field!=='enabled';const proxy=(key==='serverExit'&&['upstreamAddress','upstreamUsername','upstreamPassword'].includes(field)&&draft.serverExit?.upstreamMode==='direct');return <div key={field} className={type==='lines'?'wide':''}><Field label={label} type={type} value={draft[key]?.[field]} placeholder={placeholder} options={opts} disabled={disabled||proxy||saving} onChange={v=>change(field,v)} wide={type==='lines'}/></div>})}</div>{group.id==='admin'&&<Banner>管理台访问地址变化后需使用新的端口和协议重新访问。隧道监听地址不受此设置影响。</Banner>}{group.id==='p2p'&&<Banner>UPnP 在 Agent 所在路由器上尝试映射。Rendezvous 是服务端 UDP 反射地址；端口设置为 0 / 0 时使用随机端口。</Banner>}{group.id==='direct'&&<Banner>Public Direct 对公网端点进行验证，验证成功后才会向获授权客户端下发短期连接 Ticket。</Banner>}{group.id==='rdp'&&<Banner>启用公网 RDP 入口后仍需创建目标入口并显式授权设备能力。连接记录和封禁策略在 RDP 页面管理。</Banner>}{group.id==='exit'&&<SystemGrants ctx={ctx}/ >}{group.id==='acl'&&<Banner>allow 模式下空列表可能拒绝全部目标；出口设备本地限制仍生效。</Banner>}{group.id==='certificate'&&<Banner>路径均是 Server 运行环境内的文件路径，证书更改需要重启。</Banner>}</div></div><div className="settings-save"><div><strong>{saving?'保存中…':clean?'没有未保存的修改':'有未保存的修改'}</strong><small className="muted"> · 版本 {saved.revision} · {saved.configPath||'Server config'}</small></div><div className="actions"><Action disabled={clean||saving} onClick={()=>setDraft(structuredClone(saved.config))}>放弃修改</Action><Action tone="primary" disabled={clean||saving} onClick={save}>保存配置</Action></div></div></div></div></>;
+ return <>
+  <Head title="服务配置" desc="管理 Server 连接、出口与安全设置"/>
+  <div className="settings-layout settings-refined">
+    <aside className="settings-sidebar" aria-label="服务配置分类">
+      {[...new Set(groups.map(g=>g.section))].map(section=>
+        <div className="settings-nav-group" key={section}>
+          <div className="settings-nav-label">{section}</div>
+          {groups.filter(g=>g.section===section).map(g=>
+            <button type="button" key={g.id}
+              className={'settings-nav-item '+(g.id===settingsTab?'active':'')}
+              aria-current={g.id===settingsTab?'page':undefined}
+              onClick={()=>{setSettingsTab(g.id);history.replaceState(null,'','#settings/'+g.id)}}>
+              <span><b>{g.title}</b></span>
+            </button>)}
+        </div>)}
+    </aside>
+    <div className="settings-main">
+      <div className="settings-heading settings-refined-heading">
+        <div><h2>{group.title}</h2><p>{group.subtitle}</p></div>
+        <Badge tone={clean?'ok':''}>{clean?'已保存':'有修改'}</Badge>
+      </div>
+      <div className="config-card">
+        <div className="config-card-content">
+          <div className="config-form-grid">
+            {group.fields.map(([field,label,type,placeholder,opts])=>{
+              const disabled=(group.id==='direct'||group.id==='exit'||group.id==='rdp')&&
+                !draft[key]?.enabled&&field!=='enabled';
+              const proxy=key==='serverExit'&&
+                ['upstreamAddress','upstreamUsername','upstreamPassword'].includes(field)&&
+                draft.serverExit?.upstreamMode==='direct';
+              return <div key={field} className={type==='lines'?'wide':''}>
+                <Field label={label} type={type} value={draft[key]?.[field]}
+                  placeholder={placeholder} options={opts}
+                  disabled={disabled||proxy||saving} onChange={v=>change(field,v)} wide={type==='lines'}/>
+              </div>;
+            })}
+          </div>
+          {group.id==='admin'&&<p className="settings-inline-warning">更改管理端口或协议后，需要使用新地址访问。</p>}
+          {group.id==='rdp'&&draft.rdpIngress?.enabled&&<p className="settings-inline-warning">开启服务后还需在 RDP 公网入口页面授权目标设备。</p>}
+          {group.id==='acl'&&draft.relayACL?.accessMode==='allow'&&
+            !draft.relayACL?.domains?.length&&!draft.relayACL?.cidrs?.length&&
+            <p className="settings-inline-warning">允许列表为空，可能拒绝所有目标。</p>}
+          {group.id==='exit'&&<SystemGrants ctx={ctx}/>}
+        </div>
+      </div>
+      <div className="settings-save" role="group" aria-label="保存服务配置">
+        <div><strong>{saving?'保存中…':clean?'配置未修改':'配置有未保存的修改'}</strong>
+          <small className="muted">{saved.configPath||'Server config'}</small></div>
+        <div className="actions">
+          <Action disabled={clean||saving} onClick={()=>setDraft(structuredClone(saved.config))}>撤销修改</Action>
+          <Action tone="primary" disabled={clean||saving} onClick={save}>保存配置</Action>
+        </div>
+      </div>
+    </div>
+  </div>
+ </>;
 }
 function SystemGrants({ctx}){
  const {data,run}=ctx;

@@ -17,7 +17,11 @@ export function validateBrowserNetworkDraft(draft) {
     if(!listen||Number(listen[2])<1||Number(listen[2])>65535)
       return '监听地址无效，示例 :21292 或 0.0.0.0:21292';
   }
+  if(!d.listen && d.allowed.length)
+    return '停用网络代理时必须清除 Agent 共享白名单；可点击“停用网络出口共享”快捷完成。';
   if(d.advertise){
+    if(d.allowed.length>32 || d.allowed.some(id=>!/^dev_.{4,124}$/.test(id)))
+      return '最多允许 32 台 Agent，且必须选择 dev_ 开头的真实 Agent 设备 ID。';
     const publicAddr=/^([a-z0-9.-]+):([0-9]{1,5})$/i.exec(d.advertise);
     if(!publicAddr||publicAddr[1].startsWith('.')||publicAddr[1].endsWith('.')||
       Number(publicAddr[2])<1||Number(publicAddr[2])>65535)

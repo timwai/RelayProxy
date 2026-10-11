@@ -22,7 +22,7 @@ function BrowserNetworkSettings({onOpenSettings}) {
         advertise:state.config.browserSync?.networkProxyAdvertise||'',
         allowed:list(state.config.browserSync?.allowedExitIds)
       });
-      setExits(list(agents).filter(x=>x.deviceId));
+      setExits(list(agents).filter(x=>typeof x.deviceId==='string'&&x.deviceId.startsWith('dev_')));
     }catch(e){setError(e.message);}
     finally{setLoading(false);}
   },[]);
@@ -40,6 +40,10 @@ function BrowserNetworkSettings({onOpenSettings}) {
     if(!record||!edit||busy||!changed)return;
     const validation=validateBrowserNetworkDraft(edit);
     if(validation){setError(validation);return;}
+    if(edit.listen && (record.config.admin?.tlsEnabled!==true ||
+      record.config.tunnel?.tlsEnabled!==true)){
+      setError('浏览器网络代理需要 Server Admin HTTPS 和 Tunnel TLS 都已启用。');return;
+    }
     setBusy(true);setError('');setNotice('');
     try{
       const config=applyBrowserNetworkDraft(record.config,edit);
@@ -80,7 +84,7 @@ function BrowserNetworkSettings({onOpenSettings}) {
               onChange={e=>setEdit(v=>({...v,advertise:e.target.value}))} disabled={busy}/>
           </label>
         </div>
-        <p className="muted">两个地址都留空表示停用网络代理。对外域名必须匹配 Server TLS 证书，
+        <p className="muted">两个地址都留空且取消全部 Agent 白名单表示停用。对外域名必须匹配 Server TLS 证书，
           端口需要由管理员在防火墙放行。修改配置不会自动重启服务。</p>
         <h4>允许作为浏览器网络出口的 Agent</h4>
         {exits.length? <div className="grid-cards">{exits.map(agent=>
@@ -101,6 +105,10 @@ function BrowserNetworkSettings({onOpenSettings}) {
         {!record?.config?.browserSync?.enabled&&<p className="err-notice">
           Browser Sync 服务当前配置为关闭。请先在高级设置中启用，保存并重启 Server。</p>}
         <div className="form-actions">
+          <button className="btn" disabled={busy||(!edit.listen&&!edit.advertise&&!edit.allowed.length)}
+            onClick={()=>setEdit(v=>({...v,listen:'',advertise:'',allowed:[]}))}>
+            停用网络出口共享
+          </button>
           <button className="btn primary" onClick={save} disabled={!changed||busy||!record?.config?.browserSync?.enabled}>
             {busy?'正在保存…':'保存网络出口配置'}</button>
           {changed&&<button className="btn" onClick={load} disabled={busy}>取消修改</button>}

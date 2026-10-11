@@ -10,9 +10,11 @@ test('browser network listener, TLS address and exit allowlist are validated tog
   for(const patch of [
     {advertise:''},{listen:''},{advertise:'http://relay.example.com:21292'},
     {advertise:'relay.example.com:0'},{listen:'0.0.0.0:65536'},
-    {listen:'relay.example.com:0'},{allowed:[]}
+    {listen:'relay.example.com:0'},{allowed:[]},
+    {allowed:['server']},{allowed:Array.from({length:33},(_,i)=>'dev_agent_'+i)}
   ]) assert.notEqual(validateBrowserNetworkDraft({...valid,...patch}),'');
   assert.equal(validateBrowserNetworkDraft({...valid,listen:'',advertise:'',allowed:[]}), '');
+  assert.notEqual(validateBrowserNetworkDraft({...valid,listen:'',advertise:''}),'');
 });
 
 test('browser network edits preserve unrelated Server config and dedupe allowlist',()=>{

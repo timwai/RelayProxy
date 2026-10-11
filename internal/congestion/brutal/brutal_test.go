@@ -59,7 +59,7 @@ func TestBrutalDebugBeforeRTTStatsInstalled(t *testing.T) {
 	if got := b.debugRTTMilliseconds(); got != 0 {
 		t.Fatalf("uninitialized RTT = %d, want 0", got)
 	}
-	b.OnCongestionEventEx(0, monotime.Time(12*time.Second),
+	b.OnCongestionEventEx(0, monotime.Time(17*time.Second),
 		make([]congestion.AckedPacketInfo, 80),
 		make([]congestion.LostPacketInfo, 20))
 	if got := b.ackRate; got != 0.8 {

@@ -10,6 +10,7 @@ import argparse
 import csv
 import json
 import math
+import re
 from pathlib import Path
 import sys
 
@@ -43,6 +44,16 @@ def verify(ab_csv, coexistence_paths, manifest, policy):
     for field in MANIFEST_FIELDS:
         if not isinstance(manifest.get(field), str) or not manifest[field].strip():
             errors.append(f"manifest missing {field}")
+    for field in ("relayproxy_agent_sha256", "relayproxy_server_sha256",
+                  "hysteria2_sha256", "origin_fixture_sha256"):
+        if not re.fullmatch(r"[0-9a-fA-F]{64}", str(manifest.get(field, ""))):
+            errors.append(f"manifest {field} must be a real SHA256 hex digest")
+    if not re.fullmatch(r"[0-9a-fA-F]{40}", str(manifest.get("relayproxy_commit", ""))):
+        errors.append("manifest relayproxy_commit must be the full 40-digit git SHA")
+    for field in MANIFEST_FIELDS:
+        value = str(manifest.get(field, "")).strip().lower()
+        if value.startswith(("todo", "change_me", "example", "replace_me")):
+            errors.append(f"manifest {field} still contains placeholder text")
     loss_evidence = manifest.get("loss_evidence", {})
     if not isinstance(loss_evidence, dict):
         errors.append("manifest loss_evidence must be an object")
@@ -64,6 +75,9 @@ def verify(ab_csv, coexistence_paths, manifest, policy):
             errors.append("fairness/retention thresholds cannot exceed 1")
     summary, problems = summarize(ab_csv, min_runs=5)
     errors.extend(problems)
+    scenarios = {r["scenario"] for r in summary}
+    if len(scenarios) != 1:
+        errors.append("A/B trials have inconsistent scenario identifiers across loss and direction")
     groups = {(r["loss_label"], r["direction"], r["variant"]): r for r in summary}
     for loss in LOSS:
         for direction in DIRECTIONS:
@@ -109,8 +123,10 @@ def verify(ab_csv, coexistence_paths, manifest, policy):
                 if entry.get("round") in seen:
                     errors.append(f"{label}: duplicate round")
                 seen.add(entry.get("round"))
-                if entry.get("loss_label") != loss or entry.get("valid", "").lower() not in ("true", "1"):
-                    errors.append(f"{label}: invalid or wrongly labeled run")
+                if (entry.get("loss_label") != loss or
+                        entry.get("scenario") not in scenarios or
+                        entry.get("valid", "").lower() not in ("true", "1")):
+                    errors.append(f"{label}: invalid run, differing scenario or wrong loss label")
                     continue
                 duration = number(entry.get("duration_s"), label + " duration")
                 jain = number(entry.get("jain_coactive_index"), label + " Jain")

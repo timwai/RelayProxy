@@ -23,7 +23,7 @@ func TestEnrollmentCannotRewritePendingIdentityChoice(t *testing.T) {
   SigningKey:signing, EncryptionKey:encryption,
   RequestedIdentityID:"id_1",
  }
- if _,err:=store.EnrollExtensionDevice(ctx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",d); err!=nil { t.Fatal(err) }
+ if _,_,err:=store.EnrollExtensionDevice(ctx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",d); err!=nil { t.Fatal(err) }
  replay:=d
  replay.RequestedIdentityID="id_attacker"
  if _,_,err:=store.EnrollExtensionDevice(ctx,"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",replay); err!=nil { t.Fatal(err) }

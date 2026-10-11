@@ -48,6 +48,12 @@ It requires all three BBR/Brutal/Hysteria2 controller variants, both directions,
 
 Output is always `auto_apply_allowed: false` and `brutal_default_eligible: false`; the tool **never edits Agent configuration**. This number is only a conservative, provisional upper bound for a *measured* site and must still be checked against true capacity, active competing traffic, shared Relay budget, loaded end-to-end latency, renegotiation/reconnect behavior, and the release policy. It must not be used as a production-wide default merely because the script succeeds.
 
+## Actual distributed Agent/Server binary pairings (CI acceptance stage)
+
+The archive audit is now followed by a **separate native 3-OS archived-binary matrix** (`packaged-native-interop`). The packaging job uploads its **real** `scripts/build.sh` Linux amd64 TAR, macOS Intel/Apple-Silicon TARs, and Windows amd64 full ZIP. Dependent Ubuntu/macOS/Windows runners download these actual archives, reject unsafe paths and absent executables, and unpack them. The **new Agent and Server binaries are copied from the archive**; only the pre-feature merge-base programs and disposable identity setup helper are compiled from source. Then every native runner performs the same **8 signed old/new QUIC/TLS identity + SOCKS5→Relay→authorized Server Exit→HTTP payload verification** tests, including new/new QUIC negotiation of Brutal at 4 Mbps in both sending directions. Code: `scripts/ci-brutal-packaged-pairings.py`, `scripts/ci-brutal-native-binary-compat.py --packaged-new`, and `RELAYPROXY_PACKAGED_NEW_DIR` for Linux.
+
+This closes the important distinction between a Go-only build and a **real archived executable**, but the CI runner only unpacks/runs the portable binary. It does **not** open the graphical macOS App, authenticate a signed/notarized app, install or test the WinDivert or Network Extension driver, handle OS Gatekeeper/quarantine, or validate an in-place user-configuration migration from an old installed app. Leave the released installer/GUI upgrade gate **unmet** until those are actually tested and evidenced; do not infer it from a green archive executable matrix.
+
 ## Actual full distribution archive audit (new CI gate)
 
 The newly added `full-release-archive-check` job in `.github/workflows/brutal-compat.yml` runs **the project's actual `scripts/build.sh`**, rather than only compiling bare Go entrypoints, on the Linux release builder. `scripts/verify_brutal_release_packages.py` checks:

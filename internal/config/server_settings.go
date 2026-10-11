@@ -420,12 +420,12 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 			"server.cert_file": c.Server.CertFile, "server.key_file": c.Server.KeyFile,
 			"tunnel.heartbeat_sec": c.Tunnel.HeartbeatSec, "tunnel.max_connections": c.Tunnel.MaxConnections,
 			"tunnel.max_connections_per_device": c.Tunnel.MaxConnectionsPerDevice, "relay_acl": policy,
-			"rdp":      c.RDP,
-			"p2p":      c.P2P,
-			"direct":   c.Direct,
-			"exit":     c.Exit,
+			"rdp":          c.RDP,
+			"p2p":          c.P2P,
+			"direct":       c.Direct,
+			"exit":         c.Exit,
 			"browser_sync": c.BrowserSync,
-			"database": c.Database,
+			"database":     c.Database,
 		}
 	}
 	want, running := values(desired), values(active)

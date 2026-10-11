@@ -60,13 +60,13 @@ func (h *Handler) allowOrigin(w http.ResponseWriter, r *http.Request, enrollment
 		http.Error(w, "browser extension Origin required", http.StatusForbidden)
 		return false
 	}
-	id:=strings.TrimPrefix(origin,"chrome-extension://")
+	id := strings.TrimPrefix(origin, "chrome-extension://")
 	if !chromeExtensionIDPattern.MatchString(id) {
 		http.Error(w, "invalid Chrome extension Origin", http.StatusForbidden)
 		return false
 	}
 	if !enrollment {
-		if _, ok := h.extensions[origin]; !ok && !h.Store.ExtensionApproved(r.Context(),id){
+		if _, ok := h.extensions[origin]; !ok && !h.Store.ExtensionApproved(r.Context(), id) {
 			http.Error(w, "extension not approved by administrator", http.StatusForbidden)
 			return false
 		}
@@ -78,7 +78,8 @@ func (h *Handler) allowOrigin(w http.ResponseWriter, r *http.Request, enrollment
 }
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	enrollment:=r.URL.Path=="/api/v1/browser-sync/extensions/register" && r.Method==http.MethodPost
+	enrollment := r.URL.Path == "/api/v1/browser-sync/extensions/register" &&
+		(r.Method == http.MethodPost || r.Method == http.MethodOptions)
 	if !h.allowOrigin(w, r, enrollment) {
 		return
 	}
@@ -91,13 +92,20 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case enrollment:
 		if !h.permitRegistration(r) {
-			http.Error(w,"extension enrollment rate limit",http.StatusTooManyRequests)
+			http.Error(w, "extension enrollment rate limit", http.StatusTooManyRequests)
 			return
 		}
-		id:=strings.TrimPrefix(r.Header.Get("Origin"),"chrome-extension://")
-		state,err:=h.Store.RequestExtension(r.Context(),id)
-		if err!=nil{http.Error(w,"extension enrollment unavailable",http.StatusServiceUnavailable);return}
-		writeBrowserJSON(w,http.StatusAccepted,map[string]string{"id":id,"state":state})
+		id := strings.TrimPrefix(r.Header.Get("Origin"), "chrome-extension://")
+		if _, trusted := h.extensions[r.Header.Get("Origin")]; trusted {
+			writeBrowserJSON(w, http.StatusAccepted, map[string]string{"id": id, "state": "approved"})
+			return
+		}
+		state, err := h.Store.RequestExtension(r.Context(), id)
+		if err != nil {
+			http.Error(w, "extension enrollment unavailable", http.StatusServiceUnavailable)
+			return
+		}
+		writeBrowserJSON(w, http.StatusAccepted, map[string]string{"id": id, "state": state})
 	case r.URL.Path == "/api/v1/browser-sync/devices/register" && r.Method == http.MethodPost:
 		h.register(w, r)
 	case r.URL.Path == "/api/v1/browser-sync/ws" && r.Method == http.MethodGet:
@@ -265,9 +273,9 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		current, err := h.Store.deviceAllowed(ctx, device.ID)
-		originID:=strings.TrimPrefix(origin,"chrome-extension://")
-		_,legacy:=h.extensions[origin]
-		if err != nil || current.ID != device.ID || (!legacy&&!h.Store.ExtensionApproved(ctx,originID)) {
+		originID := strings.TrimPrefix(origin, "chrome-extension://")
+		_, legacy := h.extensions[origin]
+		if err != nil || current.ID != device.ID || (!legacy && !h.Store.ExtensionApproved(ctx, originID)) {
 			_ = conn.Close(websocket.StatusPolicyViolation, "browser approval revoked")
 			return
 		}

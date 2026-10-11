@@ -22,6 +22,29 @@ function renderSites(sites) {
   if (sites.includes(prior)) siteSelect.value = prior;
 }
 
+async function refreshSiteChoices(){
+  const select=$('site'),selected=select.value;
+  const tabs=await chrome.tabs.query({});
+  const sites=[...new Set(tabs.map(tab=>{
+    try {
+      const u=new URL(tab.url);
+      return u.protocol==='https:' ? u.origin : null;
+    }catch{return null;}
+  }).filter(Boolean))].sort();
+  select.replaceChildren();
+  const prompt=document.createElement('option');
+  prompt.value='';
+  prompt.textContent=sites.length?'请选择已打开的网站':'请先在 Chrome 打开一个 HTTPS 网站';
+  select.append(prompt);
+  for(const site of sites){
+    const item=document.createElement('option');
+    item.value=site;item.textContent=site;
+    select.append(item);
+  }
+  if(sites.includes(selected))select.value=selected;
+}
+$('refresh-sites').addEventListener('click',()=>refreshSiteChoices().catch(failure));
+
 async function load() {
   const result = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
   if (!result?.ok) throw new Error(result?.error || 'Extension background unavailable');
@@ -29,6 +52,7 @@ async function load() {
   $('extension-id').textContent = chrome.runtime.id;
   $('server').value = result.settings.serverOrigin;
   renderSites(result.settings.sites);
+  await refreshSiteChoices();
   $('local-agent-all').checked=!!result.localAgentProxy?.enabled;
   $('local-agent-port').value=result.localAgentProxy?.port||21291;
 }

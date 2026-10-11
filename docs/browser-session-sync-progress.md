@@ -238,3 +238,17 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 当前 P0-08、NB-06/07/09/10 均是**已实现·待实体 Chrome/安全验收**；NB-08/11 的 GUI 入口、安全审计和真实浏览器协议兼容仍未完成。**绝不能把本机无鉴权回环代理的 CI 通过等同于 WebRTC/QUIC/DNS 无泄漏，或把本机 TCP 代理当成 OS VPN。** Cookie P0-01–07、P1、P2 其他状态不变；PR #194 保持 Draft，不合并 main。
 
 | 2026-10-11 | Linux Server 管理页 Browser Sync 显示「服务端响应无效（HTTP 404）」 | 确认 `server/web/frontend/src/api.js` 在服务端 HTTP 404 为 HTML/纯文本时丢失 `error.status`，导致管理页 `BrowserSyncAdmin` 的「未启用」状态识别分支失效。修复为解析 JSON 失败也保留 HTTP status，并在 Browser Sync 管理页说明旧 Server、`browser_sync.enabled: false`、Admin HTTPS/TLS、扩展 ID 和反向代理路径等排查项；补 UI 404/200 HTML 响应测试与 Linux Server 示例配置注释 | Browser Sync P0/P1 功能状态不变；Linux 部署诊断体验修复仍须按新 SHA CI 复核、用户本机部署确认 | 本次仅功能分支，正式发布仍不放行 |
+
+## 2026-10-11：用户实测结果与五项产品改进（本轮阶段性实施）
+
+用户已验证 **10/12** 项：扩展安装、Agent 监听、HTTPS/HTTP 代理、PROXY/DIRECT/REJECT、进程匹配、全局开关、非 443、Agent 断线恢复、A/B Cookie 配对均通过；尚缺 **B 实际网站登录/冲突/登出恢复**、**DNS/QUIC/WebRTC 协议边界实测**。真实通过项来自用户现场反馈，不能替代后两项。
+
+| 新需求 | 本轮分支状态 | 可复核实现与剩余工作 |
+|---|---|---|
+| 不手动填 Cookie 名称，同步所选网站全部 Cookie（含所有作用域） | **未交付／待专门兼容与安全评审** | 现有同步仍是经过授权的精确 Cookie 名称、Host-only、Secure、根路径范围。不得在未完成跨路径/父域/分区 Cookie 兼容、已存账号冲突、删除归属和回滚测试前宣称支持所有 Cookie |
+| 不手动填 localStorage/sessionStorage Key，完整同步 | **未交付／待专门兼容与安全评审** | 必须加 Chrome scripting 与准确站点权限，选定来源/目标标签页；sessionStorage 是标签页级别。增加双端授权、加密载荷大小限额、覆盖冲突保护、崩溃/部分写入补偿后方可放行 |
+| 允许的网站从界面选择而不是输入 URL | **已实现·待真实 Chrome 验收** | Chrome 弹窗从已打开的 HTTPS 标签页按 Origin 去重供选择，点击授权后请求该站点的 optional host permission；不自动读取其他站点 Cookie |
+| Server 浏览器功能在 Web 全量配置 | **已实现·待 CI/真实 Linux 验收** | Server 配置 DTO + Web 设置组加入 browser_sync.enabled、兼容旧白名单 extensionIds、network_proxy.listen/advertise/allowed_exit_ids；通过原有 revision/CSRF/admin 权限保存 YAML，标注需要重启。注意启用 Browser Sync 要求 Server 原生 Admin TLS，不能仅通过代理终止 HTTPS |
+| 扩展 ID 自动上报、管理员授权，不手工填写 | **已实现·待 CI/安全/真实 Chrome 验收** | 新的 chrome-extension Origin 登记通道只允许登记 pending ID；管理员在 Server Web 单独批准/撤销该 ID，**还需单独批准浏览器设备身份、send/receive 权限和双端加密配对**；新增速率限制及 500 pending/已审计记录资源上限；历史 extension_ids 白名单暂保留用于兼容迁移 |
+
+本轮与全 Cookie/Web Storage 相关的实验性代码**未合入功能分支，不计已实现**。PR #194 保持 Draft，未合并 main；CI 完成后逐 SHA 更新状态。

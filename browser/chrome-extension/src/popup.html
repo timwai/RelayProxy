@@ -48,9 +48,10 @@
   <button id="save">保存地址并授权连接</button>
   <button id="register">上报扩展 ID / 注册浏览器设备</button>
   <button id="connect">连接 Server</button>
-  <label for="site">允许的网站 HTTPS URL</label>
-  <input id="site" placeholder="https://example.com">
-  <button id="add-site">请求站点权限</button>
+  <label for="site">选择已打开的 HTTPS 网站</label>
+  <select id="site"><option value="">请选择标签页</option></select>
+  <button id="refresh-sites">刷新可选网站</button>
+  <button id="add-site">授权所选网站</button>
   <ul id="sites"></ul>
   <h2>设备配对</h2>
   <p>需要 A/B 均在 Server 审批；只能选择同一身份下的浏览器设备。</p>

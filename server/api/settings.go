@@ -84,11 +84,11 @@ type DirectSettings struct {
 }
 
 type BrowserSyncSettings struct {
- Enabled bool `json:"enabled"`
- ExtensionIDs []string `json:"extensionIds"`
- NetworkProxyListen string `json:"networkProxyListen"`
- NetworkProxyAdvertise string `json:"networkProxyAdvertise"`
- AllowedExitIDs []string `json:"allowedExitIds"`
+	Enabled               bool     `json:"enabled"`
+	ExtensionIDs          []string `json:"extensionIds"`
+	NetworkProxyListen    string   `json:"networkProxyListen"`
+	NetworkProxyAdvertise string   `json:"networkProxyAdvertise"`
+	AllowedExitIDs        []string `json:"allowedExitIds"`
 }
 
 type ServerEditableConfig struct {
@@ -178,11 +178,11 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 			UPnPEnabled: c.P2P.UPnPEnabled != nil && *c.P2P.UPnPEnabled,
 		},
 		BrowserSync: BrowserSyncSettings{
-			Enabled: c.BrowserSync.Enabled,
-			ExtensionIDs: append([]string{}, c.BrowserSync.ExtensionIDs...),
-			NetworkProxyListen: c.BrowserSync.NetworkProxy.Listen,
+			Enabled:               c.BrowserSync.Enabled,
+			ExtensionIDs:          append([]string{}, c.BrowserSync.ExtensionIDs...),
+			NetworkProxyListen:    c.BrowserSync.NetworkProxy.Listen,
 			NetworkProxyAdvertise: c.BrowserSync.NetworkProxy.Advertise,
-			AllowedExitIDs: append([]string{}, c.BrowserSync.NetworkProxy.AllowedExitIDs...),
+			AllowedExitIDs:        append([]string{}, c.BrowserSync.NetworkProxy.AllowedExitIDs...),
 		},
 		Direct: DirectSettings{
 			Enabled:   c.Direct.Enabled != nil && *c.Direct.Enabled,

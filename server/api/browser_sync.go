@@ -61,20 +61,25 @@ func (r *Router) handleBrowserSyncRevoke(w http.ResponseWriter, req *http.Reques
 	writeJSON(w, http.StatusOK, map[string]string{"id": req.PathValue("id"), "state": "revoked"})
 }
 
-func (r *Router) handleBrowserSyncExtensions(w http.ResponseWriter,req *http.Request) {
-	items,err:=r.browserSync.Store.Extensions(req.Context())
-	if err!=nil{writeError(w,http.StatusInternalServerError,"cannot list extensions");return}
-	writeJSON(w,http.StatusOK,items)
-}
-func (r *Router) handleBrowserSyncExtensionApprove(w http.ResponseWriter,req *http.Request){
-	if err:=r.browserSync.Store.SetExtensionApproved(req.Context(),req.PathValue("id"),true);err!=nil{
-		writeError(w,http.StatusBadRequest,"pending extension not found");return
+func (r *Router) handleBrowserSyncExtensions(w http.ResponseWriter, req *http.Request) {
+	items, err := r.browserSync.Store.Extensions(req.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot list extensions")
+		return
 	}
-	writeJSON(w,http.StatusOK,map[string]string{"state":"approved"})
+	writeJSON(w, http.StatusOK, items)
 }
-func (r *Router) handleBrowserSyncExtensionRevoke(w http.ResponseWriter,req *http.Request){
-	if err:=r.browserSync.Store.SetExtensionApproved(req.Context(),req.PathValue("id"),false);err!=nil{
-		writeError(w,http.StatusBadRequest,"approved extension not found");return
+func (r *Router) handleBrowserSyncExtensionApprove(w http.ResponseWriter, req *http.Request) {
+	if err := r.browserSync.Store.SetExtensionApproved(req.Context(), req.PathValue("id"), true); err != nil {
+		writeError(w, http.StatusBadRequest, "pending extension not found")
+		return
 	}
-	writeJSON(w,http.StatusOK,map[string]string{"state":"revoked"})
+	writeJSON(w, http.StatusOK, map[string]string{"state": "approved"})
+}
+func (r *Router) handleBrowserSyncExtensionRevoke(w http.ResponseWriter, req *http.Request) {
+	if err := r.browserSync.Store.SetExtensionApproved(req.Context(), req.PathValue("id"), false); err != nil {
+		writeError(w, http.StatusBadRequest, "approved extension not found")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"state": "revoked"})
 }

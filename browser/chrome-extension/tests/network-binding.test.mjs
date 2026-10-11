@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import vm from 'node:vm';
-import {buildPAC,parseBoundHost,proxyEndpoint} from '../src/network-binding.js';
+import {buildPAC,parseBoundHost,proxyEndpoint,proxyAuthDecision} from '../src/network-binding.js';
 
 test('PAC sends only approved first-party hosts to relay without DIRECT fallback',()=>{
  const desired={one:{siteOrigin:'https://login.example.com'},two:{siteOrigin:'https://example.net'}};
@@ -24,4 +24,15 @@ test('network binding rejects IP, custom port, localhost, path and PAC injection
  }
  assert.throws(()=>proxyEndpoint('relay; DIRECT',21090));
  assert.equal(parseBoundHost('https://login.example.com'),'login.example.com');
+});
+
+test('proxy authentication never cancels ordinary website 401 or unrelated proxies',()=>{
+ const lease={username:'browser',password:'test-token',host:'relay.example.com',port:21090,expiresAt:1000};
+ const ordinary={isProxy:false,scheme:'basic',challenger:{host:'login.example.com',port:443}};
+ assert.deepEqual(proxyAuthDecision(ordinary,lease,500),{});
+ assert.deepEqual(proxyAuthDecision({...ordinary,isProxy:true,challenger:{host:'unrelated.proxy.com',port:21090}},lease,500),{});
+ assert.deepEqual(proxyAuthDecision({...ordinary,isProxy:true,challenger:{host:'relay.example.com',port:21090}},lease,500),
+   {authCredentials:{username:'browser',password:'test-token'}});
+ assert.deepEqual(proxyAuthDecision({...ordinary,isProxy:true,challenger:{host:'relay.example.com',port:21090}},lease,1000),
+   {cancel:true});
 });

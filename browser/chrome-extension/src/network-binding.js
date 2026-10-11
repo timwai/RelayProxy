@@ -135,17 +135,23 @@ export function refreshNetworkBinding({force=false}={}){
   }).finally(()=>{refreshing=null});
   return refreshing;
 }
+// Do not interfere with a website's normal HTTP 401 / WWW-Authenticate
+// flow or another extension's proxy. Cancel only a challenge from our known
+// RelayProxy endpoint when its receiver-scoped lease has expired.
+export function proxyAuthDecision(details,lease,now=Date.now()){
+  if(!details?.isProxy || details.scheme?.toLowerCase()!=='basic')return {};
+  if(!lease || String(details.challenger?.host).toLowerCase()!==lease.host ||
+    Number(details.challenger?.port)!==lease.port)return {};
+  if(!Number.isSafeInteger(lease.expiresAt) || now>=lease.expiresAt)
+    return {cancel:true};
+  return {authCredentials:{username:lease.username,password:lease.password}};
+}
 export function registerNetworkAuth(){
   chrome.webRequest?.onAuthRequired?.addListener((details,respond)=>{
     (async()=>{
-      if(!details.isProxy || details.scheme?.toLowerCase()!=='basic')return {cancel:true};
+      if(!details.isProxy || details.scheme?.toLowerCase()!=='basic')return {};
       const lease=await currentLease();
-      if(!lease||Date.now()>=lease.expiresAt ||
-        String(details.challenger?.host).toLowerCase()!==lease.host ||
-        Number(details.challenger?.port)!==lease.port)return {cancel:true};
-      // One device-level credential: Chrome caches proxy Basic auth by realm.
-      // The server checks every CONNECT's hostname and accepted rule separately.
-      return {authCredentials:{username:lease.username,password:lease.password}};
+      return proxyAuthDecision(details,lease);
     })().then(respond,()=>respond({cancel:true}));
   },{urls:['<all_urls>']},['asyncBlocking']);
 }

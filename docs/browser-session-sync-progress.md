@@ -132,3 +132,5 @@ Browser Sync 网络绑定扩展实现：[PAC/代理认证](../browser/chrome-ext
 | 2026-10-11 | [Go CI #38101967308](https://github.com/timwai/RelayProxy/actions/runs/38101967308) 格式复核 | 新增 WSS Cookie-only 兼容测试的 gofmt 格式检查失败，已按 CI diff 精确修复；继续以新提交的完整编译与 Go 测试为准 | NB 状态保持，未新增真实 Chrome/Agent 验收 | 不将格式检查失败视为业务测试通过 |
 
 | 2026-10-11 | [UI CI #38101967271](https://github.com/timwai/RelayProxy/actions/runs/38101967271) PAC IPv4 回归 | 修复扩展数字 IPv4 地址判断中过度转义的点号：采用数字标签逐项检查，拒绝 127.0.0.1 类输入；保留此前扩展单元测试 | NB-03 仍待 CI / 真机验收；P0 状态不变 | 新提交 SHA 单独检查 |
+
+| 2026-10-11 | 代理认证兼容修复 | `webRequest.onAuthRequired` 仅应响应已知 RelayProxy 代理的 Basic 407；网站自身 HTTP 401 与第三方代理认证不可被本扩展取消。增加 [代理认证隔离用例](../browser/chrome-extension/tests/network-binding.test.mjs) | NB-03 已实现待验收，避免普通网站登录回归；P0 状态不变 | 本次新提交须独立通过 CI，真实 Chrome 仍待验证 |

@@ -33,12 +33,22 @@ mkdir -p "$temp/baseline/scripts/compat_seed"
 cp "$repo/scripts/compat_seed/main.go" "$temp/baseline/scripts/compat_seed/main.go"
 for version in old new; do
   if [[ "$version" == old ]]; then root="$temp/baseline"; else root="$repo"; fi
-  (
-    cd "$root"
-    go build -trimpath -o "$temp/$version-server" ./cmd/relay-server
-    go build -trimpath -o "$temp/$version-agent" ./cmd/relay-agent
-    go build -trimpath -o "$temp/$version-seed" ./scripts/compat_seed
-  )
+  if [[ "$version" == new && -n "${RELAYPROXY_PACKAGED_NEW_DIR:-}" ]]; then
+    test -s "$RELAYPROXY_PACKAGED_NEW_DIR/relay-server"
+    test -s "$RELAYPROXY_PACKAGED_NEW_DIR/relay-agent"
+    cp "$RELAYPROXY_PACKAGED_NEW_DIR/relay-server" "$temp/new-server"
+    cp "$RELAYPROXY_PACKAGED_NEW_DIR/relay-agent" "$temp/new-agent"
+    chmod +x "$temp/new-server" "$temp/new-agent"
+    (cd "$root" && go build -trimpath -o "$temp/new-seed" ./scripts/compat_seed)
+    echo "[full-bin] Using actual packaged Linux Agent/Server for feature head"
+  else
+    (
+      cd "$root"
+      go build -trimpath -o "$temp/$version-server" ./cmd/relay-server
+      go build -trimpath -o "$temp/$version-agent" ./cmd/relay-agent
+      go build -trimpath -o "$temp/$version-seed" ./scripts/compat_seed
+    )
+  fi
   "$temp/$version-agent" --version | grep -q 'relay-agent'
 done
 openssl req -new -x509 -newkey rsa:2048 -nodes -days 1 \

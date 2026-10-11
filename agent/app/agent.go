@@ -2150,6 +2150,7 @@ func cloneAgentConfig(cfg AgentConfig) AgentConfig {
 	cfg.SOCKS5Enabled, cfg.HTTPEnabled, cfg.ExitEnabled, cfg.RDPEnabled = cloneBool(cfg.SOCKS5Enabled), cloneBool(cfg.HTTPEnabled), cloneBool(cfg.ExitEnabled), cloneBool(cfg.RDPEnabled)
 	cfg.P2PEnabled, cfg.P2PFallback = cloneBool(cfg.P2PEnabled), cloneBool(cfg.P2PFallback)
 	cfg.AccessDomains, cfg.AccessCIDRs = slices.Clone(cfg.AccessDomains), slices.Clone(cfg.AccessCIDRs)
+	cfg.BrowserLocalHosts = slices.Clone(cfg.BrowserLocalHosts)
 	cfg.Routing = routing.CloneConfig(cfg.Routing)
 	cfg.CustomExits = routing.CloneCustomExits(cfg.CustomExits)
 	cfg.DivertConfig.ExcludeProcesses = slices.Clone(cfg.DivertConfig.ExcludeProcesses)

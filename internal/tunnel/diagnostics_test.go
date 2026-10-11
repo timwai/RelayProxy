@@ -60,3 +60,34 @@ func TestQUICDiagnosticsRateSamplingAndLossPercent(t *testing.T) {
 		t.Fatalf("zero-total loss percent = %v, want 0", got)
 	}
 }
+
+func TestQUICDiagnosticsTrackBrutalController(t *testing.T) {
+	client, server := sessionPair(t, "quic")
+	if !UseBrutal(server, 12_500_000, false) {
+		t.Fatal("failed to switch QUIC session to Brutal")
+	}
+	diagnostics := DiagnoseSession(server)
+	if diagnostics == nil || diagnostics.QUIC == nil {
+		t.Fatal("missing QUIC diagnostics")
+	}
+	if diagnostics.QUIC.CongestionController != "brutal" {
+		t.Fatalf("controller=%q, want brutal", diagnostics.QUIC.CongestionController)
+	}
+	if diagnostics.QUIC.CongestionTargetBPS != 12_500_000 {
+		t.Fatalf("target=%d, want 12500000", diagnostics.QUIC.CongestionTargetBPS)
+	}
+	_ = client
+}
+
+func TestBrutalTLSFallbackNeverActivatesQUICController(t *testing.T) {
+	client, server := sessionPair(t, "tls")
+	for _, session := range []TunnelSession{client, server} {
+		if UseBrutal(session, 12_500_000, false) {
+			t.Fatal("TLS/yamux incorrectly enabled QUIC congestion control")
+		}
+		diagnostics := DiagnoseSession(session)
+		if diagnostics == nil || diagnostics.QUIC != nil {
+			t.Fatalf("TLS diagnostics incorrectly contain QUIC fields: %+v", diagnostics)
+		}
+	}
+}

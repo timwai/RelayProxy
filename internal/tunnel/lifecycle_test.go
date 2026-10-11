@@ -158,19 +158,27 @@ func TestUDPStreamCallerDeadlinesAndPartialFrame(t *testing.T) {
 			c := NewUDPStreamConn(a, &net.UDPAddr{})
 			defer c.Close()
 			frame := []byte{0, 0, 0, 4, 'p', 'i', 'n', 'g'}
+			// Never race a wall-clock sleep against the test goroutine on
+			// overloaded Windows runners: release the missing frame suffix
+			// only after the first caller-owned read deadline has fired.
+			resume := make(chan struct{})
+
 			go func() {
 				if partial > 0 {
-					_, _ = b.Write(frame[:partial])
+					if _, err := b.Write(frame[:partial]); err != nil {
+						return
+					}
 				}
-				time.Sleep(60 * time.Millisecond)
+				<-resume
 				_, _ = b.Write(frame[partial:])
 			}()
-			_ = c.SetReadDeadline(time.Now().Add(20 * time.Millisecond))
+			_ = c.SetReadDeadline(time.Now().Add(100 * time.Millisecond))
 			buf := make([]byte, 32)
 			if _, _, err := c.ReadFrom(buf); !errors.Is(err, os.ErrDeadlineExceeded) {
 				t.Fatalf("expected caller timeout, got %v", err)
 			}
 			_ = c.SetReadDeadline(time.Now().Add(time.Second))
+			close(resume)
 			n, _, err := c.ReadFrom(buf)
 			if err != nil || string(buf[:n]) != "ping" {
 				t.Fatalf("resume: %q %v", buf[:n], err)

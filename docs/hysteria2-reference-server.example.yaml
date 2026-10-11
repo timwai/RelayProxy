@@ -1,0 +1,21 @@
+# EXAMPLE ONLY, for the isolated Issue #198 physical-WAN comparison.
+# Run on the SAME physical Server B and capacity-limited NIC as RelayProxy.
+# A separate UDP port is expected; both tools must traverse the same shaped WAN.
+listen: :20002
+
+tls:
+  cert: /REPLACE_WITH_TEST_CERT/fullchain.pem
+  key: /REPLACE_WITH_TEST_CERT/privkey.pem
+
+auth:
+  type: password
+  password: REPLACE_WITH_TEST_ONLY_PASSWORD
+
+# Hysteria2 server-side maximums are per-client. Replace these with the SAME
+# configured directional caps as RelayProxy; neither is physical shaping.
+bandwidth:
+  up: 8 mbps      # Server -> Client
+  down: 8 mbps    # Client -> Server
+
+# Preserve the same upload/download source policy across products.
+# Avoid authentication material from a production deployment.

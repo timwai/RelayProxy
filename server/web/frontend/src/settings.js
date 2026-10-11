@@ -4,7 +4,13 @@ export const groups = [
     ['listen','监听地址','text',':21080'],['tlsEnabled','访问协议','bool-select',null,['HTTP','HTTPS']]]},
   {id:'tunnel',title:'隧道连接',subtitle:'TCP、QUIC 与设备连接容量',section:'基础服务',fields:[
     ['tcpListen','TCP 监听地址','text',':443'],['quicListen','QUIC / UDP 监听地址','text',':443'],['tlsEnabled','启用隧道 TLS','checkbox'],
-    ['heartbeatSec','心跳间隔（秒）','number'],['maxConnections','全局设备连接上限','number'],['maxStreamsPerDevice','每设备并发流上限','number']]},
+    ['heartbeatSec','心跳间隔（秒）','number'],['maxConnections','全局设备连接上限','number'],['maxStreamsPerDevice','每设备并发流上限','number'],
+    ['brutalUpMbps','Brutal Server → Agent 单设备上限（Mbps）','number'],
+    ['brutalDownMbps','Brutal Agent → Server 单设备上限（Mbps）','number'],
+    ['brutalTotalUpMbps','Brutal Server → Agent 汇总预算（Mbps）','number'],
+    ['brutalTotalDownMbps','Brutal Agent → Server 汇总预算（Mbps）','number'],
+    ['brutalIgnoreClientBandwidth','QUIC 拥塞控制策略','congestion-select'],
+    ['brutalDisableLossCompensation','关闭 Server Brutal 丢包速率补偿','checkbox']]},
   {id:'direct',title:'公网直连',subtitle:'Public Direct QUIC 与 Agent 监听端口',section:'网络能力',fields:[
     ['enabled','启用 Public Direct','checkbox'],['portStart','Agent UDP 端口起始','number'],['portEnd','Agent UDP 端口结束','number']]},
   {id:'p2p',title:'P2P 直连',subtitle:'UDP 打洞、Rendezvous、UPnP',section:'网络能力',fields:[

@@ -43,11 +43,24 @@ func (p *Pacer) Budget(now monotime.Time) congestion.ByteCount {
 	if p.lastSentTime.IsZero() {
 		return p.maxBurstSize()
 	}
-	budget := p.budgetAtLastSent + (p.getBandwidth()*congestion.ByteCount(now.Sub(p.lastSentTime).Nanoseconds()))/1e9
-	if budget < 0 { // protect against overflows
-		budget = congestion.ByteCount(1<<62 - 1)
+	maxBudget := p.maxBurstSize()
+	if p.budgetAtLastSent >= maxBudget {
+		return maxBudget
 	}
-	return min(p.maxBurstSize(), budget)
+	elapsed := now.Sub(p.lastSentTime)
+	bandwidth := p.getBandwidth()
+	if elapsed <= 0 || bandwidth <= 0 {
+		return max(congestion.ByteCount(0), p.budgetAtLastSent)
+	}
+	// Avoid multiplying a potentially high bytes/s value by elapsed
+	// nanoseconds before checking the burst cap. At 1,000,000 Mbps,
+	// even a 100 ms scheduling pause overflows int64 in the old code.
+	remaining := maxBudget - p.budgetAtLastSent
+	if float64(bandwidth)*elapsed.Seconds() >= float64(remaining) {
+		return maxBudget
+	}
+	return min(maxBudget, p.budgetAtLastSent+
+		congestion.ByteCount(float64(bandwidth)*elapsed.Seconds()))
 }
 
 func (p *Pacer) maxBurstSize() congestion.ByteCount {

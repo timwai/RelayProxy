@@ -688,3 +688,325 @@ func TestExitLifecyclePushesProxyInventoryImmediately(t *testing.T) {
 		t.Fatalf("offline revision=%d, online=%d", offline.ProxyExitRevision, online.ProxyExitRevision)
 	}
 }
+
+func TestAuthorizedBrutalRates(t *testing.T) {
+	tests := []struct {
+		name                       string
+		hello                      protocol.DeviceHello
+		cfg                        GatewayConfig
+		wantClientTx, wantServerTx uint64
+	}{
+		{
+			name:         "caps both directions",
+			hello:        protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg:          GatewayConfig{BrutalMaxUploadBPS: 30_000_000, BrutalMaxDownloadBPS: 10_000_000},
+			wantClientTx: 10_000_000, wantServerTx: 30_000_000,
+		},
+		{
+			name:         "zero server caps leave client hints unchanged",
+			hello:        protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			wantClientTx: 20_000_000, wantServerTx: 40_000_000,
+		},
+		{
+			name:         "one zero hint keeps that direction on BBR",
+			hello:        protocol.DeviceHello{BrutalDownloadBPS: 40_000_000},
+			wantServerTx: 40_000_000,
+		},
+		{
+			name:  "server can ignore client bandwidth",
+			hello: protocol.DeviceHello{BrutalUploadBPS: 20_000_000, BrutalDownloadBPS: 40_000_000},
+			cfg:   GatewayConfig{IgnoreClientBandwidth: true},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clientTx, serverTx := authorizedBrutalRates(tt.hello, tt.cfg)
+			if clientTx != tt.wantClientTx || serverTx != tt.wantServerTx {
+				t.Fatalf("rates client/server=%d/%d, want %d/%d", clientTx, serverTx, tt.wantClientTx, tt.wantServerTx)
+			}
+		})
+	}
+}
+
+func TestQUICHandshakeNegotiatesAndAppliesBrutal(t *testing.T) {
+	certificate, err := cert.EnsureCertificate("", "", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := session.NewManager()
+	gateway := NewGateway(GatewayConfig{
+		QUICAddr:              "127.0.0.1:0",
+		TLSConfig:             &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:      2 * time.Second,
+		ServerInstanceID:      "brutal-test-server",
+		AllowLegacyDeviceAuth: true,
+		BrutalMaxUploadBPS:    25_000_000,
+		BrutalMaxDownloadBPS:  15_000_000,
+		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
+			return DeviceAuthorization{
+				State: "approved", DeviceID: "client",
+				ApprovedCapabilities: []string{protocol.CapabilityProxyClient},
+			}, nil
+		},
+		RecheckDevice: func(string, string) bool { return true },
+	}, sessions, NewStreamRouter(sessions, nil, nil, nil))
+	if err := gateway.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gateway.Close() })
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	clientSession, err := tunnel.DialQUIC(ctx, gateway.QUICAddr().String(), &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = clientSession.Close() })
+
+	control := openTestStream(t, clientSession)
+	writeControlHeader(t, control)
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
+		DeviceName:            "brutal-client",
+		RequestedCapabilities: []string{protocol.CapabilityProxyClient},
+		BrutalUploadBPS:       20_000_000,
+		BrutalDownloadBPS:     30_000_000,
+	})
+	if !accepted.Success {
+		t.Fatalf("unexpected approval failure: %+v", accepted)
+	}
+	if accepted.BrutalUploadBPS != 15_000_000 || accepted.BrutalDownloadBPS != 25_000_000 {
+		t.Fatalf("negotiated rates upload/download=%d/%d, want 15000000/25000000",
+			accepted.BrutalUploadBPS, accepted.BrutalDownloadBPS)
+	}
+
+	serverSession, ok := sessions.Get("client")
+	if !ok || serverSession == nil {
+		t.Fatal("authenticated QUIC session was not registered")
+	}
+	if serverSession.BrutalUploadBPS != 15_000_000 || serverSession.BrutalDownloadBPS != 25_000_000 {
+		t.Fatalf("session Brutal profile=%d/%d", serverSession.BrutalUploadBPS, serverSession.BrutalDownloadBPS)
+	}
+	diagnostics := tunnel.DiagnoseSession(serverSession.Tunnel)
+	if diagnostics == nil || diagnostics.QUIC == nil {
+		t.Fatal("missing server QUIC diagnostics")
+	}
+	if diagnostics.QUIC.CongestionController != "brutal" ||
+		diagnostics.QUIC.CongestionTargetBPS != 25_000_000 {
+		t.Fatalf("server congestion diagnostics = %+v", diagnostics.QUIC)
+	}
+}
+
+// TestBrutalAbsentHelloKeepsBBR models a pre-Brutal client sending no
+// bandwidth extension fields to a configured post-Brutal server.
+func TestBrutalAbsentHelloKeepsBBR(t *testing.T) {
+	certificate, err := cert.EnsureCertificate("", "", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := session.NewManager()
+	gateway := NewGateway(GatewayConfig{
+		QUICAddr:              "127.0.0.1:0",
+		TLSConfig:             &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:      2 * time.Second,
+		ServerInstanceID:      "brutal-absent-hints",
+		AllowLegacyDeviceAuth: true,
+		BrutalMaxUploadBPS:    25_000_000,
+		BrutalMaxDownloadBPS:  15_000_000,
+		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
+			return DeviceAuthorization{State: "approved", DeviceID: "legacy-like-client", ApprovedCapabilities: []string{protocol.CapabilityProxyClient}}, nil
+		},
+		RecheckDevice: func(string, string) bool { return true },
+	}, sessions, NewStreamRouter(sessions, nil, nil, nil))
+	if err := gateway.Start(); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = gateway.Close() })
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	client, err := tunnel.DialQUIC(ctx, gateway.QUICAddr().String(), &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Close() })
+	control := openTestStream(t, client)
+	writeControlHeader(t, control)
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	accepted := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
+		DeviceName:            "pre-brutal-client",
+		RequestedCapabilities: []string{protocol.CapabilityProxyClient},
+	})
+	if !accepted.Success {
+		t.Fatalf("approval rejected: %+v", accepted)
+	}
+	if accepted.BrutalUploadBPS != 0 || accepted.BrutalDownloadBPS != 0 {
+		t.Fatalf("server activated Brutal without client hint: %+v", accepted)
+	}
+	registered, ok := sessions.Get("legacy-like-client")
+	if !ok || registered == nil {
+		t.Fatal("client session not registered")
+	}
+	diag := tunnel.DiagnoseSession(registered.Tunnel)
+	if diag == nil || diag.QUIC == nil ||
+		diag.QUIC.CongestionController != "bbr-aggressive" ||
+		diag.QUIC.CongestionTargetBPS != 0 {
+		t.Fatalf("legacy-like client did not preserve default BBR: %+v", diag)
+	}
+}
+
+func TestRelayBrutalAggregateBudgetsAndDisconnectReclaim(t *testing.T) {
+	certificate, err := cert.EnsureCertificate("", "", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := session.NewManager()
+	gateway := NewGateway(GatewayConfig{
+		QUICAddr:               "127.0.0.1:0",
+		TLSConfig:              &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:       3 * time.Second,
+		ServerInstanceID:       "brutal-total-budget",
+		AllowLegacyDeviceAuth:  true,
+		BrutalTotalUploadBPS:   3_750_000,
+		BrutalTotalDownloadBPS: 2_600_000,
+		AuthorizeDevice: func(_ string, hello protocol.DeviceHello) (DeviceAuthorization, error) {
+			return DeviceAuthorization{
+				State: "approved", DeviceID: hello.DeviceName,
+				ApprovedCapabilities: []string{protocol.CapabilityProxyClient},
+			}, nil
+		},
+		RecheckDevice: func(string, string) bool { return true },
+	}, sessions, NewStreamRouter(sessions, nil, nil, nil))
+	if err := gateway.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	connect := func(name string) (tunnel.TunnelSession, protocol.DeviceAccepted) {
+		t.Helper()
+		ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+		defer cancel()
+		client, err := tunnel.DialQUIC(ctx, gateway.QUICAddr().String(), &tls.Config{InsecureSkipVerify: true}, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		control := openTestStream(t, client)
+		writeControlHeader(t, control)
+		identity, err := deviceidentity.Generate()
+		if err != nil {
+			client.Close()
+			t.Fatal(err)
+		}
+		accepted := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
+			DeviceName: name, RequestedCapabilities: []string{protocol.CapabilityProxyClient},
+			BrutalUploadBPS: 2_000_000, BrutalDownloadBPS: 2_000_000,
+		})
+		if !accepted.Success {
+			client.Close()
+			t.Fatalf("handshake %q was rejected: %+v", name, accepted)
+		}
+		return client, accepted
+	}
+	a, first := connect("a")
+	defer a.Close()
+	if first.BrutalUploadBPS != 2_000_000 || first.BrutalDownloadBPS != 2_000_000 {
+		t.Fatalf("first session not granted full budget: upload=%d download=%d", first.BrutalUploadBPS, first.BrutalDownloadBPS)
+	}
+	b, second := connect("b")
+	defer b.Close()
+	if second.BrutalUploadBPS != 0 || second.BrutalDownloadBPS != 1_000_000 {
+		t.Fatalf("second session did not clamp to budget: upload=%d download=%d", second.BrutalUploadBPS, second.BrutalDownloadBPS)
+	}
+	registered, ok := sessions.Get("b")
+	if !ok || registered == nil {
+		t.Fatal("second device not registered")
+	}
+	diag := tunnel.DiagnoseSession(registered.Tunnel)
+	if diag == nil || diag.QUIC == nil || diag.QUIC.CongestionTargetBPS != 1_000_000 {
+		t.Fatalf("server sender did not apply aggregate cap: %+v", diag)
+	}
+	gateway.brutalBudget.mu.Lock()
+	reserved := gateway.brutalBudget.clientTx
+	gateway.brutalBudget.mu.Unlock()
+	if reserved != 2_500_000 {
+		t.Fatalf("unexpected agent-to-server aggregate reservation %d", reserved)
+	}
+	_ = a.Close()
+	deadline := time.Now().Add(4 * time.Second)
+	for time.Now().Before(deadline) {
+		gateway.brutalBudget.mu.Lock()
+		available := gateway.brutalBudget.clientTx == 0 && gateway.brutalBudget.serverTx == 1_250_000
+		gateway.brutalBudget.mu.Unlock()
+		if available {
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	gateway.brutalBudget.mu.Lock()
+	upUsed, downUsed := gateway.brutalBudget.clientTx, gateway.brutalBudget.serverTx
+	gateway.brutalBudget.mu.Unlock()
+	if upUsed != 0 || downUsed != 1_250_000 {
+		t.Fatalf("disconnect failed to reclaim reservation: %d/%d", upUsed, downUsed)
+	}
+	c, third := connect("c")
+	defer c.Close()
+	if third.BrutalUploadBPS != 2_000_000 || third.BrutalDownloadBPS != 2_000_000 {
+		t.Fatalf("reconnected session failed to reclaim bandwidth: upload=%d download=%d",
+			third.BrutalUploadBPS, third.BrutalDownloadBPS)
+	}
+}
+
+func TestTLSNeverConsumesRelayBrutalBudget(t *testing.T) {
+	certificate, err := cert.EnsureCertificate("", "", "localhost")
+	if err != nil {
+		t.Fatal(err)
+	}
+	sessions := session.NewManager()
+	gateway := NewGateway(GatewayConfig{
+		TCPAddr:                "127.0.0.1:0",
+		TLSConfig:              &tls.Config{Certificates: []tls.Certificate{certificate}},
+		HandshakeTimeout:       3 * time.Second,
+		ServerInstanceID:       "brutal-tls-budget",
+		AllowLegacyDeviceAuth:  true,
+		BrutalTotalUploadBPS:   3_000_000,
+		BrutalTotalDownloadBPS: 3_000_000,
+		AuthorizeDevice: func(string, protocol.DeviceHello) (DeviceAuthorization, error) {
+			return DeviceAuthorization{State: "approved", DeviceID: "tls-client", ApprovedCapabilities: []string{protocol.CapabilityProxyClient}}, nil
+		},
+		RecheckDevice: func(string, string) bool { return true },
+	}, sessions, NewStreamRouter(sessions, nil, nil, nil))
+	if err := gateway.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer gateway.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 4*time.Second)
+	defer cancel()
+	client, err := tunnel.DialTLS(ctx, gateway.TCPAddr().String(), &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+	control := openTestStream(t, client)
+	writeControlHeader(t, control)
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	welcome := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
+		DeviceName: "tls-client", RequestedCapabilities: []string{protocol.CapabilityProxyClient},
+		BrutalUploadBPS: 2_000_000, BrutalDownloadBPS: 2_000_000,
+	})
+	if !welcome.Success || welcome.BrutalUploadBPS != 0 || welcome.BrutalDownloadBPS != 0 {
+		t.Fatalf("TLS gateway negotiated QUIC-only bandwidth hints: %+v", welcome)
+	}
+	gateway.brutalBudget.mu.Lock()
+	usedClient, usedServer := gateway.brutalBudget.clientTx, gateway.brutalBudget.serverTx
+	gateway.brutalBudget.mu.Unlock()
+	if usedClient != 0 || usedServer != 0 {
+		t.Fatalf("TLS incorrectly reserved QUIC aggregate bandwidth %d/%d", usedClient, usedServer)
+	}
+}

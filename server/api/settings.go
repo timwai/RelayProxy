@@ -24,12 +24,18 @@ type AdminSettings struct {
 }
 
 type TunnelSettings struct {
-	TCPListen           string `json:"tcpListen"`
-	QUICListen          string `json:"quicListen"`
-	TLSEnabled          bool   `json:"tlsEnabled"`
-	HeartbeatSec        int    `json:"heartbeatSec"`
-	MaxConnections      int    `json:"maxConnections"`
-	MaxStreamsPerDevice int    `json:"maxStreamsPerDevice"`
+	TCPListen                     string `json:"tcpListen"`
+	QUICListen                    string `json:"quicListen"`
+	TLSEnabled                    bool   `json:"tlsEnabled"`
+	HeartbeatSec                  int    `json:"heartbeatSec"`
+	MaxConnections                int    `json:"maxConnections"`
+	MaxStreamsPerDevice           int    `json:"maxStreamsPerDevice"`
+	BrutalUpMbps                  int    `json:"brutalUpMbps"`
+	BrutalDownMbps                int    `json:"brutalDownMbps"`
+	BrutalTotalUpMbps             int    `json:"brutalTotalUpMbps"`
+	BrutalTotalDownMbps           int    `json:"brutalTotalDownMbps"`
+	BrutalIgnoreClientBandwidth   bool   `json:"brutalIgnoreClientBandwidth"`
+	BrutalDisableLossCompensation bool   `json:"brutalDisableLossCompensation"`
 }
 
 type CertificateSettings struct {
@@ -148,8 +154,17 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 	ingressEnabled := c.RDP.Ingress.Enabled != nil && *c.RDP.Ingress.Enabled
 	return ServerEditableConfig{
 		Admin: AdminSettings{c.Server.Admin.Listen, c.IsAdminTLSEnabled()},
-		Tunnel: TunnelSettings{c.Server.TLS.Listen, c.Server.QUIC.Listen, c.IsTLSEnabled(),
-			c.Tunnel.HeartbeatSec, c.Tunnel.MaxConnections, c.Tunnel.MaxConnectionsPerDevice},
+		Tunnel: TunnelSettings{
+			TCPListen: c.Server.TLS.Listen, QUICListen: c.Server.QUIC.Listen,
+			TLSEnabled: c.IsTLSEnabled(), HeartbeatSec: c.Tunnel.HeartbeatSec,
+			MaxConnections: c.Tunnel.MaxConnections, MaxStreamsPerDevice: c.Tunnel.MaxConnectionsPerDevice,
+			BrutalUpMbps:                  c.Tunnel.Bandwidth.UpMbps,
+			BrutalDownMbps:                c.Tunnel.Bandwidth.DownMbps,
+			BrutalTotalUpMbps:             c.Tunnel.Bandwidth.TotalUpMbps,
+			BrutalTotalDownMbps:           c.Tunnel.Bandwidth.TotalDownMbps,
+			BrutalIgnoreClientBandwidth:   c.Tunnel.Bandwidth.IgnoreClientBandwidth,
+			BrutalDisableLossCompensation: c.Tunnel.Bandwidth.DisableLossCompensation,
+		},
 		Certificate: CertificateSettings{c.Server.CertFile, c.Server.KeyFile},
 		RelayACL: RelayACLSettings{p.AllowInternet, p.AllowPrivateNetwork, p.AllowLoopback,
 			string(p.AccessMode), append([]string{}, p.AccessHosts...), append([]string{}, p.AccessCIDRs...)},
@@ -193,6 +208,12 @@ func (c ServerEditableConfig) apply(target *config.ServerConfig) error {
 	target.Tunnel.HeartbeatSec = c.Tunnel.HeartbeatSec
 	target.Tunnel.MaxConnections = c.Tunnel.MaxConnections
 	target.Tunnel.MaxConnectionsPerDevice = c.Tunnel.MaxStreamsPerDevice
+	target.Tunnel.Bandwidth.UpMbps = c.Tunnel.BrutalUpMbps
+	target.Tunnel.Bandwidth.DownMbps = c.Tunnel.BrutalDownMbps
+	target.Tunnel.Bandwidth.TotalUpMbps = c.Tunnel.BrutalTotalUpMbps
+	target.Tunnel.Bandwidth.TotalDownMbps = c.Tunnel.BrutalTotalDownMbps
+	target.Tunnel.Bandwidth.IgnoreClientBandwidth = c.Tunnel.BrutalIgnoreClientBandwidth
+	target.Tunnel.Bandwidth.DisableLossCompensation = c.Tunnel.BrutalDisableLossCompensation
 	target.RelayACL = &config.RelayACLConfig{
 		AllowInternet: config.BoolPtr(c.RelayACL.AllowInternet), AllowPrivateNetwork: c.RelayACL.AllowPrivateNetwork,
 		AllowLoopback: c.RelayACL.AllowLoopback,

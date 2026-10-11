@@ -61,8 +61,8 @@ func BenchmarkTicketAuthenticatorAuthenticatePolicy(b *testing.B) {
 		b.Fatal(err)
 	}
 	policy := checker.Policy()
-	auth.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
-		return &policy, nil
+	auth.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (Authorization, error) {
+		return Authorization{RelayPolicy: &policy}, nil
 	})
 
 	tickets := make([][]byte, b.N)

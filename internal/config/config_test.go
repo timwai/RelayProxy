@@ -735,6 +735,86 @@ func TestServerP2PPortRangeValidation(t *testing.T) {
 	}
 }
 
+func TestAgentBrutalBandwidthValidateAndPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	cfg := &AgentConfigFile{}
+	cfg.Transport.Bandwidth.UpMbps = 120
+	cfg.Transport.Bandwidth.DownMbps = 450
+	cfg.Transport.Bandwidth.DisableLossCompensation = true
+	if err := SaveAgentConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Transport.Bandwidth.UpMbps != 120 ||
+		loaded.Transport.Bandwidth.DownMbps != 450 ||
+		!loaded.Transport.Bandwidth.DisableLossCompensation {
+		t.Fatalf("agent Brutal bandwidth changed after persistence: %+v", loaded.Transport.Bandwidth)
+	}
+
+	loaded.Transport.Bandwidth.UpMbps = -1
+	if err := ValidateAgentConfig(loaded); err == nil {
+		t.Fatal("negative agent Brutal upload bandwidth was accepted")
+	}
+	loaded.Transport.Bandwidth.UpMbps = 1_000_001
+	if err := ValidateAgentConfig(loaded); err == nil {
+		t.Fatal("oversized agent Brutal upload bandwidth was accepted")
+	}
+}
+
+func TestServerBrutalBandwidthValidateAndPersist(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "server.yaml")
+	cfg := &ServerConfig{}
+	cfg.Tunnel.Bandwidth.UpMbps = 900
+	cfg.Tunnel.Bandwidth.DownMbps = 300
+	cfg.Tunnel.Bandwidth.TotalUpMbps = 480
+	cfg.Tunnel.Bandwidth.TotalDownMbps = 200
+	cfg.Tunnel.Bandwidth.IgnoreClientBandwidth = true
+	cfg.Tunnel.Bandwidth.DisableLossCompensation = true
+	if err := SaveServerConfig(path, cfg); err != nil {
+		t.Fatal(err)
+	}
+	loaded, err := LoadServerConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Tunnel.Bandwidth.UpMbps != 900 ||
+		loaded.Tunnel.Bandwidth.DownMbps != 300 ||
+		loaded.Tunnel.Bandwidth.TotalUpMbps != 480 ||
+		loaded.Tunnel.Bandwidth.TotalDownMbps != 200 ||
+		!loaded.Tunnel.Bandwidth.IgnoreClientBandwidth ||
+		!loaded.Tunnel.Bandwidth.DisableLossCompensation {
+		t.Fatalf("server Brutal bandwidth changed after persistence: %+v", loaded.Tunnel.Bandwidth)
+	}
+
+	loaded.Tunnel.Bandwidth.DownMbps = -1
+	if err := NormalizeServerConfig(loaded); err == nil {
+		t.Fatal("negative server Brutal download bandwidth was accepted")
+	}
+	loaded.Tunnel.Bandwidth.DownMbps = 1_000_001
+	if err := NormalizeServerConfig(loaded); err == nil {
+		t.Fatal("oversized server Brutal download bandwidth was accepted")
+	}
+	loaded.Tunnel.Bandwidth.DownMbps = 300
+	for _, scenario := range []struct {
+		name  string
+		apply func(*ServerConfig)
+	}{
+		{name: "negative total up", apply: func(cfg *ServerConfig) { cfg.Tunnel.Bandwidth.TotalUpMbps = -1 }},
+		{name: "oversized total down", apply: func(cfg *ServerConfig) { cfg.Tunnel.Bandwidth.TotalDownMbps = 1_000_001 }},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
+			copy := *loaded
+			scenario.apply(&copy)
+			if err := NormalizeServerConfig(&copy); err == nil {
+				t.Fatal("invalid aggregate bandwidth budget was accepted")
+			}
+		})
+	}
+}
+
 func TestAgentUPnPRequiresExplicitLocalApproval(t *testing.T) {
 	var config AgentConfigFile
 	applyAgentDefaults(&config)

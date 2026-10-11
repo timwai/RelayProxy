@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"log"
 	"net"
 	"sync"
 	"sync/atomic"
@@ -128,6 +129,11 @@ type QUICSession struct {
 	udpReadBufferBytes       int
 	udpWriteBufferBytes      int
 	congestionController     string
+	congestionTargetBPS      uint64
+	brutalGuardRunning       bool
+	brutalGuardTripped       bool
+	brutalFallbackReason     string
+	brutalFallbackHook       func()
 }
 
 // DefaultQUICConfig returns the transport profile used by RelayProxy. The
@@ -160,6 +166,122 @@ func NewQUICSession(conn *quic.Conn) *QUICSession {
 	s := &QUICSession{conn: conn, congestionController: "bbr-aggressive"}
 	s.datagrams = newDatagramMux(s)
 	return s
+}
+
+// UseBrutal switches an established QUIC session to Hysteria Brutal.
+// QUIC starts on BBR Aggressive so authentication and capability negotiation
+// don't depend on a bandwidth hint. The authenticated control plane can then
+// opt into Brutal for the sending direction.
+func (s *QUICSession) UseBrutal(txBPS uint64, disableLossCompensation bool) bool {
+	if s == nil || s.conn == nil || txBPS == 0 {
+		return false
+	}
+	txBPS = quicprofile.CapRequestedRate(txBPS, 0)
+	if txBPS == 0 {
+		return false
+	}
+	s.diagnosticsMu.Lock()
+	defer s.diagnosticsMu.Unlock()
+	if s.brutalGuardTripped || s.conn.Context().Err() != nil {
+		return false // A tripped connection may never re-enable Brutal.
+	}
+	quicprofile.UseBrutal(s.conn, txBPS, disableLossCompensation)
+	s.congestionController = "brutal"
+	s.congestionTargetBPS = txBPS
+	if !s.brutalGuardRunning {
+		s.brutalGuardRunning = true
+		go s.monitorBrutalRTT()
+	}
+	return true
+}
+
+// fallbackFromBrutal is idempotent, per sending QUIC connection. It is the
+// emergency circuit-breaker for pathological sustained queueing, not a
+// bandwidth estimator and not a substitute for aggregate fairness policy.
+// OnBrutalFallback registers the server-side aggregate-budget release hook.
+// It is invoked once outside the diagnostics mutex when this QUIC sender
+// switches to BBR. A late registration after fallback is invoked immediately.
+func (s *QUICSession) OnBrutalFallback(hook func()) {
+	if s == nil || hook == nil {
+		return
+	}
+	s.diagnosticsMu.Lock()
+	tripped := s.brutalGuardTripped
+	if !tripped {
+		s.brutalFallbackHook = hook
+	}
+	s.diagnosticsMu.Unlock()
+	if tripped {
+		hook()
+	}
+}
+
+func (s *QUICSession) fallbackFromBrutal(reason string) bool {
+	if s == nil || s.conn == nil {
+		return false
+	}
+	s.diagnosticsMu.Lock()
+	if s.congestionController != "brutal" || s.brutalGuardTripped {
+		s.diagnosticsMu.Unlock()
+		return false
+	}
+	quicprofile.UseDefaultBBR(s.conn)
+	s.congestionController = "bbr-aggressive"
+	s.congestionTargetBPS = 0
+	s.brutalGuardTripped = true
+	s.brutalFallbackReason = reason
+	hook := s.brutalFallbackHook
+	s.brutalFallbackHook = nil
+	s.diagnosticsMu.Unlock()
+	// Do not call out to the Gateway's budget mutex under diagnosticsMu.
+	if hook != nil {
+		hook()
+	}
+	log.Printf("[BrutalGuard] Reverted QUIC sender to BBR, reason=%s", reason)
+	return true
+}
+
+func (s *QUICSession) monitorBrutalRTT() {
+	const samplingPeriod = time.Second
+	clock := time.NewTicker(samplingPeriod)
+	defer clock.Stop()
+	var guard brutalRTTGuard
+	var lossGuard brutalLossGuard
+	for {
+		select {
+		case <-s.conn.Context().Done():
+			return
+		case now := <-clock.C:
+			s.diagnosticsMu.Lock()
+			active := s.congestionController == "brutal"
+			s.diagnosticsMu.Unlock()
+			if !active {
+				return
+			}
+			stats := s.conn.ConnectionStats()
+			inflatedRTT := guard.sample(now, stats.MinRTT, stats.SmoothedRTT, stats.BytesSent)
+			severeLoss := lossGuard.sample(now, stats.PacketsSent, stats.PacketsLost)
+			if inflatedRTT || severeLoss {
+				var reason string
+				if inflatedRTT {
+					reason = fmt.Sprintf("sustained loaded RTT inflation: min=%.1fms smoothed=%.1fms",
+						float64(stats.MinRTT)/float64(time.Millisecond),
+						float64(stats.SmoothedRTT)/float64(time.Millisecond))
+				} else {
+					reason = "sustained severe QUIC sender packet loss"
+				}
+				s.fallbackFromBrutal(reason)
+				return
+			}
+		}
+	}
+}
+
+// UseBrutal configures a TunnelSession when its transport is QUIC.
+// TLS/yamux sessions intentionally ignore QUIC congestion settings.
+func UseBrutal(session TunnelSession, txBPS uint64, disableLossCompensation bool) bool {
+	quicSession, ok := session.(*QUICSession)
+	return ok && quicSession.UseBrutal(txBPS, disableLossCompensation)
 }
 
 func newOwnedQUICSession(conn *quic.Conn, packetConn net.PacketConn) *QUICSession {

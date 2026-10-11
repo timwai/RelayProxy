@@ -10,6 +10,32 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 
 **Brutal is intentionally opt-in.** Rates above the physical path capacity amplify queueing, packet loss, bufferbloat, and cross-tenant unfairness. Start below the measured sustained available bandwidth. Individual caps remain per session; a *new optional* aggregate reservation pool also exists, but it is **not a global bandwidth scheduler, wire-rate limiter, or fairness guarantee**.
 
+## Runtime bufferbloat safety fuse (implemented, release validation pending)
+
+A **per-sending-QUIC-session** watchdog now checks sender-side QUIC `MinRTT`, `SmoothedRTT` and `BytesSent` once per second while Brutal is active. After at least **five seconds** of controller lifetime, it falls back to the existing **BBR Aggressive** controller only when at least **three consecutive busy samples** show all of:
+
+- meaningful sending activity (≥64 KiB new QUIC-sent bytes at each sampling tick);
+- smoothed RTT ≥3× the observed session minimum; and
+- smoothed RTT at least **100 ms above** the observed session minimum.
+
+The fallback is **one-way for that connection** (no BBR↔Brutal oscillation). Diagnostics report `brutal_fallback_reason`; the sender logs `[BrutalGuard]`. A temporary RTT spike, idle path, or naturally high-RTT steady link alone must not trigger it. Unit tests cover all three and an actual QUIC session switching back to BBR while preserving stream payload correctness.
+
+This is only a **last-resort congestion safety fuse**: it does not guarantee queue-free transit, recognize every competing tenant, estimate path capacity, implement fair queuing, or prevent a short-lived transfer from temporarily monopolizing a link before the guard triggers. Aggregate admission budgets remain necessary and independently configured. The guard's real-world false-positive and reduction-in-bufferbloat behavior still require controlled WAN evidence before default-on.
+
+## Conditions for a default-on Brutal proposal (NOT SATISFIED)
+
+Hysteria Brutal requires a **numeric sending-rate target**. RelayProxy cannot safely invent that rate from only a server address or from the existence of a QUIC connection; a guessed high target can starve other traffic, and a guessed low target can perform worse than BBR. Therefore an unconfigured link **must continue to initialize on BBR** even after this watchdog exists.
+
+Before changing shipped Agent defaults, require all of:
+
+1. A reproducible **path-capacity discovery / authorization mechanism** (or explicit independently measured link budget), with per-direction limits and other traffic headroom. It must handle heterogeneous client uplinks, mobile network changes, metered networks, and shared exit contention without assuming a single global Mbps value.
+2. The real-WAN, same-endpoint BBR/Brutal/Hysteria2 0/1/5% × upload/download × >=5-round matrix, sustained competing-flow/loaded RTT evidence, CPU and on-wire packet-loss traces, and an approved fairness/latency policy. Current CI `netem` tests are not a substitute.
+3. Guard false-positive/false-negative evaluation, reconnect/fallback telemetry, repeated long-duration multi-tenant tests and staged opt-in field rollout with rollback. The default must not make an unproven production-wide change.
+4. Installable/signed package and GUI/platform network interception upgrade QA, in addition to the passing 24 baseline/new executable authentication and SOCKS5 application transfer paths.
+5. Explicit release-owner approval that states **which measured network population, bandwidth discovery policy and selected target rate** the default-on behavior applies to, and clearly reverts to BBR whenever path capacity is unknown.
+
+Until those are complete, **do not change `transport.bandwidth.up_mbps/down_mbps: 0`, do not merge this branch to main, and do not label Issue #198 default-enabled**.
+
 ## Aggregate Relay QUIC Brutal budget (implemented, opt-in)
 
 To preserve capacity for BBR and other applications, Server admins can optionally specify total directional **pacing reservations** alongside existing per-device caps:

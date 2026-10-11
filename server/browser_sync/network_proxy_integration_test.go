@@ -95,6 +95,16 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 		t.Fatal("server allowed browser traffic without Agent's signed local opt-in")
 	}
 	exitSession.Capabilities = []string{protocol.CapabilityBrowserNetworkExit}
+	exitSession.IdentityID = "id_other"
+	if proxy.AllowedExit(identity.IdentityID, exitID) {
+		t.Fatal("browser could use a shared Exit under another Identity")
+	}
+	exitSession.IdentityID = identity.IdentityID
+	exitSession.Grants = nil
+	if proxy.AllowedExit(identity.IdentityID, exitID) {
+		t.Fatal("browser could use an Exit without proxy.exit grant")
+	}
+	exitSession.Grants = []string{protocol.CapabilityProxyExit}
 	lease, err := proxy.Issue(ctx, receiver.ID)
 	if err != nil {
 		t.Fatal(err)

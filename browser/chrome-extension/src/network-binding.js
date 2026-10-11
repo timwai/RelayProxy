@@ -217,6 +217,9 @@ export function refreshNetworkBinding({force=false}={}){
 // RelayProxy endpoint when its receiver-scoped lease has expired.
 export function proxyAuthDecision(details,lease,now=Date.now()){
   if(!details?.isProxy || details.scheme?.toLowerCase()!=='basic')return {};
+  // Only the remote Relay Server authenticates. The B-local Agent loopback
+  // CONNECT endpoint intentionally sends no 407 and receives no credentials.
+  if(String(details.challenger?.host).toLowerCase()==='127.0.0.1')return {};
   if(!lease || String(details.challenger?.host).toLowerCase()!==lease.host ||
     Number(details.challenger?.port)!==lease.port)return {};
   if(!Number.isSafeInteger(lease.expiresAt) || now>=lease.expiresAt)

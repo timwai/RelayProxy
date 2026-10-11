@@ -56,14 +56,18 @@ test('B local Agent native mode and A origin Agent mode can coexist in one PAC',
   second:{siteOrigin:'https://app.example.net',mode:'local_agent',port:21291}
  },'HTTPS relay.example.com:21090',{port:21291}));
 });
-test('local Agent 407 is isolated from A upstream and regular website login',()=>{
- const local={host:'127.0.0.1',port:21291,username:'relay-browser',password:'local-secret',
+test('local Agent never receives proxy Basic credentials, remote Relay still does',()=>{
+ const oldLocal={host:'127.0.0.1',port:21291,username:'relay-browser',password:'retired-token',
   expiresAt:Number.MAX_SAFE_INTEGER};
  assert.deepEqual(proxyAuthDecision({isProxy:true,scheme:'basic',
-  challenger:{host:'127.0.0.1',port:21291}},local,1000),
-  {authCredentials:{username:'relay-browser',password:'local-secret'}});
+  challenger:{host:'127.0.0.1',port:21291}},oldLocal,1000),{});
+ const remote={host:'relay.example.com',port:21090,username:'browser',password:'remote-token',
+  expiresAt:6000};
+ assert.deepEqual(proxyAuthDecision({isProxy:true,scheme:'basic',
+  challenger:{host:'relay.example.com',port:21090}},remote,1000),
+  {authCredentials:{username:'browser',password:'remote-token'}});
  assert.deepEqual(proxyAuthDecision({isProxy:false,scheme:'basic',
-  challenger:{host:'login.example.com',port:443}},local,1000),{});
+  challenger:{host:'login.example.com',port:443}},remote,1000),{});
 });
 
 test('local Agent does not accept or supply proxy authorization',()=>{

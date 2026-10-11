@@ -34,26 +34,7 @@ type browserLocalProxy struct {
 	slots  chan struct{}
 }
 
-var localBrowserDNS = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+package app
-
-import (
-	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/base64"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"regexp"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
-)
-
-// Dedicated 127.0.0.1 Chrome entry, independent of ordinary SOCKS/HTTP and
-)
+var localBrowserDNS = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$`)
 
 func localBrowserAllowedHost(host string) bool {
 	if len(host) > 253 || host != strings.ToLower(host) || !localBrowserDNS.MatchString(host) || net.ParseIP(host) != nil {

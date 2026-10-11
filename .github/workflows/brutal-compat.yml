@@ -39,7 +39,9 @@ jobs:
         run: python3 scripts/bench_brutal_acceptance.py --help > /dev/null
       - name: Validate sampler CSV and summary checks
         if: runner.os == 'Linux'
-        run: python3 -m unittest discover -s scripts -p 'test_brutal_acceptance.py' -v
+        run: |
+          python3 -m unittest discover -s scripts -p 'test_brutal_acceptance.py' -v
+          python3 -m unittest discover -s scripts -p 'test_brutal_netem.py' -v
       - name: Authenticated QUIC, P2P, and Direct tests
         run: go test ./internal/congestion/... ./internal/tunnel ./internal/protocol ./agent/app ./agent/direct ./agent/p2p ./server/gateway ./server/p2p ./mobile/androidcore -count=1 -timeout=15m
       - name: Targeted race regressions (Linux)
@@ -120,6 +122,10 @@ jobs:
           sudo tc -s qdisc show dev lo | tee evidence/netem-before.log
           go test -v ./internal/tunnel -run '^TestBrutalKernelNetem' -count=1 -timeout=3m \
             | tee evidence/netem-results.log
+          python3 scripts/analyze_brutal_netem.py \
+            --input evidence/netem-results.log \
+            --output evidence/netem-overlap.csv \
+            --loss-label "${NETEM_LOSS}"
           sudo tc -s qdisc show dev lo | tee evidence/netem-after.log
       - name: Store per-link UDP impairment and transfer evidence
         if: always()

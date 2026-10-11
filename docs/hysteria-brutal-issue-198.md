@@ -35,6 +35,12 @@ An Agent config requests `transport.bandwidth.up_mbps` and `down_mbps`. Server `
 Run with `bash scripts/ci-brutal-mixed-compat.sh` on Linux after `git fetch origin main`. These are real old/new **linked protocol binaries**, not a full packaged Agent/Server release test. A pass narrows regression risk without fully checking actual platform binaries.
 
 
+## Time-synchronized laboratory coexistence metrics
+
+The `TestBrutalKernelNetemCoexistence` runner additionally records receiver progress and sender-side **QUIC smoothed RTT every 250 ms** while two flows share the same kernel queue. Each log point has an absolute Unix timestamp to distinguish actual overlap from finishing-time averages. `scripts/analyze_brutal_netem.py` intersects adjacent timestamp windows and writes `evidence/netem-overlap.csv` with BBR and Brutal overlap-only goodput, observed overlap seconds, a descriptive Jain index based on the two **estimated co-active rates**, and p50/p95 of sampled QUIC **smoothed** RTT. This time overlap analysis is substantially more useful than comparing independently completed downloads.
+
+These laboratory snapshots are diagnostic, **not** true p50/p95 latency for individual application packets, time-weighted WAN measurements, or a release/fairness threshold. The script fails when either flow lacks sufficient (>=750 ms) co-active sampling, so a successful job cannot hide a nonoverlapping transfer. Observe kernel qdisc counters, sender diagnostics and separately measured loaded end-to-end RTT before making any WAN fairness conclusion.
+
 ## Kernel traffic-shaping findings (not WAN acceptance)
 
 A dedicated CI runner uses `tc netem rate 12mbit delay 20ms` on its loopback queue, with configured random loss 0/1/5%. Both independent 4 MiB QUIC transfers are run concurrently; BBR and Brutal both complete and pass integrity checks. Each row is **one short run**; rates are *per-flow bytes divided by wall-clock completion time*, not simultaneous-link fairness measurements:
@@ -71,7 +77,7 @@ For each trial capture useful-payload throughput (goodput), configured and obser
 
 ## Reproducible Hysteria2 A/B sampler (operator-run)
 
-The script `scripts/bench_brutal_acceptance.py` samples download or upload goodput through **three separately running SOCKS5/HTTP endpoints**, writes raw CSV, shuffles variant order every round, validates a known download hash when supplied, and preserves transfer errors as failed records. It **does not inject packet loss, measure actual QUIC RTT, sample CPU, or prove fairness**.
+The script `scripts/bench_brutal_acceptance.py` (with no automatic HTTP redirect following and no embedded proxy URL credentials) samples download or upload goodput through **three separately running SOCKS5/HTTP endpoints**, writes raw CSV, shuffles variant order every round, validates a known download hash when supplied, and preserves transfer errors as failed records. It **does not inject packet loss, measure actual QUIC RTT, sample CPU, or prove fairness**.
 
 For each controlled 0%, 1%, and 5% packet loss condition, apply impairment **outside** the script on the same physical bottleneck; then run (replace example endpoints and a controlled static 64+ MiB file):
 
@@ -92,7 +98,7 @@ After each run, validate sample completeness (same rounds for all three variants
 python3 scripts/summarize_brutal_acceptance.py --input out/issue198.csv --output out/issue198-summary.csv
 ```
 
-The summary reports median and p10/p90 goodput and relative median difference to Hysteria2 **for each scenario/loss/direction**. It returns nonzero for missing samples, failed transfers or malformed numbers; it does **not** claim to verify actual induced loss, loaded RTT or fairness. Archive both raw and summarized CSV with exact build versions and hardware details.
+The summary rejects inconsistent origin URLs, changed proxy endpoints, unequal payload lengths, mixed checksum-verification status, noncontiguous or incomplete rounds, or failed transfers before reporting median and p10/p90 goodput and relative median difference to Hysteria2 **for each scenario/loss/direction**. It returns nonzero for missing samples, failed transfers or malformed numbers; it does **not** claim to verify actual induced loss, loaded RTT or fairness. Archive both raw and summarized CSV with exact build versions and hardware details.
 
 For upload, use `--direction upload --upload-file /path/to/static.bin` and a separate server that accepts HTTP PUT; verify the uploaded hash at the destination. Run the matrix in both directions. A CSV row labeled "5%" does not prove that network loss was configured. Check actual packet counters (`tc -s qdisc`) and archive packet captures if available.
 

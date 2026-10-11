@@ -18,7 +18,8 @@ test('options UI provides one application action, not repeated extension approva
   const html=source('options.html');
   const code=source('options.js');
   assert.match(html,/提交统一授权申请/);
-  assert.match(code,/已一次提交/);
-  assert.match(code,/批准扩展与设备/);
+  assert.match(code,/申请已提交/);
+  assert.match(code,/身份 ID/);
+  assert.match(html,/id="device-name"/);
   assert.doesNotMatch(code,/批准后再次点击注册浏览器设备/);
 });

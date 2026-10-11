@@ -110,18 +110,24 @@ func (l *singleHTTPListener) Accept() (net.Conn,error) {
 func (l *singleHTTPListener) Close() error { return nil }
 func (l *singleHTTPListener) Addr() net.Addr { return l.conn.LocalAddr() }
 
-// Requests are already inside the Gateway TLS session; reattach the verified
-// TLS state because the gateway's protocol sniff wrapper is not a *tls.Conn.
-// This is not derived from user-controlled X-Forwarded-Proto headers.
+// Restore the TLS state (when enabled) after protocol sniffing. The wrapper
+// is not a *tls.Conn; never trust user-supplied X-Forwarded-Proto headers.
+// Only the old public push API may be served over plaintext relay.
 func serveSharedHTTPConnection(ctx context.Context, conn net.Conn, handler HTTPHandler) error {
     if handler==nil { return fmt.Errorf("public HTTP handler is not configured") }
     tlsConn:=underlyingTLSConn(conn)
-    if tlsConn==nil { return fmt.Errorf("public HTTP requires TLS") }
-    state:=tlsConn.ConnectionState()
+    var state *tls.ConnectionState
+    if tlsConn!=nil {
+        verified:=tlsConn.ConnectionState()
+        state=&verified
+    }
     observed:=&sharedHTTPConn{Conn:conn,done:make(chan struct{})}
     server:=&http.Server{
         Handler:http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
-            r.TLS=&state
+            // Old plaintext relay installations may still receive public
+            // push requests. Browser Sync and CONNECT themselves require
+            // TLS and reject r.TLS == nil at their own authorization gates.
+            r.TLS=state
             handler.ServeHTTP(w,r)
         }),
         ReadHeaderTimeout:10*time.Second,

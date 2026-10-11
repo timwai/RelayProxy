@@ -215,3 +215,33 @@ func TestSharedTCPPortWebsocketUpgradeAndCONNECTHijack(t *testing.T) {
         t.Fatalf("CONNECT hijacked stream failed: %v %q",err,echoed)
     }
 }
+
+func TestSharedGatewayKeepsLegacyPlaintextPushButNoBrowserTLSIdentity(t *testing.T) {
+    handler:=http.HandlerFunc(func(w http.ResponseWriter,r *http.Request){
+        if r.URL.Path=="/api/v1/push/test"{
+            if r.TLS!=nil {t.Error("plaintext request falsely marked TLS")}
+            w.WriteHeader(http.StatusAccepted)
+            return
+        }
+        if r.TLS==nil {http.Error(w,"TLS required",http.StatusUpgradeRequired);return}
+        http.NotFound(w,r)
+    })
+    sessions:=session.NewManager()
+    gateway:=NewGateway(GatewayConfig{
+        TCPAddr:"127.0.0.1:0",PublicHTTPHandler:handler,
+        HandshakeTimeout:time.Second,
+    },sessions,NewStreamRouter(sessions,nil,nil,nil))
+    if err:=gateway.Start();err!=nil{t.Fatal(err)}
+    defer gateway.Close()
+    client:=&http.Client{Timeout:3*time.Second}
+    base:="http://"+gateway.TCPAddr().String()
+    for _,tc:=range []struct{path string;status int}{
+        {"/api/v1/push/test",http.StatusAccepted},
+        {"/api/v1/browser-sync/ws",http.StatusUpgradeRequired},
+    }{
+        resp,err:=client.Get(base+tc.path)
+        if err!=nil{t.Fatal(err)}
+        _=resp.Body.Close()
+        if resp.StatusCode!=tc.status{t.Fatalf("%s returned %d",tc.path,resp.StatusCode)}
+    }
+}

@@ -88,6 +88,14 @@ class GateTests(unittest.TestCase):
             self.assertFalse(weak["machine_checks_passed"])
             self.assertTrue(any("mandatory 60-second" in e for e in weak["failures"]))
             self.assertTrue(accepted["human_real_wan_provenance_and_release_signoff_required"])
+            # A present but empty impairment log cannot establish real loss shaping.
+            loss_log = Path(manifest["loss_evidence"]["5"]["impairment_log"])
+            original_log = loss_log.read_text(encoding="utf-8")
+            loss_log.write_text("", encoding="utf-8")
+            empty_log = verify(ab, coexistence, manifest, policy)
+            self.assertFalse(empty_log["machine_checks_passed"])
+            self.assertTrue(any("impairment log is empty" in e for e in empty_log["failures"]))
+            loss_log.write_text(original_log, encoding="utf-8")
             # A p95/idle-p50 ratio of 15 is NOT the p50 inflation ratio.
             # Increasing the real loaded p50 to 40ms must fail a 3x cap.
             path = Path(coexistence["1"])

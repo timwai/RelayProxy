@@ -220,6 +220,7 @@ func (s *QUICSession) monitorBrutalRTT() {
 	clock := time.NewTicker(samplingPeriod)
 	defer clock.Stop()
 	var guard brutalRTTGuard
+	var lossGuard brutalLossGuard
 	for {
 		select {
 		case <-s.conn.Context().Done():
@@ -232,10 +233,17 @@ func (s *QUICSession) monitorBrutalRTT() {
 				return
 			}
 			stats := s.conn.ConnectionStats()
-			if guard.sample(now, stats.MinRTT, stats.SmoothedRTT, stats.BytesSent) {
-				reason := fmt.Sprintf("sustained loaded RTT inflation: min=%.1fms smoothed=%.1fms",
-					float64(stats.MinRTT)/float64(time.Millisecond),
-					float64(stats.SmoothedRTT)/float64(time.Millisecond))
+			inflatedRTT := guard.sample(now, stats.MinRTT, stats.SmoothedRTT, stats.BytesSent)
+			severeLoss := lossGuard.sample(now, stats.PacketsSent, stats.PacketsLost)
+			if inflatedRTT || severeLoss {
+				var reason string
+				if inflatedRTT {
+					reason = fmt.Sprintf("sustained loaded RTT inflation: min=%.1fms smoothed=%.1fms",
+						float64(stats.MinRTT)/float64(time.Millisecond),
+						float64(stats.SmoothedRTT)/float64(time.Millisecond))
+				} else {
+					reason = "sustained severe QUIC sender packet loss"
+				}
 				s.fallbackFromBrutal(reason)
 				return
 			}

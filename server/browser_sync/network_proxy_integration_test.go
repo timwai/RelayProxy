@@ -25,6 +25,7 @@ func (s *browserEchoStream) CloseWrite() error { return s.Close() }
 
 type browserEchoTunnel struct {
 	requests chan protocol.OpenTCPRequest
+	frames   chan protocol.FrameType
 }
 
 func (s *browserEchoTunnel) OpenStream(ctx context.Context) (tunnel.TunnelStream, error) {
@@ -32,8 +33,12 @@ func (s *browserEchoTunnel) OpenStream(ctx context.Context) (tunnel.TunnelStream
 	go func() {
 		defer agent.Close()
 		header, err := protocol.ReadStreamHeader(agent)
-		if err != nil || header.Type != protocol.FrameTypeBrowserNetworkTCP {
+		if err != nil || (header.Type != protocol.FrameTypeBrowserNetworkTCP &&
+			header.Type != protocol.FrameTypeOpenTCP) {
 			return
+		}
+		if s.frames != nil {
+			s.frames <- header.Type
 		}
 		var req protocol.OpenTCPRequest
 		if err := protocol.ReadJSON(agent, &req); err != nil {
@@ -73,7 +78,7 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 	}
 
 	sessions := session.NewManager()
-	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1)}
+	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1),frames: make(chan protocol.FrameType, 1)}
 	sessions.Register(&session.DeviceSession{
 		DeviceID: exitID, IdentityID: "id_1", DeviceName: "Approved Agent",
 		Grants:       []string{protocol.CapabilityProxyExit},
@@ -110,6 +115,10 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 		t.Fatal("browser could use an Exit without proxy.exit grant")
 	}
 	exitSession.Grants = []string{protocol.CapabilityProxyExit}
+	// Exercise the actual CONNECT through a remote Agent that does not
+	// advertise local Browser Network sharing. This must use the regular
+	// ACL-protected TCP egress frame, rather than a frame the Agent rejects.
+	exitSession.Capabilities = nil
 	lease, err := proxy.Issue(ctx, receiver.ID)
 	if err != nil {
 		t.Fatal(err)
@@ -143,6 +152,14 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 		if line == "\r\n" {
 			break
 		}
+	}
+	select {
+	case frameType := <-echo.frames:
+		if frameType != protocol.FrameTypeOpenTCP {
+			t.Fatalf("remote authorized Agent without opt-in received unexpected frame %v", frameType)
+		}
+	case <-time.After(3*time.Second):
+		t.Fatal("remote Agent never received standard proxy.exit TCP frame")
 	}
 	select {
 	case request := <-echo.requests:
@@ -237,5 +254,18 @@ func TestNetworkProxyCloseSignalsActiveWatchers(t *testing.T) {
 	}
 	if err := proxy.Close(context.Background()); err != nil {
 		t.Fatalf("idempotent shutdown failed: %v", err)
+	}
+}
+
+func TestBrowserExitStreamTypePreservesLocalOptInAndRemoteFallback(t *testing.T) {
+	local := &session.DeviceSession{
+		Capabilities: []string{protocol.CapabilityBrowserNetworkExit},
+	}
+	if got := browserExitStreamType(local); got != protocol.FrameTypeBrowserNetworkTCP {
+		t.Fatalf("opted-in local Agent lost Browser Network frame: %v", got)
+	}
+	remote := &session.DeviceSession{}
+	if got := browserExitStreamType(remote); got != protocol.FrameTypeOpenTCP {
+		t.Fatalf("remote proxy.exit Agent requires ordinary egress frame: %v", got)
 	}
 }

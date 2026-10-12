@@ -31,6 +31,21 @@ test('v2 policy captures all Cookie and Storage keys only for approved origin',(
     {...policy,siteOrigin:'http://localhost:8080'});
 });
 
+test('v4 encrypted scope requires explicit booleans and at least one selected type',()=>{
+  const all={siteOrigin:'https://example.com',schemaVersion:4,allCookies:true,
+    localStorage:true,sessionStorage:true,indexedDB:true};
+  assert.deepEqual(validatePolicy(all),all);
+  for(const key of ['allCookies','localStorage','sessionStorage','indexedDB']){
+    const only={siteOrigin:all.siteOrigin,schemaVersion:4,allCookies:false,
+      localStorage:false,sessionStorage:false,indexedDB:false,[key]:true};
+    assert.deepEqual(validatePolicy(only),only);
+  }
+  assert.throws(()=>validatePolicy({...all,allCookies:false,localStorage:false,
+    sessionStorage:false,indexedDB:false}),/至少/);
+  assert.throws(()=>validatePolicy({...all,sessionStorage:undefined}),/至少/);
+  assert.throws(()=>validatePolicy({...all,indexedDB:'false'}),/至少/);
+});
+
 test('server origin cannot contain path or credentials', () => {
   assert.equal(parseServerOrigin('https://relay.example.com:8443'), 'https://relay.example.com:8443');
   assert.throws(() => parseServerOrigin('https://relay.example.com/admin'));
@@ -158,6 +173,20 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
   assert.rejects(decryptEncryptedOffer({
     ...rule, offer:{...offer,ciphertext:(offer.ciphertext[0] === 'A' ? 'B' : 'A') + offer.ciphertext.slice(1)}
   },sourcePeer));
+  use(a);
+  const selected=await createEncryptedOffer({
+    target:{id:target.deviceId,signingPublicKey:target.signingPublicKey,
+      encryptionPublicKey:target.encryptionPublicKey,receive:true},
+    siteOrigin:'https://example.com',
+    dataTypes:{allCookies:false,localStorage:true,sessionStorage:false,indexedDB:true}
+  });
+  assert.deepEqual(selected.policy,{siteOrigin:'https://example.com',schemaVersion:4,
+    allCookies:false,localStorage:true,sessionStorage:false,indexedDB:true});
+  use(b);
+  assert.deepEqual(await decryptEncryptedOffer({
+    ruleId:selected.offer.ruleId,sourceBrowserDeviceId:source.deviceId,
+    targetBrowserDeviceId:target.deviceId,offer:selected.offer
+  },sourcePeer),selected.policy);
   use(a);
   const http = await createEncryptedOffer({
     target: {id:target.deviceId,signingPublicKey:target.signingPublicKey,

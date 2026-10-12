@@ -56,5 +56,7 @@ export function nextReconnectDelay(failures) {
 export function shouldRetryConnection(retry, origin, now) {
   if (!origin || !Number.isFinite(now) || now <= 0) return false;
   if (!retry || retry.serverOrigin !== origin) return true;
-  return !Number.isFinite(retry.nextRetryAt) || retry.nextRetryAt <= now;
+  // A corrupted future timestamp must not disable reconnect indefinitely.
+  return !Number.isFinite(retry.nextRetryAt) || retry.nextRetryAt <= now ||
+    retry.nextRetryAt > now + RECONNECT_MAX_MS;
 }

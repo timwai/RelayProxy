@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {siteIndexedDB,validateIndexedDBSnapshot,MAX_INDEXEDDB_BYTES} from '../src/indexeddb-sync.js';
+import {siteIndexedDB,validateIndexedDBSnapshot,MAX_INDEXEDDB_BYTES,captureIndexedDB,prepareIndexedDBRestore} from '../src/indexeddb-sync.js';
 
 // Small IndexedDB simulator for the injected ISOLATED-world routine. It
 // reproduces upgrade callbacks, cursor order, transaction completion and
@@ -175,4 +175,29 @@ test('unsupported invalid Date and shared-object graphs are rejected before tran
   store.put({when:new Date(NaN)},'invalid-date');
   db.close();
   await assert.rejects(siteIndexedDB(origin,'read'),/无法完整复制/);
+});
+
+test('real capture/restore entry points accept explicit v3 pairing, never old v2',async()=>{
+  use(fakeIndexedDB());
+  const oldChrome=globalThis.chrome;
+  const v3={siteOrigin:origin,schemaVersion:3,allCookies:true,
+    localStorage:true,sessionStorage:true,indexedDB:true};
+  const v2={siteOrigin:origin,schemaVersion:2,allCookies:true,
+    localStorage:true,sessionStorage:true};
+  globalThis.chrome={
+    tabs:{
+      async query(){return [{id:17,url:origin+'/'}];},
+      async get(id){return {id,url:origin+'/',incognito:false};}
+    },
+    scripting:{async executeScript({func,args}){return [{result:await func(...args)}];}}
+  };
+  try{
+    assert.deepEqual(await captureIndexedDB(v3),{schemaVersion:1,databases:[]});
+    const noop=await prepareIndexedDBRestore('test-rule',undefined,v3);
+    await noop.apply();
+    await noop.commit();
+    assert.equal(await noop.rollback(),true);
+    await assert.rejects(captureIndexedDB(v2),/v3/);
+    await assert.rejects(prepareIndexedDBRestore('test-rule',undefined,v2),/v3/);
+  }finally{globalThis.chrome=oldChrome;}
 });

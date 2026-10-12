@@ -167,6 +167,17 @@ async function main(){
   assert.equal(active.keysConfirmed,true);
   assert.ok(active.sourceApproved&&active.targetApproved);
 
+  // Observe only the opaque message ID in Chrome storage; no credentials
+  // or encrypted website contents pass through the test controller.
+  await a.options.evaluate(ruleId=>{
+    globalThis.__relayE2EMessageIds=[];
+    chrome.storage.onChanged.addListener((changes,area)=>{
+      if(area!=='local')return;
+      const messageId=changes.browserSyncPendingDelivery?.newValue?.[ruleId]?.messageId;
+      if(messageId)globalThis.__relayE2EMessageIds.push(messageId);
+    });
+  },offer.ruleId);
+
   // No snapshot is passed by the Node test. A's real MV3 worker collects,
   // signs and encrypts website credentials; the actual RelayProxy WSS
   // validates/countersigns/routs opaque data; B's worker decrypts, restores,
@@ -191,6 +202,72 @@ async function main(){
   await siteB.waitForLoadState('domcontentloaded');
   await verifyTargetSite(siteB,siteOrigin);
 
+  // A lost ACK must be recovered from the durable server receipt after
+  // a real WSS disconnect. Reinsert the opaque pending ID to model an MV3
+  // worker suspended before it processed the server's already-committed ACK.
+  const deliveredMessageId=await eventually('observe opaque source delivery ID',
+    ()=>a.options.evaluate(()=>globalThis.__relayE2EMessageIds?.[0]));
+  assert.match(deliveredMessageId,/^[0-9a-f-]{36}$/i);
+  await deviceDecision(fixture,'drop',identityA.deviceId);
+  await eventually('source WSS disconnected',async()=>{
+    const state=await workerCommand(a,{type:'GET_STATUS'});
+    return !state.connected;
+  },{timeout:15000});
+  await a.options.evaluate(async({ruleId,messageId})=>{
+    await chrome.storage.local.set({
+      browserSyncPendingDelivery:{[ruleId]:{ruleId,messageId,createdAt:Date.now()}},
+      browserSyncTransferStatus:{[ruleId]:{state:'UNKNOWN',time:Date.now()}}
+    });
+    // Use the production MV3 alarm listener, not a test-only worker command.
+    await chrome.alarms.create('browser-sync-reconcile',{when:Date.now()+1500});
+  },{ruleId:offer.ruleId,messageId:deliveredMessageId});
+  await eventually('source alarm reconnect and durable ACK recovery',async()=>{
+    const state=await workerCommand(a,{type:'GET_STATUS'});
+    const result=await a.options.evaluate(async ruleId=>{
+      const all=await chrome.storage.local.get([
+        'browserSyncPendingDelivery','browserSyncTransferStatus']);
+      return {pending:all.browserSyncPendingDelivery?.[ruleId],
+        status:all.browserSyncTransferStatus?.[ruleId]?.state};
+    },offer.ruleId);
+    return state.connected&&result.status==='APPLIED'&&!result.pending;
+  },{timeout:100000});
+  await a.options.evaluate(()=>chrome.alarms.create('browser-sync-reconcile',
+    {periodInMinutes:1}));
+
+  // The receiving Profile must also return to its signed WSS subscription
+  // without a manual CONNECT_BROWSER call and accept another live delivery.
+  await deviceDecision(fixture,'drop',identityB.deviceId);
+  await eventually('receiver WSS disconnected',async()=>{
+    const state=await workerCommand(b,{type:'GET_STATUS'});
+    return !state.connected;
+  },{timeout:15000});
+  await b.options.evaluate(()=>chrome.alarms.create('browser-sync-reconcile',
+    {when:Date.now()+1500}));
+  await eventually('receiver alarm reconnect',async()=>{
+    const state=await workerCommand(b,{type:'GET_STATUS'});
+    return state.connected;
+  },{timeout:100000});
+  await b.options.evaluate(()=>chrome.alarms.create('browser-sync-reconcile',
+    {periodInMinutes:1}));
+  for(const profile of [a,b]){
+    await profile.options.evaluate(async ruleId=>{
+      const all=(await chrome.storage.local.get('browserSyncTransferStatus'))
+        .browserSyncTransferStatus||{};
+      delete all[ruleId];
+      await chrome.storage.local.set({browserSyncTransferStatus:all});
+    },offer.ruleId);
+  }
+  await workerCommand(a,{type:'SEND_SESSION',ruleId:offer.ruleId});
+  for(const [profile,label] of [[a,'source'],[b,'receiver']]){
+    await eventually(label+' receives APPLIED after reconnect',async()=>{
+      const status=await profile.options.evaluate(async ruleId=>
+        (await chrome.storage.local.get('browserSyncTransferStatus'))
+          .browserSyncTransferStatus?.[ruleId]?.state,offer.ruleId);
+      return status==='APPLIED';
+    });
+  }
+  await verifyTargetSite(siteB,siteOrigin);
+
   // Administrator revocation invalidates the session and its pairing: even
   // a browser holding its Profile-local signing key must be denied.
   await deviceDecision(fixture,'revoke',identityB.deviceId);
@@ -199,7 +276,8 @@ async function main(){
   assert.equal(denied.ok,false,'revoked Chrome device reauthenticated over WSS');
   console.log('Real RelayProxy TLS/WSS + Chromium A/B passed: enrolled/approved,');
   console.log('signed challenge, E2EE rule/code, opaque WSS delivery, APPLIED ACK,');
-  console.log('actual website login+IndexedDB, revoked-device reconnect rejection.');
+  console.log('actual website login+IndexedDB, MV3 alarm WSS reconnect + durable ACK recovery,');
+  console.log('post-reconnect delivery and revoked-device reconnect rejection.');
 }
 
 let error;

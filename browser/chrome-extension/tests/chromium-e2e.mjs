@@ -143,18 +143,8 @@ async function applyToTarget(profile,ruleId,policy,payload){
       await indexedDB.apply();
       const journal=(await chrome.storage.local.get('browserSyncIndexedDBRestoreJournal')).browserSyncIndexedDBRestoreJournal;
       stages.push({step:'after-indexeddb',db:await schema(),hasJournal:!!journal?.[ruleId]});
-      if(stages.at(-1).db.length===0){
-        const [{siteIndexedDB},{execute}]=await Promise.all([
-          import(chrome.runtime.getURL('src/indexeddb-sync.js')),
-          import(chrome.runtime.getURL('src/web-storage.js'))
-        ]);
-        const direct=await execute(storage.tabId,siteIndexedDB,[
-          policy.siteOrigin,'write',payload.indexedDB,{schemaVersion:1,databases:[]}
-        ]);
-        stages.push({step:'direct-site-write',result:direct,db:await schema(),
-          tabId:storage.tabId});
-        throw new Error('IndexedDB higher-level restore lost the database: '+JSON.stringify(stages));
-      }
+      if(stages.at(-1).db.length===0)
+        throw new Error('IndexedDB restore reported success without creating the website database');
       await storage.apply();
       stages.push({step:'after-storage',db:await schema()});
       await applyAllCookies(ruleId,payload,policy);

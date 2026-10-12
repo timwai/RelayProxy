@@ -178,6 +178,12 @@ export function BrowserSyncAdmin({identities=[]}){
     ['approved','已批准',count('approved')],['revoked','已撤销',count('revoked')]];
   const ruleStates=[['all','全部'],['offered','待确认'],['active','已生效'],['paused','已暂停'],['revoked','已撤销']];
   const ruleStatus={offered:'待确认',active:'已生效',paused:'已暂停',revoked:'已撤销'};
+  const diagnosticText={
+    UNSPECIFIED:'其他失败',CONFLICT:'会话冲突',PARTIAL_ROLLBACK:'部分回滚',
+    NETWORK_UNAVAILABLE:'网络或出口不可用',REPLAY_REJECTED:'重复或过期快照',
+    DECRYPT_FAILED:'解密或签名失败',STORAGE_FAILURE:'Storage 恢复失败',
+    INDEXEDDB_FAILURE:'IndexedDB 恢复失败',COOKIE_FAILURE:'Cookie 恢复失败'
+  };
   const eventText={device_approved:'设备批准',device_revoked:'设备撤销',device_deleted:'设备删除',
     rule_paused:'规则暂停',rule_resumed:'规则恢复',rule_revoked:'规则撤销',delivery_result:'同步结果',audit_cleared:'审计清理'};
   return <section className="browser-sync-admin browser-sync-refined">
@@ -339,7 +345,8 @@ export function BrowserSyncAdmin({identities=[]}){
             <td><div className="browser-sync-audit-id">{e.deviceId||'—'}{e.peerId?' → '+e.peerId:''}</div>
               {e.ruleId&&<small className="browser-sync-device-extra">规则：{e.ruleId}</small>}</td>
             <td><span className={'badge '+(e.outcome==='APPLIED'?'ok':e.outcome==='FAILED'||e.outcome==='CONFLICT'?'danger':'')}>
-              {e.outcome||'—'}</span></td>
+              {e.outcome||'—'}</span>
+              {e.errorCode&&<small className="browser-sync-device-extra">{diagnosticText[e.errorCode]||'未分类失败'}</small>}</td>
           </tr>)}
           {!visibleAudit.length&&<tr><td colSpan={5} className="browser-sync-no-data">{loading?'读取中…':'暂无同步记录'}</td></tr>}
           </tbody></table></div>

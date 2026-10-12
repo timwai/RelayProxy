@@ -220,7 +220,7 @@ func (s *Store) DeliveryStatus(ctx context.Context, sourceID, ruleID, messageID 
 		return "", ErrRuleDenied
 	}
 	var status string
-	err := s.db.QueryRowContext(ctx, `SELECT status FROM browser_sync_delivery_results
+	err = s.db.QueryRowContext(ctx, `SELECT status FROM browser_sync_delivery_results
 		WHERE message_id=? AND rule_id=? AND source_id=? AND expires_at>?`,
 		messageID, ruleID, sourceID, now.Unix()).Scan(&status)
 	if err == nil {

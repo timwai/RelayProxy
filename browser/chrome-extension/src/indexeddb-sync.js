@@ -8,6 +8,21 @@ import {cookieValueTag} from './device-identity.js';
 import {tabFor} from './web-storage.js';
 
 export const MAX_INDEXEDDB_BYTES=4*1024*1024;
+// Chrome scripting IPC may reorder object properties even when the actual
+// IndexedDB snapshot is identical. Always canonicalize before comparing or
+// computing ownership HMACs; JSON.stringify(object) is not stable across worlds.
+export function canonicalIndexedDBJSON(value){
+  const normalize=v=>{
+    if(Array.isArray(v))return v.map(normalize);
+    if(v&&typeof v==='object'){
+      const sorted=Object.create(null);
+      for(const k of Object.keys(v).sort())sorted[k]=normalize(v[k]);
+      return sorted;
+    }
+    return v;
+  };
+  return JSON.stringify(normalize(value));
+}
 const OWNER_KEY='browserSyncManagedIndexedDBV1';
 export const JOURNAL_KEY='browserSyncIndexedDBRestoreJournal';
 
@@ -62,6 +77,20 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
   if(typeof indexedDB.databases!=='function')
     throw new Error('当前 Chrome 不支持安全枚举 IndexedDB 数据库');
   const byteLimit=4*1024*1024;
+  // An injected function is serialized independently; keep this helper
+  // self-contained rather than capturing a module-scoped variable.
+  const canonical=value=>{
+    const normalize=v=>{
+      if(Array.isArray(v))return v.map(normalize);
+      if(v&&typeof v==='object'){
+        const sorted=Object.create(null);
+        for(const k of Object.keys(v).sort())sorted[k]=normalize(v[k]);
+        return sorted;
+      }
+      return v;
+    };
+    return JSON.stringify(normalize(value));
+  };
   const b64=a=>{
     const x=new Uint8Array(a),chunks=[];
     for(let i=0;i<x.length;i+=8192)chunks.push(String.fromCharCode(...x.subarray(i,i+8192)));
@@ -249,12 +278,12 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
       throw new Error('完整 IndexedDB 超过 4 MiB 上限，不会遗漏记录');
     return out;
   }
-  function schema(db){return JSON.stringify(db.stores.map(s=>({
+  function schema(db){return canonical(db.stores.map(s=>({
     name:s.name,keyPath:s.keyPath,autoIncrement:s.autoIncrement,indexes:s.indexes
   })));}
   async function write(current,next){
     const liveBeforeWrite=await read();
-    if(JSON.stringify(liveBeforeWrite)!==JSON.stringify(current))
+    if(canonical(liveBeforeWrite)!==canonical(current))
       throw new Error('CONFLICT: IndexedDB 在准备恢复后被网站修改' +
         ' (expected DBs='+current.databases.length+
         ', actual DBs='+liveBeforeWrite.databases.length+')');
@@ -282,7 +311,7 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
     }
     for(const targetDB of next.databases){
       const oldDB=current.databases.find(d=>d.name===targetDB.name);
-      if(oldDB&&JSON.stringify(oldDB)===JSON.stringify(targetDB))continue;
+      if(oldDB&&canonical(oldDB)===canonical(targetDB))continue;
       const db=await open(targetDB.name,targetDB.version,oldDB?null:targetDB);
       try{
         const names=targetDB.stores.map(s=>s.name);
@@ -368,14 +397,14 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
   for(const db of incoming.databases){
     const existing=merged.get(db.name);
     if(existing){
-      const shape=x=>JSON.stringify(x.stores.map(s=>({
+      const shape=x=>canonicalIndexedDBJSON(x.stores.map(s=>({
         name:s.name,keyPath:s.keyPath,autoIncrement:s.autoIncrement,indexes:s.indexes
       })));
       if(existing.version!==db.version||shape(existing)!==shape(db))
         throw new Error('CONFLICT: 接收端 IndexedDB 版本或索引结构不同');
-      const same=JSON.stringify(existing)===JSON.stringify(db);
+      const same=canonicalIndexedDBJSON(existing)===canonicalIndexedDBJSON(db);
       const empty=existing.stores.every(s=>s.rows.length===0);
-      const ownTag=await cookieValueTag(ruleId,'indexeddb:'+db.name,JSON.stringify(existing));
+      const ownTag=await cookieValueTag(ruleId,'indexeddb:'+db.name,canonicalIndexedDBJSON(existing));
       if(!same&&!empty&&!allowOverwrite&&owned[db.name]!==ownTag)
         throw new Error('CONFLICT: 接收端 IndexedDB 有不同的本地账号数据');
     }
@@ -388,7 +417,7 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
   validateIndexedDBSnapshot(after);
   const nextOwnership={...owned};
   for(const db of incoming.databases){
-    nextOwnership[db.name]=await cookieValueTag(ruleId,'indexeddb:'+db.name,JSON.stringify(db));
+    nextOwnership[db.name]=await cookieValueTag(ruleId,'indexeddb:'+db.name,canonicalIndexedDBJSON(db));
   }
   let started=false,finished=false;
   return {
@@ -404,7 +433,7 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
       // and encoded records before allowing a terminal APPLIED acknowledgement.
       const verified=validateIndexedDBSnapshot(
         await executeSiteIndexedDB(id,[p.siteOrigin,'read']));
-      if(JSON.stringify(verified)!==JSON.stringify(after))
+      if(canonicalIndexedDBJSON(verified)!==canonicalIndexedDBJSON(after))
         throw new Error('INDEXEDDB_FAILURE: IndexedDB 写入后校验失败，拒绝报告同步成功');
     },
     async commit(){
@@ -422,7 +451,7 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
         const afterBy=new Map(after.databases.map(db=>[db.name,db]));
         for(const db of live.databases){
           const prev=beforeBy.get(db.name),next=afterBy.get(db.name);
-          if(JSON.stringify(db)!==JSON.stringify(prev)&&JSON.stringify(db)!==JSON.stringify(next))
+          if(canonicalIndexedDBJSON(db)!==canonicalIndexedDBJSON(prev)&&canonicalIndexedDBJSON(db)!==canonicalIndexedDBJSON(next))
             return false;
         }
         await executeSiteIndexedDB(id,[p.siteOrigin,'write',before,live]);

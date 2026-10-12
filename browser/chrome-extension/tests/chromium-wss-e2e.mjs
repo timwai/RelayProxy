@@ -273,20 +273,68 @@ async function main(){
   }
   await verifyTargetSite(siteB,siteOrigin);
 
+  // A fully stopped Chromium process is stricter than dropping its WSS.
+  // The same on-disk Profile must retain its non-extractable P-256 keys and
+  // paired trust; onStartup/Alarm should restore WSS without manual CONNECT.
+  await b.context.close();
+  const restartedB=await extensionContext(extPath,join(temp,'chrome-b'),
+    {localTestTLS:true});
+  assert.equal(restartedB.extensionId,b.extensionId,
+    'Profile restart changed the installed extension identity');
+  const restoredIdentityB=await extensionIdentity(restartedB);
+  assert.deepEqual(restoredIdentityB,identityB,
+    'Profile restart regenerated or lost browser device keys');
+  await eventually('restarted Chromium B automatically authenticates',async()=>{
+    const status=await workerCommand(restartedB,{type:'GET_STATUS'});
+    return status.connected;
+  },{timeout:80000});
+  const reopenedRules=await workerCommand(restartedB,{type:'LIST_RULES'});
+  const persistedRule=reopenedRules.rules.find(rule=>rule.id===offer.ruleId);
+  assert.ok(persistedRule?.valid && persistedRule.status==='active' &&
+    persistedRule.keysConfirmed,
+    'Profile restart lost signed pairing trust or active rule');
+  // The test opens exactly one fresh website tab for the destination so its
+  // per-tab Session Storage is genuinely restored after the browser restart.
+  const existingSitePages=restartedB.context.pages().filter(page=>{
+    try{return new URL(page.url()).origin===siteOrigin;}catch{return false;}
+  });
+  for(const page of existingSitePages)await page.close();
+  const restartedSiteB=await restartedB.context.newPage();
+  await restartedSiteB.goto(siteOrigin+'/');
+  for(const profile of [a,restartedB]){
+    await profile.options.evaluate(async ruleId=>{
+      const all=(await chrome.storage.local.get('browserSyncTransferStatus'))
+        .browserSyncTransferStatus||{};
+      delete all[ruleId];
+      await chrome.storage.local.set({browserSyncTransferStatus:all});
+    },offer.ruleId);
+  }
+  await workerCommand(a,{type:'SEND_SESSION',ruleId:offer.ruleId});
+  for(const [profile,label] of [[a,'source'],[restartedB,'restarted receiver']]){
+    await eventually(label+' confirms APPLIED after full Profile restart',async()=>{
+      const status=await profile.options.evaluate(async ruleId=>
+        (await chrome.storage.local.get('browserSyncTransferStatus'))
+          .browserSyncTransferStatus?.[ruleId]?.state,offer.ruleId);
+      return status==='APPLIED';
+    });
+  }
+  await verifyTargetSite(restartedSiteB,siteOrigin);
+
   // Administrator revocation invalidates the session and its pairing: even
   // a browser holding its Profile-local signing key must be denied.
   await deviceDecision(fixture,'revoke',identityB.deviceId);
-  const staleSocket=await b.options.evaluate(async()=>
+  const staleSocket=await restartedB.options.evaluate(async()=>
     chrome.runtime.sendMessage({type:'LIST_RULES'}));
   assert.equal(staleSocket.ok,false,
     'revoked browser used an already-authenticated WSS socket');
-  await workerCommand(b,{type:'SAVE_SERVER',serverOrigin:fixture.serverOrigin});
-  const denied=await b.options.evaluate(async()=>chrome.runtime.sendMessage({type:'CONNECT_BROWSER'}));
+  await workerCommand(restartedB,{type:'SAVE_SERVER',serverOrigin:fixture.serverOrigin});
+  const denied=await restartedB.options.evaluate(async()=>chrome.runtime.sendMessage({type:'CONNECT_BROWSER'}));
   assert.equal(denied.ok,false,'revoked Chrome device reauthenticated over WSS');
   console.log('Real RelayProxy TLS/WSS + Chromium A/B passed: enrolled/approved,');
   console.log('signed challenge, E2EE rule/code, opaque WSS delivery, APPLIED ACK,');
   console.log('actual website login+IndexedDB, MV3 alarm WSS reconnect + durable ACK recovery,');
-  console.log('post-reconnect delivery, pending-auth denial and live/reconnect revocation.');
+  console.log('full Chromium Profile restart/key retention, post-restart delivery,');
+  console.log('pending-auth denial and live/reconnect revocation.');
 }
 
 let error;

@@ -37,6 +37,7 @@ type AdminAuditEvent struct {
 	PeerID    string    `json:"peerId,omitempty"`
 	RuleID    string    `json:"ruleId,omitempty"`
 	Outcome   string    `json:"outcome,omitempty"`
+	ErrorCode string    `json:"errorCode,omitempty"`
 	ActorID   string    `json:"actorId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
@@ -72,6 +73,7 @@ func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 		rule_id TEXT NOT NULL DEFAULT '',
 		outcome TEXT NOT NULL DEFAULT '',
 		actor_id TEXT NOT NULL DEFAULT '',
+		error_code TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL
 	)`)
 	if err != nil {
@@ -83,7 +85,7 @@ func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 	if err != nil {
 		return err
 	}
-	foundActor := false
+	foundActor, foundErrorCode := false, false
 	for rows.Next() {
 		var columnID, notNull, primaryKey int
 		var name, dataType string
@@ -94,6 +96,9 @@ func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 		}
 		if name == "actor_id" {
 			foundActor = true
+		}
+		if name == "error_code" {
+			foundErrorCode = true
 		}
 	}
 	if err := rows.Err(); err != nil {
@@ -108,6 +113,11 @@ func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	if !foundErrorCode {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE browser_sync_audit ADD COLUMN error_code TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
+	}
 	_, err = s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_browser_sync_audit_device
 		ON browser_sync_audit(device_id,id)`)
 	return err
@@ -116,6 +126,26 @@ func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 // No arbitrary free-text log content is accepted, including from ACK frames.
 // This function must be called inside the same transaction as the event.
 func appendBrowserAudit(ctx context.Context, tx *sql.Tx, event, deviceID, peerID, ruleID, outcome string) error {
+	return appendBrowserAuditDetail(ctx, tx, event, deviceID, peerID, ruleID, outcome, "")
+}
+
+// Error categories are fixed by the protocol; arbitrary browser exception text
+// and website details must NEVER be stored or reflected in admin diagnostics.
+func validBrowserSyncErrorCode(code string) bool {
+	switch code {
+	case "", "UNSPECIFIED", "CONFLICT", "PARTIAL_ROLLBACK", "NETWORK_UNAVAILABLE",
+		"REPLAY_REJECTED", "DECRYPT_FAILED", "STORAGE_FAILURE",
+		"INDEXEDDB_FAILURE", "COOKIE_FAILURE":
+		return true
+	}
+	return false
+}
+
+func appendBrowserAuditDetail(ctx context.Context, tx *sql.Tx, event, deviceID, peerID, ruleID, outcome, errorCode string) error {
+	if !validBrowserSyncErrorCode(errorCode) || (event != "delivery_result" && errorCode != "") ||
+		(outcome == "APPLIED" && errorCode != "") {
+		return errors.New("invalid browser audit diagnostic code")
+	}
 	switch event {
 	case "device_approved", "device_revoked", "device_deleted",
 		"rule_paused", "rule_resumed", "rule_revoked", "delivery_result", "audit_cleared":
@@ -134,8 +164,8 @@ func appendBrowserAudit(ctx context.Context, tx *sql.Tx, event, deviceID, peerID
 	now := time.Now().UTC()
 	actorID, _ := ctx.Value(browserAdminActorKey{}).(string)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_audit
-		(type,device_id,peer_id,rule_id,outcome,actor_id,created_at) VALUES(?,?,?,?,?,?,?)`,
-		event, deviceID, peerID, ruleID, outcome, actorID, now); err != nil {
+		(type,device_id,peer_id,rule_id,outcome,actor_id,error_code,created_at) VALUES(?,?,?,?,?,?,?,?)`,
+		event, deviceID, peerID, ruleID, outcome, actorID, errorCode, now); err != nil {
 		return err
 	}
 	// Retain bounded metadata only, independent of the delivery-receipt TTL.
@@ -309,7 +339,7 @@ func (s *Store) AdminAuditFiltered(ctx context.Context, before int64, limit int,
 	if deviceID != "" && !deviceIDPattern.MatchString(deviceID) {
 		return nil, errors.New("invalid browser audit device")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,type,device_id,peer_id,rule_id,outcome,actor_id,created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id,type,device_id,peer_id,rule_id,outcome,actor_id,error_code,created_at
 		FROM browser_sync_audit WHERE (?=0 OR id<?)
 		AND (?='' OR type=?)
 		AND (?='' OR device_id=? OR peer_id=?)
@@ -325,7 +355,7 @@ func (s *Store) AdminAuditFiltered(ctx context.Context, before int64, limit int,
 	for rows.Next() {
 		var event AdminAuditEvent
 		if err := rows.Scan(&event.ID, &event.Type, &event.DeviceID, &event.PeerID,
-			&event.RuleID, &event.Outcome, &event.ActorID, &event.CreatedAt); err != nil {
+			&event.RuleID, &event.Outcome, &event.ActorID, &event.ErrorCode, &event.CreatedAt); err != nil {
 			return nil, err
 		}
 		events = append(events, event)

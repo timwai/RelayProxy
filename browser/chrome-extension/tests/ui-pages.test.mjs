@@ -155,3 +155,15 @@ test('overwrite and open-after-success are one-shot checkbox options, not button
   assert.match(popup,/openAfter\.type='checkbox'/);
   assert.doesNotMatch(popup,/el\('button','small-button outline-button','同步后打开'\)/);
 });
+
+test('outgoing session receipts use one serialized mutation path including revocation',()=>{
+  const session=asset('session-sync.js');
+  assert.match(session,/let pendingWriteQueue=Promise\.resolve\(\)/);
+  assert.match(session,/function mutatePendingDelivery\(ruleId,update\)/);
+  assert.match(session,/function clearPendingDelivery\(ruleId,messageId\)/);
+  assert.match(session,/clearPendingIfMessageMatches\(previous,messageId\)/);
+  assert.match(session,/await mutatePendingDelivery\(ruleId,\(\)=>null\)/);
+  assert.doesNotMatch(session,/delete pending\[message\.ruleId\]/);
+  assert.doesNotMatch(session,/const latest=.*PENDING_DELIVERY/);
+  assert.match(session,/payload\.cookies\?\.length\|\|0/);
+});

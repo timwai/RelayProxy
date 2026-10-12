@@ -263,29 +263,35 @@ function renderRules(rules,peers=[]) {
         card.append(textNode('p','来源设备申请：访问 '+rule.network.host+
           ' 时经由 Agent '+rule.network.exitDeviceId+' 出口。仅 HTTPS 443。'));
         const approve=document.createElement('button');
-        approve.textContent='启用来源设备出口';
+        approve.textContent='接受网络绑定邀请';
         approve.disabled=!rule.network.matchingHost;
         approve.addEventListener('click',async()=>{
           if(!window.confirm('此网站将通过来源设备出口访问；出口离线时会阻断连接。确定启用？'))return;
           try{
             await ask({type:'NETWORK_ACCEPT',ruleId:rule.id,confirmed:true});
-            status('网络绑定已授权；该网站通过来源设备 Agent 出口访问。');
+            status('网络绑定已授权；该网站将通过选择的 Agent 出口访问。');
             await refreshPairing();
           }catch(error){failure(error);}
         });
         card.append(approve);
       }
-      if(rule.role==='source' && (!rule.network || rule.network.status==='none')){
+      if(rule.network?.status==='offered'){
+        card.append(textNode('p',rule.role==='source'
+          ? '网络绑定邀请已发送，等待接收端确认；可取消后更换出口。'
+          : '尚未接受该网络邀请；可以取消，取消后来源端可重新邀请。'));
+      }
+      if(rule.role==='source' && (!rule.network ||
+         rule.network.status==='none'||rule.network.status==='revoked')){
         const action=document.createElement('button');
-        action.textContent='为此 Cookie 规则绑定 Agent 网络';
-        action.title='需要已启用 Browser Sync 的 TLS/TCP 中继、浏览器 send 权限，以及同身份的共享 Agent Exit 在线';
+        action.textContent=rule.network?.status==='revoked'?'重新发起网络绑定邀请':'绑定已授权网络出口';
+        action.title='显示该身份下所有已授权且在线的 Agent proxy.exit 出口，包括远程出口';
         action.addEventListener('click',async()=>{
           try{
             const exits=(await ask({type:'NETWORK_EXITS'})).exits||[];
             if(!exits.length)throw new Error(
-              '当前没有可用 Agent 出口。请检查：① Server 已启用 Browser Sync 和 TLS/TCP 中继；' +
-              '② 来源设备 Agent 已开启浏览器网络共享并具有出口权限；' +
-              '③ Agent 与来源浏览器属于同一身份。');
+              '当前没有可用网络出口。请检查：① Server 已启用 Browser Sync 和 TLS/TCP 中继；' +
+              '② 已授权 proxy.exit 的 Agent 在线；' +
+              '③ Agent 与浏览器属于同一身份。');
             const select=document.createElement('select');
             for(const exit of exits){
               const opt=document.createElement('option');
@@ -308,15 +314,20 @@ function renderRules(rules,peers=[]) {
         });
         card.append(action);
       }
-      if(rule.network?.status==='active'){
+      if(rule.network?.status==='active')
         card.append(textNode('p','网络：'+rule.network.host+' → '+rule.network.exitDeviceId));
+      if(['offered','active'].includes(rule.network?.status)){
+        const isOffered=rule.network.status==='offered';
         const revoke=document.createElement('button');
-        revoke.textContent='撤销网络绑定';
+        revoke.className='secondary-button';
+        revoke.textContent=isOffered?'取消网络绑定邀请':'撤销网络绑定';
         revoke.addEventListener('click',async()=>{
-          if(!window.confirm('撤销后，此网站可能恢复使用本机网络，已同步的网站登录状态不会自动清除。继续？'))return;
+          if(!window.confirm(isOffered
+            ? '取消此次网络绑定邀请？接收端将无法批准已取消的邀请，来源端可重新选择出口发送。'
+            : '撤销后将停止使用当前 Agent 出口，可能恢复本机网络；已同步的登录状态不会自动清除。继续？'))return;
           try{
             await ask({type:'NETWORK_REVOKE',ruleId:rule.id});
-            status('网络绑定已撤销。');
+            status(isOffered?'邀请已取消，可以重新发起网络绑定。':'网络绑定已撤销，可以重新选择出口。');
             await refreshPairing();
           }catch(error){failure(error);}
         });
@@ -324,7 +335,7 @@ function renderRules(rules,peers=[]) {
       }
     }
     if (rule.status==='active' && rule.valid && rule.role==='target' && rule.policy.siteOrigin.startsWith('https://')){
-      const current=rule.localNetworkMode==='local_agent'?'本机 Agent':rule.localNetworkMode==='source_agent'?'来源设备 Agent':'未启用';
+      const current=rule.localNetworkMode==='local_agent'?'本机 Agent':rule.localNetworkMode==='source_agent'?'已授权远程 Agent':'未启用';
       card.append(textNode('p','当前站点网络出口：'+current));
       const local=document.createElement('button');
       local.textContent='改用本机 Agent 代理';
@@ -351,11 +362,11 @@ function renderRules(rules,peers=[]) {
       card.append(local);
       if(rule.network?.status==='active'&&rule.network.matchingHost&&rule.localNetworkMode!=='source_agent'){
         const useSource=document.createElement('button');
-        useSource.textContent='切换到来源设备出口';
+        useSource.textContent='切换到已授权网络出口';
         useSource.addEventListener('click',async()=>{
           try{
             await ask({type:'NETWORK_USE_SOURCE',ruleId:rule.id});
-            status('已切换到来源设备出口');
+            status('已切换到已授权网络出口');
             await refreshPairing();
           }catch(error){failure(error);}
         });

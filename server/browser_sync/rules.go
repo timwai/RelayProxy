@@ -19,6 +19,10 @@ import (
 var ErrRuleDenied = errors.New("browser sync rule denied")
 
 const maxBrowserRulesPerDevice = 32
+// Count all non-revoked rules whose source belongs to the same approved
+// identity. Counting only each device would allow hundreds of unused encrypted
+// offers to accumulate through additional pairs of approved devices.
+const maxBrowserRulesPerIdentity = 128
 
 var policyDigestPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
 
@@ -161,6 +165,32 @@ func (s *Store) OfferRule(ctx context.Context, sourceID string, offer EncryptedO
 		return err
 	}
 	defer tx.Rollback()
+	// Revalidate active same-identity enrollment at insertion time; checking
+	// devices before opening the transaction is insufficient against revocation.
+	var identityID string
+	if err := tx.QueryRowContext(ctx, `SELECT src.identity_id FROM browser_sync_devices src
+		JOIN browser_sync_devices dst ON dst.id=?
+		WHERE src.id=? AND src.state='approved' AND src.can_send=1
+		AND dst.state='approved' AND dst.can_receive=1
+		AND src.identity_id!='' AND src.identity_id=dst.identity_id`,
+		offer.TargetID, sourceID).Scan(&identityID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrRuleDenied
+		}
+		return err
+	}
+	// All active/offered/paused rules share the identity budget regardless of
+	// which browser is their sender. Revocation releases the capacity.
+	var identityRules int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_rules r
+		JOIN browser_sync_devices src ON src.id=r.source_id
+		WHERE src.identity_id=? AND r.status!='revoked'`,
+		identityID).Scan(&identityRules); err != nil {
+		return err
+	}
+	if identityRules >= maxBrowserRulesPerIdentity {
+		return ErrBrowserIdentityQuota
+	}
 	// Include both sent and received non-revoked rules. Count and insert in
 	// the same transaction to avoid bypassing the quota with concurrent offers.
 	for _, deviceID := range []string{sourceID, offer.TargetID} {

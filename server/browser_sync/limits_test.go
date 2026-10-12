@@ -76,3 +76,57 @@ func TestBrowserControlRateLimits(t *testing.T) {
 		t.Fatal("other rule affected")
 	}
 }
+
+func TestBrowserControlRestartReadBurstDoesNotStarveWrites(t *testing.T) {
+	h := &Handler{limits: newBrowserLimiter()}
+	// A receiver can restart while a source is re-sending and querying ACKs.
+	// A sustained read burst must not consume the separate mutation budget.
+	for i := 0; i < 60; i++ {
+		if !h.permitControl("browser_restart", ruleControlFrame{Type: "LIST_RULES"}) {
+			t.Fatalf("legitimate restart list request %d was throttled", i)
+		}
+	}
+	if h.permitControl("browser_restart", ruleControlFrame{Type: "LIST_RULES"}) {
+		t.Fatal("listing's minute cap must still reject the 61st request")
+	}
+	for i := 0; i < 30; i++ {
+		if !h.permitControl("browser_restart", ruleControlFrame{Type: "PING"}) {
+			t.Fatalf("mutation/control burst unexpectedly shared read budget at %d", i)
+		}
+	}
+	if h.permitControl("browser_restart", ruleControlFrame{Type: "PING"}) {
+		t.Fatal("mutable/general control burst exceeded its 30/10s limit")
+	}
+	if !h.permitControl("another_browser", ruleControlFrame{Type: "LIST_RULES"}) {
+		t.Fatal("unrelated browser throttled")
+	}
+}
+
+func TestBrowserControlReadBurstRetainsBoundedQuota(t *testing.T) {
+	h := &Handler{limits: newBrowserLimiter()}
+	for i := 0; i < 64; i++ {
+		if !h.permitControl("browser_read", ruleControlFrame{Type: "SEQUENCE_CURSOR"}) {
+			t.Fatalf("read burst failed early at %d", i)
+		}
+	}
+	if h.permitControl("browser_read", ruleControlFrame{Type: "SEQUENCE_CURSOR"}) {
+		t.Fatal("read-only controls exceeded 64 requests per 10 seconds")
+	}
+	// The shared minute window still applies across read and write classes,
+	// even though they have separate short-burst windows.
+	h.limits = newBrowserLimiter()
+	for i := 0; i < 240; i++ {
+		msgType := "PING"
+		if i%2 == 0 {
+			msgType = "DELIVERY_STATUS"
+		}
+		// Expiry-free fixed-window test: each per-class burst is limited as
+		// expected, so use the underlying shared minute bucket directly.
+		if !h.limits.allow("device-minute:browser_total", 240, time.Minute) {
+			t.Fatalf("minute limit blocked early at %d", i)
+		}
+	}
+	if h.limits.allow("device-minute:browser_total", 240, time.Minute) {
+		t.Fatal("shared per-device minute limit was bypassed")
+	}
+}

@@ -81,18 +81,23 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 	})
 	t.Cleanup(func() { sessions.Unregister(exitID) })
 	proxy := NewNetworkProxy(store, sessions)
-	// Local Agent opt-in is independent from proxy.exit authorization.
+	// Browser network bindings may use any same-identity Agent with an
+	// approved proxy.exit grant. The remote Agent need not have local
+	// browser-sharing enabled; A and B consent to the binding separately.
 	identity, err := store.deviceAllowed(ctx, receiver.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if !proxy.AllowedExit(identity.IdentityID, exitID) {
-		t.Fatal("same-Identity proxy.exit Agent opt-in failed")
+		t.Fatal("same-Identity proxy.exit Agent rejected")
 	}
 	exitSession, _ := sessions.Get(exitID)
 	exitSession.Capabilities = nil
-	if proxy.AllowedExit(identity.IdentityID, exitID) {
-		t.Fatal("server allowed browser traffic without Agent's signed local opt-in")
+	if !proxy.AllowedExit(identity.IdentityID, exitID) {
+		t.Fatal("remote proxy.exit Agent hidden due to missing local browser-sharing flag")
+	}
+	if got := proxy.AvailableExits(ctx, source.ID); len(got) != 1 || got[0]["id"] != exitID {
+		t.Fatalf("approved remote exit not listed: %v", got)
 	}
 	exitSession.Capabilities = []string{protocol.CapabilityBrowserNetworkExit}
 	exitSession.IdentityID = "id_other"

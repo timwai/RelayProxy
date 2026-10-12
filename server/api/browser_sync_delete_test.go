@@ -63,8 +63,16 @@ func TestBrowserSyncAdminExtensionDeleteRequiresRevocation(t *testing.T) {
 	}
 	router := &Router{browserSync: browsersync.NewHandler(store, nil)}
 	const id = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
-	if _, err := store.RequestExtension(context.Background(), id); err != nil {
+	// An extension Origin is inventoried as approved without an independent
+	// administrator approval. Only its associated browser device is approved
+	// by an administrator, and an explicitly revoked historical Origin can be
+	// removed after its linked devices are cleared.
+	state, err := store.RequestExtension(context.Background(), id)
+	if err != nil {
 		t.Fatal(err)
+	}
+	if state != "approved" {
+		t.Fatalf("an Origin unexpectedly requires separate approval: %q", state)
 	}
 	call := func() int {
 		req := httptest.NewRequest(http.MethodDelete, "/api/v1/browser-sync/admin/extensions/"+id, nil)
@@ -74,10 +82,7 @@ func TestBrowserSyncAdminExtensionDeleteRequiresRevocation(t *testing.T) {
 		return rec.Code
 	}
 	if got := call(); got != http.StatusConflict {
-		t.Fatalf("pending extension deleted: %d", got)
-	}
-	if err := store.SetExtensionApproved(context.Background(), id, true); err != nil {
-		t.Fatal(err)
+		t.Fatalf("non-revoked extension deleted: %d", got)
 	}
 	if err := store.SetExtensionApproved(context.Background(), id, false); err != nil {
 		t.Fatal(err)

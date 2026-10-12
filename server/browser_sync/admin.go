@@ -199,12 +199,34 @@ func (s *Store) AdminRuleAction(ctx context.Context, id, action string) error {
 
 // Cursor pages are bounded, ordered by internal ID and omit opaque policies.
 func (s *Store) AdminAudit(ctx context.Context, before int64, limit int) ([]AdminAuditEvent, error) {
+	return s.AdminAuditFiltered(ctx, before, limit, "", "")
+}
+
+// AdminAuditFiltered filters before pagination so a sparse event category
+// cannot appear empty just because a page of unrelated events was fetched.
+func (s *Store) AdminAuditFiltered(ctx context.Context, before int64, limit int, eventType, deviceID string) ([]AdminAuditEvent, error) {
 	if before < 0 || limit < 1 || limit > 100 {
 		return nil, errors.New("invalid browser audit pagination")
 	}
+	if eventType != "" {
+		switch eventType {
+		case "device_approved", "device_revoked", "device_deleted",
+			"rule_paused", "rule_resumed", "rule_revoked", "delivery_result":
+		default:
+			return nil, errors.New("invalid browser audit event filter")
+		}
+	}
+	if deviceID != "" && !deviceIDPattern.MatchString(deviceID) {
+		return nil, errors.New("invalid browser audit device")
+	}
 	rows, err := s.db.QueryContext(ctx, `SELECT id,type,device_id,peer_id,rule_id,outcome,created_at
 		FROM browser_sync_audit WHERE (?=0 OR id<?)
-		ORDER BY id DESC LIMIT ?`, before, before, limit)
+		AND (?='' OR type=?)
+		AND (?='' OR device_id=? OR peer_id=?)
+		AND created_at>=?
+		ORDER BY id DESC LIMIT ?`,
+		before, before, eventType, eventType, deviceID, deviceID, deviceID,
+		time.Now().UTC().Add(-browserAuditRetention), limit)
 	if err != nil {
 		return nil, err
 	}

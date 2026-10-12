@@ -488,3 +488,72 @@ func TestWSSReceiverDiagnosticCodeIsValidatedAndAudited(t *testing.T) {
 		t.Fatalf("receiver failure diagnostic missing from safe audit: %+v %v", events, err)
 	}
 }
+
+
+func TestWSSReceiverTransferRequestTokenIsRoutedAndSigned(t *testing.T) {
+	store := testBrowserStore(t)
+	source, sourceKey := approvedWSSBrowser(t, store, true, false)
+	target, targetKey := approvedWSSBrowser(t, store, false, true)
+	ruleID := uuid.NewString()
+	ctx := context.Background()
+	if err := store.OfferRule(ctx, source.ID, encryptedTestOffer(ruleID, target.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AcceptRule(ctx, target.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ConfirmRule(ctx, source.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(NewHandler(store, []string{testExtensionID}))
+	defer server.Close()
+	a := dialApprovedBrowser(t, server, source, sourceKey)
+	b := dialApprovedBrowser(t, server, target, targetKey)
+	token := uuid.NewString()
+	sendWSSControl(t, b, map[string]any{
+		"type": "SYNC_REQUEST", "requestId": "request-one",
+		"ruleId": ruleID, "transferRequestId": token,
+	})
+	forward := readWSSControl(t, a)
+	if forward["type"] != "SYNC_REQUEST" || forward["transferRequestId"] != token {
+		t.Fatalf("authenticated B transfer token not forwarded to A: %v", forward)
+	}
+	if reply := readWSSControl(t, b); reply["status"] != "REQUESTED" {
+		t.Fatalf("B request status missing: %v", reply)
+	}
+	envelope := signedTestSnapshot(t, sourceKey, source.ID, target.ID, ruleID)
+	envelope.TransferRequestID = token
+	hash := sha256.Sum256([]byte(protocol.SignedHeader(envelope) + "\n" + envelope.Ciphertext))
+	rVal, sVal, err := ecdsa.Sign(rand.Reader, sourceKey, hash[:])
+	if err != nil {
+		t.Fatal(err)
+	}
+	signature := make([]byte, 64)
+	rVal.FillBytes(signature[:32])
+	sVal.FillBytes(signature[32:])
+	envelope.Signature = base64.RawURLEncoding.EncodeToString(signature)
+	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT",
+		"requestId": "snapshot-one", "envelope": envelope})
+	if reply := readWSSControl(t, a); reply["status"] != "RELAYED" {
+		t.Fatalf("signed snapshot with request token rejected: %v", reply)
+	}
+	received := readWSSControl(t, b)
+	routed, ok := received["envelope"].(map[string]any)
+	if !ok || routed["transferRequestId"] != token {
+		t.Fatalf("request token missing from encrypted delivery: %v", received)
+	}
+	sendWSSControl(t, b, map[string]any{"type": "SYNC_ACK",
+		"requestId": "ack-one", "ruleId": ruleID,
+		"messageId": envelope.MessageID, "status": "APPLIED"})
+	if reply := readWSSControl(t, a); reply["status"] != "APPLIED" {
+		t.Fatalf("source missing final ACK: %v", reply)
+	}
+	if reply := readWSSControl(t, b); reply["status"] != "ACK_FORWARDED" {
+		t.Fatalf("receiver missing ACK status: %v", reply)
+	}
+	sendWSSControl(t, b, map[string]any{"type": "SYNC_REQUEST", "requestId": "bad",
+		"ruleId": ruleID, "transferRequestId": "malformed-token"})
+	if reply := readWSSControl(t, b); reply["type"] != "RULE_ERROR" {
+		t.Fatalf("malformed transfer token was allowed: %v", reply)
+	}
+}

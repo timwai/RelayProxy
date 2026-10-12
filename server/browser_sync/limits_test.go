@@ -116,12 +116,8 @@ func TestBrowserControlReadBurstRetainsBoundedQuota(t *testing.T) {
 	// even though they have separate short-burst windows.
 	h.limits = newBrowserLimiter()
 	for i := 0; i < 240; i++ {
-		msgType := "PING"
-		if i%2 == 0 {
-			msgType = "DELIVERY_STATUS"
-		}
-		// Expiry-free fixed-window test: each per-class burst is limited as
-		// expected, so use the underlying shared minute bucket directly.
+		// Keep this test deterministic: exercise the shared minute bucket
+		// directly, without waiting for shorter burst windows to expire.
 		if !h.limits.allow("device-minute:browser_total", 240, time.Minute) {
 			t.Fatalf("minute limit blocked early at %d", i)
 		}

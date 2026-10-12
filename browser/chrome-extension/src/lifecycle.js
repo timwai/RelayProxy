@@ -30,3 +30,31 @@ export function nextSessionSequence(localSequence, serverCursor) {
   if (!Number.isSafeInteger(next)) throw new Error('会话序号耗尽，必须重新配对');
   return next;
 }
+
+
+// An overwrite grant permits at most ONE signed incoming snapshot. It cannot
+// be a persistent boolean; legacy grants are rejected after an upgrade.
+export const OVERWRITE_GRANT_TTL_MS = 2 * 60 * 1000;
+export function validOverwriteGrant(grant, siteOrigin, now) {
+  return !!grant && typeof grant === 'object' && !Array.isArray(grant) &&
+    typeof siteOrigin === 'string' && siteOrigin.length > 0 &&
+    grant.siteOrigin === siteOrigin &&
+    Number.isSafeInteger(grant.expiresAt) &&
+    Number.isFinite(now) && grant.expiresAt > now &&
+    grant.expiresAt - now <= OVERWRITE_GRANT_TTL_MS;
+}
+
+// Chrome alarms have one-minute cadence. Persist retry state across MV3
+// suspension; do not start a tight loop during a WSS failure or auth denial.
+export const RECONNECT_BASE_MS = 60 * 1000;
+export const RECONNECT_MAX_MS = 15 * 60 * 1000;
+export function nextReconnectDelay(failures) {
+  if (!Number.isSafeInteger(failures) || failures <= 0) return RECONNECT_BASE_MS;
+  return Math.min(RECONNECT_MAX_MS, RECONNECT_BASE_MS *
+    (2 ** Math.min(failures - 1, 10)));
+}
+export function shouldRetryConnection(retry, origin, now) {
+  if (!origin || !Number.isFinite(now) || now <= 0) return false;
+  if (!retry || retry.serverOrigin !== origin) return true;
+  return !Number.isFinite(retry.nextRetryAt) || retry.nextRetryAt <= now;
+}

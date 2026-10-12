@@ -41,9 +41,8 @@
             <p class="field-hint">填写 Server 的 HTTPS / TLS 中继地址。</p>
           </div>
           <div class="form-grid"><div class="field-group"><label for="identity-id">身份 ID（由管理员审批绑定）</label><input id="identity-id" type="text" maxlength="128" autocomplete="off" placeholder="输入所属身份 ID"></div><div class="field-group"><label for="device-name">设备名称</label><input id="device-name" type="text" maxlength="100" autocomplete="off" placeholder="例如：办公电脑 Chrome"></div></div>
-          <div class="button-row"><button id="save" class="primary-button" type="button">保存地址并授权</button>
-            <button id="register" class="secondary-button" type="button">提交设备授权申请</button>
-            <button id="connect" class="secondary-button" type="button">连接 Server</button></div>
+          <div class="button-row"><button id="connect" class="primary-button" type="button">连接服务端</button></div>
+          <p class="field-hint">首次连接保存地址并提交设备审批；管理员批准后再次连接，已批准设备可以直接认证。</p>
           <div class="divider-line"></div>
           <div class="device-identity"><div><strong>本浏览器设备</strong></div>
             <div id="device" class="device-code" title="本设备 ID">正在初始化…</div></div>
@@ -88,7 +87,13 @@
             <div class="field-group"><label for="target">接收设备</label><select id="target"><option value="">请先连接并刷新设备</option></select></div>
             <div class="field-group"><label for="pair-site">授权的网站</label><select id="pair-site"><option value="">请先添加允许的网站</option></select></div>
           </div>
-          <p class="field-hint">同步 Cookie、Local Storage、Session Storage 和 IndexedDB。已有配对范围不变。</p>
+          <fieldset class="sync-scope"><legend>同步数据类型</legend>
+            <label><input id="sync-cookies" type="checkbox" checked> Cookie</label>
+            <label><input id="sync-local" type="checkbox" checked> Local Storage</label>
+            <label><input id="sync-session" type="checkbox" checked> Session Storage</label>
+            <label><input id="sync-indexeddb" type="checkbox" checked> IndexedDB</label>
+          </fieldset>
+          <p class="field-hint">默认全部勾选，仅影响新创建的配对；至少选择一项。已有配对不会自动改变范围。</p>
           <button id="offer-rule" class="primary-button" type="button">创建加密配对邀请</button>
         </div>
       </section>

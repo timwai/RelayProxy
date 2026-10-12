@@ -70,6 +70,13 @@ export async function registerBrowser() {
 
 let currentSocket = null;
 let connectionState = 'DISCONNECTED';
+let stateObserver = null;
+export function onBrowserConnectionChange(callback){stateObserver=callback;}
+function setConnectionState(next){
+  if(connectionState===next)return;
+  connectionState=next;
+  try{stateObserver?.(next);}catch{ /* WSS must not depend on UI listeners */ }
+}
 const requests = new Map();
 let keepalive = null;
 let connectingPromise = null;
@@ -83,7 +90,7 @@ export function disconnect() {
   for (const [id, value] of requests) { clearTimeout(value.timer); value.reject(new Error('WSS 已断开')); requests.delete(id); }
   if (currentSocket) currentSocket.close(1000, 'extension disconnected');
   currentSocket = null;
-  connectionState = 'DISCONNECTED';
+  setConnectionState('DISCONNECTED');
 }
 
 async function connectFreshBrowser() {
@@ -97,7 +104,7 @@ async function connectFreshBrowser() {
   // No long-term tokens, credentials or Cookie values in URL.
   const socket = new WebSocket(url);
   currentSocket = socket;
-  connectionState = 'CONNECTING';
+  setConnectionState('CONNECTING');
   return new Promise((resolve, reject) => {
     let authenticated = false;
     let finished = false;
@@ -118,7 +125,7 @@ async function connectFreshBrowser() {
       if (finished) return;
       finished = true;
       if (handshakeTimer) clearTimeout(handshakeTimer);
-      connectionState = 'DISCONNECTED';
+      setConnectionState('DISCONNECTED');
       socket.close();
       reject(error);
     };
@@ -155,7 +162,7 @@ async function connectFreshBrowser() {
           stage = 'authenticated';
           authenticated = true;
           if (handshakeTimer) clearTimeout(handshakeTimer);
-          connectionState = 'AUTHENTICATED';
+          setConnectionState('AUTHENTICATED');
           if (!finished) { finished = true; resolve({ state: connectionState }); }
           // A live Chrome 116+ MV3 WebSocket needs periodic control traffic.
           // Reconnecting after worker suspension is handled by the caller.
@@ -202,7 +209,7 @@ async function connectFreshBrowser() {
         keepalive = null;
         for (const [id, item] of requests) { clearTimeout(item.timer); item.reject(new Error('WSS 连接中断')); requests.delete(id); }
         currentSocket = null;
-        connectionState = 'DISCONNECTED';
+        setConnectionState('DISCONNECTED');
       }
       if (!authenticated) failWithDiagnosis();
     });

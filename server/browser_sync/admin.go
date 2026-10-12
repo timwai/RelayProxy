@@ -68,6 +68,7 @@ func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 		peer_id TEXT NOT NULL DEFAULT '',
 		rule_id TEXT NOT NULL DEFAULT '',
 		outcome TEXT NOT NULL DEFAULT '',
+		actor_id TEXT NOT NULL DEFAULT '',
 		created_at TIMESTAMP NOT NULL
 	)`)
 	if err != nil {

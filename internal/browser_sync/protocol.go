@@ -44,6 +44,7 @@ type Envelope struct {
 	Protocol              string           `json:"protocol"`
 	Type                  EventType        `json:"type"`
 	MessageID             string           `json:"messageId"`
+	TransferRequestID     string           `json:"transferRequestId,omitempty"`
 	RuleID                string           `json:"ruleId"`
 	SourceBrowserDeviceID string           `json:"sourceBrowserDeviceId"`
 	TargetBrowserDeviceID string           `json:"targetBrowserDeviceId"`
@@ -69,6 +70,14 @@ func ValidateEnvelope(e Envelope, now time.Time) error {
 	}
 	if _, err := uuid.Parse(e.MessageID); err != nil {
 		return errors.New("invalid messageId")
+	}
+	if e.TransferRequestID != "" {
+		if len(e.TransferRequestID) != 36 {
+			return errors.New("invalid transfer request id")
+		}
+		if _, err := uuid.Parse(e.TransferRequestID); err != nil {
+			return errors.New("invalid transfer request id")
+		}
 	}
 	for name, value := range map[string]string{
 		"ruleId":                e.RuleID,
@@ -136,7 +145,7 @@ func ValidateEnvelope(e Envelope, now time.Time) error {
 // SignedHeader is a deterministic cross-language encoding: ISO8601 JSON time
 // spellings do not appear in the signature; both ends use Unix milliseconds.
 func SignedHeader(e Envelope) string {
-	return strings.Join([]string{
+	fields := []string{
 		e.Protocol, string(e.Type), e.MessageID, e.RuleID,
 		e.SourceBrowserDeviceID, e.TargetBrowserDeviceID,
 		strconv.FormatUint(e.Sequence, 10),
@@ -144,5 +153,11 @@ func SignedHeader(e Envelope) string {
 		strconv.FormatInt(e.ExpiresAt.UnixMilli(), 10),
 		e.Encryption.Suite, e.Encryption.KeyID, e.Encryption.Enc,
 		e.Encryption.Salt, e.Encryption.IV,
-	}, "\n")
+	}
+	// Append only when present: legacy automatic snapshots retain the exact
+	// same signed/AES-GCM header, while explicit B requests bind the token.
+	if e.TransferRequestID != "" {
+		fields = append(fields, e.TransferRequestID)
+	}
+	return strings.Join(fields, "\n")
 }

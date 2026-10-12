@@ -13,6 +13,25 @@ import (
 var ErrNotFound = errors.New("browser device not found")
 var ErrDeviceConflict = errors.New("browser device key mismatch")
 var ErrDeleteRequiresRevoke = errors.New("revoke browser authorization before deleting the record")
+var ErrBrowserIdentityQuota = errors.New("browser identity capacity exceeded")
+
+// Approved devices consume budget; pending applications are not trusted to
+// reserve capacity for an arbitrary requested identity, and revoked devices
+// release capacity without deleting the audit history.
+const maxApprovedBrowserDevicesPerIdentity = 32
+
+func checkApprovedBrowserDeviceQuota(ctx context.Context, tx *sql.Tx, identityID string) error {
+	var approved int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_devices
+		WHERE identity_id=? AND state='approved'`, identityID).Scan(&approved); err != nil {
+		return err
+	}
+	if approved >= maxApprovedBrowserDevicesPerIdentity {
+		return ErrBrowserIdentityQuota
+	}
+	return nil
+}
+
 var ErrExtensionStillLinked = errors.New("delete linked browser devices before deleting the extension")
 
 // BrowserDevice is entirely separate from the privileged RelayProxy Agent model.
@@ -179,6 +198,9 @@ func (s *Store) Approve(ctx context.Context, id, identityID string, canSend, can
 	}
 	if status != "active" {
 		return errors.New("identity is not active")
+	}
+	if err := checkApprovedBrowserDeviceQuota(ctx, tx, identityID); err != nil {
+		return err
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE browser_sync_devices SET identity_id=?,state='approved',can_send=?,can_receive=?,updated_at=? WHERE id=? AND state='pending'`,
 		identityID, boolInt(canSend), boolInt(canReceive), time.Now().UTC(), id)

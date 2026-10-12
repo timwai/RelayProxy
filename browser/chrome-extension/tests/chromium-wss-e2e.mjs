@@ -49,7 +49,7 @@ async function launchFixture(){
         failure(new Error('Test-only Relay WSS fixture panic'));
     });
   });
-  for(const item of [info.serverOrigin,info.adminOrigin])
+  for(const item of [info.serverOrigin,info.proxyOrigin,info.adminOrigin])
     assert.equal(new URL(item).hostname,'127.0.0.1','test WSS fixture must bind loopback only');
   return {token,...info};
 }
@@ -100,6 +100,9 @@ async function main(){
   scope.push(()=>new Promise(resolve=>webSite.close(resolve)));
   const siteOrigin=`http://127.0.0.1:${webSite.address().port}`;
   const fixture=await launchFixture();
+  const throughProxy=process.env.RELAY_BROWSER_WSS_USE_PROXY==='1';
+  const relayOrigin=throughProxy?fixture.proxyOrigin:fixture.serverOrigin;
+  assert.equal(new URL(relayOrigin).protocol,'https:');
   const extPath=join(temp,'extension');
   await cp(extensionRoot,extPath,{
     recursive:true,
@@ -118,8 +121,8 @@ async function main(){
   const b=await extensionContext(extPath,join(temp,'chrome-b'),{localTestTLS:true});
   const [identityA,identityB]=await Promise.all([extensionIdentity(a),extensionIdentity(b)]);
   assert.notEqual(identityA.deviceId,identityB.deviceId);
-  await setServerAndSite(a,fixture.serverOrigin,siteOrigin,'Chromium A');
-  await setServerAndSite(b,fixture.serverOrigin,siteOrigin,'Chromium B');
+  await setServerAndSite(a,relayOrigin,siteOrigin,'Chromium A');
+  await setServerAndSite(b,relayOrigin,siteOrigin,'Chromium B');
   const siteA=await a.context.newPage();
   const siteB=await b.context.newPage();
   await sourceSiteState(siteA,siteOrigin);
@@ -327,10 +330,11 @@ async function main(){
     chrome.runtime.sendMessage({type:'LIST_RULES'}));
   assert.equal(staleSocket.ok,false,
     'revoked browser used an already-authenticated WSS socket');
-  await workerCommand(restartedB,{type:'SAVE_SERVER',serverOrigin:fixture.serverOrigin});
+  await workerCommand(restartedB,{type:'SAVE_SERVER',serverOrigin:relayOrigin});
   const denied=await restartedB.options.evaluate(async()=>chrome.runtime.sendMessage({type:'CONNECT_BROWSER'}));
   assert.equal(denied.ok,false,'revoked Chrome device reauthenticated over WSS');
-  console.log('Real RelayProxy TLS/WSS + Chromium A/B passed: enrolled/approved,');
+  console.log('Real RelayProxy TLS/WSS '+(throughProxy?'via HTTPS reverse proxy':'direct')+
+    ' + Chromium A/B passed: enrolled/approved,');
   console.log('signed challenge, E2EE rule/code, opaque WSS delivery, APPLIED ACK,');
   console.log('actual website login+IndexedDB, MV3 alarm WSS reconnect + durable ACK recovery,');
   console.log('full Chromium Profile restart/key retention, post-restart delivery,');

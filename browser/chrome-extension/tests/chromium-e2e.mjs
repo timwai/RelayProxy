@@ -136,9 +136,13 @@ async function applyToTarget(profile,ruleId,policy,payload){
     };
     const stages=[];
     try{
+      stages.push({step:'payload',hasIndexedDB:payload.indexedDB!==undefined,
+        count:payload.indexedDB?.databases?.length,
+        stores:payload.indexedDB?.databases?.map(db=>db.stores.map(s=>s.name))});
       stages.push({step:'before',db:await schema()});
       await indexedDB.apply();
-      stages.push({step:'after-indexeddb',db:await schema()});
+      const journal=(await chrome.storage.local.get('browserSyncIndexedDBRestoreJournal')).browserSyncIndexedDBRestoreJournal;
+      stages.push({step:'after-indexeddb',db:await schema(),hasJournal:!!journal?.[ruleId]});
       await storage.apply();
       stages.push({step:'after-storage',db:await schema()});
       await applyAllCookies(ruleId,payload,policy);

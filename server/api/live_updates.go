@@ -14,47 +14,52 @@ import (
 // existing authenticated, identity-filtered APIs to load current state; no
 // device inventory, credentials or private application data travel in SSE.
 type liveUpdates struct {
-	mu sync.Mutex
-	revision uint64
+	mu          sync.Mutex
+	revision    uint64
 	subscribers map[chan uint64]liveSubscriber
 }
 type liveSubscriber struct {
 	identityID string
-	admin bool
+	admin      bool
 }
+
 const maxLiveSubscribers = 128
 
 func newLiveUpdates() *liveUpdates {
-	return &liveUpdates{subscribers:make(map[chan uint64]liveSubscriber)}
+	return &liveUpdates{subscribers: make(map[chan uint64]liveSubscriber)}
 }
 
 func (h *liveUpdates) subscribe(identityID string, admin bool) (<-chan uint64, func(), bool) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
-	if len(h.subscribers)>=maxLiveSubscribers{return nil,nil,false}
-	ch:=make(chan uint64,1)
-	h.subscribers[ch]=liveSubscriber{identityID:identityID,admin:admin}
-	return ch,func(){
+	if len(h.subscribers) >= maxLiveSubscribers {
+		return nil, nil, false
+	}
+	ch := make(chan uint64, 1)
+	h.subscribers[ch] = liveSubscriber{identityID: identityID, admin: admin}
+	return ch, func() {
 		h.mu.Lock()
-		delete(h.subscribers,ch)
+		delete(h.subscribers, ch)
 		h.mu.Unlock()
-	},true
+	}, true
 }
 
 // Empty scope broadcasts to administrators only. An identity-scoped event
 // reaches that identity and administrators; a different identity receives
 // neither the revision nor a change in its SSE cadence.
 func (h *liveUpdates) publish(identityID string) {
-	if h==nil{return}
+	if h == nil {
+		return
+	}
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.revision++
-	for ch,subscriber:=range h.subscribers {
-		if !subscriber.admin && (identityID==""||subscriber.identityID!=identityID){
+	for ch, subscriber := range h.subscribers {
+		if !subscriber.admin && (identityID == "" || subscriber.identityID != identityID) {
 			continue
 		}
 		select {
-		case ch<-h.revision:
+		case ch <- h.revision:
 		default:
 			// One pending notification is enough: we only tell the client to
 			// re-read canonical state, never deliver a delta.
@@ -62,50 +67,61 @@ func (h *liveUpdates) publish(identityID string) {
 	}
 }
 
-func (r *Router) handleLiveEvents(w http.ResponseWriter,req *http.Request) {
-	flusher,ok:=w.(http.Flusher)
+func (r *Router) handleLiveEvents(w http.ResponseWriter, req *http.Request) {
+	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w,"streaming unsupported",http.StatusInternalServerError)
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
 	}
-	user,ok:=req.Context().Value(principalContextKey).(*repository.User)
-	if !ok||user==nil {
-		http.Error(w,"unauthorized",http.StatusUnauthorized)
+	user, ok := req.Context().Value(principalContextKey).(*repository.User)
+	if !ok || user == nil {
+		http.Error(w, "unauthorized", http.StatusUnauthorized)
 		return
 	}
-	ch,unsubscribe,ok:=r.live.subscribe(user.IdentityID,user.Role=="admin")
+	ch, unsubscribe, ok := r.live.subscribe(user.IdentityID, user.Role == "admin")
 	if !ok {
-		http.Error(w,"too many live subscribers",http.StatusServiceUnavailable)
+		http.Error(w, "too many live subscribers", http.StatusServiceUnavailable)
 		return
 	}
 	defer unsubscribe()
-	w.Header().Set("Content-Type","text/event-stream; charset=utf-8")
-	w.Header().Set("Cache-Control","no-store")
-	w.Header().Set("X-Accel-Buffering","no")
-	w.Header().Set("Connection","keep-alive")
+	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Accel-Buffering", "no")
+	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
-	_,_ = fmt.Fprint(w,": connected\n\n")
+	_, _ = fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()
-	pulse:=time.NewTicker(25*time.Second)
+	pulse := time.NewTicker(25 * time.Second)
 	defer pulse.Stop()
 	for {
 		select {
-		case <-req.Context().Done():return
-		case revision:=<-ch:
-			payload,_:=json.Marshal(map[string]uint64{"revision":revision})
-			if _,err:=fmt.Fprintf(w,"event: invalidate\ndata: %s\n\n",payload);err!=nil{return}
+		case <-req.Context().Done():
+			return
+		case revision := <-ch:
+			payload, _ := json.Marshal(map[string]uint64{"revision": revision})
+			if _, err := fmt.Fprintf(w, "event: invalidate\ndata: %s\n\n", payload); err != nil {
+				return
+			}
 			flusher.Flush()
 		case <-pulse.C:
 			// A disabled user or revoked login must not hold an authorized
 			// long-lived subscription until the browser happens to reconnect.
-			cookie,err:=requestSessionCookie(req)
-			if err!=nil{return}
-			id,valid:=r.authService.Authenticate(cookie.Value)
-			if !valid||id!=user.ID{return}
-			current,err:=r.db.GetUserByID(id)
-			if err!=nil||current.Status!="active"||current.Role!=user.Role||
-				current.IdentityID!=user.IdentityID{return}
-			if _,err=fmt.Fprint(w,": keepalive\n\n");err!=nil{return}
+			cookie, err := requestSessionCookie(req)
+			if err != nil {
+				return
+			}
+			id, valid := r.authService.Authenticate(cookie.Value)
+			if !valid || id != user.ID {
+				return
+			}
+			current, err := r.db.GetUserByID(id)
+			if err != nil || current.Status != "active" || current.Role != user.Role ||
+				current.IdentityID != user.IdentityID {
+				return
+			}
+			if _, err = fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+				return
+			}
 			flusher.Flush()
 		}
 	}
@@ -115,15 +131,20 @@ type mutationStatusWriter struct {
 	http.ResponseWriter
 	status int
 }
-func (w *mutationStatusWriter) WriteHeader(status int){
-	if w.status!=0{return}
-	w.status=status
+
+func (w *mutationStatusWriter) WriteHeader(status int) {
+	if w.status != 0 {
+		return
+	}
+	w.status = status
 	w.ResponseWriter.WriteHeader(status)
 }
-func (w *mutationStatusWriter) Write(content []byte)(int,error){
-	if w.status==0{w.status=http.StatusOK}
+func (w *mutationStatusWriter) Write(content []byte) (int, error) {
+	if w.status == 0 {
+		w.status = http.StatusOK
+	}
 	return w.ResponseWriter.Write(content)
 }
 func (w *mutationStatusWriter) succeeded() bool {
-	return w.status==0||w.status>=200&&w.status<300
+	return w.status == 0 || w.status >= 200 && w.status < 300
 }

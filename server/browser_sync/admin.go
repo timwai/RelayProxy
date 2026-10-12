@@ -144,27 +144,60 @@ func appendBrowserAudit(ctx context.Context, tx *sql.Tx, event, deviceID, peerID
 	return nil
 }
 
+// AdminRules preserves the original metadata-only list API for callers
+// that have not opted into server-side pagination.
 func (s *Store) AdminRules(ctx context.Context) ([]AdminRule, error) {
+	return s.adminRulesQuery(ctx, 500, 0, "", "", "")
+}
+
+// AdminRulesPage filters and pages BEFORE applying the limit. Clients must
+// treat the 500-row legacy endpoint as truncated and use this for full lists.
+func (s *Store) AdminRulesPage(ctx context.Context, limit, offset int, identityID, status, search string) ([]AdminRule, error) {
+	if limit < 1 || limit > 100 || offset < 0 || offset > 100000 ||
+		len(identityID) > 128 || len(search) > 100 {
+		return nil, errors.New("invalid browser rule pagination")
+	}
+	if status != "" {
+		switch status {
+		case "offered", "active", "paused", "revoked":
+		default:
+			return nil, errors.New("invalid browser rule status")
+		}
+	}
+	return s.adminRulesQuery(ctx, limit, offset, identityID, status, search)
+}
+
+func (s *Store) adminRulesQuery(ctx context.Context, limit, offset int, identityID, status, search string) ([]AdminRule, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT r.id,r.source_id,sd.name,r.target_id,td.name,
 		sd.identity_id,r.status,r.source_approved,r.target_approved,r.keys_confirmed,
 		r.created_at,r.updated_at FROM browser_sync_rules r
 		INNER JOIN browser_sync_devices sd ON sd.id=r.source_id
 		INNER JOIN browser_sync_devices td ON td.id=r.target_id
-		ORDER BY r.updated_at DESC LIMIT 500`)
+		WHERE (?='' OR sd.identity_id=?)
+		  AND (?='' OR r.status=?)
+		  AND (?='' OR instr(lower(r.id),lower(?))>0
+		    OR instr(lower(r.source_id),lower(?))>0
+		    OR instr(lower(r.target_id),lower(?))>0
+		    OR instr(lower(sd.name),lower(?))>0
+		    OR instr(lower(td.name),lower(?))>0)
+		ORDER BY r.updated_at DESC,r.id DESC LIMIT ? OFFSET ?`,
+		identityID, identityID, status, status,
+		search, search, search, search, search, search,
+		limit, offset)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	items := make([]AdminRule, 0)
 	for rows.Next() {
-		var r AdminRule
+		var rule AdminRule
 		var source, target, keys int
-		if err := rows.Scan(&r.ID, &r.SourceID, &r.SourceName, &r.TargetID, &r.TargetName,
-			&r.IdentityID, &r.Status, &source, &target, &keys, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&rule.ID, &rule.SourceID, &rule.SourceName, &rule.TargetID, &rule.TargetName,
+			&rule.IdentityID, &rule.Status, &source, &target, &keys, &rule.CreatedAt, &rule.UpdatedAt); err != nil {
 			return nil, err
 		}
-		r.SourceApproved, r.TargetApproved, r.KeysConfirmed = source != 0, target != 0, keys != 0
-		items = append(items, r)
+		rule.SourceApproved, rule.TargetApproved, rule.KeysConfirmed = source != 0, target != 0, keys != 0
+		items = append(items, rule)
 	}
 	return items, rows.Err()
 }

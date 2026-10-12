@@ -8,8 +8,9 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	browsersync "relayproxy/server/browser_sync"
 	_ "modernc.org/sqlite"
+
+	browsersync "relayproxy/server/browser_sync"
 )
 
 func testBrowserAdminRouter(t *testing.T) (*Router, *browsersync.Store) {

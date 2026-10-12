@@ -79,26 +79,6 @@ $('local-agent-apply').addEventListener('click',async()=>{
   }catch(error){failure(error);}
 });
 
-$('save').addEventListener('click', async () => {
-  try {
-    const raw = $('server').value.trim();
-    const origin = new URL(raw);
-    if (origin.protocol !== 'https:' || origin.pathname !== '/' ||
-        origin.search || origin.hash || origin.username || origin.password) {
-      throw new Error('仅支持 HTTPS Server Origin');
-    }
-    // Explicit click grants the extension access to the selected Relay HTTPS origin.
-    const pattern = `${origin.protocol}//${origin.hostname}/*`; // Chrome host permission patterns omit ports
-    const granted = await chrome.permissions.request({ origins: [pattern] });
-    if (!granted) { status('未授予 Server 访问权限。'); return; }
-    const response = await chrome.runtime.sendMessage({
-      type: 'SAVE_SERVER', serverOrigin: raw
-    });
-    if (!response?.ok) throw new Error(response?.error || 'Unable to save address');
-    status('Server 地址已保存，可以注册浏览器设备。');
-  } catch (error) { failure(error); }
-});
-
 $('add-site').addEventListener('click', async () => {
   try {
     const origin = parseSiteOrigin($('site').value.trim());
@@ -122,35 +102,45 @@ $('add-site').addEventListener('click', async () => {
   } catch (error) { failure(error); }
 });
 
-$('register').addEventListener('click', async () => {
-  try {
-    const requestedIdentityId = $('identity-id').value.trim();
-    const deviceName = $('device-name').value.trim();
-    if (!requestedIdentityId || !deviceName) throw new Error('请填写身份 ID 和设备名称');
-    if (deviceName.length > 100 || requestedIdentityId.length > 128) throw new Error('身份 ID 或设备名称过长');
-    await updateSettings({requestedIdentityId,deviceName});
-    const result = await chrome.runtime.sendMessage({ type: 'REGISTER_BROWSER' });
-    if (!result?.ok) throw new Error(result?.error || '设备注册失败');
-    status(result.state === 'pending'
-      ? '申请已提交。请管理员核对身份 ID、设备名称和权限后批准。'
-      : result.state === 'approved'
-      ? '浏览器设备已获批准，可以连接 Server。'
-      : result.state === 'revoked'
-      ? '该浏览器设备已撤销。请管理员在 Server Web 撤销后删除旧设备，再重新提交申请；若曾禁用扩展来源，还需清除历史禁用记录。'
-      : '浏览器设备状态：' + result.state);
-  } catch (error) { failure(error); }
-});
-
 $('connect').addEventListener('click', async () => {
-  try {
-    const result = await chrome.runtime.sendMessage({ type: 'CONNECT_BROWSER' });
-    if (!result?.ok) throw new Error(result?.error || '连接失败');
-    status('已完成设备身份认证，刷新设备列表进行配对。请在两端审批配对后同步。');
-    $('server-stage').textContent = '设备认证已连接';
+  const button=$('connect');
+  try{
+    const raw=$('server').value.trim();
+    const origin=new URL(raw);
+    if(origin.protocol!=='https:'||origin.pathname!=='/'||
+       origin.search||origin.hash||origin.username||origin.password)
+      throw new Error('仅支持 HTTPS Server Origin');
+    const requestedIdentityId=$('identity-id').value.trim();
+    const deviceName=$('device-name').value.trim();
+    if(!requestedIdentityId||!deviceName)
+      throw new Error('请填写身份 ID 和设备名称');
+    if(deviceName.length>100||requestedIdentityId.length>128)
+      throw new Error('身份 ID 或设备名称过长');
+    // Chrome host permission must be requested directly in the click path.
+    const allowed=await chrome.permissions.request({
+      origins:[origin.protocol+'//'+origin.hostname+'/*']
+    });
+    if(!allowed)throw new Error('未授予 Server 访问权限');
+    button.disabled=true;
+    const current=await getSettings();
+    if(current.serverOrigin!==origin.origin)
+      await ask({type:'SAVE_SERVER',serverOrigin:origin.origin});
+    await updateSettings({requestedIdentityId,deviceName});
+    const registered=await ask({type:'REGISTER_BROWSER'});
+    if(registered.state!=='approved'){
+      $('server-stage').textContent=registered.state==='pending'?'等待管理员审批':'设备授权未生效';
+      status(registered.state==='pending'
+        ?'设备授权申请已提交；管理员批准后再次点击「连接服务端」。'
+        :'设备状态：'+registered.state+'；请在 Server Web 核对授权。');
+      return;
+    }
+    await ask({type:'CONNECT_BROWSER'});
+    $('server-stage').textContent='设备认证已连接';
+    status('已连接服务端，设备身份认证通过。');
     await refreshPairing();
-  } catch (error) { failure(error); }
+  }catch(error){failure(error);}
+  finally{button.disabled=false;}
 });
-
 
 async function ask(message) {
   const result = await chrome.runtime.sendMessage(message);
@@ -218,11 +208,14 @@ function renderRules(rules,peers=[]) {
       card.append(textNode('p', '站点：' + rule.policy.siteOrigin));
       if(rule.policy.siteOrigin.startsWith('http://'))
         card.append(textNode('p', 'HTTP 风险：网站访问与登录凭据可能明文暴露，设备间同步本身仍为加密传输。', 'error'));
-      card.append(textNode('p',Array.isArray(rule.policy.cookieNames) ?
-        '旧版指定 Cookie：'+rule.policy.cookieNames.join(', ') :
-        (rule.policy.indexedDB===true
-          ? '同步范围：全部 Cookie / Local Storage / Session Storage / 同源 IndexedDB（v3；最多 4 MiB IndexedDB）'
-          : '同步范围：全部 Cookie / Local Storage / Session Storage（旧 v2 配对不包括 IndexedDB）')));
+      const selected=Array.isArray(rule.policy.cookieNames)
+        ?'旧版指定 Cookie：'+rule.policy.cookieNames.join(', ')
+        :['allCookies','localStorage','sessionStorage','indexedDB']
+          .filter(key=>rule.policy[key]===true)
+          .map(key=>({allCookies:'Cookie',localStorage:'Local Storage',
+            sessionStorage:'Session Storage',indexedDB:'IndexedDB'}[key]))
+          .join(' / ');
+      card.append(textNode('p','同步范围：'+selected));
       card.append(textNode('div', '配对校验码：' + rule.code, 'code'));
       if (rule.status === 'offered' &&
           ((rule.role === 'target' && !rule.targetApproved) ||
@@ -386,65 +379,74 @@ function renderRules(rules,peers=[]) {
       }
     }
     if (rule.status === 'active' && rule.valid) {
-      const sync = document.createElement('button');
-      sync.textContent = rule.role === 'source' ? '立即发送加密登录状态' : '从来源设备请求同步';
-      sync.addEventListener('click', async () => {
-        try {
-          const action = rule.role === 'source' ? 'SEND_SESSION' : 'REQUEST_SESSION';
-          const result = await ask({ type: action, ruleId: rule.id });
-          status(result.state === 'RELAYED' ? '密文已投递，等待接收端验证和应用。' :
-            '已请求来源设备发送最新密文快照，请刷新检查结果。');
-        } catch (error) { failure(error); }
-      });
-      card.append(sync);
-      if (rule.role === 'target') {
-        if (rule.lastTransfer?.state === 'PARTIAL') {
-          card.append(textNode('p','注意：上次部分 Cookie 无法完整恢复。请检查当前目标网站的登录状态，确认没有混合账户后再恢复。','error'));
-          const resume = document.createElement('button');
-          resume.textContent = '我已检查登录状态，恢复此规则';
+      // Options are parameters of the NEXT explicit sync, not separate
+      // actions or permanent account overwrite grants.
+      let openAfter=null,overwriteOnce=null;
+      if(rule.role==='target'){
+        const options=document.createElement('div');
+        options.className='sync-preferences';
+        const openLabel=document.createElement('label');
+        openAfter=document.createElement('input');
+        openAfter.type='checkbox';
+        openLabel.append(openAfter,textNode('span','同步成功后打开页面'));
+        const overwriteLabel=document.createElement('label');
+        overwriteOnce=document.createElement('input');
+        overwriteOnce.type='checkbox';
+        overwriteLabel.append(overwriteOnce,textNode('span','允许本次覆盖现有登录数据'));
+        options.append(openLabel,overwriteLabel);
+        card.append(options);
+        if(rule.lastTransfer?.state==='PARTIAL'){
+          card.append(textNode('p','上次恢复不完整，请确认站点登录状态后手动恢复此规则。','error'));
+          const resume=document.createElement('button');
+          resume.textContent='我已检查登录状态，恢复此规则';
           resume.addEventListener('click',async()=>{
-            if(!window.confirm('你是否已经检查目标网站的登录状态，并确认可以继续接收会话？'))return;
-            try {
+            if(!window.confirm('确认已检查目标登录状态且没有混合账号？'))return;
+            try{
               await ask({type:'RESUME_PARTIAL_RESTORE',ruleId:rule.id,confirmed:true});
-              status('已解除恢复暂停。请检查目标登录账号后手动请求同步。');
               await refreshPairing();
             }catch(error){failure(error);}
           });
           card.append(resume);
         }
-        const open = document.createElement('button');
-        open.textContent = '同步成功后打开网站';
-        open.addEventListener('click',async()=>{
-          try{
-            await ask({type:'SYNC_THEN_OPEN',ruleId:rule.id});
-            status('已请求同步，只有本次授权范围内的会话数据成功应用后才会打开网站。');
-          }catch(error){failure(error);}
-        });
-        card.append(open);
-        // A deliberate click authorizes ONLY the next authenticated snapshot,
-        // for at most two minutes. There is no persistent "always allow".
-        const overwrite = document.createElement('button');
-        overwrite.type = 'button';
-        overwrite.textContent = '允许本次覆盖并请求同步';
-        overwrite.addEventListener('click',async()=>{
-          if(!window.confirm('本次同步可能覆盖目标端 Cookie、Local/Session Storage 与 IndexedDB，并切换当前登录账号。确认仅允许下一次同步覆盖吗？'))return;
-          overwrite.disabled = true;
-          try{
-            const granted=await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:true});
-            if(!granted.transferRequestId)throw new Error('缺少一次性请求授权标识');
-            try{
-              await ask({type:'REQUEST_SESSION',ruleId:rule.id,
-                transferRequestId:granted.transferRequestId});
-              status('已发起单次覆盖同步。仅本次请求对应的已签名快照可覆盖目标账号；2 分钟内有效，消费后不再续期。');
-            }catch(error){
-              await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:false}).catch(()=>{});
-              throw error;
-            }
-          }catch(error){failure(error);}
-          finally{overwrite.disabled=false;}
-        });
-        card.append(overwrite);
       }
+      const sync=document.createElement('button');
+      sync.textContent=rule.role==='source'?'立即发送加密登录状态':'请求同步';
+      sync.addEventListener('click',async()=>{
+        let granted=false;
+        sync.disabled=true;
+        try{
+          if(rule.role==='source'){
+            const answer=await ask({type:'SEND_SESSION',ruleId:rule.id});
+            status(answer.state==='RELAYED'?'密文已转发，等待接收端应用。':'正在发送会话状态。');
+          }else{
+            const overwrite=overwriteOnce.checked;
+            const shouldOpen=openAfter.checked;
+            if(overwrite&&!window.confirm(
+              '本次同步可能覆盖目标端已选范围内的登录数据并切换账号。仅允许本次同步覆盖，确认？'))return;
+            let requestId='';
+            if(overwrite){
+              const result=await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:true});
+              if(!result.transferRequestId)throw new Error('缺少一次性覆盖授权标识');
+              requestId=result.transferRequestId;
+              granted=true;
+            }
+            const action=shouldOpen?'SYNC_THEN_OPEN':'REQUEST_SESSION';
+            try{
+              await ask({type:action,ruleId:rule.id,
+                ...(requestId?{transferRequestId:requestId}:{})});
+              status(shouldOpen?'已请求同步，成功应用后才会打开页面。':'已请求同步，等待来源端传输。');
+            }catch(error){
+              if(granted)await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:false}).catch(()=>{});
+              throw error;
+            }finally{
+              // Every overwrite consent applies to at most this one request.
+              overwriteOnce.checked=false;
+            }
+          }
+        }catch(error){failure(error);}
+        finally{sync.disabled=false;}
+      });
+      card.append(sync);
     }
     const revoke = document.createElement('button');
     revoke.textContent = '撤销配对';
@@ -473,7 +475,12 @@ $('offer-rule').addEventListener('click', async () => {
     if (!targetID || !siteOrigin) throw new Error('请先选择网站与接收设备');
     if(siteOrigin.startsWith('http://') && !window.confirm(
       '即将为 HTTP 网站创建会话配对。虽然同步数据端到端加密，但站点访问本身仍可能泄露登录凭据。继续？'))return;
-    const result = await ask({ type: 'CREATE_RULE', siteOrigin, targetID });
+    const dataTypes={allCookies:$('sync-cookies').checked,
+      localStorage:$('sync-local').checked,
+      sessionStorage:$('sync-session').checked,indexedDB:$('sync-indexeddb').checked};
+    if(!Object.values(dataTypes).some(Boolean))
+      throw new Error('至少勾选一种同步数据类型');
+    const result=await ask({type:'CREATE_RULE',siteOrigin,targetID,dataTypes});
     status('已创建加密邀请 ' + result.ruleId.slice(0, 8) + '，请双方核对配对校验码。');
     await refreshPairing();
   } catch (error) { failure(error); }

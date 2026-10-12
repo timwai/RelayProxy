@@ -146,3 +146,53 @@ func TestRevocationAndPairingAreAtomic(t *testing.T) {
 		t.Fatal("active rule survived device revocation")
 	}
 }
+
+func TestBrowserApprovalCannotChangeSubmittedIdentityID(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	_, signing := makeKey(t)
+	_, encryption := makeKey(t)
+	device := BrowserDevice{
+		ID: "browser_" + uuid.NewString(), Name: "submitted identity",
+		SigningKey: signing, EncryptionKey: encryption,
+		RequestedIdentityID: "id_1",
+	}
+	if _, _, err := store.EnrollExtensionDevice(ctx, "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", device); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApproveEnrollment(ctx, device.ID, "id_other", true, false); err == nil {
+		t.Fatal("administrator could bind browser to identity different from submitted ID")
+	}
+	saved, err := store.Device(ctx, device.ID)
+	if err != nil || saved.State != "pending" || saved.IdentityID != "" {
+		t.Fatalf("rejected cross-identity approval mutated enrollment: %+v %v", saved, err)
+	}
+	if err := store.ApproveEnrollment(ctx, device.ID, "id_1", true, false); err != nil {
+		t.Fatalf("submitted active identity must be approvable: %v", err)
+	}
+	saved, err = store.Device(ctx, device.ID)
+	if err != nil || saved.State != "approved" || saved.IdentityID != "id_1" || !saved.Send {
+		t.Fatalf("identity submission not used on approval: %+v %v", saved, err)
+	}
+}
+
+func TestLegacyBrowserApprovalAlsoCannotOverrideSubmittedIdentity(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	_, signing := makeKey(t)
+	_, encryption := makeKey(t)
+	device := BrowserDevice{
+		ID: "browser_" + uuid.NewString(), Name: "legacy enrollment",
+		SigningKey: signing, EncryptionKey: encryption,
+		RequestedIdentityID: "id_1",
+	}
+	if _, err := store.Register(ctx, device); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Approve(ctx, device.ID, "id_other", true, false); err == nil {
+		t.Fatal("legacy approval bypassed saved requested identity")
+	}
+	if err := store.Approve(ctx, device.ID, "id_1", true, false); err != nil {
+		t.Fatal(err)
+	}
+}

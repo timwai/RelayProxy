@@ -67,8 +67,8 @@ func TestLiveUpdatesSlowConsumersCannotBlockAuthorizationMutations(t *testing.T)
 	}
 	select {
 	case value := <-ch:
-		if value == 0 {
-			t.Fatal("missing revision")
+		if value != 1000 {
+			t.Fatalf("slow consumer observed stale revision %d, expected 1000", value)
 		}
 	default:
 		t.Fatal("no bounded invalidation was queued")

@@ -109,6 +109,31 @@ func main() {
 		}
 		w.WriteHeader(http.StatusNoContent)
 	})
+	// Test-only bounded diagnostic categories; never expose URLs, cookies,
+	// ciphertext, exceptions, rule metadata or browser keys.
+	adminMux.HandleFunc("/__fixture/results", func(w http.ResponseWriter, req *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		if req.Method != http.MethodGet ||
+			subtle.ConstantTimeCompare([]byte(req.Header.Get("Authorization")), []byte("Bearer "+token)) != 1 {
+			http.Error(w, "not authorized", http.StatusForbidden)
+			return
+		}
+		events, err := store.AdminAuditFiltered(req.Context(), 0, 20, "delivery_result", "")
+		if err != nil {
+			http.Error(w, "audit unavailable", http.StatusInternalServerError)
+			return
+		}
+		type result struct {
+			Outcome   string `json:"outcome"`
+			ErrorCode string `json:"errorCode"`
+		}
+		rows := make([]result, 0, len(events))
+		for _, event := range events {
+			rows = append(rows, result{Outcome: event.Outcome, ErrorCode: event.ErrorCode})
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(rows)
+	})
 	// A unique temporary administration token is never emitted on stdout or
 	// any HTTP response. The ephemeral server URL itself contains no token.
 	admin := httptest.NewServer(adminMux)

@@ -63,6 +63,15 @@ async function deviceDecision(fixture,action,id,send=false,receive=false){
   assert.equal(reply.status,204,'fixture device action '+action+' was rejected');
 }
 
+async function diagnosticCategories(fixture){
+  const response=await fetch(new URL('/__fixture/results',fixture.adminOrigin),{
+    headers:{Authorization:'Bearer '+fixture.token},cache:'no-store'
+  });
+  assert.equal(response.status,200,'test-only diagnostic endpoint denied');
+  const rows=await response.json();
+  return rows.map(({outcome,errorCode})=>({outcome,errorCode}));
+}
+
 async function workerCommand(profile,message){
   const value=await profile.options.evaluate(async message=>
     chrome.runtime.sendMessage(message),message);
@@ -313,7 +322,8 @@ async function main(){
     },offer.ruleId);
   }
   await workerCommand(a,{type:'SEND_SESSION',ruleId:offer.ruleId});
-  for(const [profile,label] of [[a,'source'],[restartedB,'restarted receiver']]){
+  try {
+    for(const [profile,label] of [[a,'source'],[restartedB,'restarted receiver']]){
     await eventually(label+' confirms APPLIED after full Profile restart',async()=>{
       const state=await profile.options.evaluate(async ruleId=>{
         const stored=await chrome.storage.local.get([
@@ -325,6 +335,14 @@ async function main(){
         throw new Error('state='+state.status+', hasPending='+state.pending);
       return true;
     });
+    }
+  }catch(error){
+    // Diagnosis stays within fixed, schema-controlled audit categories.
+    // Never print the website origin, browser keys, exception stack from B,
+    // cookie values, encryption payloads or session storage.
+    console.error('Post-restart ACK outcome categories:',
+      JSON.stringify(await diagnosticCategories(fixture)));
+    throw error;
   }
   await verifyTargetSite(restartedSiteB,siteOrigin);
 

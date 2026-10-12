@@ -176,7 +176,7 @@ export function browserRestoreFailureCode(error) {
 
 // Consume BEFORE any mutation, so a failed restore or MV3 restart cannot
 // turn one user's account-switch confirmation into a reusable permission.
-async function consumeOneTimeOverwrite(ruleId, siteOrigin) {
+export async function consumeOneTimeOverwrite(ruleId, siteOrigin) {
   const stored=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
   const candidate=stored[ruleId];
   if(candidate===undefined)return false;

@@ -69,11 +69,22 @@ func (s *Store) OfferNetworkBinding(ctx context.Context, sourceID, ruleID, host,
 	if err != nil || !target.Receive || target.IdentityID != source.IdentityID {
 		return ErrRuleDenied
 	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO browser_sync_network_bindings(rule_id,host,exit_id,status,updated_at)
- VALUES(?,?,?,'offered',?)`, ruleID, host, exitID, time.Now().UTC())
+	// Re-offering is permitted ONLY after an explicit revoke. Never update
+	// an outstanding offer or an active binding in place: B must confirm each
+	// new hostname/exit combination independently before proxying any traffic.
+	result, err := s.db.ExecContext(ctx, `INSERT INTO browser_sync_network_bindings(rule_id,host,exit_id,status,updated_at)
+ VALUES(?,?,?,'offered',?)
+ ON CONFLICT(rule_id) DO UPDATE SET host=excluded.host,
+ exit_id=excluded.exit_id,status='offered',updated_at=excluded.updated_at
+ WHERE browser_sync_network_bindings.status='revoked'`,
+		ruleID, host, exitID, time.Now().UTC())
 	if err != nil {
 		return ErrRuleDenied
-	} // immutable offer: change requires full revoke/re-pair
+	}
+	updated, err := result.RowsAffected()
+	if err != nil || updated != 1 {
+		return ErrRuleDenied
+	}
 	return nil
 }
 

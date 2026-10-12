@@ -368,7 +368,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(msg.Type) > 48 || len(msg.RequestID) > 64 ||
-			len(msg.RuleID) > 128 || len(msg.MessageID) > 128 {
+			len(msg.RuleID) > 128 || len(msg.MessageID) > 128 || len(msg.ErrorCode) > 32 {
 			_ = conn.Close(websocket.StatusPolicyViolation, "oversized browser control identifier")
 			return
 		}
@@ -412,7 +412,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 				payload = map[string]any{"type": "SYNC_STATUS", "requestId": msg.RequestID, "status": "REQUESTED"}
 			}
 		case "SYNC_ACK":
-			if err := h.relayAcknowledgement(ctx, device.ID, msg.RuleID, msg.MessageID, msg.Status); err != nil {
+			if err := h.relayAcknowledgementWithCode(ctx, device.ID, msg.RuleID, msg.MessageID, msg.Status, msg.ErrorCode); err != nil {
 				payload = ruleError(msg.RequestID)
 			} else {
 				payload = map[string]any{"type": "SYNC_STATUS", "requestId": msg.RequestID, "status": "ACK_FORWARDED"}
@@ -557,6 +557,7 @@ type ruleControlFrame struct {
 	Envelope     *protocol.Envelope `json:"envelope"`
 	MessageID    string             `json:"messageId"`
 	Status       string             `json:"status"`
+	ErrorCode    string             `json:"errorCode"`
 	Host         string             `json:"host"`
 	ExitDeviceID string             `json:"exitDeviceId"`
 }

@@ -13,6 +13,13 @@ const deliveryRetention = 15 * time.Minute
 const maxPendingDeliveriesPerRule = 16
 const maxPendingDeliveriesPerSource = 128
 
+// The ACK recovery window must be bounded across many active rules/devices.
+// Count both pending deliveries AND terminal results at admission, so later
+// ACK transitions cannot exceed the budget or evict an unexpired receipt.
+const maxTrackedDeliveriesPerSource = 2048
+const maxTrackedDeliveriesPerIdentity = 4096
+const maxTrackedDeliveriesGlobal = 32768
+
 // Delivery receipts contain message metadata only. Ciphertexts, Cookies and
 // credential values are never written to this table.
 func (s *Store) EnsureDeliverySchema(ctx context.Context) error {
@@ -39,7 +46,22 @@ func (s *Store) EnsureDeliverySchema(ctx context.Context) error {
 		status TEXT NOT NULL CHECK(status IN ('APPLIED','FAILED','CONFLICT')),
 		expires_at INTEGER NOT NULL
 	)`)
-	return err
+	if err != nil {
+		return err
+	}
+	for _, query := range []string{
+		`CREATE INDEX IF NOT EXISTS idx_browser_sync_delivery_source_expiry
+			ON browser_sync_deliveries(source_id,expires_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_browser_sync_delivery_result_source_expiry
+			ON browser_sync_delivery_results(source_id,expires_at)`,
+		`CREATE INDEX IF NOT EXISTS idx_browser_sync_delivery_result_expiry
+			ON browser_sync_delivery_results(expires_at)`,
+	} {
+		if _, err := s.db.ExecContext(ctx, query); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RecordDelivery establishes a one-time receiver-bound receipt claim BEFORE
@@ -67,17 +89,24 @@ func (s *Store) RecordDelivery(ctx context.Context, messageID, ruleID, sourceID,
 	if _, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_delivery_results WHERE expires_at<=?`, now.Unix()); err != nil {
 		return err
 	}
-	// Recheck the rule in the insertion transaction: administrative pause or
-	// revoke can race the earlier encrypted-envelope signature check.
-	var activeRule int
-	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_rules
-		WHERE id=? AND source_id=? AND target_id=? AND status='active'
-		AND source_approved=1 AND target_approved=1 AND keys_confirmed=1`,
-		ruleID, sourceID, targetID).Scan(&activeRule); err != nil {
+	// Recheck active pairing, device approval, capabilities and common
+	// identity in the SAME transaction as the admission quota. A device
+	// revocation or identity change must not bypass accounting.
+	var identityID string
+	if err := tx.QueryRowContext(ctx, `SELECT src.identity_id
+		FROM browser_sync_rules r
+		JOIN browser_sync_devices src ON src.id=r.source_id
+		JOIN browser_sync_devices dst ON dst.id=r.target_id
+		WHERE r.id=? AND r.source_id=? AND r.target_id=? AND r.status='active'
+		AND r.source_approved=1 AND r.target_approved=1 AND r.keys_confirmed=1
+		AND src.state='approved' AND dst.state='approved'
+		AND src.can_send=1 AND dst.can_receive=1
+		AND src.identity_id!='' AND src.identity_id=dst.identity_id`,
+		ruleID, sourceID, targetID).Scan(&identityID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrRuleDenied
+		}
 		return err
-	}
-	if activeRule != 1 {
-		return ErrRuleDenied
 	}
 	var pendingRule, pendingSource int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_deliveries
@@ -89,6 +118,30 @@ func (s *Store) RecordDelivery(ctx context.Context, messageID, ruleID, sourceID,
 		return err
 	}
 	if pendingRule >= maxPendingDeliveriesPerRule || pendingSource >= maxPendingDeliveriesPerSource {
+		return ErrRuleDenied
+	}
+	// Every successful terminal ACK removes one pending row and inserts one
+	// result row; reserving capacity here guarantees the ACK can be stored
+	// without evicting another recoverable terminal result.
+	var trackedSource, trackedIdentity, trackedGlobal int
+	const tracked = `SELECT source_id FROM browser_sync_deliveries WHERE expires_at>?
+		UNION ALL SELECT source_id FROM browser_sync_delivery_results WHERE expires_at>?`
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+tracked+`)
+		WHERE source_id=?`, now.Unix(), now.Unix(), sourceID).Scan(&trackedSource); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+tracked+`) d
+		JOIN browser_sync_devices src ON src.id=d.source_id
+		WHERE src.identity_id=?`, now.Unix(), now.Unix(), identityID).Scan(&trackedIdentity); err != nil {
+		return err
+	}
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM (`+tracked+`)`,
+		now.Unix(), now.Unix()).Scan(&trackedGlobal); err != nil {
+		return err
+	}
+	if trackedSource >= maxTrackedDeliveriesPerSource ||
+		trackedIdentity >= maxTrackedDeliveriesPerIdentity ||
+		trackedGlobal >= maxTrackedDeliveriesGlobal {
 		return ErrRuleDenied
 	}
 	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_deliveries(

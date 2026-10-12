@@ -57,7 +57,10 @@ async function load() {
   const result = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
   if (!result?.ok) throw new Error(result?.error || 'Extension background unavailable');
   $('device').textContent = result.identity.deviceId;
-  $('server-stage').textContent = result.connected ? '设备认证已连接' : result.settings.serverOrigin ? '尚未连接 Server' : '尚未配置 Server';
+  const retrying=!result.connected&&result.nextRetryAt>Date.now();
+  $('server-stage').textContent = result.connected ? '设备认证已连接' :
+    retrying ? '连接中断，等待自动重连（约 '+Math.ceil((result.nextRetryAt-Date.now())/1000)+' 秒）' :
+    result.settings.serverOrigin ? '尚未连接 Server' : '尚未配置 Server';
   $('server').value = result.settings.serverOrigin;
   $('identity-id').value = result.settings.requestedIdentityId || '';
   $('device-name').value = result.settings.deviceName || '';

@@ -547,8 +547,11 @@ export async function forgetRuleLocalState(ruleId) {
   cookieTimers.delete(ruleId);
   // Removing sync metadata does NOT delete or revoke website Cookies.
   // Credential revocation must be handled by the destination website.
+  // Pending ACKs are serialized with every other sender mutation, including
+  // concurrent server pushes, to prevent resurrecting stale delivery records.
+  await mutatePendingDelivery(ruleId,()=>null);
   for(const key of [LAST_SEQUENCE,LAST_APPLIED,ALLOW_OVERRIDE,statusKey,
-      pendingOpenKey,PENDING_DELIVERY,PAUSED_RESTORE,'browserSyncManagedCookieHmacV1',
+      pendingOpenKey,PAUSED_RESTORE,'browserSyncManagedCookieHmacV1',
       'browserSyncManagedAllCookieHmacV2','browserSyncManagedWebStorageV2',
       'browserSyncStorageRestoreJournal',IDB_JOURNAL,
       'browserSyncManagedIndexedDBV1','browserSyncLocalOffers']){

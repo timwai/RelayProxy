@@ -121,6 +121,11 @@ async function refresh({quiet = false} = {}) {
     const configured = !!result.settings.serverOrigin;
     $('server-summary').textContent = result.settings.serverOrigin || '请先在设置中添加 HTTPS Server';
     setConnection(!!result.connected,configured,result.stage);
+    if(configured&&!result.connected&&result.nextRetryAt>Date.now()){
+      const seconds=Math.max(1,Math.ceil((result.nextRetryAt-Date.now())/1000));
+      $('connection-text').textContent='等待自动重连';
+      $('connect').title='自动重试约 '+seconds+' 秒后；也可以手动连接';
+    }
     if (result.connected) {
       const [ruleReply, tabs] = await Promise.all([
         ask('LIST_RULES'),chrome.tabs.query({active:true,currentWindow:true})

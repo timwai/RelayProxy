@@ -56,7 +56,7 @@ test('popup quick actions only apply to verified active rules and fail closed',(
   assert.match(js,/currentWindow:true/);
   assert.match(js,/await refresh\(\{quiet:true\}\)/);
   assert.match(js,/sync\.disabled = paused/);
-  assert.match(js,/open\.disabled = paused/);
+  assert.match(js,/openAfter\.type='checkbox'/);
 });
 
 test('full options navigation changes panels without removing pairing, networking, or IndexedDB consent',()=>{

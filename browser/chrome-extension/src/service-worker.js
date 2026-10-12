@@ -354,7 +354,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'SEND_SESSION':
         return { ok: true, ...(await sendSnapshot(message.ruleId)) };
       case 'REQUEST_SESSION':
-        return { ok: true, ...(await requestSnapshot(message.ruleId)) };
+        if(message.transferRequestId &&
+          sender.url!==chrome.runtime.getURL('src/options.html'))
+          throw new Error('仅设置页可以提交一次性覆盖请求');
+        return { ok: true, ...(await requestSnapshot(message.ruleId,message.transferRequestId||'')) };
       case 'SYNC_THEN_OPEN':
         return { ok: true, ...(await syncThenOpen(message.ruleId)) };
       case 'ALLOW_OVERWRITE':

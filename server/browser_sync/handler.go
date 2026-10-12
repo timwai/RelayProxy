@@ -368,7 +368,8 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if len(msg.Type) > 48 || len(msg.RequestID) > 64 ||
-			len(msg.RuleID) > 128 || len(msg.MessageID) > 128 || len(msg.ErrorCode) > 32 {
+			len(msg.RuleID) > 128 || len(msg.MessageID) > 128 || len(msg.ErrorCode) > 32 ||
+			len(msg.TransferRequestID) > 36 {
 			_ = conn.Close(websocket.StatusPolicyViolation, "oversized browser control identifier")
 			return
 		}
@@ -406,7 +407,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 				payload = map[string]any{"type": "SYNC_STATUS", "requestId": msg.RequestID, "status": "RELAYED"}
 			}
 		case "SYNC_REQUEST":
-			if err := h.requestSnapshot(ctx, device.ID, msg.RuleID); err != nil {
+			if err := h.requestSnapshotWithToken(ctx, device.ID, msg.RuleID, msg.TransferRequestID); err != nil {
 				payload = ruleError(msg.RequestID)
 			} else {
 				payload = map[string]any{"type": "SYNC_STATUS", "requestId": msg.RequestID, "status": "REQUESTED"}
@@ -556,6 +557,7 @@ type ruleControlFrame struct {
 	Offer        *EncryptedOffer    `json:"offer"`
 	Envelope     *protocol.Envelope `json:"envelope"`
 	MessageID    string             `json:"messageId"`
+	TransferRequestID string       `json:"transferRequestId"`
 	Status       string             `json:"status"`
 	ErrorCode    string             `json:"errorCode"`
 	Host         string             `json:"host"`

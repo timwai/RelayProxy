@@ -4,7 +4,7 @@ import {
   shouldReconcile, acceptDeliveryAck, isTerminalAck, RECONCILE_INTERVAL_MS,
   DELIVERY_ACK_TIMEOUT_MS, nextSessionSequence, validOverwriteGrant,
   OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection,
-  RECONNECT_BASE_MS, RECONNECT_MAX_MS, singleFlight
+  RECONNECT_BASE_MS, RECONNECT_MAX_MS, singleFlight, nextDeliveryStatus
 } from '../src/lifecycle.js';
 
 test('reconcile on new profile or after inactivity, not every minute', () => {
@@ -107,4 +107,29 @@ test('rejected single-flight restore does not block future alarm retries',async(
   await assert.rejects(initial,/temporarily unavailable/);
   assert.equal(await restore(),'connected');
   assert.equal(calls,2);
+});
+
+test('late RELAYED/SENDING never downgrades APPLIED for the same message',()=>{
+  const id='37c0c6b6-5d2f-47aa-a32a-1caa16785511';
+  let result=nextDeliveryStatus(null,'SENDING',id,1000);
+  result=nextDeliveryStatus(result,'APPLIED',id,1001);
+  const immutable=result;
+  result=nextDeliveryStatus(result,'RELAYED',id,1002);
+  result=nextDeliveryStatus(result,'SENDING',id,1003);
+  result=nextDeliveryStatus(result,'UNKNOWN',id,1004);
+  assert.strictEqual(result,immutable);
+  assert.equal(result.state,'APPLIED');
+  assert.equal(result.messageId,id);
+});
+
+test('late older delivery cannot overwrite new message status',()=>{
+  const oldId='d19e0d8e-421e-48f4-a7c3-e7815f932e1e';
+  const newId='b0d6d774-ae1b-4848-a650-28b0de3312e6';
+  const past=nextDeliveryStatus(null,'APPLIED',oldId,1000);
+  const fresh=nextDeliveryStatus(past,'SENDING',newId,1001);
+  assert.equal(fresh.state,'SENDING');
+  assert.equal(fresh.messageId,newId);
+  assert.strictEqual(nextDeliveryStatus(fresh,'APPLIED',oldId,1002),fresh);
+  assert.equal(nextDeliveryStatus(fresh,'RELAYED',newId,1003).state,'RELAYED');
+  assert.equal(nextDeliveryStatus(fresh,'APPLIED',newId,1003).state,'APPLIED');
 });

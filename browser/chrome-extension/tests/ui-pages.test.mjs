@@ -93,9 +93,13 @@ test('one-time account-switch permission is accessible only through the Options 
   assert.doesNotMatch(options,/允许覆盖目标端 Cookie、Local\/Session Storage 与 IndexedDB（可能切换账号）/);
   assert.match(worker,/sender\.url!==chrome\.runtime\.getURL\('src\/options\.html'\)/);
   assert.match(worker,/await pruneOverwriteGrants\(\)/);
-  assert.match(session,/consumeOneTimeOverwrite\(ruleId,ctx\.policy\.siteOrigin\)/);
+  assert.match(session,/consumeOneTimeOverwrite\(ruleId,ctx\.policy\.siteOrigin,envelope\.transferRequestId\)/);
+  assert.match(options,/transferRequestId:granted\.transferRequestId/);
+  assert.match(worker,/sender\.url!==chrome\.runtime\.getURL\('src\/options\.html'\)/);
+  assert.match(session,/encryptSnapshot\(ctx\.rule,ctx\.remote,sequence,payload,transferRequestId\)/);
+  assert.match(session,/sourceRequested\.set\(ruleId,transferRequestId\)/);
   assert.match(session,/delete stored\[ruleId\]/);
-  assert.match(session,/validOverwriteGrant\(candidate,siteOrigin,Date\.now\(\)\)/);
+  assert.match(session,/validOverwriteGrant\(candidate,siteOrigin,Date\.now\(\),requestId\)/);
   assert.doesNotMatch(session,/switches\[ruleId\]===true/);
 });
 

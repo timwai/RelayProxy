@@ -15,7 +15,6 @@ export function BrowserSyncAdmin({identities=[]}){
   const [error,setError]=useState('');
   const [notice,setNotice]=useState('');
   const [busy,setBusy]=useState('');
-  const [identity,setIdentity]=useState({});
   const [capabilities,setCapabilities]=useState({});
   const [view,setView]=useState('devices');
   const [filter,setFilter]=useState('');
@@ -76,19 +75,22 @@ export function BrowserSyncAdmin({identities=[]}){
     return ()=>clearInterval(id);
   },[refresh]);
 
-  const selectedIdentity=id=>identity[id]||devices.find(d=>d.id===id)?.requestedIdentityId||'';
-  const validIdentity=id=>activeIdentities.some(item=>item.id===selectedIdentity(id));
+  // The requested identity is immutable once the browser enrolls.
+  // Administrators review/reject that binding; they cannot silently assign
+  // the pending device to a different identity from this screen.
+  const requestedIdentity=id=>devices.find(d=>d.id===id)?.requestedIdentityId||'';
+  const validIdentity=id=>activeIdentities.some(item=>item.id===requestedIdentity(id));
   const deviceAction=async(id,mode)=>{
     if(busy)return;
     if(mode==='revoke'&&!window.confirm('撤销后该浏览器将不能继续同步，相关配对规则也会失效。确定撤销？'))return;
     if(mode==='delete'&&!window.confirm('永久删除已撤销设备及其配对记录？此操作不可恢复，重新注册仍须管理员审批。'))return;
-    if(mode==='approve'&&!validIdentity(id)){setError('请选择已启用的身份。');return;}
+    if(mode==='approve'&&!validIdentity(id)){setError('设备提交的身份 ID 不存在或未启用；请检查设备的身份配置。');return;}
     setBusy(id);setError('');setNotice('');
     try{
       if(mode==='approve'){
         const caps=capabilities[id]||{send:true,receive:false};
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id)+'/approve',
-          json('POST',{identityId:selectedIdentity(id),send:!!caps.send,receive:!!caps.receive}));
+          json('POST',{identityId:requestedIdentity(id),send:!!caps.send,receive:!!caps.receive}));
         setNotice('设备已批准，可以连接中继。');
       }else if(mode==='delete'){
         await api('/browser-sync/admin/devices/'+encodeURIComponent(id),{method:'DELETE'});
@@ -243,12 +245,14 @@ export function BrowserSyncAdmin({identities=[]}){
                   成功 {stat.applied||0} · 失败 {stat.failed||0} · 冲突 {stat.conflicted||0}</small>
                 {d.extensionState==='revoked'&&<small className="browser-sync-device-extra">历史扩展来源已禁用</small>}</td>
               <td>{d.state==='pending'?<div className="browser-sync-approve-controls">
-                <select className="input" aria-label={'为 '+(d.name||d.id)+' 选择身份'}
-                  value={activeIdentities.some(i=>i.id===selectedIdentity(d.id))?selectedIdentity(d.id):''}
-                  onChange={e=>setIdentity(v=>({...v,[d.id]:e.target.value}))}>
-                  <option value="">选择身份</option>{activeIdentities.map(v=>
-                    <option value={v.id} key={v.id}>{v.name||v.id}</option>)}
-                </select>
+                <div className="browser-sync-requested-identity" title={d.requestedIdentityId||''}>
+                  {d.requestedIdentityId
+                    ? (activeIdentities.find(i=>i.id===d.requestedIdentityId)?.name||d.requestedIdentityId)
+                    : '未提交身份 ID'}
+                  {d.requestedIdentityId&&activeIdentities.some(i=>i.id===d.requestedIdentityId)
+                    ? <small className="browser-sync-device-extra">申请身份 ID：{d.requestedIdentityId}</small>
+                    : <small className="browser-sync-device-extra">此身份未启用，暂不可批准</small>}
+                </div>
                 <div className="browser-sync-permissions">
                   <label><input type="checkbox" checked={caps.send}
                     onChange={e=>setCapabilities(v=>({...v,[d.id]:{...caps,send:e.target.checked}}))}/>发送</label>

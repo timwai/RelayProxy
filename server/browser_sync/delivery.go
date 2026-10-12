@@ -193,7 +193,20 @@ func (s *Store) DeliveryStatus(ctx context.Context, sourceID, ruleID, messageID 
 	if _, err := uuid.Parse(messageID); err != nil {
 		return "", ErrRuleDenied
 	}
-	if _, err := s.SessionCursor(ctx, sourceID, ruleID); err != nil {
+	// A paused rule no longer permits snapshots, but the source must still
+	// be able to recover the terminal ACK for a pre-pause delivery.
+	source, err := s.deviceAllowed(ctx, sourceID)
+	if err != nil || !source.Send {
+		return "", ErrRuleDenied
+	}
+	rule, err := s.ActiveRule(ctx, ruleID)
+	if err != nil || (rule.Status != "active" && rule.Status != "paused") ||
+		!rule.SourceApproved || !rule.TargetApproved || !rule.KeyFingerprintsVerified ||
+		rule.SourceBrowserDeviceID != sourceID {
+		return "", ErrRuleDenied
+	}
+	target, err := s.deviceAllowed(ctx, rule.TargetBrowserDeviceID)
+	if err != nil || !target.Receive || target.IdentityID != source.IdentityID {
 		return "", ErrRuleDenied
 	}
 	var status string

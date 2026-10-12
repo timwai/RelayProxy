@@ -125,6 +125,11 @@ func NewRouter(authService *service.AuthService, deviceService *service.DeviceSe
 	for _, option := range options {
 		option(r)
 	}
+	if sessions!=nil{
+		// Agent tunnel arrivals/departures share the same invalidation path
+		// as Server Web mutations; each UI re-reads its scoped snapshot.
+		sessions.SetPresenceNotifier(r.live.publish)
+	}
 	r.registerRoutes()
 	return r
 }

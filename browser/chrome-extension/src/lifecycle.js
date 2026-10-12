@@ -98,3 +98,9 @@ export function nextDeliveryStatus(previous,state,messageId='',now=Date.now()){
     return previous;
   return {state,time:now,...(messageId?{messageId}:{})};
 }
+
+// A receipt from an earlier send cannot clear a newer, as-yet-unacknowledged
+// snapshot. Pass through the current record unchanged when IDs differ.
+export function clearPendingIfMessageMatches(current,messageId){
+  return current?.messageId===messageId?null:current;
+}

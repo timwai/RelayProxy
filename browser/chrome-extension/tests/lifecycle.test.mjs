@@ -4,7 +4,7 @@ import {
   shouldReconcile, acceptDeliveryAck, isTerminalAck, RECONCILE_INTERVAL_MS,
   DELIVERY_ACK_TIMEOUT_MS, nextSessionSequence, validOverwriteGrant,
   OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection,
-  RECONNECT_BASE_MS, RECONNECT_MAX_MS
+  RECONNECT_BASE_MS, RECONNECT_MAX_MS, singleFlight
 } from '../src/lifecycle.js';
 
 test('reconcile on new profile or after inactivity, not every minute', () => {
@@ -70,4 +70,41 @@ test('MV3 reconnect retry survives alarm wakeups and caps exponential delay',()=
   assert.equal(shouldRetryConnection({serverOrigin:'https://other.example',nextRetryAt:now+120000},origin,now),true);
   assert.equal(shouldRetryConnection({serverOrigin:origin,nextRetryAt:now+24*3600000},origin,now),true);
   assert.equal(shouldRetryConnection(null,'',now),false);
+});
+
+test('MV3 startup and alarm restore share one in-flight run and retry afterwards',async()=>{
+  let calls=0,release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const restore=singleFlight(async value=>{
+    calls++;
+    await gate;
+    return value;
+  });
+  const startup=restore('startup');
+  const alarm=restore('alarm');
+  assert.strictEqual(startup,alarm,'alarm must not trigger a duplicate restore');
+  assert.equal(await Promise.resolve().then(()=>calls),1);
+  release();
+  assert.equal(await alarm,'startup');
+  assert.equal(await restore('retry'),'retry');
+  assert.equal(calls,2);
+});
+
+test('rejected single-flight restore does not block future alarm retries',async()=>{
+  let calls=0,release;
+  const gate=new Promise(resolve=>{release=resolve;});
+  const restore=singleFlight(async()=>{
+    calls++;
+    if(calls===1){
+      await gate;
+      throw new Error('WSS temporarily unavailable');
+    }
+    return 'connected';
+  });
+  const initial=restore();
+  assert.strictEqual(restore(),initial);
+  release();
+  await assert.rejects(initial,/temporarily unavailable/);
+  assert.equal(await restore(),'connected');
+  assert.equal(calls,2);
 });

@@ -143,16 +143,19 @@ func (s *Store) AdminRuleAction(ctx context.Context, id, action string) error {
 	defer tx.Rollback()
 	var current, sourceID, targetID, sourceState, targetState string
 	var sourceIdentity, targetIdentity, identityStatus string
-	var send, receive, sourceOK, targetOK, confirmed int
+	var send, receive, sourceOK, targetOK, confirmed, originRevoked int
 	err = tx.QueryRowContext(ctx, `SELECT r.status,r.source_id,r.target_id,sd.state,td.state,
 		sd.identity_id,td.identity_id,COALESCE(i.status,''),
-		sd.can_send,td.can_receive,r.source_approved,r.target_approved,r.keys_confirmed
+		sd.can_send,td.can_receive,r.source_approved,r.target_approved,r.keys_confirmed,
+		EXISTS (SELECT 1 FROM browser_sync_device_extensions bx
+		JOIN browser_sync_extensions ex ON ex.extension_id=bx.extension_id
+		WHERE bx.device_id IN (r.source_id,r.target_id) AND ex.state='revoked')
 		FROM browser_sync_rules r
 		JOIN browser_sync_devices sd ON sd.id=r.source_id
 		JOIN browser_sync_devices td ON td.id=r.target_id
 		LEFT JOIN identities i ON i.id=sd.identity_id WHERE r.id=?`, id).
 		Scan(&current, &sourceID, &targetID, &sourceState, &targetState, &sourceIdentity,
-			&targetIdentity, &identityStatus, &send, &receive, &sourceOK, &targetOK, &confirmed)
+			&targetIdentity, &identityStatus, &send, &receive, &sourceOK, &targetOK, &confirmed, &originRevoked)
 	if errors.Is(err, sql.ErrNoRows) {
 		return ErrNotFound
 	}
@@ -169,7 +172,7 @@ func (s *Store) AdminRuleAction(ctx context.Context, id, action string) error {
 	case "resume":
 		if current != "paused" || sourceState != "approved" || targetState != "approved" ||
 			sourceIdentity == "" || sourceIdentity != targetIdentity || identityStatus != "active" ||
-			send != 1 || receive != 1 || sourceOK != 1 || targetOK != 1 || confirmed != 1 {
+			send != 1 || receive != 1 || sourceOK != 1 || targetOK != 1 || confirmed != 1 || originRevoked != 0 {
 			return ErrRuleDenied
 		}
 		targetStateValue, event = "active", "rule_resumed"

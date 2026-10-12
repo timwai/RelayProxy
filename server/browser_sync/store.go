@@ -109,6 +109,7 @@ func NewStore(db *sql.DB) (*Store, error) {
 	}
 	return store, nil
 }
+
 // Register retains the legacy direct-store enrollment API. Both this path
 // and Chrome Origin registration share one atomic inventory gate.
 func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevice, error) {

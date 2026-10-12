@@ -14,6 +14,10 @@ var ErrNotFound = errors.New("browser device not found")
 var ErrDeviceConflict = errors.New("browser device key mismatch")
 var ErrDeleteRequiresRevoke = errors.New("revoke browser authorization before deleting the record")
 var ErrBrowserIdentityQuota = errors.New("browser identity capacity exceeded")
+var ErrBrowserEnrollmentQuota = errors.New("browser pending enrollment inventory full")
+
+const maxPendingBrowserEnrollmentsGlobal = 512
+const maxPendingBrowserEnrollmentsPerExtension = 64
 
 // Approved devices consume budget; pending applications are not trusted to
 // reserve capacity for an arbitrary requested identity, and revoked devices
@@ -104,34 +108,112 @@ func NewStore(db *sql.DB) (*Store, error) {
 	}
 	return store, nil
 }
+// Register retains the legacy direct-store enrollment API. Both this path
+// and Chrome Origin registration share one atomic inventory gate.
 func (s *Store) Register(ctx context.Context, device BrowserDevice) (BrowserDevice, error) {
-	if device.ID == "" || device.Name == "" || len(device.Name) > 100 || len(device.SigningKey) > 1024 || len(device.EncryptionKey) > 1024 {
+	return s.registerBrowserDevice(ctx, device, "")
+}
+
+// registerBrowserDevice atomically accounts for new pending devices and binds
+// the originating extension. A rejected registration must never leave an
+// unbound device, an altered identity preference, or a consumed quota slot.
+// A matching existing device may re-register even after the inventory fills.
+func (s *Store) registerBrowserDevice(ctx context.Context, device BrowserDevice, extensionID string) (BrowserDevice, error) {
+	if device.ID == "" || device.Name == "" || len(device.Name) > 100 ||
+		len(device.SigningKey) > 1024 || len(device.EncryptionKey) > 1024 {
 		return BrowserDevice{}, errors.New("invalid browser registration")
 	}
-	now := time.Now().UTC()
-	_, err := s.db.ExecContext(ctx, `INSERT INTO browser_sync_devices(
-   id,name,signing_key,encryption_key,created_at,updated_at
- ) VALUES(?,?,?,?,?,?) ON CONFLICT(id) DO NOTHING`, device.ID, device.Name, device.SigningKey, device.EncryptionKey, now, now)
+	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return BrowserDevice{}, err
 	}
-	actual, err := s.Device(ctx, device.ID)
-	if err != nil {
-		return BrowserDevice{}, err
-	}
-	if actual.SigningKey != device.SigningKey || actual.EncryptionKey != device.EncryptionKey {
-		return BrowserDevice{}, ErrDeviceConflict
-	}
-	if device.RequestedIdentityID != "" && actual.State == "pending" {
-		// Enrollment has public keys only. They are not proof of possession,
-		// so a second request must not rewrite another pending device's
-		// already-recorded identity preference.
-		if _, err := s.db.ExecContext(ctx, `INSERT INTO browser_sync_identity_requests(device_id,requested_identity_id) VALUES(?,?) ON CONFLICT(device_id) DO NOTHING`, device.ID, device.RequestedIdentityID); err != nil {
+	defer tx.Rollback()
+
+	if extensionID != "" {
+		var originState string
+		err := tx.QueryRowContext(ctx, `SELECT state FROM browser_sync_extensions
+			WHERE extension_id=?`, extensionID).Scan(&originState)
+		if errors.Is(err, sql.ErrNoRows) || originState == "revoked" {
+			return BrowserDevice{}, ErrNotFound
+		}
+		if err != nil {
 			return BrowserDevice{}, err
 		}
-		return s.Device(ctx, device.ID)
 	}
-	return actual, nil
+	var priorSigning, priorEncryption, priorState string
+	err = tx.QueryRowContext(ctx, `SELECT signing_key,encryption_key,state FROM browser_sync_devices
+		WHERE id=?`, device.ID).Scan(&priorSigning, &priorEncryption, &priorState)
+	newDevice := errors.Is(err, sql.ErrNoRows)
+	if err != nil && !newDevice {
+		return BrowserDevice{}, err
+	}
+	if !newDevice && (priorSigning != device.SigningKey || priorEncryption != device.EncryptionKey) {
+		return BrowserDevice{}, ErrDeviceConflict
+	}
+	var boundOrigin string
+	if extensionID != "" && !newDevice {
+		err = tx.QueryRowContext(ctx, `SELECT extension_id FROM browser_sync_device_extensions
+			WHERE device_id=?`, device.ID).Scan(&boundOrigin)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return BrowserDevice{}, err
+		}
+		if (boundOrigin != "" && boundOrigin != extensionID) ||
+			(boundOrigin == "" && priorState == "approved") {
+			return BrowserDevice{}, ErrDeviceConflict
+		}
+	}
+	if newDevice {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_devices
+			WHERE state='pending'`).Scan(&count); err != nil {
+			return BrowserDevice{}, err
+		}
+		if count >= maxPendingBrowserEnrollmentsGlobal {
+			return BrowserDevice{}, ErrBrowserEnrollmentQuota
+		}
+	}
+	if extensionID != "" && (newDevice || boundOrigin == "") && (newDevice || priorState == "pending") {
+		var count int
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_device_extensions x
+			JOIN browser_sync_devices d ON d.id=x.device_id
+			WHERE x.extension_id=? AND d.state='pending'`, extensionID).Scan(&count); err != nil {
+			return BrowserDevice{}, err
+		}
+		if count >= maxPendingBrowserEnrollmentsPerExtension {
+			return BrowserDevice{}, ErrBrowserEnrollmentQuota
+		}
+	}
+	now := time.Now().UTC()
+	if newDevice {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_devices(
+			id,name,signing_key,encryption_key,created_at,updated_at
+		) VALUES(?,?,?,?,?,?)`, device.ID, device.Name, device.SigningKey,
+			device.EncryptionKey, now, now); err != nil {
+			return BrowserDevice{}, err
+		}
+		priorState = "pending"
+	}
+	if extensionID != "" && boundOrigin == "" {
+		if _, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_device_extensions
+			(device_id,extension_id,created_at) VALUES(?,?,?)`,
+			device.ID, extensionID, now); err != nil {
+			return BrowserDevice{}, err
+		}
+	}
+	if device.RequestedIdentityID != "" && priorState == "pending" {
+		// A repeated unauthenticated registration never changes an already
+		// recorded identity preference.
+		if _, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_identity_requests(
+			device_id,requested_identity_id) VALUES(?,?)
+			ON CONFLICT(device_id) DO NOTHING`,
+			device.ID, device.RequestedIdentityID); err != nil {
+			return BrowserDevice{}, err
+		}
+	}
+	if err := tx.Commit(); err != nil {
+		return BrowserDevice{}, err
+	}
+	return s.Device(ctx, device.ID)
 }
 func (s *Store) Device(ctx context.Context, id string) (BrowserDevice, error) {
 	var d BrowserDevice

@@ -65,3 +65,21 @@ export function shouldRetryConnection(retry, origin, now) {
   return !Number.isFinite(retry.nextRetryAt) || retry.nextRetryAt <= now ||
     retry.nextRetryAt > now + RECONNECT_MAX_MS;
 }
+
+// Coalesce simultaneous onStartup/onInstalled/alarm invocations while one
+// reconciliation runs. A rejected run must never poison future retries.
+// The factory has no timers/storage and can be tested independently of Chrome.
+export function singleFlight(task) {
+  let inFlight = null;
+  return (...args) => {
+    if (inFlight) return inFlight;
+    const promise = Promise.resolve().then(() => task(...args));
+    inFlight = promise;
+    // Clean up on BOTH success and failure without creating an unobserved
+    // rejecting promise from finally().
+    promise.finally(() => {
+      if (inFlight === promise) inFlight = null;
+    }).catch(() => {});
+    return promise;
+  };
+}

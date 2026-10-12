@@ -263,3 +263,91 @@ func TestBrowserAuditStoresOnlyBoundedTerminalMetadataAndPaginates(t *testing.T)
 		t.Fatalf("did not aggregate both sender and receiver: %d", seen)
 	}
 }
+
+
+func TestBrowserRuleApprovalTimestampsSurviveAdministrativeStateChanges(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	if err := store.EnsureRuleSchema(ctx); err != nil {
+		t.Fatalf("rule column migration is not repeatable: %v", err)
+	}
+	_, _, ruleID := adminTestPair(t, store)
+	rules, err := store.AdminRulesPage(ctx, 20, 0, "", "active", "")
+	if err != nil || len(rules) != 1 {
+		t.Fatalf("missing newly activated rule: %+v %v", rules, err)
+	}
+	before := rules[0]
+	if before.SourceApprovedAt.IsZero() || before.TargetApprovedAt == nil || before.ActivatedAt == nil ||
+		before.TargetApprovedAt.IsZero() || before.ActivatedAt.IsZero() {
+		t.Fatalf("missing dual-consent milestones: %+v", before)
+	}
+	if err := store.AdminRuleAction(ctx, ruleID, "pause"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdminRuleAction(ctx, ruleID, "resume"); err != nil {
+		t.Fatal(err)
+	}
+	rules, err = store.AdminRulesPage(ctx, 20, 0, "", "active", "")
+	if err != nil || len(rules) != 1 ||
+		!rules[0].TargetApprovedAt.Equal(*before.TargetApprovedAt) ||
+		!rules[0].ActivatedAt.Equal(*before.ActivatedAt) {
+		t.Fatalf("administrative update rewrote consent times: %+v %v", rules, err)
+	}
+}
+
+func TestBrowserAuditClearIsAttributedAndRejectsAnonymousDelete(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	_, _, ruleID := adminTestPair(t, store)
+	if err := store.AdminRuleAction(ctx, ruleID, "pause"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClearAdminAudit(ctx); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("anonymous caller cleared admin audit: %v", err)
+	}
+	actorCtx := WithAdminActor(ctx, "admin-audit-cleaner")
+	removed, err := store.ClearAdminAudit(actorCtx)
+	if err != nil || removed < 1 {
+		t.Fatalf("admin clear failed: %d %v", removed, err)
+	}
+	events, err := store.AdminAudit(ctx, 0, 50)
+	if err != nil || len(events) != 1 || events[0].Type != "audit_cleared" ||
+		events[0].ActorID != "admin-audit-cleaner" {
+		t.Fatalf("clearing removed its own audit trail: %+v %v", events, err)
+	}
+	exported, err := store.AdminAuditExport(ctx, "audit_cleared", "")
+	if err != nil || len(exported) != 1 {
+		t.Fatalf("clear event missing from export: %+v %v", exported, err)
+	}
+}
+
+func TestBrowserDeliveryDiagnosticCodeAllowlistCannotLeakArbitraryText(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	source, target, ruleID := adminTestPair(t, store)
+	now := time.Now().UTC()
+	mid := uuid.NewString()
+	if err := store.RecordDelivery(ctx, mid, ruleID, source, target, now); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.ClaimDeliveryReceiptWithCode(ctx, target, ruleID, mid,
+		"FAILED", "website-secret-cookie=123", now); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("unbounded failure text accepted: %v", err)
+	}
+	if _, err := store.ClaimDeliveryReceiptWithCode(ctx, target, ruleID, mid,
+		"APPLIED", "COOKIE_FAILURE", now); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("success incorrectly recorded a failure code: %v", err)
+	}
+	if _, err := store.ClaimDeliveryReceiptWithCode(ctx, target, ruleID, mid,
+		"FAILED", "COOKIE_FAILURE", now); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.AdminAuditFiltered(ctx, 0, 20, "delivery_result", source)
+	if err != nil || len(events) != 1 || events[0].ErrorCode != "COOKIE_FAILURE" {
+		t.Fatalf("fixed failure category not recorded: %+v %v", events, err)
+	}
+	encoded, _ := json.Marshal(events)
+	if strings.Contains(string(encoded), "website-secret-cookie") {
+		t.Fatal("browser exception leaked into admin audit")
+	}
+}

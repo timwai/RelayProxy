@@ -40,8 +40,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message?.type) {
       case 'GET_STATUS': {
-        const [identity, settings] = await Promise.all([getOrCreateIdentity(), getSettings()]);
-        return { ok: true, identity, settings, localAgentProxy:await localAgentGlobal(), connected: currentConnectionState() === 'AUTHENTICATED', stage: currentConnectionState(), transferEnabled: true };
+        const [identity, settings, retryData] = await Promise.all([
+          getOrCreateIdentity(), getSettings(), chrome.storage.local.get('browserSyncConnectionRetry')]);
+        const retry=retryData.browserSyncConnectionRetry;
+        const nextRetryAt=retry?.serverOrigin===settings.serverOrigin &&
+          Number.isFinite(retry.nextRetryAt) && retry.nextRetryAt>Date.now()
+          ?retry.nextRetryAt:0;
+        return { ok: true, identity, settings, localAgentProxy:await localAgentGlobal(),
+          connected:currentConnectionState()==='AUTHENTICATED',
+          stage:currentConnectionState(),nextRetryAt,transferEnabled:true };
       }
       case 'SET_LOCAL_AGENT_GLOBAL': {
         // User controlled browser-wide proxy. No Cookie pairing or Server

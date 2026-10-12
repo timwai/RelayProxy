@@ -315,10 +315,15 @@ async function main(){
   await workerCommand(a,{type:'SEND_SESSION',ruleId:offer.ruleId});
   for(const [profile,label] of [[a,'source'],[restartedB,'restarted receiver']]){
     await eventually(label+' confirms APPLIED after full Profile restart',async()=>{
-      const status=await profile.options.evaluate(async ruleId=>
-        (await chrome.storage.local.get('browserSyncTransferStatus'))
-          .browserSyncTransferStatus?.[ruleId]?.state,offer.ruleId);
-      return status==='APPLIED';
+      const state=await profile.options.evaluate(async ruleId=>{
+        const stored=await chrome.storage.local.get([
+          'browserSyncTransferStatus','browserSyncPendingDelivery']);
+        return {status:stored.browserSyncTransferStatus?.[ruleId]?.state||'ABSENT',
+          pending:!!stored.browserSyncPendingDelivery?.[ruleId]};
+      },offer.ruleId);
+      if(state.status!=='APPLIED')
+        throw new Error('state='+state.status+', hasPending='+state.pending);
+      return true;
     });
   }
   await verifyTargetSite(restartedSiteB,siteOrigin);

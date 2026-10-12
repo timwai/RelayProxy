@@ -132,7 +132,7 @@ test('server connection has one button and new pairing scope defaults all checke
   const html=asset('options.html'),code=asset('options.js');
   assert.match(html,/id="connect" class="primary-button"/);
   assert.doesNotMatch(html,/id="save"|id="register"/);
-  assert.doesNotMatch(code,/\$('save'\)|\$('register'\)/);
+  assert.ok(!code.includes("$('save')")&&!code.includes("$('register')"));
   assert.match(code,/type:'SAVE_SERVER'/);
   assert.match(code,/type:'REGISTER_BROWSER'/);
   assert.match(code,/type:'CONNECT_BROWSER'/);

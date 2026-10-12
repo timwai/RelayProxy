@@ -905,7 +905,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
 		"出口开关": enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
 		"浏览器网络共享": c.Exit.BrowserNetworkShare,
-		"私网访问": c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
+		"私网访问":    c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
 		"共享上游出口": c.Exit.UpstreamExitID,
 		"出口上游模式": upstreamMode, "出口上游地址": upstreamAddress,
 		"出口上游用户名": upstreamUser, "出口上游密码": upstreamPassword,

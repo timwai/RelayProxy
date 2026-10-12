@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"sort"
 	"time"
 
 	"github.com/google/uuid"
@@ -416,31 +417,64 @@ func (s *Store) ClearAdminAudit(ctx context.Context) (int64, error) {
 	return n, nil
 }
 
+// AdminDeviceStats folds bounded, directly typed TIMESTAMP rows. SQLite's
+// strftime() cannot consistently parse the modernc driver timestamp encoding
+// once MAX(CASE...) converts its affinity to TEXT; that silently hid lastSyncAt.
 func (s *Store) AdminDeviceStats(ctx context.Context) ([]AdminDeviceStats, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT device_id,CAST(strftime('%s',MAX(CASE WHEN type='delivery_result' AND outcome='APPLIED' THEN created_at ELSE NULL END)) AS INTEGER),
-		SUM(CASE WHEN type='delivery_result' AND outcome='APPLIED' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN type='delivery_result' AND outcome='FAILED' THEN 1 ELSE 0 END),
-		SUM(CASE WHEN type='delivery_result' AND outcome='CONFLICT' THEN 1 ELSE 0 END)
-		FROM (SELECT device_id,type,outcome,created_at FROM browser_sync_audit
-		UNION ALL SELECT peer_id,type,outcome,created_at FROM browser_sync_audit WHERE peer_id!='')
-		WHERE device_id!='' AND created_at>=? GROUP BY device_id LIMIT 1000`,
-		time.Now().UTC().Add(-browserAuditRetention))
+	rows, err := s.db.QueryContext(ctx, `SELECT device_id,peer_id,outcome,created_at
+		FROM browser_sync_audit WHERE type='delivery_result'
+		AND created_at>=? ORDER BY id DESC LIMIT ?`,
+		time.Now().UTC().Add(-browserAuditRetention), browserAuditMaxRows)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	stats := make([]AdminDeviceStats, 0)
+	byDevice := make(map[string]*AdminDeviceStats)
+	add := func(id, outcome string, when time.Time) {
+		if id == "" {
+			return
+		}
+		entry := byDevice[id]
+		if entry == nil {
+			if len(byDevice) >= 1000 {
+				return
+			}
+			entry = &AdminDeviceStats{DeviceID: id}
+			byDevice[id] = entry
+		}
+		switch outcome {
+		case "APPLIED":
+			entry.Applied++
+			if entry.LastSyncAt == nil || when.After(*entry.LastSyncAt) {
+				appliedAt := when.UTC()
+				entry.LastSyncAt = &appliedAt
+			}
+		case "FAILED":
+			entry.Failed++
+		case "CONFLICT":
+			entry.Conflicted++
+		}
+	}
 	for rows.Next() {
-		var item AdminDeviceStats
-		var last sql.NullInt64
-		if err := rows.Scan(&item.DeviceID, &last, &item.Applied, &item.Failed, &item.Conflicted); err != nil {
+		var source, peer, outcome string
+		var when time.Time
+		if err := rows.Scan(&source, &peer, &outcome, &when); err != nil {
 			return nil, err
 		}
-		if last.Valid {
-			lastTime := time.Unix(last.Int64, 0).UTC()
-			item.LastSyncAt = &lastTime
+		add(source, outcome, when)
+		if peer != source {
+			add(peer, outcome, when)
 		}
-		stats = append(stats, item)
 	}
-	return stats, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	stats := make([]AdminDeviceStats, 0, len(byDevice))
+	for _, item := range byDevice {
+		stats = append(stats, *item)
+	}
+	sort.Slice(stats, func(i, j int) bool {
+		return stats[i].DeviceID < stats[j].DeviceID
+	})
+	return stats, nil
 }

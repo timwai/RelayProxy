@@ -69,6 +69,7 @@ func NewStore(db *sql.DB) (*Store, error) {
     CHECK (state IN ('pending','approved','revoked'))
    )`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_browser_signing_key ON browser_sync_devices(signing_key)`,
+		`CREATE INDEX IF NOT EXISTS idx_browser_pending_device_inventory ON browser_sync_devices(state)`,
 		`CREATE TABLE IF NOT EXISTS browser_sync_identity_requests (device_id TEXT PRIMARY KEY REFERENCES browser_sync_devices(id) ON DELETE CASCADE, requested_identity_id TEXT NOT NULL)`,
 		`CREATE TABLE IF NOT EXISTS browser_sync_rules (
     id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES browser_sync_devices(id),

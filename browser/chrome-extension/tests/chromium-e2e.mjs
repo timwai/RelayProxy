@@ -38,13 +38,17 @@ function listenLocalServer(){
   });
 }
 
-async function extensionContext(path, profileDir){
+async function extensionContext(path, profileDir,{localTestTLS=false}={}){
   const context=await chromium.launchPersistentContext(profileDir,{
     channel:'chromium',headless:true,
+    ignoreHTTPSErrors:localTestTLS,
     args:[
       '--disable-extensions-except='+path,
       '--load-extension='+path,
-      '--no-first-run','--no-default-browser-check'
+      '--no-first-run','--no-default-browser-check',
+      // The CI-only self-signed localhost fixture has no public CA trust.
+      // Never apply this flag to the shipped extension or real deployments.
+      ...(localTestTLS?['--ignore-certificate-errors']:[])
     ]
   });
   scope.push(()=>context.close());

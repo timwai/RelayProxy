@@ -678,6 +678,8 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
 #root .browser-sync-refined .browser-sync-permissions input{accent-color:var(--brand)}
 #root .browser-sync-refined .browser-sync-approve-controls{max-width:230px}
 #root .browser-sync-refined .browser-sync-approve-controls select{width:100%;min-height:38px}
+#root .browser-sync-refined .browser-sync-requested-identity{font-weight:600;overflow-wrap:anywhere}
+#root .browser-sync-refined .browser-sync-requested-identity .browser-sync-device-extra{display:block;font-weight:400;margin-top:4px}
 #root .browser-sync-refined .browser-sync-actions{white-space:nowrap;text-align:right}
 #root .browser-sync-refined .browser-sync-no-data{text-align:center;padding:30px!important;color:var(--muted)}
 #root .browser-sync-refined .browser-sync-panel-title{

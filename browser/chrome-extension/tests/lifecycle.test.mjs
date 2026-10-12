@@ -43,15 +43,19 @@ test('replay cursor resumes after local storage loss without decreasing sequence
 
 test('one-use overwrite grant rejects legacy booleans, other origins and expiry',()=>{
   const now=1770000000000,origin='https://example.com';
-  const grant={siteOrigin:origin,expiresAt:now+OVERWRITE_GRANT_TTL_MS};
-  assert.equal(validOverwriteGrant(grant,origin,now),true);
-  assert.equal(validOverwriteGrant(grant,origin,now+OVERWRITE_GRANT_TTL_MS-1),true);
-  assert.equal(validOverwriteGrant(grant,origin,now+OVERWRITE_GRANT_TTL_MS),false);
-  assert.equal(validOverwriteGrant(grant,'https://evil.example',now),false);
-  assert.equal(validOverwriteGrant({...grant,expiresAt:now+OVERWRITE_GRANT_TTL_MS+1},origin,now),false);
-  assert.equal(validOverwriteGrant(true,origin,now),false);
-  assert.equal(validOverwriteGrant({siteOrigin:origin},origin,now),false);
-  assert.equal(validOverwriteGrant(null,origin,now),false);
+  const token='01234567-89ab-4cde-a321-112233445566';
+  const grant={siteOrigin:origin,transferRequestId:token,
+    expiresAt:now+OVERWRITE_GRANT_TTL_MS};
+  assert.equal(validOverwriteGrant(grant,origin,now,token),true);
+  assert.equal(validOverwriteGrant(grant,origin,now+OVERWRITE_GRANT_TTL_MS-1,token),true);
+  assert.equal(validOverwriteGrant(grant,origin,now+OVERWRITE_GRANT_TTL_MS,token),false);
+  assert.equal(validOverwriteGrant(grant,'https://evil.example',now,token),false);
+  assert.equal(validOverwriteGrant(grant,origin,now,'11111111-89ab-4cde-a321-112233445566'),false);
+  assert.equal(validOverwriteGrant(grant,origin,now,''),false);
+  assert.equal(validOverwriteGrant({...grant,expiresAt:now+OVERWRITE_GRANT_TTL_MS+1},origin,now,token),false);
+  assert.equal(validOverwriteGrant(true,origin,now,token),false);
+  assert.equal(validOverwriteGrant({siteOrigin:origin,expiresAt:grant.expiresAt},origin,now,token),false);
+  assert.equal(validOverwriteGrant(null,origin,now,token),false);
 });
 
 test('MV3 reconnect retry survives alarm wakeups and caps exponential delay',()=>{

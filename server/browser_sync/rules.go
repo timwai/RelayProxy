@@ -79,7 +79,44 @@ func (s *Store) EnsureRuleSchema(ctx context.Context) error {
 		rule_id TEXT PRIMARY KEY REFERENCES browser_sync_rules(id) ON DELETE CASCADE,
 		body TEXT NOT NULL
 	)`)
-	return err
+	if err != nil {
+		return err
+	}
+	// Preserve exact consent milestones independently of updated_at, which is
+	// also modified by pause/resume/revoke. Historical milestones remain NULL
+	// instead of inventing timestamps for existing pairings.
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(browser_sync_rules)`)
+	if err != nil {
+		return err
+	}
+	columns := map[string]bool{}
+	for rows.Next() {
+		var pos, required, primary int
+		var name, kind string
+		var fallback sql.NullString
+		if err := rows.Scan(&pos, &name, &kind, &required, &fallback, &primary); err != nil {
+			rows.Close()
+			return err
+		}
+		columns[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	for _, col := range []string{"target_approved_at", "activated_at"} {
+		if columns[col] {
+			continue
+		}
+		// Only use hardcoded column names, never user-controlled identifiers.
+		if _, err := s.db.ExecContext(ctx, "ALTER TABLE browser_sync_rules ADD COLUMN "+col+" TIMESTAMP"); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *Store) deviceAllowed(ctx context.Context, id string) (BrowserDevice, error) {
@@ -187,7 +224,7 @@ func (s *Store) ListRules(ctx context.Context, deviceID string) ([]BrowserRule, 
 }
 
 func (s *Store) AcceptRule(ctx context.Context, targetID, ruleID string) error {
-	return s.transitionRule(ctx, `UPDATE browser_sync_rules SET target_approved=1,updated_at=?
+	return s.transitionRule(ctx, `UPDATE browser_sync_rules SET target_approved=1,target_approved_at=CURRENT_TIMESTAMP,updated_at=?
 		WHERE id=? AND target_id=? AND status='offered' AND source_approved=1 AND target_approved=0`, targetID, ruleID)
 }
 
@@ -195,7 +232,7 @@ func (s *Store) ConfirmRule(ctx context.Context, sourceID, ruleID string) error 
 	// This final step is deliberately source-only. The source UI must explicitly
 	// confirm the independently compared key fingerprint before activating.
 	return s.transitionRule(ctx, `UPDATE browser_sync_rules SET keys_confirmed=1,
-		status='active',updated_at=? WHERE id=? AND source_id=?
+		status='active',activated_at=CURRENT_TIMESTAMP,updated_at=? WHERE id=? AND source_id=?
 		AND status='offered' AND source_approved=1 AND target_approved=1 AND keys_confirmed=0`,
 		sourceID, ruleID)
 }

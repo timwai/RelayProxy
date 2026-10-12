@@ -61,8 +61,17 @@ func (h *liveUpdates) publish(identityID string) {
 		select {
 		case ch <- h.revision:
 		default:
-			// One pending notification is enough: we only tell the client to
-			// re-read canonical state, never deliver a delta.
+			// Keep the MOST RECENT revision when a slow subscriber misses
+			// intermediate invalidations. The buffer remains bounded and a
+			// canonical read always supersedes every earlier revision.
+			select {
+			case <-ch:
+			default:
+			}
+			select {
+			case ch <- h.revision:
+			default:
+			}
 		}
 	}
 }

@@ -467,12 +467,12 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 				case bindErr != nil:
 					payload = networkRuleError(msg.RequestID, "RULE_INACTIVE",
 						"会话配对尚未激活、双端授权不完整或规则已失效；请刷新并检查配对状态")
-				case binding.Status != "none":
+				case binding.Status != "none" && binding.Status != "revoked":
 					payload = networkRuleError(msg.RequestID, "BINDING_EXISTS",
-						"此配对已经创建网络绑定；请刷新查看状态，撤销后需重新配对才能更换出口")
+						"此配对已发出网络邀请或正在使用网络绑定；请先取消或撤销，然后重新邀请")
 				case !h.network.AllowedExit(current.IdentityID, msg.ExitDeviceID):
 					payload = networkRuleError(msg.RequestID, "EXIT_NOT_ALLOWED",
-						"Agent 出口不可用：检查在线状态、proxy.exit 授权、身份一致性及 Agent 本机浏览器出口共享开关")
+						"Agent 出口不可用：请检查在线状态、proxy.exit 授权及浏览器与 Agent 所属身份是否一致")
 				case h.Store.OfferNetworkBinding(ctx, device.ID, msg.RuleID, msg.Host, msg.ExitDeviceID) != nil:
 					payload = networkRuleError(msg.RequestID, "NETWORK_OFFER_DENIED",
 						"网络绑定未创建：请确认 HTTPS 443 域名有效、接收端具备 receive 权限且与来源端身份一致")

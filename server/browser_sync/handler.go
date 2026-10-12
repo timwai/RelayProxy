@@ -188,6 +188,10 @@ func (h *Handler) registerExtensionDevice(w http.ResponseWriter, r *http.Request
 			http.Error(w, "registered identity key or extension mismatch", http.StatusConflict)
 			return
 		}
+		if errors.Is(err, ErrBrowserEnrollmentQuota) {
+			http.Error(w, "browser enrollment inventory limit reached", http.StatusTooManyRequests)
+			return
+		}
 		if errors.Is(err, ErrNotFound) {
 			http.Error(w, "revoked extension cannot request enrollment", http.StatusForbidden)
 			return
@@ -214,6 +218,10 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		if errors.Is(err, ErrDeviceConflict) {
 			http.Error(w, "registered identity key or extension mismatch", http.StatusConflict)
+			return
+		}
+		if errors.Is(err, ErrBrowserEnrollmentQuota) {
+			http.Error(w, "browser enrollment inventory limit reached", http.StatusTooManyRequests)
 			return
 		}
 		http.Error(w, "registration failed", http.StatusInternalServerError)

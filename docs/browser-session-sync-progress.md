@@ -1,3 +1,5 @@
+> **2026-10-12 · P1 管理增强第三轮（规则确认时间 / 审计导出 / 错误分类）：** 新规则单独持久化 `target_approved_at`（B 端批准）和 `activated_at`（来源端密钥指纹确认），来源批准时间使用规则创建时间；暂停/恢复/撤销不会覆盖这些时间。通过幂等 SQLite 列迁移兼容旧数据库，旧配对缺失的历史确认时间保持空值，不伪造。管理员只读审计新增带筛选的 CSV 导出（固定列、公式注入防护、`no-store`、最多 5000 条）和明确确认的清理；清理在事务内删除历史后插入 `audit_cleared` 操作者留痕。Chrome 失败回执现在只发送 `CONFLICT / PARTIAL_ROLLBACK / NETWORK_UNAVAILABLE / REPLAY_REJECTED / DECRYPT_FAILED / STORAGE_FAILURE / INDEXEDDB_FAILURE / COOKIE_FAILURE / UNSPECIFIED` 固定错误码；Server 拒绝任意异常文本并与投递结果原子审计，Web 展示友好诊断说明。新增 Go SQLite、管理 API、WSS 集成、Node/React 契约回归；**16 项静态集成检查通过，另有 SQLite SQL 冒烟验证，但当前 SHA 的完整 Go/Node/React CI、真实 Chrome A/B 仍未获验收，不得合并 main。** P1-01 / P1-06 基础功能更完整，P1-03 的一次性覆盖确认仍未实现。
+
 > **2026-10-12 · P1 管理增强第二轮：** Server 管理 API 在保留旧版无参数规则列表数组响应的同时，增加 `limit/offset/identityId/status/q` 服务端分页及过滤，Server Web 规则页可按身份/状态/设备搜索并加载更多，不受旧列表一次 500 条限制。审计增加 `actor_id` 操作者标识（只从已认证管理员会话上下文写入，不接收浏览器或请求 JSON 自报），兼容旧 SQLite 表结构的幂等升级，并在审计页显示操作者。修复管理员暂停与投递竞态：新会话进入投递数据库时再检查配对处于 active；暂停前已登记的会话允许终态 ACK 与来源查询，不允许新会话；撤销后仍禁止回执查询。新增管理 API、SQLite 迁移、状态切换与分页回归测试，15 项静态集成契约核对通过。**最新 SHA 的 Go/Node/React CI 和真实 A/B Chrome 尚未通过可确认验收，PR 继续 Draft。**
 
 > **2026-10-12 · Server Web 浏览器同步管理增强（当前 PR #194）：** 新增管理员独占规则查询和暂停/恢复/撤销接口（`/admin/rules`），规则恢复重新核验双端设备/身份/能力/来源禁用；Server Web 以“浏览器设备、配对规则、同步记录”三个视图显示在线 WSS 状态（15 秒轮询）、最近成功应用时间及终态计数。新增有界、脱敏持久审计：设备批准/撤销/删除、规则暂停/恢复/撤销、同步终态结果，同一数据库事务写入，最多保留 **30 天/5000 条**；支持类型/设备过滤及游标分页，绝不记录网站 Origin、Cookie、明文或密文快照。新增 `server/browser_sync/admin_test.go`、UI 静态契约测试及 WSS 历史来源撤销回归。**最新提交尚未获得 Go/Node/React 的本 SHA CI 通过记录，也未做真实 Chrome A/B 联调，P0 发布门禁不变。** P1-01/02/06 从原“部分完成”推进为“基础管理功能已编码，待 CI/真机验收，仍有细项”。
@@ -105,12 +107,12 @@
 
 | ID | 交付项 | 当前状态 | 现有能力 / 代码证据 | 下一步与验收条件 |
 |---|---|---|---|---|
-| P1-01 | **完整规则管理** | **部分完成（管理主流程已编码·待 CI / 真实体验验收）** | [管理员规则元数据及安全状态操作](../server/browser_sync/admin.go)、[Server Web 三视图](../server/web/frontend/src/BrowserSync.jsx)、[独占 Admin API](../server/api/browser_sync.go) 已支持配对列表、状态/设备搜索、暂停/恢复/撤销；恢复前检查双端已授权和身份有效，不解密网站策略。 | 下一步：单规则双端确认时间完整留痕、实体 Chrome 与管理员操作联调；不得让管理员直接修改加密站点范围或绕过双方审批。 |
+| P1-01 | **完整规则管理** | **部分完成（管理主流程已编码·待 CI / 真实体验验收）** | [管理员规则元数据及安全状态操作](../server/browser_sync/admin.go)、[Server Web 三视图](../server/web/frontend/src/BrowserSync.jsx)、[独占 Admin API](../server/api/browser_sync.go) 已支持配对列表、状态/设备搜索、暂停/恢复/撤销；恢复前检查双端已授权和身份有效，不解密网站策略。 | 已补齐新规则双端同意与生效时间戳及历史列迁移；下一步：实体 Chrome 与管理员操作联调、历史规则无法追溯的确认时间说明；不得让管理员直接修改加密站点范围或绕过双方审批。 |
 | P1-02 | **设备在线/最后同步/失败统计** | **部分完成（基础状态和统计已编码·待 CI / 真机验收）** | [WSS 在线连接快照](../server/browser_sync/relay.go) + [终态元数据聚合](../server/browser_sync/admin.go)；Web 设备列表展示在线/离线、最近成功应用及成功/失败/冲突次数，每 15 秒轮询在线状态。 | 仍需持久最后上线/离线时间、端到端延迟/失败原因分析、在线规模与性能压测；不能把加密载荷“APPLIED”误报为网站登录成功。 |
-| P1-03 | **冲突诊断与一次性确认** | **部分完成** | 已有 `CONFLICT`、持久覆盖开关、`PARTIAL` 手工恢复 | 增加按规则的只读错误码/风险提示、单次覆盖确认（优先替代长期全局许可）、账号切换警示、权限变化时取消等待中的恢复 |
+| P1-03 | **冲突诊断与一次性确认** | **部分完成** | 已有 `CONFLICT`、持久覆盖开关、`PARTIAL` 手工恢复 | 固定枚举错误码与 Web 只读诊断已编码；仍需单次覆盖确认（优先替代长期全局许可）、账号切换警示、权限变化时取消等待中的恢复 |
 | P1-04 | **Cookie 名称选择器（需求被新流程替代）** | **需求调整·不再单独实施** | [v2/v3 全量站点 Cookie 采集](../browser/chrome-extension/src/cookies-all.js)、[站点授权选项页](../browser/chrome-extension/src/options.js)已取消新配对手填 Cookie 名称，改为双端明确同意当前站点的全量 Cookie/Storage；旧 v1 名称白名单仍可验证 | 不再按旧设计增加逐名称选择器；需真机验证全量授权提示、Cookie 范围、目标冲突保护、撤销后重配对及 v1→v3 不自动扩权。若重新提出逐名称选择需求，应另开任务评审 |
 | P1-05 | **扩展安装、固定 ID、升级与发布** | **未开始（发布流程）** | [MV3 manifest](../browser/chrome-extension/manifest.json)和[开发者加载说明](../browser/chrome-extension/README.md)存在 | 正式扩展签名/固定 ID（Server Origin 白名单所依赖）、版本兼容策略、密钥和存储迁移、权限变更提示、打包/回滚与升级验证 |
-| P1-06 | **专用审计、规则指标与排错页** | **部分完成（持久脱敏审计已编码·待 CI / 安全验收）** | [审计表及事务写入](../server/browser_sync/admin.go)只记录授权、规则操作及 APPLIED/FAILED/CONFLICT；`30 天/5000 条` 保留上限，Server Web 可按事件和设备筛选、游标分页。 | 仍需脱敏导出/清理、可审计的错误码分类和诊断关联、管理员行为归属、批量分页与服务端部署压力/故障验收；不记录 Cookie/Token/密文策略。 |
+| P1-06 | **专用审计、规则指标与排错页** | **部分完成（持久脱敏审计已编码·待 CI / 安全验收）** | [审计表及事务写入](../server/browser_sync/admin.go)只记录授权、规则操作及 APPLIED/FAILED/CONFLICT；`30 天/5000 条` 保留上限，Server Web 可按事件和设备筛选、游标分页。 | 已新增管理员操作者归属、固定错误码、带筛选 CSV 导出及事务化清理留痕；仍需跨事件诊断关联、分页压力与生产安全/故障验收；不记录 Cookie/Token/密文策略。 |
 
 ## 三、后续增强功能（P2）
 

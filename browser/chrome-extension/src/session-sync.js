@@ -11,7 +11,7 @@ import {captureAllCookies,applyAllCookies} from './cookies-all.js';
 import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
 import {captureIndexedDB,prepareIndexedDBRestore,JOURNAL_KEY as IDB_JOURNAL} from './indexeddb-sync.js';
 import {showRestoredWebsiteTab} from './session-tabs.js';
-import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence, validOverwriteGrant, OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection, singleFlight } from './lifecycle.js';
+import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence, validOverwriteGrant, OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection, singleFlight, nextDeliveryStatus } from './lifecycle.js';
 import {ensureNetworkForRule} from './network-binding.js';
 
 const sourceBusy = new Set();
@@ -29,11 +29,20 @@ const PAUSED_RESTORE = 'browserSyncRestorePaused';
 const statusKey = 'browserSyncTransferStatus';
 const pendingOpenKey = 'browserSyncPendingOpen';
 
-async function setStatus(ruleId, result) {
-  // Explicitly store only a status enum; never Cookie values or payloads.
-  const current = (await chrome.storage.local.get(statusKey))[statusKey] || {};
-  current[ruleId] = { state: result, time: Date.now() };
-  await chrome.storage.local.set({[statusKey]:current});
+// Serialize status map writes across all rules: overlapping WSS pushes and
+// sender control replies otherwise overwrite each other's read-modify-write.
+// Only the opaque per-delivery ID is retained, never session or Cookie data.
+let statusWriteQueue=Promise.resolve();
+function setStatus(ruleId,result,messageId='') {
+  const write=statusWriteQueue.catch(()=>{}).then(async()=>{
+    const all=(await chrome.storage.local.get(statusKey))[statusKey]||{};
+    const next=nextDeliveryStatus(all[ruleId],result,messageId);
+    if(next===all[ruleId])return;
+    all[ruleId]=next;
+    await chrome.storage.local.set({[statusKey]:all});
+  });
+  statusWriteQueue=write;
+  return write;
 }
 
 async function ruleContext(ruleId) {
@@ -101,13 +110,13 @@ export async function sendSnapshot(ruleId, transferRequestId='') {
     const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
     pending[ruleId]={ruleId,messageId:envelope.messageId,createdAt:Date.now()};
     await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
-    await setStatus(ruleId,'SENDING');
+    await setStatus(ruleId,'SENDING',envelope.messageId);
     transmissionAttempted=true;
     const ack=await sendControl('SESSION_SNAPSHOT',{envelope});
     if(ack.status!=='RELAYED')throw new Error('中继没有接受加密快照');
     const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
     // A fast target APPLIED may have consumed this pending entry already.
-    if(latest[ruleId]?.messageId===envelope.messageId)await setStatus(ruleId,'RELAYED');
+    if(latest[ruleId]?.messageId===envelope.messageId)await setStatus(ruleId,'RELAYED',envelope.messageId);
     return {state:'RELAYED',count:payload.cookies.length};
   }catch(error){
     if(!transmissionAttempted){
@@ -119,7 +128,7 @@ export async function sendSnapshot(ruleId, transferRequestId='') {
       // A timed-out WSS response does NOT prove B failed to apply a Cookie.
       // Retain messageId so reconnect can query the durable terminal receipt.
       const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
-      if(latest[ruleId])await setStatus(ruleId,'UNKNOWN');
+      if(latest[ruleId]?.messageId===envelope.messageId)await setStatus(ruleId,'UNKNOWN',envelope.messageId);
     }
     throw error;
   }finally{
@@ -331,7 +340,7 @@ onServerPush(async message => {
     const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
     const item=pending[message.ruleId];
     if(!acceptDeliveryAck(item,message,Date.now()))return;
-    await setStatus(message.ruleId,message.status);
+    await setStatus(message.ruleId,message.status,item.messageId);
     if(isTerminalAck(message.status)){
       delete pending[message.ruleId];
       await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
@@ -373,16 +382,16 @@ export async function reconcilePendingDeliveries() {
     const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
     if(latest[ruleId]?.messageId!==item.messageId)continue;
     if(['APPLIED','FAILED','CONFLICT'].includes(statusReply.status)){
-      await setStatus(ruleId,statusReply.status);
+      await setStatus(ruleId,statusReply.status,item.messageId);
       delete latest[ruleId];
       await chrome.storage.local.set({[PENDING_DELIVERY]:latest});
     }else if(statusReply.status==='UNKNOWN'){
       // Outcome was lost or expired: never claim a login actually failed.
-      await setStatus(ruleId,'UNKNOWN');
+      await setStatus(ruleId,'UNKNOWN',item.messageId);
       delete latest[ruleId];
       await chrome.storage.local.set({[PENDING_DELIVERY]:latest});
     }else if(statusReply.status==='RECEIVED'){
-      await setStatus(ruleId,'RECEIVED');
+      await setStatus(ruleId,'RECEIVED',item.messageId);
     }
   }
 }
@@ -480,7 +489,7 @@ export async function resumePausedRestore(ruleId,confirmed) {
   delete idbJournal[ruleId];
   await chrome.storage.local.set({[PAUSED_RESTORE]:flags,[journalKey]:journal,
     [storageKey]:storageJournal,[IDB_JOURNAL]:idbJournal});
-  await setStatus(ruleId,'UNKNOWN');
+  await setStatus(ruleId,'UNKNOWN',item.messageId);
   // Do not immediately overwrite a possibly changed website session.
   return {state:'UNKNOWN'};
 }

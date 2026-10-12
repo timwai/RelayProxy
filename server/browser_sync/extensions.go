@@ -27,11 +27,15 @@ func (s *Store) EnsureExtensionSchema(ctx context.Context) error {
 	)`); err != nil {
 		return err
 	}
-	_, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS browser_sync_device_extensions (
+	if _, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS browser_sync_device_extensions (
         device_id TEXT PRIMARY KEY REFERENCES browser_sync_devices(id),
         extension_id TEXT NOT NULL REFERENCES browser_sync_extensions(extension_id),
         created_at TIMESTAMP NOT NULL
-    )`)
+    )`); err != nil {
+		return err
+	}
+	_, err := s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_browser_device_extension_inventory
+		ON browser_sync_device_extensions(extension_id,device_id)`)
 	return err
 }
 

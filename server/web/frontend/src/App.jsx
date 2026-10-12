@@ -9,6 +9,7 @@ import {summarizeSession,summarizePathReport} from './diagnostics.js';
 import {OverviewRealtime} from './OverviewCharts.jsx';
 import {allCapabilities,visibleCapabilityGroups,toggleDeviceCapability} from './capability-ui.js';
 import {BrowserSyncAdmin} from './BrowserSync.jsx';
+import {subscribeLiveUpdates} from './live-updates.js';
 
 const pages={overview:'运行总览',devices:'设备管理',identities:'身份管理',browserSync:'浏览器同步',exits:'出口节点',sessions:'活跃会话',p2p:'P2P 直连',messages:'消息历史',channels:'推送渠道',rdp:'RDP 公网入口',audit:'RDP 连接审计',security:'RDP 安全策略',settings:'服务配置'};
 const nav=[['概览',[['overview','运行总览']]],['设备与身份',[['devices','设备管理'],['identities','身份管理'],['browserSync','浏览器同步'],['exits','出口节点']]],['连接',[['sessions','实时连接'],['p2p','P2P 路径'],['rdp','RDP 公网入口'],['audit','连接审计'],['security','IP 安全策略']]],['消息',[['messages','消息历史'],['channels','推送渠道']]],['系统',[['settings','服务配置']]]];
@@ -125,6 +126,7 @@ export function App(){
  },[user]);
  useEffect(()=>{let cancelled=false;api('/auth/me').then(u=>{if(cancelled)return;const principal=u.user||u;setUser(principal)}).catch(e=>{if(!cancelled&&e.status!==401)setAuthError(e.message)}).finally(()=>{if(!cancelled)setAuthReady(true)});return()=>{cancelled=true}},[]);
  useEffect(()=>{if(user)refresh(user);},[user,refreshCounter]);
+ useEffect(()=>{if(!user)return;return subscribeLiveUpdates(()=>{refresh(user,true).catch(()=>{})});},[user,refresh]);
  useEffect(()=>{const update=()=>{const next=queryFromHash();setRoute(next);setSettingsTab(next.settingTab)};window.addEventListener('hashchange',update);return()=>window.removeEventListener('hashchange',update)},[]);
  useEffect(()=>{const dark=theme==='dark'||theme==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.dataset.theme=dark?'dark':'light';localStorage.setItem('relayproxy-theme',theme);const mq=window.matchMedia('(prefers-color-scheme: dark)');const fn=()=>{if(theme==='system')document.documentElement.dataset.theme=mq.matches?'dark':'light'};mq.addEventListener('change',fn);return()=>mq.removeEventListener('change',fn)},[theme]);
  useEffect(()=>{const fn=e=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',fn);return()=>window.removeEventListener('beforeunload',fn)},[dirty]);

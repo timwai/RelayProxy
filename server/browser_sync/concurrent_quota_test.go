@@ -318,8 +318,7 @@ func TestBrowserSyncRevokedOriginBlocksBothReceiptStages(t *testing.T) {
 		t.Fatal(err)
 	}
 	for i, status := range []string{"RECEIVED", "APPLIED"} {
-		if _, err := store.ClaimDeliveryReceipt(ctx, target.ID, ruleID, ids[i], status, now);
-			!errors.Is(err, ErrRuleDenied) {
+		if _, err := store.ClaimDeliveryReceipt(ctx, target.ID, ruleID, ids[i], status, now); !errors.Is(err, ErrRuleDenied) {
 			t.Fatalf("revoked Chrome Origin obtained %s ACK: %v", status, err)
 		}
 	}

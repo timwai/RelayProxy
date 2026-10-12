@@ -29,7 +29,7 @@ const maxLiveSubscribers = 128
 func newLiveUpdates() *liveUpdates {
 	return &liveUpdates{
 		scopeRevision: make(map[string]uint64),
-		subscribers: make(map[chan uint64]liveSubscriber),
+		subscribers:   make(map[chan uint64]liveSubscriber),
 	}
 }
 

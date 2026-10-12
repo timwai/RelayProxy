@@ -91,7 +91,7 @@ export async function captureAllCookies(policy){
 }
 export async function applyAllCookies(ruleId,snapshot,policy,{allowOverwrite=false}={}){
   const p=validatePolicy(policy);
-  if(![2,3].includes(p.schemaVersion) || snapshot?.schemaVersion!==2 ||
+  if(![2,3,4].includes(p.schemaVersion) || p.allCookies!==true || snapshot?.schemaVersion!==2 ||
     snapshot.siteOrigin!==p.siteOrigin || !Array.isArray(snapshot.cookies) ||
     snapshot.cookies.length>1000)throw new Error('站点 Cookie 策略不匹配');
   const next=new Map();

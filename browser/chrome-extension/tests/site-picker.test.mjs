@@ -1,19 +1,31 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
-const html=readFileSync(new URL('../src/popup.html',import.meta.url),'utf8');
-const popup=readFileSync(new URL('../src/popup.js',import.meta.url),'utf8');
+
+const asset=name=>readFileSync(new URL('../src/'+name,import.meta.url),'utf8');
+const optionsHTML=asset('options.html');
+const optionsJS=asset('options.js');
+const popupHTML=asset('popup.html');
+const serverAPI=asset('server-api.js');
+const worker=asset('service-worker.js');
 const manifest=JSON.parse(readFileSync(new URL('../manifest.json',import.meta.url),'utf8'));
-test('website grant uses a tab picker, not manual URL entry',()=>{
- assert.match(html,/<select id="site"/);
- assert.doesNotMatch(html,/<input id="site"/);
- assert.match(popup,/chrome\.tabs\.query\(\{\}\)/);
- assert.match(popup,/u\.protocol==='https:'/);
- assert.match(popup,/chrome\.permissions\.request/);
+
+test('website permission is selected from open HTTP or HTTPS tabs in Settings',()=>{
+ assert.match(optionsHTML,/<select id="site"/);
+ assert.doesNotMatch(optionsHTML,/<input id="site"/);
+ assert.match(optionsJS,/chrome\.tabs\.query\(\{\}\)/);
+ assert.match(optionsJS,/\['http:','https:'\]\.includes\(u\.protocol\)/);
+ assert.match(optionsJS,/chrome\.permissions\.request/);
  assert.ok(manifest.permissions.includes('tabs'));
+ assert.doesNotMatch(popupHTML,/<select id="site"/);
 });
-test('extension ID is reported without manual copying',()=>{
- const api=readFileSync(new URL('../src/server-api.js',import.meta.url),'utf8');
- assert.match(api,/extensions\/register/);
- assert.match(api,/extension_pending/);
+
+test('one browser-device registration includes its identity preference and public keys',()=>{
+ assert.match(optionsJS,/type: 'REGISTER_BROWSER'/);
+ assert.match(worker,/case 'REGISTER_BROWSER'/);
+ assert.match(serverAPI,/\/api\/v1\/browser-sync\/devices\/register/);
+ assert.match(serverAPI,/requestedIdentityId/);
+ assert.match(serverAPI,/signingPublicKey/);
+ assert.match(serverAPI,/encryptionPublicKey/);
+ assert.doesNotMatch(serverAPI,/extensions\/register|extension_pending/);
 });

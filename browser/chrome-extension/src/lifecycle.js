@@ -35,9 +35,14 @@ export function nextSessionSequence(localSequence, serverCursor) {
 // An overwrite grant permits at most ONE signed incoming snapshot. It cannot
 // be a persistent boolean; legacy grants are rejected after an upgrade.
 export const OVERWRITE_GRANT_TTL_MS = 2 * 60 * 1000;
-export function validOverwriteGrant(grant, siteOrigin, now) {
+export function validOverwriteGrant(grant, siteOrigin, now, requestId) {
+  // A matching, source-signed transfer request ID is required. Old grants
+  // without a token never authorize account switching after an upgrade.
   return !!grant && typeof grant === 'object' && !Array.isArray(grant) &&
     typeof siteOrigin === 'string' && siteOrigin.length > 0 &&
+    typeof requestId === 'string' &&
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(requestId) &&
+    grant.transferRequestId === requestId &&
     grant.siteOrigin === siteOrigin &&
     Number.isSafeInteger(grant.expiresAt) &&
     Number.isFinite(now) && grant.expiresAt > now &&

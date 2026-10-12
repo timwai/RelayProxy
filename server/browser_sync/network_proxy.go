@@ -39,7 +39,7 @@ type NetworkProxy struct {
 func NewNetworkProxy(store *Store, sessions *session.Manager) *NetworkProxy {
 	return &NetworkProxy{Store: store, Sessions: sessions,
 		leases: make(map[[32]byte]networkLease),
-		slots: make(chan struct{}, 128), shutdown: make(chan struct{})}
+		slots:  make(chan struct{}, 128), shutdown: make(chan struct{})}
 }
 
 // Bind the same Relay target ACL as ordinary proxy streams. Agent Exit

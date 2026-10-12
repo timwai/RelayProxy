@@ -107,7 +107,8 @@ test('one-time account-switch permission is accessible only through the Options 
 test('MV3 alarm reconnect is not throttled by periodic session refresh',()=>{
   const worker=asset('service-worker.js'),session=asset('session-sync.js');
   assert.match(worker,/chrome\.alarms\.onAlarm/);
-  assert.match(worker,/restoreActiveSubscriptions\(\)/);
+  assert.match(worker,/restoreApprovedBrowser\(\)\.catch/);
+  assert.match(worker,/await restoreActiveSubscriptions\(\{force:force\|\|status\.state==='approved'\}\)/);
   assert.match(session,/await connectBrowser\(\)/);
   assert.match(session,/shouldRetryConnection\(stored,settings\.serverOrigin,now\)/);
   assert.match(session,/nextReconnectDelay\(failures\)/);

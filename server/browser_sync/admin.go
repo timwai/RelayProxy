@@ -34,6 +34,7 @@ type AdminAuditEvent struct {
 	PeerID    string    `json:"peerId,omitempty"`
 	RuleID    string    `json:"ruleId,omitempty"`
 	Outcome   string    `json:"outcome,omitempty"`
+	ActorID   string    `json:"actorId,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 }
 
@@ -48,6 +49,17 @@ type AdminDeviceStats struct {
 const browserAuditMaxRows = 5000
 const browserAuditRetention = 30 * 24 * time.Hour
 
+type browserAdminActorKey struct{}
+
+// WithAdminActor tags a validated administrator action for audit attribution.
+// Only the existing requireAuth+requireAdmin middleware can supply the actor.
+func WithAdminActor(ctx context.Context, actorID string) context.Context {
+	if actorID == "" || len(actorID) > 128 {
+		return ctx
+	}
+	return context.WithValue(ctx, browserAdminActorKey{}, actorID)
+}
+
 func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS browser_sync_audit (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -60,6 +72,37 @@ func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 	)`)
 	if err != nil {
 		return err
+	}
+	// Earlier PR builds created browser_sync_audit without actor_id.
+	// SQLite has no portable ADD COLUMN IF NOT EXISTS: inspect before migrating.
+	rows, err := s.db.QueryContext(ctx, `PRAGMA table_info(browser_sync_audit)`)
+	if err != nil {
+		return err
+	}
+	foundActor := false
+	for rows.Next() {
+		var columnID, notNull, primaryKey int
+		var name, dataType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&columnID, &name, &dataType, &notNull, &defaultValue, &primaryKey); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "actor_id" {
+			foundActor = true
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if !foundActor {
+		if _, err := s.db.ExecContext(ctx, `ALTER TABLE browser_sync_audit ADD COLUMN actor_id TEXT NOT NULL DEFAULT ''`); err != nil {
+			return err
+		}
 	}
 	_, err = s.db.ExecContext(ctx, `CREATE INDEX IF NOT EXISTS idx_browser_sync_audit_device
 		ON browser_sync_audit(device_id,id)`)
@@ -85,9 +128,10 @@ func appendBrowserAudit(ctx context.Context, tx *sql.Tx, event, deviceID, peerID
 		return errors.New("unexpected browser audit outcome")
 	}
 	now := time.Now().UTC()
+	actorID, _ := ctx.Value(browserAdminActorKey{}).(string)
 	if _, err := tx.ExecContext(ctx, `INSERT INTO browser_sync_audit
-		(type,device_id,peer_id,rule_id,outcome,created_at) VALUES(?,?,?,?,?,?)`,
-		event, deviceID, peerID, ruleID, outcome, now); err != nil {
+		(type,device_id,peer_id,rule_id,outcome,actor_id,created_at) VALUES(?,?,?,?,?,?,?)`,
+		event, deviceID, peerID, ruleID, outcome, actorID, now); err != nil {
 		return err
 	}
 	// Retain bounded metadata only, independent of the delivery-receipt TTL.
@@ -219,7 +263,7 @@ func (s *Store) AdminAuditFiltered(ctx context.Context, before int64, limit int,
 	if deviceID != "" && !deviceIDPattern.MatchString(deviceID) {
 		return nil, errors.New("invalid browser audit device")
 	}
-	rows, err := s.db.QueryContext(ctx, `SELECT id,type,device_id,peer_id,rule_id,outcome,created_at
+	rows, err := s.db.QueryContext(ctx, `SELECT id,type,device_id,peer_id,rule_id,outcome,actor_id,created_at
 		FROM browser_sync_audit WHERE (?=0 OR id<?)
 		AND (?='' OR type=?)
 		AND (?='' OR device_id=? OR peer_id=?)
@@ -235,7 +279,7 @@ func (s *Store) AdminAuditFiltered(ctx context.Context, before int64, limit int,
 	for rows.Next() {
 		var event AdminAuditEvent
 		if err := rows.Scan(&event.ID, &event.Type, &event.DeviceID, &event.PeerID,
-			&event.RuleID, &event.Outcome, &event.CreatedAt); err != nil {
+			&event.RuleID, &event.Outcome, &event.ActorID, &event.CreatedAt); err != nil {
 			return nil, err
 		}
 		events = append(events, event)

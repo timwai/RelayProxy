@@ -287,16 +287,17 @@ export function BrowserSyncAdmin({identities=[]}){
           </select>
         </div>
         <div className="table-wrap"><table>
-          <thead><tr><th>时间</th><th>事件</th><th>设备 / 配对</th><th>结果</th></tr></thead>
+          <thead><tr><th>时间</th><th>事件</th><th>操作者</th><th>设备 / 配对</th><th>结果</th></tr></thead>
           <tbody>{visibleAudit.map(e=><tr key={e.id}>
             <td>{fmtDate(e.createdAt)}</td>
             <td>{eventText[e.type]||e.type}</td>
+            <td><span className="browser-sync-audit-id">{e.actorId||'—'}</span></td>
             <td><div className="browser-sync-audit-id">{e.deviceId||'—'}{e.peerId?' → '+e.peerId:''}</div>
               {e.ruleId&&<small className="browser-sync-device-extra">规则：{e.ruleId}</small>}</td>
             <td><span className={'badge '+(e.outcome==='APPLIED'?'ok':e.outcome==='FAILED'||e.outcome==='CONFLICT'?'danger':'')}>
               {e.outcome||'—'}</span></td>
           </tr>)}
-          {!visibleAudit.length&&<tr><td colSpan={4} className="browser-sync-no-data">{loading?'读取中…':'暂无同步记录'}</td></tr>}
+          {!visibleAudit.length&&<tr><td colSpan={5} className="browser-sync-no-data">{loading?'读取中…':'暂无同步记录'}</td></tr>}
           </tbody></table></div>
         <div className="browser-sync-audit-footer">
           <span className="muted">仅记录脱敏事件元数据，最多保留 30 天 / 5000 条；不保存 Cookie 或同步密文。</span>

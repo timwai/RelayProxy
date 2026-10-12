@@ -20,8 +20,8 @@ import (
 	"syscall"
 	"time"
 
-	browsersync "relayproxy/server/browser_sync"
 	_ "modernc.org/sqlite"
+	browsersync "relayproxy/server/browser_sync"
 )
 
 func main() {
@@ -106,8 +106,8 @@ func main() {
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(map[string]string{
 		"serverOrigin": relay.URL,
-		"adminOrigin": admin.URL,
-		"runId": hex.EncodeToString(nonce),
+		"adminOrigin":  admin.URL,
+		"runId":        hex.EncodeToString(nonce),
 	}); err != nil {
 		log.Fatal(fmt.Errorf("fixture startup: %w", err))
 	}

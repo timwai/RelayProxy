@@ -158,7 +158,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error('目标设备密钥变更');
         }
         const result = await createEncryptedOffer({
-          target: peer, siteOrigin: message.siteOrigin
+          target: peer, siteOrigin: message.siteOrigin, dataTypes:message.dataTypes
         });
         const response = await sendControl('RULE_OFFER', { offer: result.offer });
         const saved = (await chrome.storage.local.get('browserSyncLocalOffers')).browserSyncLocalOffers || {};
@@ -359,7 +359,10 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           throw new Error('仅设置页可以提交一次性覆盖请求');
         return { ok: true, ...(await requestSnapshot(message.ruleId,message.transferRequestId||'')) };
       case 'SYNC_THEN_OPEN':
-        return { ok: true, ...(await syncThenOpen(message.ruleId)) };
+        if(message.transferRequestId &&
+          sender.url!==chrome.runtime.getURL('src/options.html'))
+          throw new Error('仅设置页可以提交一次性覆盖请求');
+        return { ok: true, ...(await syncThenOpen(message.ruleId,message.transferRequestId||'')) };
       case 'ALLOW_OVERWRITE':
         // A content script may share the extension sender ID. The
         // account-switch override is available only to the trusted Options UI.

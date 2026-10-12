@@ -17,13 +17,17 @@ test('one registration request submits browser device and public keys',()=>{
   assert.doesNotMatch(api,/extension_pending/);
 });
 
-test('options UI provides one application action, no extension approval',()=>{
+test('one server button registers pending identity and connects only after approval',()=>{
   const html=source('options.html');
   const code=source('options.js');
-  assert.match(html,/提交设备授权申请/);
-  assert.match(code,/申请已提交/);
+  assert.match(html,/id="connect" class="primary-button"/);
+  assert.doesNotMatch(html,/id="save"|id="register"/);
+  assert.match(code,/type:'SAVE_SERVER'/);
+  assert.match(code,/type:'REGISTER_BROWSER'/);
+  assert.match(code,/registered.state!=='approved'/);
+  assert.match(code,/type:'CONNECT_BROWSER'/);
+  assert.match(code,/管理员批准后再次点击/);
   assert.match(code,/身份 ID/);
   assert.doesNotMatch(code,/需要先批准扩展/);
   assert.match(html,/id="device-name"/);
-  assert.doesNotMatch(code,/批准后再次点击注册浏览器设备/);
 });

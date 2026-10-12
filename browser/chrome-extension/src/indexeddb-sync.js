@@ -425,14 +425,14 @@ export async function executeSiteIndexedDB(tabId,args){
 
 export async function captureIndexedDB(policy){
   const p=validatePolicy(policy);
-  if(p.schemaVersion!==3)throw new Error('仅双方确认的 v3 站点配对支持 IndexedDB');
+  if(![3,4].includes(p.schemaVersion)||p.indexedDB!==true)throw new Error('配对未授权 IndexedDB 同步');
   const tabId=await tabFor(p.siteOrigin);
   return validateIndexedDBSnapshot(await executeSiteIndexedDB(tabId,[p.siteOrigin,'read']));
 }
 
 export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite=false,tabId=null}={}){
   const p=validatePolicy(policy);
-  if(p.schemaVersion!==3)throw new Error('仅双方确认的 v3 站点配对支持 IndexedDB');
+  if(![3,4].includes(p.schemaVersion)||p.indexedDB!==true)throw new Error('配对未授权 IndexedDB 同步');
   // Old Chrome senders included no IndexedDB; never treat a missing field
   // as an instruction to clear the receiver's databases.
   if(data===undefined)return {tabId,async apply(){},async commit(){},async rollback(){return true;}};

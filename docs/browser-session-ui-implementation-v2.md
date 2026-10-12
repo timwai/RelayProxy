@@ -23,6 +23,14 @@
 - 简化长提示，仅保留表单必要说明；HTTP 网站权限确认、配对校验码、覆盖目标账号及网络出口调整的安全确认逻辑不变。
 - `popup.js`：发送端 / 接收端角色名称，不再展示“来源 A / 接收 B”。原快捷发送、请求、同步后打开和本机 Agent 开关保留。
 
+## 2026-10-12：浏览器规则与运行审计扩展
+
+- Server Web 的浏览器同步页增加 **浏览器设备 / 配对规则 / 同步记录** 三个视图。设备状态使用已认证 WSS 在线表（15 秒轮询），最近成功应用时间和成功/失败/冲突数从短保留期脱敏审计计算，**不等于网站登录成功**。
+- 管理员只可按规则元数据暂停、恢复、撤销现有配对；不提供直接修改站点明文规则或绕过 Chrome 双端授权的能力。恢复时再验证双端审批、身份有效、发送/接收能力及历史来源撤销状态；已经撤销的配对不能由管理员直接恢复。
+- Server 独立管理接口受原有 requireAuth + requireAdmin 约束：`GET /browser-sync/admin/rules`、`POST /browser-sync/admin/rules/{id}/{pause|resume|revoke}`、`GET /browser-sync/admin/status`、`GET /browser-sync/admin/audit?type=&device=&before=&limit=`。
+- 新建 SQLite `browser_sync_audit` 表，管理员操作和终态投递与业务状态在同一事务提交。只保存设备 ID、规则 ID、APPLIED/FAILED/CONFLICT 类别和时间；单表约束 30 天 / 5000 条，最多查询 100 条/页；不保存网站 Origin、Cookie、Token、密文策略、密文快照。
+- 真实上线仍需在同一提交 SHA 下跑 Go、Node、React 构建测试，并验证真实 Chrome 双端撤销/恢复/报表一致性、管理员安全边界与高负载写入。**代码提交不代表已验收**；原来“仅为 UI 层修改”的描述仅指初始 UI V2 交付。
+
 ## 验证边界
 
 - 增加 Server 静态布局/操作入口检查和 Chrome 选项页导航/控件引用检查。

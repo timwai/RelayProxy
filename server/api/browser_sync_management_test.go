@@ -127,7 +127,6 @@ func TestBrowserAdminActionGetsActorFromAuthenticatedContextOnly(t *testing.T) {
 	}
 }
 
-
 func TestBrowserAdminAuditCSVExportAndClearRequireActor(t *testing.T) {
 	router, store := testBrowserAdminRouter(t)
 	ctx := context.Background()

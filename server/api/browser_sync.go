@@ -50,6 +50,10 @@ func (r *Router) handleBrowserSyncApprove(w http.ResponseWriter, req *http.Reque
 			writeError(w, http.StatusNotFound, "pending browser not found")
 			return
 		}
+		if errors.Is(err, browsersync.ErrBrowserIdentityQuota) {
+			writeError(w, http.StatusConflict, "browser identity device capacity reached")
+			return
+		}
 		writeError(w, http.StatusBadRequest, "browser device approval failed")
 		return
 	}

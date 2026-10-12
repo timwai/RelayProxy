@@ -8,6 +8,13 @@ import {registerBrowser} from './server-api.js';
 export const PENDING_ENROLLMENT_KEY='browserSyncPendingEnrollment';
 export const ENROLLMENT_POLL_MS=60*1000;
 
+export function enrollmentPollDue(entry,now){
+  return !!entry && Number.isFinite(now) &&
+    (!Number.isFinite(entry.lastCheckedAt) ||
+      entry.lastCheckedAt>now ||
+      now-entry.lastCheckedAt>=ENROLLMENT_POLL_MS);
+}
+
 export function validPendingEnrollment(entry,settings,deviceId){
   return !!entry && typeof entry==='object' &&
     !!settings?.serverOrigin && entry.serverOrigin===settings.serverOrigin &&
@@ -47,9 +54,7 @@ export function pollPendingEnrollment({force=false}={}){
       return {state:'invalid'};
     }
     const now=Date.now();
-    if(!force&&Number.isFinite(entry.lastCheckedAt)&&
-      entry.lastCheckedAt>=now-ENROLLMENT_POLL_MS&&entry.lastCheckedAt<=now)
-      return {state:'pending'};
+    if(!force&&!enrollmentPollDue(entry,now))return {state:'pending'};
     // Persist before fetching: worker suspension, network failure or repeated
     // alarms cannot flood the unprivileged registration endpoint.
     await chrome.storage.local.set({[PENDING_ENROLLMENT_KEY]:{

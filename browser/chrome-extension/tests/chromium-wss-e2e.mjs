@@ -162,14 +162,19 @@ async function main(){
   assert.ok(peersA.peers.some(p=>p.id===identityB.deviceId&&p.receive));
   assert.ok(peersB.peers.some(p=>p.id===identityA.deviceId&&p.send));
 
+  // The default user-visible four-checkbox selection creates a v4 policy.
   const offer=await workerCommand(a,{type:'CREATE_RULE',
-    targetID:identityB.deviceId,siteOrigin});
+    targetID:identityB.deviceId,siteOrigin,
+    dataTypes:{allCookies:true,localStorage:true,sessionStorage:true,indexedDB:true}});
   assert.ok(offer.ruleId);
   const bRules=await workerCommand(b,{type:'LIST_RULES'});
   const toAccept=bRules.rules.find(x=>x.id===offer.ruleId);
   assert.equal(toAccept.role,'target');
   assert.equal(toAccept.status,'offered');
   assert.ok(toAccept.valid&&toAccept.code,'B must decrypt/verify A encrypted pairing policy');
+  assert.equal(toAccept.policy.schemaVersion,4);
+  assert.deepEqual([toAccept.policy.allCookies,toAccept.policy.localStorage,
+    toAccept.policy.sessionStorage,toAccept.policy.indexedDB],[true,true,true,true]);
   const aRules=await workerCommand(a,{type:'LIST_RULES'});
   assert.equal(aRules.rules.find(x=>x.id===offer.ruleId).code,toAccept.code,
     'the out-of-band A/B pairing confirmation code must match');

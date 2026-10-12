@@ -95,18 +95,28 @@ func TestDeviceDiagnosticsValidateAndClonePayload(t *testing.T) {
 }
 
 func TestPresenceNotifierEmitsOnlyCurrentSessionTransitions(t *testing.T) {
-	m:=NewManager()
+	m := NewManager()
 	var notifications []string
-	m.SetPresenceNotifier(func(identity string){notifications=append(notifications,identity)})
-	old:=&DeviceSession{DeviceID:"device",IdentityID:"identity_a"}
-	current:=&DeviceSession{DeviceID:"device",IdentityID:"identity_a"}
+	m.SetPresenceNotifier(func(identity string) { notifications = append(notifications, identity) })
+	old := &DeviceSession{DeviceID: "device", IdentityID: "identity_a"}
+	current := &DeviceSession{DeviceID: "device", IdentityID: "identity_a"}
 	m.Register(old)
 	m.Register(current)
-	if m.UnregisterSession(old){t.Fatal("old session removed current generation")}
-	if len(notifications)!=2{t.Fatalf("unexpected notifications after stale close: %v",notifications)}
-	if !m.UnregisterSession(current){t.Fatal("current session did not close")}
-	if len(notifications)!=3{t.Fatalf("missing close notification: %v",notifications)}
-	for _,identity:=range notifications{
-		if identity!="identity_a"{t.Fatalf("cross identity notice: %q",identity)}
+	if m.UnregisterSession(old) {
+		t.Fatal("old session removed current generation")
+	}
+	if len(notifications) != 2 {
+		t.Fatalf("unexpected notifications after stale close: %v", notifications)
+	}
+	if !m.UnregisterSession(current) {
+		t.Fatal("current session did not close")
+	}
+	if len(notifications) != 3 {
+		t.Fatalf("missing close notification: %v", notifications)
+	}
+	for _, identity := range notifications {
+		if identity != "identity_a" {
+			t.Fatalf("cross identity notice: %q", identity)
+		}
 	}
 }

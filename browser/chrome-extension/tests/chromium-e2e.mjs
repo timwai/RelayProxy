@@ -97,6 +97,36 @@ async function sourceSiteState(page,origin){
   });
 }
 
+// A hostile first-party page can shadow browser APIs in MAIN world. The
+// extension must use isolated JS globals, while still reading/writing the
+// SAME origin-scoped IndexedDB database that the page owns.
+async function blockPageWorldIndexedDB(page){
+  await page.evaluate(()=>{
+    const descriptor=Object.getOwnPropertyDescriptor(window,'indexedDB');
+    if(!descriptor?.configurable)
+      throw new Error('Test requires configurable main-world IndexedDB binding');
+    Object.defineProperty(window,'__relayE2ESavedIndexedDB',{value:descriptor,
+      configurable:true});
+    Object.defineProperty(window,'indexedDB',{configurable:true,get(){
+      throw new Error('PAGE_WORLD_INDEXEDDB_HIJACK');
+    }});
+  });
+  assert.equal(await page.evaluate(()=>{
+    try{void indexedDB;return false;}catch(e){
+      return e?.message==='PAGE_WORLD_INDEXEDDB_HIJACK';
+    }
+  }),true,'the page-world IndexedDB poison was not installed');
+}
+
+async function unblockPageWorldIndexedDB(page){
+  await page.evaluate(()=>{
+    const descriptor=window.__relayE2ESavedIndexedDB;
+    if(!descriptor)throw new Error('Missing saved page-world IndexedDB property');
+    Object.defineProperty(window,'indexedDB',descriptor);
+    delete window.__relayE2ESavedIndexedDB;
+  });
+}
+
 async function chromiumCapture(profile,policy){
   return profile.options.evaluate(async policy=>{
     const [{captureAllCookies},{captureWebStorage},{captureIndexedDB}]=await Promise.all([
@@ -239,9 +269,13 @@ async function main(){
   const pageA=await a.context.newPage();
   const pageB=await b.context.newPage();
   await sourceSiteState(pageA,origin);
+  // The webpage's global IndexedDB API is now hostile. ISOLATED-world
+  // capture must bypass its patched getter and retain the real database.
+  await blockPageWorldIndexedDB(pageA);
   await pageB.goto(origin+'/');
   assert.deepEqual(await pageB.evaluate(async()=>(await(await fetch('/whoami')).json())),{user:'anonymous'});
   const payload=await chromiumCapture(a,policy);
+  await unblockPageWorldIndexedDB(pageA);
   assert.equal(payload.cookies.some(c=>c.name==='rp_e2e_session'&&c.httpOnly&&c.value==='alice'),true,
     'the source Chrome API must collect HTTP-only session Cookies');
   const sourceDB=payload.indexedDB.databases.find(db=>db.name==='rp-e2e-auth');
@@ -260,7 +294,9 @@ async function main(){
   rejected.ciphertext=rejected.ciphertext.replace(/^./,v=>v==='A'?'B':'A');
   await assert.rejects(decryptInTarget(b,rejected,source),/签名|decryption|decrypt/i,
     'tampered Chrome encrypted envelope must be rejected');
+  await blockPageWorldIndexedDB(pageB);
   const applied=await applyToTarget(b,ruleId,policy,restored);
+  await unblockPageWorldIndexedDB(pageB);
   console.log('IndexedDB restore phases (schema only):',JSON.stringify(applied.stages));
   assert.equal(applied.status,'APPLIED');
   const [extView,pageView]=await Promise.all([
@@ -283,7 +319,8 @@ async function main(){
   assert.deepEqual(await pageB.evaluate(async()=>(await(await fetch('/whoami')).json())),
     {user:'bob'},'new independent B account must stay logged in after refused overwrite');
   console.log('Chromium A/B integration passed: two real profiles, MV3 permissions, HttpOnly login,');
-  console.log('all local/session storage, IndexedDB v3 Blob/Date, E2EE, tamper + account conflict.');
+  console.log('all local/session storage, IndexedDB v3 in ISOLATED world despite page API hijack,');
+  console.log('Blob/Date, E2EE, tamper + account conflict.');
 }
 
 // Also used by the separate real-Server WSS acceptance test. Importing this

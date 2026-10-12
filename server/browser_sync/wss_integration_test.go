@@ -405,3 +405,33 @@ func TestWSSRevokedDeviceCannotContinueAuthenticatedSession(t *testing.T) {
 		t.Fatalf("revoked browser kept its WSS session: %v", err)
 	}
 }
+
+func TestWSSRevokedOriginRejectsExistingDeviceSession(t *testing.T) {
+	store := testBrowserStore(t)
+	key, signing := makeKey(t)
+	_, encryption := makeKey(t)
+	device := BrowserDevice{
+		ID: "browser_" + uuid.NewString(), Name: "Origin revocation browser",
+		SigningKey: signing, EncryptionKey: encryption,
+	}
+	ctx := context.Background()
+	if _, _, err := store.EnrollExtensionDevice(ctx, testExtensionID, device); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ApproveEnrollment(ctx, device.ID, "id_1", true, false); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(NewHandler(store, nil))
+	defer server.Close()
+	conn := dialApprovedBrowser(t, server, device, key)
+	if err := store.SetExtensionApproved(ctx, testExtensionID, false); err != nil {
+		t.Fatal(err)
+	}
+	sendWSSControl(t, conn, map[string]any{"type": "PING"})
+	readCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	_, _, err := conn.Read(readCtx)
+	if websocket.CloseStatus(err) != websocket.StatusPolicyViolation {
+		t.Fatalf("revoked Origin kept its WSS session: %v", err)
+	}
+}

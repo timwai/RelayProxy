@@ -219,3 +219,17 @@ test('IndexedDB object-key ordering across Chrome scripting boundaries never cau
   changed.databases[0].stores[0].rows[0].value[1][0][1][1]='bob';
   assert.notEqual(canonicalIndexedDBJSON(snapshot),canonicalIndexedDBJSON(changed));
 });
+
+test('Chrome injected IndexedDB errors are returned explicitly instead of silent null success',async()=>{
+  use(fakeIndexedDB());
+  const blank={schemaVersion:1,databases:[]};
+  const snapshot={schemaVersion:1,databases:[{
+    name:'fixture',version:1,stores:[{name:'records',keyPath:null,
+      autoIncrement:false,indexes:[],rows:[{key:['s','id'],value:['s','value']}]}]
+  }]};
+  await siteIndexedDB(origin,'write',snapshot,blank);
+  await assert.rejects(siteIndexedDB(origin,'write',snapshot,blank),/CONFLICT/);
+  const reported=await siteIndexedDB(origin,'write',snapshot,blank,true);
+  assert.match(reported.__relayIndexedDBError,/CONFLICT/);
+  assert.deepEqual(await siteIndexedDB(origin,'read'),snapshot);
+});

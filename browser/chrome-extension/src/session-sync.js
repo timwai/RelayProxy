@@ -489,7 +489,7 @@ export async function resumePausedRestore(ruleId,confirmed) {
   delete idbJournal[ruleId];
   await chrome.storage.local.set({[PAUSED_RESTORE]:flags,[journalKey]:journal,
     [storageKey]:storageJournal,[IDB_JOURNAL]:idbJournal});
-  await setStatus(ruleId,'UNKNOWN',item.messageId);
+  await setStatus(ruleId,'UNKNOWN');
   // Do not immediately overwrite a possibly changed website session.
   return {state:'UNKNOWN'};
 }

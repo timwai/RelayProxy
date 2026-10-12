@@ -279,6 +279,7 @@ func (s *Store) ActiveRule(ctx context.Context, ruleID string) (ApprovedRule, er
 		return ApprovedRule{}, err
 	}
 	r.Active = status == "active"
+	r.Status = status
 	r.SourceApproved, r.TargetApproved, r.KeyFingerprintsVerified = source != 0, target != 0, confirmed != 0
 	return r, nil
 }

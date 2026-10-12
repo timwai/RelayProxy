@@ -4,7 +4,8 @@ import {
   shouldReconcile, acceptDeliveryAck, isTerminalAck, RECONCILE_INTERVAL_MS,
   DELIVERY_ACK_TIMEOUT_MS, nextSessionSequence, validOverwriteGrant,
   OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection,
-  RECONNECT_BASE_MS, RECONNECT_MAX_MS, singleFlight, nextDeliveryStatus
+  RECONNECT_BASE_MS, RECONNECT_MAX_MS, singleFlight, nextDeliveryStatus,
+  clearPendingIfMessageMatches
 } from '../src/lifecycle.js';
 
 test('reconcile on new profile or after inactivity, not every minute', () => {
@@ -142,4 +143,14 @@ test('provisional UNKNOWN can be resolved by a later durable APPLIED receipt',()
   assert.equal(completed.state,'APPLIED');
   assert.equal(completed.messageId,messageId);
   assert.strictEqual(nextDeliveryStatus(completed,'RELAYED',messageId,1003),completed);
+});
+
+test('late ACK clear cannot erase a newer durable pending receipt',()=>{
+  const old={ruleId:'r1',messageId:'old',createdAt:1000};
+  const fresh={ruleId:'r1',messageId:'new',createdAt:2000};
+  assert.strictEqual(clearPendingIfMessageMatches(fresh,old.messageId),fresh,
+    'old terminal ACK removed the recovery record for a new delivery');
+  assert.equal(clearPendingIfMessageMatches(fresh,fresh.messageId),null);
+  assert.equal(clearPendingIfMessageMatches(undefined,old.messageId),undefined);
+  assert.strictEqual(clearPendingIfMessageMatches(old,fresh.messageId),old);
 });

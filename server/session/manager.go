@@ -100,7 +100,7 @@ type Manager struct {
 	exitsByOwner    map[string]map[string]*DeviceSession
 	exitsByIdentity map[string]map[string]*DeviceSession
 	authorizationMu sync.Mutex
-	presenceNotify func(identityID string)
+	presenceNotify  func(identityID string)
 }
 
 // SetPresenceNotifier is a nonblocking invalidation hook. It is called
@@ -108,15 +108,17 @@ type Manager struct {
 // through their own scoped APIs rather than trust a session snapshot.
 func (m *Manager) SetPresenceNotifier(fn func(identityID string)) {
 	m.mu.Lock()
-	m.presenceNotify=fn
+	m.presenceNotify = fn
 	m.mu.Unlock()
 }
 
-func (m *Manager) notifyPresence(identityID string){
+func (m *Manager) notifyPresence(identityID string) {
 	m.mu.RLock()
-	fn:=m.presenceNotify
+	fn := m.presenceNotify
 	m.mu.RUnlock()
-	if fn!=nil{fn(identityID)}
+	if fn != nil {
+		fn(identityID)
+	}
 }
 
 func NewManager() *Manager {
@@ -234,19 +236,21 @@ func (m *Manager) ChangeDeviceAuthorization(deviceID string, revoke bool, change
 		return err
 	}
 	var toClose tunnel.TunnelSession
-	changedIdentity:=""
+	changedIdentity := ""
 	if revoke {
 		// Authorization/ownership/grant changes invalidate the whole snapshot.
 		// A new tunnel must authenticate again before its data-plane state is used.
 		m.mu.Lock()
 		if sess := m.removeLocked(deviceID); sess != nil {
 			toClose = sess.Tunnel
-			changedIdentity=sess.IdentityID
+			changedIdentity = sess.IdentityID
 		}
 		m.mu.Unlock()
 	}
 	m.authorizationMu.Unlock()
-	if changedIdentity!=""{m.notifyPresence(changedIdentity)}
+	if changedIdentity != "" {
+		m.notifyPresence(changedIdentity)
+	}
 	if toClose != nil {
 		_ = toClose.Close()
 	}
@@ -277,7 +281,9 @@ func (m *Manager) InvalidateIdentity(identityID string) []string {
 	}
 	m.mu.Unlock()
 	m.authorizationMu.Unlock()
-	if len(deviceIDs)>0{m.notifyPresence(identityID)}
+	if len(deviceIDs) > 0 {
+		m.notifyPresence(identityID)
+	}
 
 	for _, transport := range toClose {
 		_ = transport.Close()
@@ -299,7 +305,9 @@ func (m *Manager) UnregisterSession(sess *DeviceSession) bool {
 		}
 	}
 	m.mu.Unlock()
-	if removed{m.notifyPresence(sess.IdentityID)}
+	if removed {
+		m.notifyPresence(sess.IdentityID)
+	}
 	if toClose != nil {
 		_ = toClose.Close()
 	}
@@ -309,13 +317,15 @@ func (m *Manager) UnregisterSession(sess *DeviceSession) bool {
 func (m *Manager) Unregister(deviceID string) {
 	m.mu.Lock()
 	var toClose tunnel.TunnelSession
-	identityID:=""
+	identityID := ""
 	if sess := m.removeLocked(deviceID); sess != nil {
 		toClose = sess.Tunnel
-		identityID=sess.IdentityID
+		identityID = sess.IdentityID
 	}
 	m.mu.Unlock()
-	if identityID!=""{m.notifyPresence(identityID)}
+	if identityID != "" {
+		m.notifyPresence(identityID)
+	}
 	if toClose != nil {
 		_ = toClose.Close()
 	}
@@ -324,18 +334,20 @@ func (m *Manager) Unregister(deviceID string) {
 func (m *Manager) ReapStaleSessions(timeout time.Duration) {
 	threshold := time.Now().Add(-timeout).Unix()
 	var toClose []tunnel.TunnelSession
-	changed:=make(map[string]struct{})
+	changed := make(map[string]struct{})
 
 	m.mu.Lock()
 	for id, sess := range m.sessions {
 		if sess.LastHeartbeat.Load() < threshold {
 			toClose = append(toClose, sess.Tunnel)
-			changed[sess.IdentityID]=struct{}{}
+			changed[sess.IdentityID] = struct{}{}
 			m.removeLocked(id)
 		}
 	}
 	m.mu.Unlock()
-	for identityID:=range changed {m.notifyPresence(identityID)}
+	for identityID := range changed {
+		m.notifyPresence(identityID)
+	}
 
 	for _, t := range toClose {
 		if t != nil {

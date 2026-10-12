@@ -201,8 +201,8 @@ test('real capture/restore entry points accept explicit v3 pairing, never old v2
     await noop.apply();
     await noop.commit();
     assert.equal(await noop.rollback(),true);
-    await assert.rejects(captureIndexedDB(v2),/v3/);
-    await assert.rejects(prepareIndexedDBRestore('test-rule',undefined,v2),/v3/);
+    await assert.rejects(captureIndexedDB(v2),/未授权 IndexedDB/);
+    await assert.rejects(prepareIndexedDBRestore('test-rule',undefined,v2),/未授权 IndexedDB/);
   }finally{globalThis.chrome=oldChrome;}
 });
 

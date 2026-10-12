@@ -67,6 +67,18 @@ func (s *Store) RecordDelivery(ctx context.Context, messageID, ruleID, sourceID,
 	if _, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_delivery_results WHERE expires_at<=?`, now.Unix()); err != nil {
 		return err
 	}
+	// Recheck the rule in the insertion transaction: administrative pause or
+	// revoke can race the earlier encrypted-envelope signature check.
+	var activeRule int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_rules
+		WHERE id=? AND source_id=? AND target_id=? AND status='active'
+		AND source_approved=1 AND target_approved=1 AND keys_confirmed=1`,
+		ruleID, sourceID, targetID).Scan(&activeRule); err != nil {
+		return err
+	}
+	if activeRule != 1 {
+		return ErrRuleDenied
+	}
 	var pendingRule, pendingSource int
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_deliveries
 		WHERE rule_id=? AND expires_at>?`, ruleID, now.Unix()).Scan(&pendingRule); err != nil {
@@ -91,8 +103,8 @@ func (s *Store) DiscardDelivery(ctx context.Context, messageID string) {
 	_, _ = s.db.ExecContext(ctx, `DELETE FROM browser_sync_deliveries WHERE message_id=?`, messageID)
 }
 
-// ClaimDeliveryReceipt requires an active, mutually approved rule AND an
-// actual previous encrypted transmission for this exact receiver/message.
+// ClaimDeliveryReceipt requires a mutually approved active/paused rule AND
+// an already registered encrypted delivery. A pause must not lose its ACK.
 // RECEIVED may precede exactly one terminal acknowledgement.
 func (s *Store) ClaimDeliveryReceipt(ctx context.Context, receiverID, ruleID, messageID, status string, now time.Time) (string, error) {
 	switch status {
@@ -105,7 +117,8 @@ func (s *Store) ClaimDeliveryReceipt(ctx context.Context, receiverID, ruleID, me
 		return "", ErrRuleDenied
 	}
 	rule, err := s.ActiveRule(ctx, ruleID)
-	if err != nil || !rule.Active || !rule.SourceApproved || !rule.TargetApproved ||
+	if err != nil || (rule.Status != "active" && rule.Status != "paused") ||
+		!rule.SourceApproved || !rule.TargetApproved ||
 		!rule.KeyFingerprintsVerified || rule.TargetBrowserDeviceID != receiver.ID {
 		return "", ErrRuleDenied
 	}

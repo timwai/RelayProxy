@@ -49,6 +49,7 @@ func TestValidateEnvelope(t *testing.T) {
 			e.Ciphertext = strings.Repeat("A", base64.StdEncoding.EncodedLen(MaxCiphertextBytes)+4)
 		}},
 		{"missing-signature", func(e *Envelope) { e.Signature = "" }},
+		{"invalid-transfer-request", func(e *Envelope) { e.TransferRequestID = "untrusted-text" }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			e := validEnvelope(now)
@@ -70,5 +71,28 @@ func TestExpandedSnapshotCiphertextEnvelopeLimit(t *testing.T) {
 	env.Ciphertext = base64.RawURLEncoding.EncodeToString(make([]byte, MaxCiphertextBytes+1))
 	if err := ValidateEnvelope(env, now); err == nil {
 		t.Fatal("snapshot larger than the wire limit was accepted")
+	}
+}
+
+func TestReceiverTransferRequestIsAuthenticatedInEnvelopeHeader(t *testing.T) {
+	now := time.Now().UTC()
+	base := validEnvelope(now)
+	oldHeader := SignedHeader(base)
+	const token = "01234567-89ab-4cde-a321-112233445566"
+	base.TransferRequestID = token
+	if err := ValidateEnvelope(base, now); err != nil {
+		t.Fatalf("valid B request token rejected: %v", err)
+	}
+	signed := SignedHeader(base)
+	if signed == oldHeader || !strings.HasSuffix(signed, "\n"+token) {
+		t.Fatalf("receiver token not authenticated in signed header")
+	}
+	base.TransferRequestID = "11111111-89ab-4cde-a321-112233445566"
+	if SignedHeader(base) == signed {
+		t.Fatal("changing request token did not invalidate the signed header")
+	}
+	base.TransferRequestID = ""
+	if SignedHeader(base) != oldHeader {
+		t.Fatal("legacy unrequested snapshot wire header changed")
 	}
 }

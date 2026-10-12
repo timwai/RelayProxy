@@ -155,18 +155,28 @@ async function verifyTargetSite(page,origin){
   }),{user:'alice'},'the WEBSITE must accept the migrated HTTP-only Cookie');
   const state=await page.evaluate(async()=>{
     const record=await new Promise((resolve,reject)=>{
+      const events=[];
+      const timer=setTimeout(()=>reject(new Error('IndexedDB page read timed out: '+events.join(','))),9000);
+      const ok=value=>{clearTimeout(timer);resolve(value);};
+      const fail=error=>{clearTimeout(timer);reject(error);};
       const open=indexedDB.open('rp-e2e-auth');
-      open.onerror=()=>reject(open.error);
+      open.onblocked=()=>events.push('open-blocked');
+      open.onerror=()=>fail(open.error||new Error('open failed'));
       open.onsuccess=()=>{
+        events.push('opened');
         const db=open.result;
-        const tx=db.transaction('accounts','readonly');
-        const get=tx.objectStore('accounts').get('primary');
-        get.onsuccess=()=>{const row=get.result;db.close();resolve({
-          id:row.id,user:row.user,token:row.token,
-          blob:row.blob instanceof Blob,
-          validDate:row.lastLogin instanceof Date
-        });};
-        get.onerror=()=>{db.close();reject(get.error);};
+        let tx;
+        try{
+          tx=db.transaction('accounts','readonly');
+          const get=tx.objectStore('accounts').get('primary');
+          get.onsuccess=()=>{const row=get.result;db.close();ok({
+            id:row.id,user:row.user,token:row.token,
+            blob:row.blob instanceof Blob,
+            validDate:row.lastLogin instanceof Date
+          });};
+          get.onerror=()=>{db.close();fail(get.error||new Error('get failed'));};
+          tx.onabort=()=>{db.close();fail(tx.error||new Error('transaction aborted'));};
+        }catch(e){db.close();fail(e);}
       };
     });
     return {local:localStorage.getItem('rp_e2e_access'),

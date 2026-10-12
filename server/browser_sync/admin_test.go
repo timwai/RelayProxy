@@ -14,7 +14,7 @@ import (
 func adminTestPair(t *testing.T, store *Store) (string, string, string) {
 	t.Helper()
 	ctx := context.Background()
-	source, target := "browser_"+uuid.NewString(), "browser_"+uuid.NewString()
+	source, target := "browser_" + uuid.NewString(), "browser_" + uuid.NewString()
 	registerBrowserForRules(t, store, source, true, false)
 	registerBrowserForRules(t, store, target, false, true)
 	id := uuid.NewString()

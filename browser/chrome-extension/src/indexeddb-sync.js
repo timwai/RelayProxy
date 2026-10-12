@@ -386,6 +386,13 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
       journal[ruleId]={startedAt:Date.now()};
       await chrome.storage.local.set({[JOURNAL_KEY]:journal});
       await executeSiteIndexedDB(id,[p.siteOrigin,'write',after,before]);
+      // A successful chrome.scripting response alone cannot prove the
+      // website can read the committed database. Verify the complete schema
+      // and encoded records before allowing a terminal APPLIED acknowledgement.
+      const verified=validateIndexedDBSnapshot(
+        await executeSiteIndexedDB(id,[p.siteOrigin,'read']));
+      if(JSON.stringify(verified)!==JSON.stringify(after))
+        throw new Error('INDEXEDDB_FAILURE: IndexedDB 写入后校验失败，拒绝报告同步成功');
     },
     async commit(){
       if(!started||finished)throw new Error('IndexedDB 事务状态无效');

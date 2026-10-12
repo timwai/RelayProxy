@@ -60,6 +60,22 @@ func (p *NetworkProxy) AllowedExit(browserIdentity, exitID string) bool {
 		exit.Tunnel != nil
 }
 
+// A locally opted-in Agent understands the dedicated Browser Network frame.
+// Other identity-authorized proxy.exit Agents already handle ordinary TCP
+// egress with the SAME Agent ACL and Relay target policy. The Server has
+// authenticated the source browser and the target-approved binding before
+// sending either frame, never offering unapproved browser traffic.
+func browserExitStreamType(exit *session.DeviceSession) protocol.FrameType {
+	if exit != nil {
+		for _, capability := range exit.Capabilities {
+			if capability == protocol.CapabilityBrowserNetworkExit {
+				return protocol.FrameTypeBrowserNetworkTCP
+			}
+		}
+	}
+	return protocol.FrameTypeOpenTCP
+}
+
 func (p *NetworkProxy) AvailableExits(ctx context.Context, browserID string) []map[string]string {
 	browser, err := p.Store.deviceAllowed(ctx, browserID)
 	if err != nil {
@@ -174,7 +190,7 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	defer stream.Close()
 	reqID := uuid.NewString()
 	_ = stream.SetDeadline(time.Now().Add(12 * time.Second))
-	header := &protocol.StreamHeader{Type: protocol.FrameTypeBrowserNetworkTCP, RequestID: reqID,
+	header := &protocol.StreamHeader{Type: browserExitStreamType(exit), RequestID: reqID,
 		ClientDeviceID: lease.deviceID, ExitDeviceID: exit.DeviceID}
 	if err = protocol.WriteStreamHeader(stream, header); err == nil {
 		err = protocol.WriteJSON(stream, protocol.OpenTCPRequest{

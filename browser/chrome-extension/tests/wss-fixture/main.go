@@ -72,17 +72,18 @@ func main() {
 			http.Error(w, "invalid request", http.StatusBadRequest)
 			return
 		}
+		var actionErr error
 		switch body.Action {
 		case "approve":
-			err = store.Approve(req.Context(), body.ID, "id_1", body.Send, body.Receive)
+			actionErr = store.Approve(req.Context(), body.ID, "id_1", body.Send, body.Receive)
 		case "revoke":
-			err = store.Revoke(req.Context(), body.ID)
+			actionErr = store.Revoke(req.Context(), body.ID)
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)
 			return
 		}
-		if err != nil {
-			log.Printf("fixture device action rejected: %v", err)
+		if actionErr != nil {
+			log.Printf("fixture device action rejected: %v", actionErr)
 			http.Error(w, "device transition rejected", http.StatusConflict)
 			return
 		}

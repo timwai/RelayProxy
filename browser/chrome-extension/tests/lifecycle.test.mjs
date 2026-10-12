@@ -133,3 +133,13 @@ test('late older delivery cannot overwrite new message status',()=>{
   assert.equal(nextDeliveryStatus(fresh,'RELAYED',newId,1003).state,'RELAYED');
   assert.equal(nextDeliveryStatus(fresh,'APPLIED',newId,1003).state,'APPLIED');
 });
+
+test('provisional UNKNOWN can be resolved by a later durable APPLIED receipt',()=>{
+  const messageId='93f3fc57-c38e-49c1-8c0b-34e653775b11';
+  const unconfirmed=nextDeliveryStatus(null,'SENDING',messageId,1000);
+  const unknown=nextDeliveryStatus(unconfirmed,'UNKNOWN',messageId,1001);
+  const completed=nextDeliveryStatus(unknown,'APPLIED',messageId,1002);
+  assert.equal(completed.state,'APPLIED');
+  assert.equal(completed.messageId,messageId);
+  assert.strictEqual(nextDeliveryStatus(completed,'RELAYED',messageId,1003),completed);
+});

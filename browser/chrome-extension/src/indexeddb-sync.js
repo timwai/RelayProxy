@@ -56,7 +56,8 @@ export function validateIndexedDBSnapshot(value){
 // Executed by chrome.scripting, not by the extension service worker.
 // IndexedDB is scoped to the current page origin. No MAIN-world scripts,
 // postMessage bridges, or cross-origin iframe enumeration are required.
-export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=null){
+export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=null,reportErrors=false){
+  try {
   if(location.origin!==expectedOrigin)throw new Error('IndexedDB 站点导航已变化');
   if(typeof indexedDB.databases!=='function')
     throw new Error('当前 Chrome 不支持安全枚举 IndexedDB 数据库');
@@ -304,7 +305,7 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
     }
     return true;
   }
-  if(mode==='read')return read();
+  if(mode==='read')return await read();
   if(mode==='validate'){
     if(!target||target.schemaVersion!==1||!Array.isArray(target.databases))fail();
     for(const db of target.databases)for(const s of db.stores)for(const row of s.rows){
@@ -312,8 +313,15 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
     }
     return true;
   }
-  if(mode==='write')return write(expected,target);
+  if(mode==='write')return await write(expected,target);
   throw new Error('IndexedDB 操作模式无效');
+  }catch(error){
+    // Chromium may return a null InjectionResult for an injected script that
+    // throws instead of rejecting scripting.executeScript. Report a bounded
+    // error string explicitly; never return "success" on an unknown result.
+    if(reportErrors)return {__relayIndexedDBError:String(error?.message||error).slice(0,256)};
+    throw error;
+  }
 }
 
 // IndexedDB writes must target the website's own database, not a transient
@@ -323,10 +331,12 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
 // MAIN-world use remains a site-interference risk and needs security review.
 async function executeSiteIndexedDB(tabId,args){
   const result=await chrome.scripting.executeScript({
-    target:{tabId},world:'MAIN',func:siteIndexedDB,args
+    target:{tabId},world:'MAIN',func:siteIndexedDB,args:[...args,true]
   });
-  if(result?.length!==1||!result[0]||!('result' in result[0]))
-    throw new Error('页面 IndexedDB 读取/写入失败');
+  if(result?.length!==1||!result[0]||!('result' in result[0])||result[0].result===null)
+    throw new Error('页面 IndexedDB 脚本异常，未确认读写完成');
+  if(result[0].result?.__relayIndexedDBError)
+    throw new Error(result[0].result.__relayIndexedDBError);
   return result[0].result;
 }
 

@@ -305,14 +305,17 @@ async function main(){
   assert.ok(persistedRule?.valid && persistedRule.status==='active' &&
     persistedRule.keysConfirmed,
     'Profile restart lost signed pairing trust or active rule');
-  // The test opens exactly one fresh website tab for the destination so its
-  // per-tab Session Storage is genuinely restored after the browser restart.
+  // Chrome onStartup may already have requested a new snapshot and chosen
+  // a website tab for the restore. Never close that tab mid-transaction: the
+  // test itself would cause an artificial PARTIAL/FAILED result. Reuse it, or
+  // create a site tab only when startup has not opened one.
   const existingSitePages=restartedB.context.pages().filter(page=>{
     try{return new URL(page.url()).origin===siteOrigin;}catch{return false;}
   });
-  for(const page of existingSitePages)await page.close();
-  const restartedSiteB=await restartedB.context.newPage();
-  await restartedSiteB.goto(siteOrigin+'/');
+  const restartedSiteB=existingSitePages[0]||await restartedB.context.newPage();
+  if(new URL(restartedSiteB.url()).origin!==siteOrigin)
+    await restartedSiteB.goto(siteOrigin+'/');
+  await restartedSiteB.waitForLoadState('domcontentloaded');
   for(const profile of [a,restartedB]){
     await profile.options.evaluate(async ruleId=>{
       const all=(await chrome.storage.local.get('browserSyncTransferStatus'))
@@ -324,7 +327,7 @@ async function main(){
   await workerCommand(a,{type:'SEND_SESSION',ruleId:offer.ruleId});
   try {
     for(const [profile,label] of [[a,'source'],[restartedB,'restarted receiver']]){
-    await eventually(label+' confirms APPLIED after full Profile restart',async()=>{
+      await eventually(label+' confirms APPLIED after full Profile restart',async()=>{
       const state=await profile.options.evaluate(async ruleId=>{
         const stored=await chrome.storage.local.get([
           'browserSyncTransferStatus','browserSyncPendingDelivery']);
@@ -334,7 +337,7 @@ async function main(){
       if(state.status!=='APPLIED')
         throw new Error('state='+state.status+', hasPending='+state.pending);
       return true;
-    });
+      });
     }
   }catch(error){
     // Diagnosis stays within fixed, schema-controlled audit categories.

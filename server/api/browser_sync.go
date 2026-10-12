@@ -219,7 +219,7 @@ func (r *Router) handleBrowserSyncStatus(w http.ResponseWriter, req *http.Reques
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"online": r.browserSync.OnlineSnapshot(),
-		"stats": stats,
+		"stats":  stats,
 	})
 }
 
@@ -258,7 +258,6 @@ func (r *Router) handleBrowserSyncAudit(w http.ResponseWriter, req *http.Request
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
 }
-
 
 // browserAuditCSVCell prevents spreadsheet formulas in values not guaranteed
 // to be server-generated UUIDs, particularly administrator account IDs.

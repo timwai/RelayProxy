@@ -435,3 +435,56 @@ func TestWSSRevokedOriginRejectsExistingDeviceSession(t *testing.T) {
 		t.Fatalf("revoked Origin kept its WSS session: %v", err)
 	}
 }
+
+
+func TestWSSReceiverDiagnosticCodeIsValidatedAndAudited(t *testing.T) {
+	store := testBrowserStore(t)
+	source, sourceKey := approvedWSSBrowser(t, store, true, false)
+	target, targetKey := approvedWSSBrowser(t, store, false, true)
+	ruleID := uuid.NewString()
+	ctx := context.Background()
+	if err := store.OfferRule(ctx, source.ID, encryptedTestOffer(ruleID, target.ID)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AcceptRule(ctx, target.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.ConfirmRule(ctx, source.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(NewHandler(store, []string{testExtensionID}))
+	defer server.Close()
+	a := dialApprovedBrowser(t, server, source, sourceKey)
+	b := dialApprovedBrowser(t, server, target, targetKey)
+	env := signedTestSnapshot(t, sourceKey, source.ID, target.ID, ruleID)
+	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "requestId": "send", "envelope": env})
+	if reply := readWSSControl(t, a); reply["status"] != "RELAYED" {
+		t.Fatalf("source snapshot was not relayed: %v", reply)
+	}
+	if reply := readWSSControl(t, b); reply["type"] != "SESSION_SNAPSHOT" {
+		t.Fatalf("receiver did not receive encrypted session: %v", reply)
+	}
+	sendWSSControl(t, b, map[string]any{
+		"type": "SYNC_ACK", "requestId": "bad", "ruleId": ruleID,
+		"messageId": env.MessageID, "status": "FAILED",
+		"errorCode": "session_cookie=secret-value",
+	})
+	if reply := readWSSControl(t, b); reply["type"] != "RULE_ERROR" {
+		t.Fatalf("arbitrary diagnostic text was accepted: %v", reply)
+	}
+	sendWSSControl(t, b, map[string]any{
+		"type": "SYNC_ACK", "requestId": "good", "ruleId": ruleID,
+		"messageId": env.MessageID, "status": "FAILED",
+		"errorCode": "INDEXEDDB_FAILURE",
+	})
+	if reply := readWSSControl(t, a); reply["type"] != "SYNC_ACK" || reply["status"] != "FAILED" {
+		t.Fatalf("source did not receive terminal failure: %v", reply)
+	}
+	if reply := readWSSControl(t, b); reply["type"] != "SYNC_STATUS" {
+		t.Fatalf("receiver failure receipt did not commit: %v", reply)
+	}
+	events, err := store.AdminAuditFiltered(ctx, 0, 10, "delivery_result", source.ID)
+	if err != nil || len(events) != 1 || events[0].ErrorCode != "INDEXEDDB_FAILURE" {
+		t.Fatalf("receiver failure diagnostic missing from safe audit: %+v %v", events, err)
+	}
+}

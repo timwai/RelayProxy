@@ -127,6 +127,25 @@ jobs:
             go test ./... -count=1
           fi
 
+  browser-sync-chromium:
+    # Isolated real Chromium profiles, Chrome MV3 APIs, local owned login
+    # fixture and cross-profile E2EE. Does not require a public Relay Server.
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: "22"
+      - name: Install Chromium and test runner
+        working-directory: browser/chrome-extension
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install --with-deps chromium
+      - name: Real Chromium A/B MV3 session sync acceptance
+        working-directory: browser/chrome-extension
+        run: npm run test:chromium
+
   desktop-platforms:
     strategy:
       fail-fast: false

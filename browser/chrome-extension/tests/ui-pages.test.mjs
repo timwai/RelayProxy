@@ -113,3 +113,16 @@ test('MV3 alarm reconnect is not throttled by periodic session refresh',()=>{
   assert.ok(session.indexOf('await reconcilePendingDeliveries();')<
     session.indexOf('if(!force&&!shouldReconcile(last,now))return;'));
 });
+
+test('network binding invitation remains actionable while pending or revoked',()=>{
+  const code=asset('options.js');
+  assert.match(code,/rule\.network\?\.status==='offered'/);
+  assert.match(code,/rule\.network\.status==='revoked'/);
+  assert.match(code,/取消网络绑定邀请/);
+  assert.match(code,/重新发起网络绑定邀请/);
+  assert.match(code,/NETWORK_REVOKE/);
+  assert.match(code,/NETWORK_OFFER/);
+  assert.match(code,/NETWORK_EXITS/);
+  assert.match(code,/已授权且在线的 Agent proxy\.exit 出口/);
+  assert.doesNotMatch(code,/来源设备 Agent 已开启浏览器网络共享/);
+});

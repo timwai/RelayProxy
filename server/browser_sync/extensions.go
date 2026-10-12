@@ -125,7 +125,6 @@ func (s *Store) SetExtensionApproved(ctx context.Context, id string, approve boo
 	return nil
 }
 
-
 // EnrollExtensionDevice binds a Chrome Origin to the exact device ID and
 // P-256 public keys during a single, unprivileged registration attempt.
 // Only device approval grants access; origin inventory never grants privileges.

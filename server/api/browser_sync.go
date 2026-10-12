@@ -1,12 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/csv"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	browsersync "relayproxy/server/browser_sync"
 )
@@ -254,4 +257,75 @@ func (r *Router) handleBrowserSyncAudit(w http.ResponseWriter, req *http.Request
 		next = items[len(items)-1].ID
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextCursor": next})
+}
+
+
+// browserAuditCSVCell prevents spreadsheet formulas in values not guaranteed
+// to be server-generated UUIDs, particularly administrator account IDs.
+func browserAuditCSVCell(value string) string {
+	if value == "" {
+		return value
+	}
+	switch value[0] {
+	case '=', '+', '-', '@', '\t', '\r', '\n':
+		return "'" + value
+	}
+	return value
+}
+
+func (r *Router) handleBrowserSyncAuditExport(w http.ResponseWriter, req *http.Request) {
+	entries, err := r.browserSync.Store.AdminAuditExport(req.Context(),
+		req.URL.Query().Get("type"), req.URL.Query().Get("device"))
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "invalid browser audit") {
+			writeError(w, http.StatusBadRequest, "invalid audit export filter")
+		} else {
+			writeError(w, http.StatusInternalServerError, "cannot export browser audit")
+		}
+		return
+	}
+	var buf bytes.Buffer
+	writer := csv.NewWriter(&buf)
+	if err := writer.Write([]string{"id", "time_utc", "event", "actor_id",
+		"device_id", "peer_id", "rule_id", "outcome"}); err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot serialize browser audit")
+		return
+	}
+	for _, entry := range entries {
+		values := []string{
+			strconv.FormatInt(entry.ID, 10), entry.CreatedAt.UTC().Format(time.RFC3339),
+			entry.Type, entry.ActorID, entry.DeviceID, entry.PeerID, entry.RuleID, entry.Outcome,
+		}
+		for i := range values {
+			values[i] = browserAuditCSVCell(values[i])
+		}
+		if err := writer.Write(values); err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot serialize browser audit")
+			return
+		}
+	}
+	writer.Flush()
+	if err := writer.Error(); err != nil {
+		writeError(w, http.StatusInternalServerError, "cannot serialize browser audit")
+		return
+	}
+	w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+	w.Header().Set("Content-Disposition", `attachment; filename="relayproxy-browser-sync-audit.csv"`)
+	w.Header().Set("Cache-Control", "no-store")
+	w.Header().Set("X-Content-Type-Options", "nosniff")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(buf.Bytes())
+}
+
+func (r *Router) handleBrowserSyncAuditClear(w http.ResponseWriter, req *http.Request) {
+	count, err := r.browserSync.Store.ClearAdminAudit(browserAdminContext(req))
+	if err != nil {
+		if errors.Is(err, browsersync.ErrRuleDenied) {
+			writeError(w, http.StatusForbidden, "administrator required to clear browser audit")
+		} else {
+			writeError(w, http.StatusInternalServerError, "unable to clear browser audit")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"deleted": count})
 }

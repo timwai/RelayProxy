@@ -14,10 +14,10 @@ import (
 // existing authenticated, identity-filtered APIs to load current state; no
 // device inventory, credentials or private application data travel in SSE.
 type liveUpdates struct {
-	mu          sync.Mutex
-	revision    uint64
+	mu            sync.Mutex
+	revision      uint64
 	scopeRevision map[string]uint64
-	subscribers map[chan uint64]liveSubscriber
+	subscribers   map[chan uint64]liveSubscriber
 }
 type liveSubscriber struct {
 	identityID string
@@ -58,7 +58,7 @@ func (h *liveUpdates) publish(identityID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.revision++
-	if identityID!=""{
+	if identityID != "" {
 		h.scopeRevision[identityID]++
 	}
 	for ch, subscriber := range h.subscribers {
@@ -67,8 +67,10 @@ func (h *liveUpdates) publish(identityID string) {
 		}
 		// Identity subscribers see only their OWN revision sequence, never
 		// gaps revealing how often another identity changed its state.
-		revision:=h.revision
-		if !subscriber.admin{revision=h.scopeRevision[identityID]}
+		revision := h.revision
+		if !subscriber.admin {
+			revision = h.scopeRevision[identityID]
+		}
 		select {
 		case ch <- revision:
 		default:

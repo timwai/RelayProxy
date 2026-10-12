@@ -83,3 +83,16 @@ export function singleFlight(task) {
     return promise;
   };
 }
+
+// A browser can receive APPLIED before the earlier RELAYED response is
+// processed. Never allow that older, non-terminal status to erase the final
+// result for the same opaque message ID. A new message may start fresh.
+// This pure reducer intentionally stores no website content or credentials.
+export function nextDeliveryStatus(previous,state,messageId='',now=Date.now()){
+  const terminal=new Set(['APPLIED','FAILED','CONFLICT','UNKNOWN','PARTIAL']);
+  if(messageId&&previous?.messageId&&previous.messageId!==messageId&&state!=='SENDING')
+    return previous;
+  if(messageId&&previous?.messageId===messageId&&terminal.has(previous.state))
+    return previous;
+  return {state,time:now,...(messageId?{messageId}:{})};
+}

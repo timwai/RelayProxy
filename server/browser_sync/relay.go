@@ -1,13 +1,13 @@
 package browsersync
 
 import (
-	"github.com/google/uuid"
 	"context"
 	"errors"
 	"sync"
 	"time"
 
 	"github.com/coder/websocket"
+	"github.com/google/uuid"
 	protocol "relayproxy/internal/browser_sync"
 )
 

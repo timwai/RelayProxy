@@ -118,7 +118,7 @@ func (s *Store) EnsureAdminSchema(ctx context.Context) error {
 func appendBrowserAudit(ctx context.Context, tx *sql.Tx, event, deviceID, peerID, ruleID, outcome string) error {
 	switch event {
 	case "device_approved", "device_revoked", "device_deleted",
-		"rule_paused", "rule_resumed", "rule_revoked", "delivery_result":
+		"rule_paused", "rule_resumed", "rule_revoked", "delivery_result", "audit_cleared":
 	default:
 		return errors.New("invalid browser audit event")
 	}
@@ -331,6 +331,59 @@ func (s *Store) AdminAuditFiltered(ctx context.Context, before int64, limit int,
 		events = append(events, event)
 	}
 	return events, rows.Err()
+}
+
+// AdminAuditExport returns at most the retained 5000 events, using the same
+// validated filters as the paged administrator view.
+func (s *Store) AdminAuditExport(ctx context.Context, eventType, deviceID string) ([]AdminAuditEvent, error) {
+	all := make([]AdminAuditEvent, 0)
+	var before int64
+	for len(all) < browserAuditMaxRows {
+		limit := 100
+		if remaining := browserAuditMaxRows - len(all); remaining < limit {
+			limit = remaining
+		}
+		page, err := s.AdminAuditFiltered(ctx, before, limit, eventType, deviceID)
+		if err != nil {
+			return nil, err
+		}
+		all = append(all, page...)
+		if len(page) < limit {
+			break
+		}
+		before = page[len(page)-1].ID
+	}
+	return all, nil
+}
+
+// ClearAdminAudit explicitly deletes the retained audit history, then writes
+// a new administrator-attributed clearing event in the SAME transaction.
+// Auditors can still see that the history was deliberately cleared.
+func (s *Store) ClearAdminAudit(ctx context.Context) (int64, error) {
+	actor, _ := ctx.Value(browserAdminActorKey{}).(string)
+	if actor == "" {
+		return 0, ErrRuleDenied
+	}
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, err
+	}
+	defer tx.Rollback()
+	res, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_audit`)
+	if err != nil {
+		return 0, err
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, err
+	}
+	if err := appendBrowserAudit(ctx, tx, "audit_cleared", "", "", "", ""); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	return n, nil
 }
 
 func (s *Store) AdminDeviceStats(ctx context.Context) ([]AdminDeviceStats, error) {

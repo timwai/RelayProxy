@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {siteIndexedDB,validateIndexedDBSnapshot,MAX_INDEXEDDB_BYTES,captureIndexedDB,prepareIndexedDBRestore,canonicalIndexedDBJSON} from '../src/indexeddb-sync.js';
+import {siteIndexedDB,validateIndexedDBSnapshot,MAX_INDEXEDDB_BYTES,captureIndexedDB,prepareIndexedDBRestore,canonicalIndexedDBJSON,executeSiteIndexedDB} from '../src/indexeddb-sync.js';
 
 // Small IndexedDB simulator for the injected ISOLATED-world routine. It
 // reproduces upgrade callbacks, cursor order, transaction completion and
@@ -236,4 +236,89 @@ test('Chrome injected IndexedDB errors are returned explicitly instead of silent
   const reported=await siteIndexedDB(origin,'write',snapshot,blank,true);
   assert.match(reported.__relayIndexedDBError,/CONFLICT/);
   assert.deepEqual(await siteIndexedDB(origin,'read'),snapshot);
+});
+
+test('missing injected READ result retries once in ISOLATED top frame without mutating data',async()=>{
+  const old=globalThis.chrome,seen=[];
+  globalThis.chrome={
+    tabs:{async get(){return {url:origin+'/',status:'complete'};}},
+    scripting:{async executeScript({world,target,args}){
+      assert.equal(world,'ISOLATED');
+      assert.deepEqual(target,{tabId:17,frameIds:[0]});
+      seen.push(args[1]);
+      return [{frameId:0,result:seen.length===1?null:blank}];
+    }}
+  };
+  try{
+    assert.deepEqual(await executeSiteIndexedDB(17,[origin,'read']),blank);
+    assert.deepEqual(seen,['read','read']);
+  }finally{globalThis.chrome=old;}
+});
+
+test('unknown WRITE result is accepted only after independent full readback, never replayed',async()=>{
+  const old=globalThis.chrome,seen=[];
+  const written={schemaVersion:1,databases:[{
+    name:'accounts',version:1,stores:[{
+      name:'sessions',keyPath:null,autoIncrement:false,indexes:[],
+      rows:[{key:['s','primary'],value:['s','opaque']}]
+    }]
+  }]};
+  globalThis.chrome={
+    tabs:{async get(){return {url:origin+'/account',status:'complete'};}},
+    scripting:{async executeScript({world,args}){
+      assert.equal(world,'ISOLATED');
+      seen.push(args[1]);
+      if(args[1]==='write')return [{frameId:0,result:null}];
+      return [{frameId:0,result:written}];
+    }}
+  };
+  try{
+    assert.equal(await executeSiteIndexedDB(17,[origin,'write',written,blank]),true);
+    assert.deepEqual(seen,['write','read']);
+  }finally{globalThis.chrome=old;}
+});
+
+test('unknown WRITE result never replays or claims success when readback differs',async()=>{
+  const old=globalThis.chrome,seen=[];
+  globalThis.chrome={
+    tabs:{async get(){return {url:origin+'/',status:'complete'};}},
+    scripting:{async executeScript({args}){
+      seen.push(args[1]);
+      return [{frameId:0,result:args[1]==='write'?null:blank}];
+    }}
+  };
+  try{
+    const expected={schemaVersion:1,databases:[{name:'new-db',version:1,stores:[]}]};
+    await assert.rejects(executeSiteIndexedDB(17,[origin,'write',expected,blank]),
+      /PARTIAL_ROLLBACK/);
+    assert.deepEqual(seen,['write','read']);
+  }finally{globalThis.chrome=old;}
+});
+
+test('missing injection result refuses navigation and foreign frames without retry',async()=>{
+  const old=globalThis.chrome;
+  let called=0;
+  globalThis.chrome={
+    tabs:{async get(){return {url:'https://changed.example/'};}},
+    scripting:{async executeScript(){called++;return [{frameId:0,result:null}];}}
+  };
+  try{
+    await assert.rejects(executeSiteIndexedDB(17,[origin,'read']),/页面已跳转/);
+    assert.equal(called,1);
+    globalThis.chrome.scripting.executeScript=async()=>[{frameId:3,result:blank}];
+    await assert.rejects(executeSiteIndexedDB(17,[origin,'read']),/不是顶层页面/);
+  }finally{globalThis.chrome=old;}
+});
+
+test('persistent null read result stays failed closed after bounded retry',async()=>{
+  const old=globalThis.chrome;
+  let called=0;
+  globalThis.chrome={
+    tabs:{async get(){return {url:origin+'/'};}},
+    scripting:{async executeScript(){called++;return [{frameId:0,result:null}];}}
+  };
+  try{
+    await assert.rejects(executeSiteIndexedDB(17,[origin,'read']),/未返回结果/);
+    assert.equal(called,2);
+  }finally{globalThis.chrome=old;}
 });

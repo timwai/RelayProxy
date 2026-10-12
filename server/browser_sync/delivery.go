@@ -107,6 +107,16 @@ func (s *Store) DiscardDelivery(ctx context.Context, messageID string) {
 // an already registered encrypted delivery. A pause must not lose its ACK.
 // RECEIVED may precede exactly one terminal acknowledgement.
 func (s *Store) ClaimDeliveryReceipt(ctx context.Context, receiverID, ruleID, messageID, status string, now time.Time) (string, error) {
+	return s.ClaimDeliveryReceiptWithCode(ctx, receiverID, ruleID, messageID, status, "", now)
+}
+
+// ClaimDeliveryReceiptWithCode stores only a fixed diagnostic category, never
+// a Chrome exception message, website name or decrypted session content.
+func (s *Store) ClaimDeliveryReceiptWithCode(ctx context.Context, receiverID, ruleID, messageID, status, code string, now time.Time) (string, error) {
+	if !validBrowserSyncErrorCode(code) || (status == "APPLIED" && code != "") ||
+		(status == "RECEIVED" && code != "") {
+		return "", ErrRuleDenied
+	}
 	switch status {
 	case "RECEIVED", "APPLIED", "FAILED", "CONFLICT":
 	default:
@@ -167,7 +177,7 @@ func (s *Store) ClaimDeliveryReceipt(ctx context.Context, receiverID, ruleID, me
 	if err != nil {
 		return "", err
 	}
-	if err := appendBrowserAudit(ctx, tx, "delivery_result", source.ID, receiverID, ruleID, status); err != nil {
+	if err := appendBrowserAuditDetail(ctx, tx, "delivery_result", source.ID, receiverID, ruleID, status, code); err != nil {
 		return "", err
 	}
 	if err = tx.Commit(); err != nil {

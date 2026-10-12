@@ -49,6 +49,21 @@ test('Browser Sync polls only presence and allows metadata rule transitions and 
  assert.doesNotMatch(page,/policyDigest|offer\.ciphertext|signingPublicKey|encryptionPublicKey/);
 });
 
+
+test('Browser Sync shows consent milestones and only exports/clears audited metadata',()=>{
+ const page=read('./BrowserSync.jsx');
+ assert.match(page,/fmtDate\(r\.sourceApprovedAt\)/);
+ assert.match(page,/fmtDate\(r\.targetApprovedAt\)/);
+ assert.match(page,/fmtDate\(r\.activatedAt\)/);
+ assert.match(page,/\/api\/v1\/browser-sync\/admin\/audit\/export/);
+ assert.match(page,/method:'DELETE'/);
+ assert.match(page,/onClick=\{clearAudit\}/);
+ assert.match(page,/e\.errorCode/);
+ assert.match(page,/PARTIAL_ROLLBACK:'部分回滚'/);
+ assert.match(page,/audit_cleared:'审计清理'/);
+ assert.doesNotMatch(page,/tokenValue|cookieValue|sessionCiphertext|policyDigest/);
+});
+
 test('Server settings keeps category navigation, every editable field and explicit Save',()=>{
  const app=read('./App.jsx'),css=read('./react.css');
  assert.match(app,/settings-layout settings-refined/);

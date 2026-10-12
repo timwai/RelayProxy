@@ -34,6 +34,9 @@ test('Browser Sync polls only presence and allows metadata rule transitions and 
  assert.match(page,/ruleAction\(r,'resume'\)/);
  assert.match(page,/ruleAction\(r,'revoke'\)/);
  assert.match(page,/\/browser-sync\/admin\/audit\?limit=50&before=/);
+ assert.match(page,/auditFilter==='all'/);
+ assert.match(page,/auditDevice\?'&device='/);
+ assert.match(page,/aria-label="筛选浏览器设备"/);
  assert.match(page,/audit\.nextCursor>0/);
  assert.match(page,/fmtDate\(stat\.lastSyncAt\)/);
  assert.doesNotMatch(page,/policyDigest|offer\.ciphertext|signingPublicKey|encryptionPublicKey/);

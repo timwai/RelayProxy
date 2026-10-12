@@ -158,10 +158,26 @@ export async function syncThenOpen(ruleId) {
   }
 }
 
+// Only fixed categories leave the browser. Never send arbitrary exception
+// messages, website origin names or decrypted session payloads to Server.
+export function browserRestoreFailureCode(error) {
+  const message=String(error?.message||'');
+  if(message.startsWith('PARTIAL_ROLLBACK:'))return 'PARTIAL_ROLLBACK';
+  if(message.startsWith('CONFLICT:'))return 'CONFLICT';
+  if(/旧会话快照|replay|sequence/i.test(message))return 'REPLAY_REJECTED';
+  if(/IndexedDB|indexeddb/i.test(message))return 'INDEXEDDB_FAILURE';
+  if(/cookie/i.test(message))return 'COOKIE_FAILURE';
+  if(/storage/i.test(message))return 'STORAGE_FAILURE';
+  if(/解密|decrypt|signature/i.test(message))return 'DECRYPT_FAILED';
+  if(/网络|proxy|PAC|出口|connect|network/i.test(message))return 'NETWORK_UNAVAILABLE';
+  return 'UNSPECIFIED';
+}
+
 async function handleIncomingSnapshot(envelope) {
   const ruleId=envelope?.ruleId;
   if(typeof ruleId!=='string'||ruleId.length>128)return;
   let result='FAILED';
+  let diagnostic='UNSPECIFIED';
   try{
     const ctx=await ruleContext(ruleId);
     if(!ctx.targetRole||ctx.remote.id!==envelope.sourceBrowserDeviceId ||
@@ -231,11 +247,12 @@ async function handleIncomingSnapshot(envelope) {
       }
     }catch(error){
       const code=String(error.message||'');
-      if(code.startsWith('CONFLICT:'))result='CONFLICT';
+      if(code.startsWith('CONFLICT:')){result='CONFLICT';diagnostic='CONFLICT';}
       else throw error;
     }
     await setStatus(ruleId,result);
   }catch(error){
+    diagnostic=browserRestoreFailureCode(error);
     // An incomplete rollback can leave a mixed website login state.
     // Fail closed until the receiver explicitly inspects and resumes.
     const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
@@ -247,7 +264,8 @@ async function handleIncomingSnapshot(envelope) {
   }
   try{
     if(typeof envelope.messageId==='string')
-      await sendControl('SYNC_ACK',{ruleId,messageId:envelope.messageId,status:result});
+      await sendControl('SYNC_ACK',{ruleId,messageId:envelope.messageId,status:result,
+        errorCode:result==='APPLIED'?'':diagnostic});
   }catch{ /* peer may be offline; session values are still never logged */ }
 }
 

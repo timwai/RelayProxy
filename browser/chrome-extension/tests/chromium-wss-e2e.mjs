@@ -359,12 +359,43 @@ async function main(){
   await workerCommand(restartedB,{type:'SAVE_SERVER',serverOrigin:relayOrigin});
   const denied=await restartedB.options.evaluate(async()=>chrome.runtime.sendMessage({type:'CONNECT_BROWSER'}));
   assert.equal(denied.ok,false,'revoked Chrome device reauthenticated over WSS');
+
+  // A Profile can retain its device ID after a corrupted/uninstalled key
+  // database. Losing its non-exportable private keys must rotate the device
+  // identity; the Server must treat it as a brand-new pending enrollment, not
+  // silently inherit the old browser's approval or encrypted pairing.
+  const rotatedB=await restartedB.options.evaluate(async()=>{
+    const before=(await chrome.storage.local.get('browserDeviceId')).browserDeviceId;
+    await new Promise((resolve,reject)=>{
+      const request=indexedDB.deleteDatabase('relayproxy-browser-sync');
+      request.onsuccess=resolve;
+      request.onerror=()=>reject(request.error||new Error('identity key reset failed'));
+      request.onblocked=()=>reject(new Error('identity keys remained open'));
+    });
+    const {getOrCreateIdentity}=await import(
+      chrome.runtime.getURL('src/device-identity.js'));
+    const current=await getOrCreateIdentity();
+    return {before,current};
+  });
+  assert.equal(rotatedB.before,identityB.deviceId,
+    'test did not preserve device ID before losing its private keys');
+  assert.notEqual(rotatedB.current.deviceId,identityB.deviceId,
+    'missing private keys reused an already-enrolled browser ID');
+  assert.notEqual(rotatedB.current.signingPublicKey,identityB.signingPublicKey);
+  assert.notEqual(rotatedB.current.encryptionPublicKey,identityB.encryptionPublicKey);
+  const rotatedEnrollment=await workerCommand(restartedB,{type:'REGISTER_BROWSER'});
+  assert.equal(rotatedEnrollment.state,'pending',
+    'fresh signing keys silently inherited revoked device approval');
+  const rotatedDenied=await restartedB.options.evaluate(async()=>
+    chrome.runtime.sendMessage({type:'CONNECT_BROWSER'}));
+  assert.equal(rotatedDenied.ok,false,
+    'new unapproved device authenticated using an old Profile authorization');
   console.log('Real RelayProxy TLS/WSS '+(throughProxy?'via HTTPS reverse proxy':'direct')+
     ' + Chromium A/B passed: enrolled/approved,');
   console.log('signed challenge, E2EE rule/code, opaque WSS delivery, APPLIED ACK,');
   console.log('actual website login+IndexedDB, MV3 alarm WSS reconnect + durable ACK recovery,');
   console.log('full Chromium Profile restart/key retention, post-restart delivery,');
-  console.log('pending-auth denial and live/reconnect revocation.');
+  console.log('pending-auth denial, live/reconnect revocation and private-key loss rotation.');
 }
 
 let error;

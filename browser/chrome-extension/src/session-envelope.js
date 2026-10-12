@@ -7,16 +7,27 @@ import {packSessionPayload,unpackSessionPayload,MAX_WIRE_PLAINTEXT_BYTES} from '
 
 export const CIPHER_SUITE = 'P256-HKDF-SHA256-A256GCM-v1';
 const utf8 = text => new TextEncoder().encode(text);
+export const isTransferRequestId=id=>typeof id==='string' &&
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id);
+
 
 export function signedHeader(env) {
   const created = Date.parse(env.createdAt);
   const expires = Date.parse(env.expiresAt);
   if (!Number.isFinite(created) || !Number.isFinite(expires)) throw new Error('invalid session timestamp');
-  return [env.protocol, env.type, env.messageId, env.ruleId,
+  const fields=[env.protocol, env.type, env.messageId, env.ruleId,
     env.sourceBrowserDeviceId, env.targetBrowserDeviceId,
     String(env.sequence), String(created), String(expires),
     env.encryption.suite, env.encryption.keyId, env.encryption.enc,
-    env.encryption.salt, env.encryption.iv].join('\n');
+    env.encryption.salt, env.encryption.iv];
+  // Preserve v1 wire compatibility when no receiver request token exists.
+  // For explicit requests, the token is covered by signature and AEAD AAD.
+  if(env.transferRequestId!==undefined){
+    if(typeof env.transferRequestId!=='string'||!isTransferRequestId(env.transferRequestId))
+      throw new Error('无效的一次性同步请求 ID');
+    fields.push(env.transferRequestId);
+  }
+  return fields.join('\n');
 }
 async function sessionAESKey(peer, ephemeral, salt, info, usage) {
   const remote = await importPublic(peer, {name:'ECDH',namedCurve:'P-256'});
@@ -25,7 +36,9 @@ async function sessionAESKey(peer, ephemeral, salt, info, usage) {
   return crypto.subtle.deriveKey({name:'HKDF',hash:'SHA-256',salt,info:utf8(info)},
     base,{name:'AES-GCM',length:256},false,[usage]);
 }
-export async function encryptSnapshot(rule, target, sequence, payload) {
+export async function encryptSnapshot(rule, target, sequence, payload, transferRequestId='') {
+  if(transferRequestId!==''&&!isTransferRequestId(transferRequestId))
+    throw new Error('无效的一次性同步请求 ID');
   const identity = await getOrCreateIdentity();
   if (rule?.status !== 'active' || rule.sourceBrowserDeviceId !== identity.deviceId ||
       rule.targetBrowserDeviceId !== target?.id || !target.encryptionPublicKey ||
@@ -39,6 +52,7 @@ export async function encryptSnapshot(rule, target, sequence, payload) {
     protocol:'browser.sync.v1',type:'SESSION_SNAPSHOT',messageId:crypto.randomUUID(),
     ruleId:rule.ruleId,sourceBrowserDeviceId:identity.deviceId,
     targetBrowserDeviceId:target.id,sequence,
+    ...(transferRequestId?{transferRequestId}:{}),
     createdAt:new Date(now).toISOString(),expiresAt:new Date(now+5*60*1000).toISOString(),
     encryption: {
       suite:CIPHER_SUITE,keyId:target.id,

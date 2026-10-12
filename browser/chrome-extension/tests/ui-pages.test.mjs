@@ -80,3 +80,32 @@ test('popup displays role names rather than A/B device codes',()=>{
   assert.match(code,/rule\.role === 'source' \? '发送端' : '接收端'/);
   assert.doesNotMatch(code,/来源 A|接收 B/);
 });
+
+
+test('one-time account-switch permission is accessible only through the Options UI',()=>{
+  const options=asset('options.js');
+  const worker=asset('service-worker.js');
+  const session=asset('session-sync.js');
+  assert.match(options,/允许本次覆盖并请求同步/);
+  assert.match(options,/ALLOW_OVERWRITE.*allowed:true/);
+  assert.match(options,/REQUEST_SESSION/);
+  assert.match(options,/ALLOW_OVERWRITE.*allowed:false/);
+  assert.doesNotMatch(options,/允许覆盖目标端 Cookie、Local\/Session Storage 与 IndexedDB（可能切换账号）/);
+  assert.match(worker,/sender\.url!==chrome\.runtime\.getURL\('src\/options\.html'\)/);
+  assert.match(worker,/await pruneOverwriteGrants\(\)/);
+  assert.match(session,/consumeOneTimeOverwrite\(ruleId,ctx\.policy\.siteOrigin\)/);
+  assert.match(session,/delete stored\[ruleId\]/);
+  assert.match(session,/validOverwriteGrant\(candidate,siteOrigin,Date\.now\(\)\)/);
+  assert.doesNotMatch(session,/switches\[ruleId\]===true/);
+});
+
+test('MV3 alarm reconnect is not throttled by periodic session refresh',()=>{
+  const worker=asset('service-worker.js'),session=asset('session-sync.js');
+  assert.match(worker,/chrome\.alarms\.onAlarm/);
+  assert.match(worker,/restoreActiveSubscriptions\(\)/);
+  assert.match(session,/await connectBrowser\(\)/);
+  assert.match(session,/shouldRetryConnection\(stored,settings\.serverOrigin,now\)/);
+  assert.match(session,/nextReconnectDelay\(failures\)/);
+  assert.ok(session.indexOf('await reconcilePendingDeliveries();')<
+    session.indexOf('if(!force&&!shouldReconcile(last,now))return;'));
+});

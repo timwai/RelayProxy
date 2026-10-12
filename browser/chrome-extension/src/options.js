@@ -59,6 +59,7 @@ async function load() {
   $('device').textContent = result.identity.deviceId;
   const retrying=!result.connected&&result.nextRetryAt>Date.now();
   $('server-stage').textContent = result.connected ? '设备认证已连接' :
+    result.pendingApproval ? '等待管理员审批，批准后自动连接' :
     retrying ? '连接中断，等待自动重连（约 '+Math.ceil((result.nextRetryAt-Date.now())/1000)+' 秒）' :
     result.settings.serverOrigin ? '尚未连接 Server' : '尚未配置 Server';
   $('server').value = result.settings.serverOrigin;
@@ -112,8 +113,14 @@ $('connect').addEventListener('click', async () => {
       throw new Error('仅支持 HTTPS Server Origin');
     const requestedIdentityId=$('identity-id').value.trim();
     const deviceName=$('device-name').value.trim();
-    if(!requestedIdentityId||!deviceName)
-      throw new Error('请填写身份 ID 和设备名称');
+    if(!requestedIdentityId){
+      $('identity-id').focus();
+      throw new Error('身份 ID 为必填项');
+    }
+    if(!deviceName){
+      $('device-name').focus();
+      throw new Error('设备名称为必填项');
+    }
     if(deviceName.length>100||requestedIdentityId.length>128)
       throw new Error('身份 ID 或设备名称过长');
     // Chrome host permission must be requested directly in the click path.
@@ -130,7 +137,7 @@ $('connect').addEventListener('click', async () => {
     if(registered.state!=='approved'){
       $('server-stage').textContent=registered.state==='pending'?'等待管理员审批':'设备授权未生效';
       status(registered.state==='pending'
-        ?'设备授权申请已提交；管理员批准后再次点击「连接服务端」。'
+        ?'设备授权申请已提交；管理员批准后扩展会自动连接，无须再次点击。'
         :'设备状态：'+registered.state+'；请在 Server Web 核对授权。');
       return;
     }
@@ -512,8 +519,28 @@ document.querySelectorAll('.settings-nav a[href^="#"]').forEach(link=>{
 window.addEventListener('hashchange',()=>activateSettingsSection(window.location.hash.slice(1)));
 activateSettingsSection(window.location.hash.slice(1));
 
-load().then(async () => {
-  const response=await chrome.runtime.sendMessage({type:'GET_STATUS'});
-  if(response?.connected)await refreshPairing();
+// The MV3 background checks Server approval using a persisted one-minute
+// alarm. This lightweight UI refresh only reads Chrome's local connection
+// state; it never polls an unapproved Server or resubmits enrollment.
+let previousConnected=false;
+async function updateConnectionState(){
+  const result=await chrome.runtime.sendMessage({type:'GET_STATUS'});
+  if(!result?.ok)return;
+  $('server-stage').textContent=result.connected?'设备认证已连接':
+    result.pendingApproval?'等待管理员审批，批准后自动连接':
+    result.settings?.serverOrigin?'尚未连接 Server':'尚未配置 Server';
+  if(result.connected&&!previousConnected){
+    if($('server-stage').dataset.waitingApproval==='true')
+      status('设备已获管理员批准，扩展已自动连接服务端。');
+    $('server-stage').dataset.waitingApproval='false';
+    await refreshPairing().catch(()=>{});
+  }
+  if(result.pendingApproval)$('server-stage').dataset.waitingApproval='true';
+  previousConnected=!!result.connected;
+}
+load().then(()=>{
+  updateConnectionState().catch(()=>{});
+  setInterval(()=>{if(document.visibilityState==='visible')
+    updateConnectionState().catch(()=>{});},8000);
 }).catch(failure);
 

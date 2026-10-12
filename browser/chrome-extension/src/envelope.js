@@ -80,7 +80,9 @@ export async function createEncryptedOffer({ target, siteOrigin, dataTypes }) {
   // The selected scope is encrypted and signed in the pairing invitation.
   // Omitted dataTypes retains existing callers' all-enabled v3 behavior.
   const policy = dataTypes
-    ?validatePolicy({siteOrigin,schemaVersion:4,...dataTypes})
+    ?validatePolicy({siteOrigin,schemaVersion:4,
+      allCookies:dataTypes.allCookies,localStorage:dataTypes.localStorage,
+      sessionStorage:dataTypes.sessionStorage,indexedDB:dataTypes.indexedDB})
     :validatePolicy({siteOrigin,schemaVersion:3,allCookies:true,
       localStorage:true,sessionStorage:true,indexedDB:true});
   const ruleId = crypto.randomUUID();

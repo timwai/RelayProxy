@@ -18,17 +18,17 @@ import (
 // Handler authenticates each browser before accepting encrypted transfers.
 // Resource quotas are in addition to per-frame protocol validation.
 type Handler struct {
-	Store      *Store
-	auth       *Authenticator
-	extensions map[string]struct{}
-	mu         sync.Mutex
-	attempts   map[string]attempt
-	slots      chan struct{}
-	limits     *browserLimiter
-	clientMu   sync.RWMutex
-	clients    map[string]*browserConnection
+	Store           *Store
+	auth            *Authenticator
+	extensions      map[string]struct{}
+	mu              sync.Mutex
+	attempts        map[string]attempt
+	slots           chan struct{}
+	limits          *browserLimiter
+	clientMu        sync.RWMutex
+	clients         map[string]*browserConnection
 	presenceChanged func()
-	network    *NetworkProxy
+	network         *NetworkProxy
 }
 type attempt struct {
 	window time.Time

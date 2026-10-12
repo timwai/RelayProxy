@@ -300,7 +300,7 @@ func TestWSSLargeEncryptedSnapshotCrossesOldFrameLimit(t *testing.T) {
 		t.Fatal(err)
 	}
 	env.Ciphertext = base64.RawURLEncoding.EncodeToString(cipher)
-	digest := sha256.Sum256([]byte(protocol.SignedHeader(env)+"\n"+env.Ciphertext))
+	digest := sha256.Sum256([]byte(protocol.SignedHeader(env) + "\n" + env.Ciphertext))
 	rSig, sSig, err := ecdsa.Sign(rand.Reader, key, digest[:])
 	if err != nil {
 		t.Fatal(err)
@@ -309,8 +309,8 @@ func TestWSSLargeEncryptedSnapshotCrossesOldFrameLimit(t *testing.T) {
 	rSig.FillBytes(sig[:32])
 	sSig.FillBytes(sig[32:])
 	env.Signature = base64.RawURLEncoding.EncodeToString(sig)
-	sendWSSControl(t, a, map[string]any{"type":"SESSION_SNAPSHOT","requestId":"big",
-		"envelope":env})
+	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "requestId": "big",
+		"envelope": env})
 	if resp := readWSSControl(t, a); resp["status"] != "RELAYED" {
 		t.Fatalf("large signed session not relayed: %v", resp["type"])
 	}
@@ -436,7 +436,6 @@ func TestWSSRevokedOriginRejectsExistingDeviceSession(t *testing.T) {
 	}
 }
 
-
 func TestWSSReceiverDiagnosticCodeIsValidatedAndAudited(t *testing.T) {
 	store := testBrowserStore(t)
 	source, sourceKey := approvedWSSBrowser(t, store, true, false)
@@ -488,7 +487,6 @@ func TestWSSReceiverDiagnosticCodeIsValidatedAndAudited(t *testing.T) {
 		t.Fatalf("receiver failure diagnostic missing from safe audit: %+v %v", events, err)
 	}
 }
-
 
 func TestWSSReceiverTransferRequestTokenIsRoutedAndSigned(t *testing.T) {
 	store := testBrowserStore(t)

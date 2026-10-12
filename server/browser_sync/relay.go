@@ -30,16 +30,21 @@ func (h *Handler) attach(id string, c *browserConnection) {
 	old := h.clients[id]
 	h.clients[id] = c
 	h.clientMu.Unlock()
+	h.notifyPresence()
 	if old != nil && old != c {
 		_ = old.conn.Close(websocket.StatusPolicyViolation, "browser reconnected")
 	}
 }
 func (h *Handler) detach(id string, c *browserConnection) {
 	h.clientMu.Lock()
-	if h.clients[id] == c {
+	removed := h.clients[id] == c
+	if removed {
 		delete(h.clients, id)
 	}
 	h.clientMu.Unlock()
+	if removed {
+		h.notifyPresence()
+	}
 }
 
 // DisconnectDevice terminates any authenticated websocket still attached to
@@ -50,6 +55,7 @@ func (h *Handler) DisconnectDevice(id string) {
 	delete(h.clients, id)
 	h.clientMu.Unlock()
 	if c != nil {
+		h.notifyPresence()
 		_ = c.conn.Close(websocket.StatusPolicyViolation, "browser authorization revoked")
 	}
 }

@@ -734,3 +734,10 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
  #root .browser-sync-refined .browser-sync-toolbar>.browser-sync-filters{padding:0}
  #root .browser-sync-refined .browser-sync-audit-footer .btn{width:100%}
 }
+
+#root .browser-sync-refined .browser-sync-audit-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#root .browser-sync-refined .browser-sync-audit-actions .btn{min-height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+@media(max-width:600px){
+ #root .browser-sync-refined .browser-sync-audit-actions{width:100%}
+ #root .browser-sync-refined .browser-sync-audit-actions .btn{flex:1;min-width:110px}
+}

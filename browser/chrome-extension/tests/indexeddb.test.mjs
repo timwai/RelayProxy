@@ -189,7 +189,11 @@ test('real capture/restore entry points accept explicit v3 pairing, never old v2
       async query(){return [{id:17,url:origin+'/'}];},
       async get(id){return {id,url:origin+'/',incognito:false};}
     },
-    scripting:{async executeScript({func,args}){return [{result:await func(...args)}];}}
+    scripting:{async executeScript({world,func,args}){
+      assert.equal(world,'ISOLATED',
+        'IndexedDB injection may not execute in hostile page MAIN world');
+      return [{result:await func(...args)}];
+    }}
   };
   try{
     assert.deepEqual(await captureIndexedDB(v3),{schemaVersion:1,databases:[]});

@@ -123,6 +123,16 @@ export function BrowserSyncAdmin({identities=[]}){
     }catch(err){setError(err.message);}
     finally{setBusy('');}
   };
+  const moreRules=async()=>{
+    if(busy||ruleNextOffset<0)return;
+    setBusy('rules');setError('');
+    try{
+      const result=await api(rulePagePath(ruleNextOffset));
+      setRules(old=>[...old,...list(result?.items).filter(item=>!old.some(r=>r.id===item.id))]);
+      setRuleNextOffset(Number.isInteger(result?.nextOffset)?result.nextOffset:-1);
+    }catch(err){setError(err.message);}
+    finally{setBusy('');}
+  };
   const moreAudit=async()=>{
     if(busy||!audit.nextCursor)return;
     setBusy('audit');setError('');
@@ -146,10 +156,7 @@ export function BrowserSyncAdmin({identities=[]}){
     [d.name,d.id,d.identityId,d.requestedIdentityId,d.state,d.extensionId].join(' ').toLowerCase()
       .includes(filter.trim().toLowerCase()))
     .sort((a,b)=>({pending:0,approved:1,revoked:2}[a.state]??3)-({pending:0,approved:1,revoked:2}[b.state]??3));
-  const visibleRules=rules.filter(r=>
-    (ruleFilter==='all'||r.status===ruleFilter)&&
-    [r.id,r.sourceId,r.targetId,r.sourceName,r.targetName,r.identityId,r.status]
-      .join(' ').toLowerCase().includes(ruleSearch.trim().toLowerCase()));
+  const visibleRules=rules;
   const visibleAudit=list(audit.items);
   const linkedExtensions=new Set(devices.filter(d=>d.extensionId).map(d=>d.extensionId));
   const count=state=>devices.filter(d=>d.state===state).length;

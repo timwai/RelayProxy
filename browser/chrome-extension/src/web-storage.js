@@ -30,7 +30,7 @@ function mutate(expectedOrigin,changes){
   }
   return true;
 }
-async function tabFor(origin,{create=false}={}){
+export async function tabFor(origin,{create=false}={}){
   const tabs=await chrome.tabs.query({});
   const active=await chrome.tabs.query({active:true,lastFocusedWindow:true});
   let tab=[...active,...tabs].find(t=>{
@@ -53,7 +53,7 @@ async function tabFor(origin,{create=false}={}){
   if(latest.incognito||new URL(latest.url).origin!==origin)throw new Error('站点已经跳转，拒绝跨域读取 Storage');
   return tab.id;
 }
-async function execute(tabId,func,args){
+export async function execute(tabId,func,args){
   const result=await chrome.scripting.executeScript({target:{tabId},world:'ISOLATED',func,args});
   if(result?.length!==1||!result[0]||!('result' in result[0]))
     throw new Error('页面 Storage 读取/写入失败');

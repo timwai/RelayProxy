@@ -137,14 +137,24 @@ jobs:
       - uses: actions/setup-node@v5
         with:
           node-version: "22"
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build production-handler loopback WSS fixture
+        run: go build -o "$RUNNER_TEMP/relay-browser-wss-fixture" ./browser/chrome-extension/tests/wss-fixture
       - name: Install Chromium and test runner
         working-directory: browser/chrome-extension
         run: |
           npm install --no-audit --no-fund
           npx playwright install --with-deps chromium
-      - name: Real Chromium A/B MV3 session sync acceptance
+      - name: Real Chromium A/B MV3 site-state acceptance
         working-directory: browser/chrome-extension
         run: npm run test:chromium
+      - name: Real RelayProxy WSS + Chromium A/B approval and session ACK
+        working-directory: browser/chrome-extension
+        env:
+          RELAY_BROWSER_WSS_FIXTURE: ${{ runner.temp }}/relay-browser-wss-fixture
+        run: node tests/chromium-wss-e2e.mjs
 
   desktop-platforms:
     strategy:

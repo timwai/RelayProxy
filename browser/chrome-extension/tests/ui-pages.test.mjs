@@ -39,7 +39,7 @@ test('independent options page retains every ID consumed by pairing and network 
   assert.equal(new Set(ids).size,ids.length,'options page IDs must remain unique');
   for(const id of new Set(used))
     assert.ok(ids.includes(id),'missing HTML control: '+id);
-  for(const id of ['server','save','register','connect','local-agent-all','local-agent-port',
+  for(const id of ['server','connect','local-agent-all','local-agent-port',
                     'site','sites','refresh-sites','add-site','target','pair-site',
                     'offer-rule','refresh-pairing','pairing-rules','message']){
     assert.ok(ids.includes(id),id);
@@ -86,7 +86,8 @@ test('one-time account-switch permission is accessible only through the Options 
   const options=asset('options.js');
   const worker=asset('service-worker.js');
   const session=asset('session-sync.js');
-  assert.match(options,/允许本次覆盖并请求同步/);
+  assert.match(options,/允许本次覆盖现有登录数据/);
+  assert.match(options,/同步成功后打开页面/);
   assert.match(options,/ALLOW_OVERWRITE.*allowed:true/);
   assert.match(options,/REQUEST_SESSION/);
   assert.match(options,/ALLOW_OVERWRITE.*allowed:false/);
@@ -94,7 +95,7 @@ test('one-time account-switch permission is accessible only through the Options 
   assert.match(worker,/sender\.url!==chrome\.runtime\.getURL\('src\/options\.html'\)/);
   assert.match(worker,/await pruneOverwriteGrants\(\)/);
   assert.match(session,/consumeOneTimeOverwrite\(ruleId,ctx\.policy\.siteOrigin,envelope\.transferRequestId\)/);
-  assert.match(options,/transferRequestId:granted\.transferRequestId/);
+  assert.match(options,/transferRequestId:requestId/);
   assert.match(worker,/sender\.url!==chrome\.runtime\.getURL\('src\/options\.html'\)/);
   assert.match(session,/encryptSnapshot\(ctx\.rule,ctx\.remote,sequence,payload,transferRequestId\)/);
   assert.match(session,/sourceRequested\.set\(ruleId,transferRequestId\)/);
@@ -125,4 +126,31 @@ test('network binding invitation remains actionable while pending or revoked',()
   assert.match(code,/NETWORK_EXITS/);
   assert.match(code,/已授权且在线的 Agent proxy\.exit 出口/);
   assert.doesNotMatch(code,/来源设备 Agent 已开启浏览器网络共享/);
+});
+
+test('server connection has one button and new pairing scope defaults all checked',()=>{
+  const html=asset('options.html'),code=asset('options.js');
+  assert.match(html,/id="connect" class="primary-button"/);
+  assert.doesNotMatch(html,/id="save"|id="register"/);
+  assert.doesNotMatch(code,/\$('save'\)|\$('register'\)/);
+  assert.match(code,/type:'SAVE_SERVER'/);
+  assert.match(code,/type:'REGISTER_BROWSER'/);
+  assert.match(code,/type:'CONNECT_BROWSER'/);
+  for(const id of ['sync-cookies','sync-local','sync-session','sync-indexeddb']){
+    assert.match(html,new RegExp('id="'+id+'"[^>]*checked'));
+  }
+  assert.match(code,/dataTypes=\{allCookies:/);
+  assert.match(code,/CREATE_RULE',siteOrigin,targetID,dataTypes/);
+});
+
+test('overwrite and open-after-success are one-shot checkbox options, not buttons',()=>{
+  const code=asset('options.js'),popup=asset('popup.js');
+  assert.match(code,/overwriteOnce\.type='checkbox'/);
+  assert.match(code,/openAfter\.type='checkbox'/);
+  assert.match(code,/overwriteOnce\.checked=false/);
+  assert.match(code,/shouldOpen\?'SYNC_THEN_OPEN':'REQUEST_SESSION'/);
+  assert.doesNotMatch(code,/const open = document\.createElement\('button'\)/);
+  assert.doesNotMatch(code,/const overwrite = document\.createElement\('button'\)/);
+  assert.match(popup,/openAfter\.type='checkbox'/);
+  assert.doesNotMatch(popup,/el\('button','small-button outline-button','同步后打开'\)/);
 });

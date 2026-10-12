@@ -11,7 +11,7 @@ import {captureAllCookies,applyAllCookies} from './cookies-all.js';
 import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
 import {captureIndexedDB,prepareIndexedDBRestore,JOURNAL_KEY as IDB_JOURNAL} from './indexeddb-sync.js';
 import {showRestoredWebsiteTab} from './session-tabs.js';
-import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence, validOverwriteGrant, OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection, singleFlight, nextDeliveryStatus } from './lifecycle.js';
+import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence, validOverwriteGrant, OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection, singleFlight, nextDeliveryStatus, clearPendingIfMessageMatches } from './lifecycle.js';
 import {ensureNetworkForRule} from './network-binding.js';
 
 const sourceBusy = new Set();
@@ -65,7 +65,7 @@ async function listPendingDeliveries(){
 }
 function clearPendingDelivery(ruleId,messageId){
   return mutatePendingDelivery(ruleId,previous=>
-    previous?.messageId===messageId?null:previous);
+    clearPendingIfMessageMatches(previous,messageId));
 }
 function setStatus(ruleId,result,messageId='') {
   const write=statusWriteQueue.catch(()=>{}).then(async()=>{

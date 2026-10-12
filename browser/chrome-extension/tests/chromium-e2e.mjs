@@ -166,7 +166,7 @@ async function applyToTarget(profile,ruleId,policy,payload){
     }catch(err){
       const storageRecovered=await storage.rollback().catch(()=>false);
       const indexedDBRecovered=await indexedDB.rollback().catch(()=>false);
-      throw new Error(`restore failed: ${err.message}; rolled back: ${storageRecovered}/${indexedDBRecovered}`);
+      throw new Error(`restore failed: ${err.message}; stages=${JSON.stringify(stages)}; rolled back: ${storageRecovered}/${indexedDBRecovered}`);
     }
   },{ruleId,policy,payload});
 }

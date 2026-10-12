@@ -13,6 +13,11 @@ test('Browser Sync keeps device approval in one place and adds rules and audit m
  assert.match(page,/stateFilter==='all'/);
  assert.match(page,/aria-pressed=\{stateFilter===id\}/);
  assert.match(page,/const validIdentity=id=>activeIdentities\.some/);
+ assert.match(page,/const requestedIdentity=id=>devices\.find/);
+ assert.match(page,/identityId:requestedIdentity\(id\)/);
+ assert.doesNotMatch(page,/选择身份<\/option>/);
+ assert.doesNotMatch(page,/setIdentity\(/);
+ assert.match(page,/d\.requestedIdentityId/);
  assert.match(page,/disabled=\{!!busy\|\|!validIdentity\(d\.id\)/);
  assert.match(page,/send:e\.target\.checked/);
  assert.match(page,/receive:e\.target\.checked/);

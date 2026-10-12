@@ -27,6 +27,7 @@ type Handler struct {
 	limits     *browserLimiter
 	clientMu   sync.RWMutex
 	clients    map[string]*browserConnection
+	presenceChanged func()
 	network    *NetworkProxy
 }
 type attempt struct {
@@ -42,6 +43,24 @@ func NewHandler(store *Store, extensionIDs []string) *Handler {
 	return &Handler{Store: store, auth: NewAuthenticator(store), extensions: allowed,
 		attempts: map[string]attempt{}, slots: make(chan struct{}, 64), limits: newBrowserLimiter(),
 		clients: make(map[string]*browserConnection)}
+}
+
+// SetPresenceNotifier connects authenticated Browser WSS online/offline changes
+// to the same revision-only admin invalidation mechanism as Agent sessions.
+// No website content, device keys, cookies or identity data enter notifications.
+func (h *Handler) SetPresenceNotifier(fn func()) {
+	h.clientMu.Lock()
+	h.presenceChanged = fn
+	h.clientMu.Unlock()
+}
+
+func (h *Handler) notifyPresence() {
+	h.clientMu.RLock()
+	fn := h.presenceChanged
+	h.clientMu.RUnlock()
+	if fn != nil {
+		fn()
+	}
 }
 
 // ConfigureNetworkProxy enables the relay-shared authenticated browser-to-Agent

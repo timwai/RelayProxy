@@ -37,12 +37,12 @@
         <div class="settings-card">
           <div class="card-heading"><div><h3>服务端连接</h3></div><span class="status-pill" id="server-stage">检查中</span></div>
           <div class="field-group"><label for="server">RelayProxy HTTPS Server</label>
-            <input id="server" type="url" spellcheck="false" placeholder="https://relay.example.com:443" autocomplete="url">
+            <input id="server" type="url" required aria-required="true" spellcheck="false" placeholder="https://relay.example.com:443" autocomplete="url">
             <p class="field-hint">填写 Server 的 HTTPS / TLS 中继地址。</p>
           </div>
-          <div class="form-grid"><div class="field-group"><label for="identity-id">身份 ID（由管理员审批绑定）</label><input id="identity-id" type="text" maxlength="128" autocomplete="off" placeholder="输入所属身份 ID"></div><div class="field-group"><label for="device-name">设备名称</label><input id="device-name" type="text" maxlength="100" autocomplete="off" placeholder="例如：办公电脑 Chrome"></div></div>
+          <div class="form-grid"><div class="field-group"><label for="identity-id">身份 ID <span aria-hidden="true">*</span>（由管理员审批绑定）</label><input id="identity-id" type="text" required aria-required="true" maxlength="128" autocomplete="off" placeholder="输入所属身份 ID"></div><div class="field-group"><label for="device-name">设备名称 <span aria-hidden="true">*</span></label><input id="device-name" type="text" required aria-required="true" maxlength="100" autocomplete="off" placeholder="例如：办公电脑 Chrome"></div></div>
           <div class="button-row"><button id="connect" class="primary-button" type="button">连接服务端</button></div>
-          <p class="field-hint">首次连接保存地址并提交设备审批；管理员批准后再次连接，已批准设备可以直接认证。</p>
+          <p class="field-hint">身份 ID 和设备名称必填。首次连接提交授权申请，管理员批准后扩展自动连接，无须再次点击。</p>
           <div class="divider-line"></div>
           <div class="device-identity"><div><strong>本浏览器设备</strong></div>
             <div id="device" class="device-code" title="本设备 ID">正在初始化…</div></div>

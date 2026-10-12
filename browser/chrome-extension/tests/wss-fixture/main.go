@@ -15,6 +15,8 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/http/httputil"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -50,6 +52,19 @@ func main() {
 	handler := browsersync.NewHandler(store, nil)
 	relay := httptest.NewTLSServer(handler)
 	defer relay.Close()
+
+	// Test an HTTP/1.1 WebSocket Upgrade through a real HTTPS reverse proxy.
+	// Keep the external Host header: the browser signs the public origin,
+	// not the backend's ephemeral listener address. Transport trusts only
+	// this test Relay's certificate; no TLS verification bypass is needed.
+	upstream, err := url.Parse(relay.URL)
+	if err != nil {
+		log.Fatal(err)
+	}
+	proxy := httputil.NewSingleHostReverseProxy(upstream)
+	proxy.Transport = relay.Client().Transport
+	edge := httptest.NewTLSServer(proxy)
+	defer edge.Close()
 
 	// Only the local test controller may approve/revoke devices. Do not
 	// accept identities or capabilities from the browser registration HTTP
@@ -104,13 +119,14 @@ func main() {
 		log.Fatal(err)
 	}
 	// Assert both URLs are loopback before surfacing them to the test runner.
-	for _, value := range []string{relay.URL, admin.URL} {
+	for _, value := range []string{relay.URL, edge.URL, admin.URL} {
 		if value == "" {
 			log.Fatal("fixture listener unavailable")
 		}
 	}
 	if err := json.NewEncoder(os.Stdout).Encode(map[string]string{
 		"serverOrigin": relay.URL,
+		"proxyOrigin":  edge.URL,
 		"adminOrigin":  admin.URL,
 		"runId":        hex.EncodeToString(nonce),
 	}); err != nil {
@@ -123,5 +139,6 @@ func main() {
 	shutdown, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 	defer cancel()
 	_ = admin.Config.Shutdown(shutdown)
+	_ = edge.Config.Shutdown(shutdown)
 	_ = relay.Config.Shutdown(shutdown)
 }

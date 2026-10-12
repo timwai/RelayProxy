@@ -1,3 +1,11 @@
+## 真实 Chromium 双 Profile 自动化验收（开发分支）
+
+`.github/workflows/ui-ci.yml` 的 `browser-sync-chromium` job 使用 Playwright 的 Chromium 和两套独立持久 Profile，加载真实 MV3 扩展，通过仅在 127.0.0.1 监听的自有 HTTP 测试网站验证 HttpOnly Cookie 登录、Local/Session Storage、IndexedDB v3 的 Store/索引/Blob/Date、真实 WebCrypto 设备密钥与签名加密、篡改拒绝及 B 设备独立账号冲突保护。运行：在 `browser/chrome-extension` 目录执行 `npm install`、`npx playwright install --with-deps chromium`、`npm run test:chromium`。测试临时复制扩展并只给自有本机测试站点预授权，**不改变正式 Manifest 的可选权限与用户点击授权要求**。
+
+Chromium 实测修复了 v3 IndexedDB 错误版本门禁、注入脚本错误被 `null` 结果掩盖、跨脚本上下文 JSON 属性顺序导致假冲突的问题。恢复后必须回读核对完整 IndexedDB 快照才能报告成功。为访问网站实际 IndexedDB，IndexedDB 操作采用 `MAIN` world 注入，但仍要求精确授权 Origin、完整数据边界/冲突/归属校验；**主世界中的网站脚本可能干扰内建 API，属于待独立安全审查的边界**，不得将此项测试视为生产安全验收。Cookie 与 Web Storage 的既有 ISOLATED 访问方式不变。
+
+该自动化没有启动 RelayProxy Server WSS、没有进行管理员审批，也不能替代 Windows/macOS 真实双设备与网站设备绑定兼容性测试；相应 P0 状态详见 [开发进度文档](../../docs/browser-session-sync-progress.md)。
+
 ## 2026-10-11 新增 IndexedDB 会话同步（配对 v3）
 
 新建的 HTTP/HTTPS 网站双端加密配对从 v2 升级为 **v3**：在已有全量 Cookie、Local Storage 和单标签页 Session Storage 的基础上，额外纳入**当前站点 Origin 下的 IndexedDB**，无需手动配置数据库名、Object Store 或记录 Key。已有 v1/v2 配对不自动扩权；请撤销旧配对并由 A 创建新的 v3 配对，在 B 重新接受和核对配对校验码。**A、B Chrome 扩展都必须升级**，无需额外 Agent，也无需变更 Server 数据库、端口或密文中继协议。

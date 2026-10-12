@@ -364,6 +364,8 @@ func (r *Router) registerRoutes() {
 		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/rules/{id}/resume", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRuleAction)))
 		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/rules/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRuleAction)))
 		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/audit", r.requireAuth(r.requireAdmin(r.handleBrowserSyncAudit)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/audit/export", r.requireAuth(r.requireAdmin(r.handleBrowserSyncAuditExport)))
+		r.mux.HandleFunc("DELETE /api/v1/browser-sync/admin/audit", r.requireAuth(r.requireAdmin(r.handleBrowserSyncAuditClear)))
 	}
 
 	// Static Web UI Handler

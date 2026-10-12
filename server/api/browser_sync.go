@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"net/http"
@@ -9,6 +10,13 @@ import (
 
 	browsersync "relayproxy/server/browser_sync"
 )
+
+// browserAdminContext is only used behind the requireAuth + requireAdmin
+// middleware. Client payloads cannot specify the audit operator.
+func browserAdminContext(req *http.Request) context.Context {
+	actorID, _ := req.Context().Value(userContextKey).(string)
+	return browsersync.WithAdminActor(req.Context(), actorID)
+}
 
 // Admin endpoints are protected by the existing requireAuth+requireAdmin
 // middleware. Browser devices never inherit Agent proxy or RDP capabilities.
@@ -34,7 +42,7 @@ func (r *Router) handleBrowserSyncApprove(w http.ResponseWriter, req *http.Reque
 		writeError(w, http.StatusBadRequest, "invalid approval request")
 		return
 	}
-	if err := r.browserSync.Store.ApproveEnrollment(req.Context(), req.PathValue("id"), body.IdentityID, body.Send, body.Receive); err != nil {
+	if err := r.browserSync.Store.ApproveEnrollment(browserAdminContext(req), req.PathValue("id"), body.IdentityID, body.Send, body.Receive); err != nil {
 		if errors.Is(err, browsersync.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "pending browser not found")
 			return
@@ -52,7 +60,7 @@ func (r *Router) handleBrowserSyncRevoke(w http.ResponseWriter, req *http.Reques
 			return
 		}
 	}
-	if err := r.browserSync.Store.Revoke(req.Context(), req.PathValue("id")); err != nil {
+	if err := r.browserSync.Store.Revoke(browserAdminContext(req), req.PathValue("id")); err != nil {
 		if errors.Is(err, browsersync.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "browser device not found")
 			return
@@ -66,7 +74,7 @@ func (r *Router) handleBrowserSyncRevoke(w http.ResponseWriter, req *http.Reques
 
 func (r *Router) handleBrowserSyncDelete(w http.ResponseWriter, req *http.Request) {
 	id := req.PathValue("id")
-	if err := r.browserSync.Store.DeleteRevokedDevice(req.Context(), id); err != nil {
+	if err := r.browserSync.Store.DeleteRevokedDevice(browserAdminContext(req), id); err != nil {
 		switch {
 		case errors.Is(err, browsersync.ErrNotFound):
 			writeError(w, http.StatusNotFound, "browser device not found")
@@ -126,7 +134,6 @@ func (r *Router) handleBrowserSyncExtensionRevoke(w http.ResponseWriter, req *ht
 	writeJSON(w, http.StatusOK, map[string]string{"state": "revoked"})
 }
 
-
 // Admin-only management metadata. Never return encrypted offers, browser keys,
 // tokens, credential material or arbitrary client-supplied error strings.
 func (r *Router) handleBrowserSyncRules(w http.ResponseWriter, req *http.Request) {
@@ -148,7 +155,7 @@ func (r *Router) handleBrowserSyncRuleAction(w http.ResponseWriter, req *http.Re
 			return
 		}
 	}
-	if err := r.browserSync.Store.AdminRuleAction(req.Context(), req.PathValue("id"), action); err != nil {
+	if err := r.browserSync.Store.AdminRuleAction(browserAdminContext(req), req.PathValue("id"), action); err != nil {
 		if errors.Is(err, browsersync.ErrNotFound) {
 			writeError(w, http.StatusNotFound, "browser rule not found")
 		} else if errors.Is(err, browsersync.ErrRuleDenied) {

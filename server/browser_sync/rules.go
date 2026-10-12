@@ -19,6 +19,7 @@ import (
 var ErrRuleDenied = errors.New("browser sync rule denied")
 
 const maxBrowserRulesPerDevice = 32
+
 // Count all non-revoked rules whose source belongs to the same approved
 // identity. Counting only each device would allow hundreds of unused encrypted
 // offers to accumulate through additional pairs of approved devices.

@@ -250,7 +250,8 @@ func (s *Store) AdminDeviceStats(ctx context.Context) ([]AdminDeviceStats, error
 		SUM(CASE WHEN type='delivery_result' AND outcome='CONFLICT' THEN 1 ELSE 0 END)
 		FROM (SELECT device_id,type,outcome,created_at FROM browser_sync_audit
 		UNION ALL SELECT peer_id,type,outcome,created_at FROM browser_sync_audit WHERE peer_id!='')
-		WHERE device_id!='' GROUP BY device_id LIMIT 1000`)
+		WHERE device_id!='' AND created_at>=? GROUP BY device_id LIMIT 1000`,
+		time.Now().UTC().Add(-browserAuditRetention))
 	if err != nil {
 		return nil, err
 	}

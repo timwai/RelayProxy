@@ -145,7 +145,10 @@ async function applyToTarget(profile,ruleId,policy,payload){
 }
 
 async function verifyTargetSite(page,origin){
-  await page.goto(origin+'/');
+  assert.equal(new URL(page.url()).origin,origin);
+  await page.waitForLoadState('domcontentloaded');
+  // Do not reload the tab immediately after injected sessionStorage/IDB writes:
+  // the goal is to verify this exact site's real browser storage context.
   assert.deepEqual(await page.evaluate(async()=>{
     const res=await fetch('/whoami');
     return res.json();

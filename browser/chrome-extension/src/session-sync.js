@@ -3,7 +3,7 @@
 // signed encrypted message has been produced.
 import { getOrCreateIdentity } from './device-identity.js';
 import { getSettings, getTrustedPeer } from './rules.js';
-import { sendControl, onServerPush } from './server-api.js';
+import { sendControl, connectBrowser, onServerPush } from './server-api.js';
 import { decryptEncryptedOffer } from './envelope.js';
 import { encryptSnapshot, decryptSnapshot } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
@@ -360,23 +360,58 @@ export async function reconcilePendingDeliveries() {
   }
 }
 
+// A disconnected Chrome MV3 worker must re-establish its authenticated WSS
+// listener even if the five-minute scheduled snapshot cycle is not due.
+// Persist the retry deadline because the service worker can be destroyed.
 export async function restoreActiveSubscriptions({force=false}={}) {
   const settings=await getSettings();
   if(!settings.serverOrigin)return;
   const now=Date.now();
+  const stored=(await chrome.storage.local.get(CONNECTION_RETRY))[CONNECTION_RETRY]||null;
+  if(!force&&!shouldRetryConnection(stored,settings.serverOrigin,now))return;
+  try{
+    await connectBrowser();
+    // A live authenticated socket also lets the source receive SYNC_REQUEST
+    // and the receiver accept asynchronous SESSION_SNAPSHOT pushes.
+    if(stored?.failures||stored?.nextRetryAt)
+      await chrome.storage.local.set({[CONNECTION_RETRY]:{
+        serverOrigin:settings.serverOrigin,failures:0,nextRetryAt:0}});
+  }catch{
+    const failures=(stored?.serverOrigin===settings.serverOrigin
+      ?Math.max(0,Math.min(10,Number(stored.failures)||0)):0)+1;
+    await chrome.storage.local.set({[CONNECTION_RETRY]:{
+      serverOrigin:settings.serverOrigin,failures,
+      nextRetryAt:now+nextReconnectDelay(failures)}});
+    return;
+  }
+  // Delivery reconciliation must not wait for the periodic five-minute
+  // refresh: ACKs can arrive while the browser worker was asleep.
+  await reconcilePendingDeliveries();
   const last=(await chrome.storage.local.get(LAST_RECONCILE))[LAST_RECONCILE];
   if(!force&&!shouldReconcile(last,now))return;
-  await reconcilePendingDeliveries();
   const identity=await getOrCreateIdentity();
   const rules=(await sendControl('LIST_RULES')).rules||[];
-  // Network reconnection may trigger multiple async wakeups. Limit periodic
-  // sync to five minutes, not every one-minute service worker alarm.
+  // Do not record the last reconciliation until the Server was reachable.
   await chrome.storage.local.set({[LAST_RECONCILE]:now});
-  for(const r of rules){
-    if(r.status==='active'&&r.targetBrowserDeviceId===identity.deviceId)
-      await requestSnapshot(r.ruleId).catch(()=>{});
+  for(const rule of rules){
+    if(rule.status==='active'&&rule.targetBrowserDeviceId===identity.deviceId)
+      await requestSnapshot(rule.ruleId).catch(()=>{});
   }
 }
+
+export async function pruneOverwriteGrants(){
+  const all=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
+  const clean={};
+  const now=Date.now();
+  for(const [id,grant] of Object.entries(all)){
+    if(validOverwriteGrant(grant,grant?.siteOrigin,now))clean[id]=grant;
+  }
+  // Old releases stored persistent booleans. They must never be honored
+  // after upgrade, even if the worker has no Server connection yet.
+  if(Object.keys(clean).length!==Object.keys(all).length)
+    await chrome.storage.local.set({[ALLOW_OVERRIDE]:clean});
+}
+
 
 export async function setOverwritePermission(ruleId,allowed) {
   const ctx=await ruleContext(ruleId);

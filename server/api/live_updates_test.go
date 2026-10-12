@@ -102,3 +102,24 @@ func TestLiveUpdatesGlobalConnectionBudget(t *testing.T) {
 		done()
 	}
 }
+
+func TestLiveUpdatesScopedRevisionsHideCrossIdentityActivity(t *testing.T) {
+	h := newLiveUpdates()
+	a, release, ok := h.subscribe("identity_a", false)
+	if !ok {
+		t.Fatal("subscription denied")
+	}
+	defer release()
+	h.publish("identity_a")
+	if got := <-a; got != 1 {
+		t.Fatalf("first scoped revision = %d", got)
+	}
+	for i := 0; i < 17; i++ {
+		h.publish("identity_b")
+	}
+	h.publish("") // admin-only events are also private
+	h.publish("identity_a")
+	if got := <-a; got != 2 {
+		t.Fatalf("cross-identity event count leaked through revision gap: %d", got)
+	}
+}

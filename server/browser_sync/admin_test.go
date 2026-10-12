@@ -74,6 +74,36 @@ func TestBrowserAdminRulesNeverExposeEncryptedOfferAndRequireSafeTransitions(t *
 	}
 }
 
+func TestAdminPausePreservesInFlightAckButRejectsNewDelivery(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	source, target, ruleID := adminTestPair(t, store)
+	beforePause := uuid.NewString()
+	now := time.Now().UTC()
+	if err := store.RecordDelivery(ctx, beforePause, ruleID, source, target, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AdminRuleAction(ctx, ruleID, "pause"); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordDelivery(ctx, uuid.NewString(), ruleID, source, target, now); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("new encrypted delivery accepted for paused pair: %v", err)
+	}
+	if _, err := store.ClaimDeliveryReceipt(ctx, target, ruleID, beforePause, "APPLIED", now); err != nil {
+		t.Fatalf("pause discarded in-flight receipt: %v", err)
+	}
+	status, err := store.DeliveryStatus(ctx, source, ruleID, beforePause, now)
+	if err != nil || status != "APPLIED" {
+		t.Fatalf("paused rule lost terminal delivery status: %s %v", status, err)
+	}
+	if err := store.AdminRuleAction(ctx, ruleID, "revoke"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.DeliveryStatus(ctx, source, ruleID, beforePause, now); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("revoked pair still exposed delivery metadata: %v", err)
+	}
+}
+
 func TestAdminRulesPageFiltersBeforePagination(t *testing.T) {
 	store := testBrowserStore(t)
 	ctx := context.Background()

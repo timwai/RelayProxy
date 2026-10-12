@@ -1,6 +1,7 @@
 // Agentless development milestone: device identity + local website rules.
 // Session transfer uses existing mutual pairing, E2EE and precise cookie scopes.
 import { getOrCreateIdentity } from './device-identity.js';
+import {PENDING_ENROLLMENT_KEY,recordEnrollment,pollPendingEnrollment,validPendingEnrollment} from './enrollment-auto.js';
 import { getSettings, updateSettings, parseServerOrigin } from './rules.js';
 import { registerBrowser, connectBrowser, currentConnectionState, disconnect, sendControl } from './server-api.js';
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
@@ -10,6 +11,15 @@ import {parseBoundHost, installNetworkGuard, startNetworkGuard, startLocalNetwor
 
 registerNetworkAuth();
 
+async function restoreApprovedBrowser({force=false}={}){
+  const status=await pollPendingEnrollment({force});
+  if(!['none','approved'].includes(status.state))return;
+  // The Server has affirmatively returned approved (or the browser was
+  // already approved before this feature); never authenticate a pending
+  // registration based solely on a reachable TLS endpoint.
+  await restoreActiveSubscriptions({force:force||status.state==='approved'});
+}
+
 async function initialize() {
   await getOrCreateIdentity();
   // Remove legacy unsalted SHA-256 Cookie fingerprints on extension startup.
@@ -18,7 +28,7 @@ async function initialize() {
   await chrome.alarms.create('browser-sync-reconcile', { periodInMinutes: 1 });
   await installNetworkGuard();
   await refreshNetworkBinding({force:true}).catch(()=>{});
-  restoreActiveSubscriptions({force:true}).catch(() => {});
+  restoreApprovedBrowser({force:true}).catch(() => {});
 }
 
 chrome.runtime.onInstalled.addListener(() => { initialize().catch(console.error); });
@@ -28,7 +38,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   if (alarm.name !== 'browser-sync-reconcile') return;
   pruneOverwriteGrants().catch(()=>{});
   refreshNetworkBinding().catch(()=>{});
-  restoreActiveSubscriptions().catch(() => {});
+  restoreApprovedBrowser().catch(() => {});
 });
 
 chrome.cookies.onChanged.addListener(({ cookie }) => {
@@ -40,14 +50,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
     switch (message?.type) {
       case 'GET_STATUS': {
-        const [identity, settings, retryData] = await Promise.all([
-          getOrCreateIdentity(), getSettings(), chrome.storage.local.get('browserSyncConnectionRetry')]);
+        const [identity, settings, retryData, enrollmentData] = await Promise.all([
+          getOrCreateIdentity(),getSettings(),
+          chrome.storage.local.get('browserSyncConnectionRetry'),
+          chrome.storage.local.get(PENDING_ENROLLMENT_KEY)]);
         const retry=retryData.browserSyncConnectionRetry;
         const nextRetryAt=retry?.serverOrigin===settings.serverOrigin &&
           Number.isFinite(retry.nextRetryAt) && retry.nextRetryAt>Date.now()
           ?retry.nextRetryAt:0;
         return { ok: true, identity, settings, localAgentProxy:await localAgentGlobal(),
           connected:currentConnectionState()==='AUTHENTICATED',
+          pendingApproval:validPendingEnrollment(enrollmentData[PENDING_ENROLLMENT_KEY],
+            settings,identity.deviceId),
           stage:currentConnectionState(),nextRetryAt,transferEnabled:true };
       }
       case 'SET_LOCAL_AGENT_GLOBAL': {
@@ -59,7 +73,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'SAVE_SERVER': {
         const serverOrigin = parseServerOrigin(message.serverOrigin);
         disconnect();
-        await chrome.storage.local.remove('browserSyncConnectionRetry');
+        await chrome.storage.local.remove([
+          'browserSyncConnectionRetry',PENDING_ENROLLMENT_KEY
+        ]);
         const saved=await updateSettings({ serverOrigin });
         // Rebuild PAC for the new Relay control-plane host. When a previous
         // Server had a bound website, refreshNetworkBinding will fail closed
@@ -69,9 +85,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'REGISTER_BROWSER': {
         const result = await registerBrowser();
+        await recordEnrollment(result);
         return { ok: true, ...result };
       }
       case 'CONNECT_BROWSER': {
+        const enrollment=(await chrome.storage.local.get(PENDING_ENROLLMENT_KEY))[PENDING_ENROLLMENT_KEY];
+        if(enrollment)throw new Error('设备仍在等待管理员审批，审批通过后将自动连接');
         const result = await connectBrowser();
         // A successful manual connection overrides a previous automatic
         // backoff, allowing the next MV3 alarm to reconcile pending ACKs.

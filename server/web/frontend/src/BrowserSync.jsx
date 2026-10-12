@@ -148,6 +148,20 @@ export function BrowserSyncAdmin({identities=[]}){
     finally{setBusy('');}
   };
 
+  const clearAudit=async()=>{
+    if(busy||!window.confirm('将永久清除浏览器同步的历史审计记录，仅保留本次清理操作。确定继续？'))return;
+    setBusy('audit-clear');setError('');setNotice('');
+    try{
+      const result=await api('/browser-sync/admin/audit',{method:'DELETE'});
+      setNotice('已清理 '+(result?.deleted||0)+' 条审计记录，保留了本次操作留痕。');
+      await refresh();
+    }catch(err){setError(err.message);}
+    finally{setBusy('');}
+  };
+  const auditExportURL='/api/v1/browser-sync/admin/audit/export'+
+    ((auditFilter==='all'&&!auditDevice)?'':
+      '?'+[auditFilter==='all'?'':'type='+encodeURIComponent(auditFilter),
+        auditDevice?'device='+encodeURIComponent(auditDevice):''].filter(Boolean).join('&'));
   const online=presence.online||{};
   const stats=new Map(list(presence.stats).map(s=>[s.deviceId,s]));
   const activeCount=devices.filter(d=>d.state==='approved'&&online[d.id]).length;
@@ -165,7 +179,7 @@ export function BrowserSyncAdmin({identities=[]}){
   const ruleStates=[['all','全部'],['offered','待确认'],['active','已生效'],['paused','已暂停'],['revoked','已撤销']];
   const ruleStatus={offered:'待确认',active:'已生效',paused:'已暂停',revoked:'已撤销'};
   const eventText={device_approved:'设备批准',device_revoked:'设备撤销',device_deleted:'设备删除',
-    rule_paused:'规则暂停',rule_resumed:'规则恢复',rule_revoked:'规则撤销',delivery_result:'同步结果'};
+    rule_paused:'规则暂停',rule_resumed:'规则恢复',rule_revoked:'规则撤销',delivery_result:'同步结果',audit_cleared:'审计清理'};
   return <section className="browser-sync-admin browser-sync-refined">
     <div className="page-head">
       <div><h1>浏览器同步</h1><p>设备授权、配对规则与同步运行记录</p></div>
@@ -281,9 +295,10 @@ export function BrowserSyncAdmin({identities=[]}){
               <small className="browser-sync-device-extra">身份：{r.identityId||'—'}</small></td>
             <td><span className={'badge '+(r.status==='active'?'ok':r.status==='revoked'?'danger':'')}>
               {ruleStatus[r.status]||r.status}</span></td>
-            <td><div>{r.sourceApproved?'发送端已确认':'发送端待确认'} / {r.targetApproved?'接收端已确认':'接收端待确认'}</div>
-              <small className="browser-sync-device-extra">{r.keysConfirmed?'密钥指纹已确认':'指纹未完成确认'}</small>
-              <small className="browser-sync-device-extra">{fmtDate(r.updatedAt)}</small></td>
+            <td><div>来源批准：{fmtDate(r.sourceApprovedAt)}</div>
+              <small className="browser-sync-device-extra">接收端批准：{fmtDate(r.targetApprovedAt)}</small>
+              <small className="browser-sync-device-extra">密钥确认：{fmtDate(r.activatedAt)}</small>
+              <small className="browser-sync-device-extra">最后修改：{fmtDate(r.updatedAt)}</small></td>
             <td className="browser-sync-actions">
               {r.status==='active'&&<button className="btn" type="button" disabled={!!busy}
                 onClick={()=>ruleAction(r,'pause')}>暂停</button>}
@@ -329,8 +344,12 @@ export function BrowserSyncAdmin({identities=[]}){
           {!visibleAudit.length&&<tr><td colSpan={5} className="browser-sync-no-data">{loading?'读取中…':'暂无同步记录'}</td></tr>}
           </tbody></table></div>
         <div className="browser-sync-audit-footer">
-          <span className="muted">仅记录脱敏事件元数据，最多保留 30 天 / 5000 条；不保存 Cookie 或同步密文。</span>
-          {audit.nextCursor>0&&<button className="btn" type="button" disabled={!!busy} onClick={moreAudit}>加载更多</button>}
+          <span className="muted">只保存脱敏事件；最多保留 30 天或 5000 条，不含 Cookie 和同步密文。</span>
+          <div className="browser-sync-audit-actions">
+            <a className="btn" href={auditExportURL}>导出 CSV</a>
+            {audit.nextCursor>0&&<button className="btn" type="button" disabled={!!busy} onClick={moreAudit}>加载更多</button>}
+            <button className="btn danger" type="button" disabled={!!busy} onClick={clearAudit}>清理审计</button>
+          </div>
         </div>
       </div>}
     </>}

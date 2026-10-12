@@ -42,6 +42,61 @@ func TestNetworkBindingConsentAndRevoke(t *testing.T) {
 		t.Fatalf("network access survived revocation: %v", err)
 	}
 }
+func TestNetworkBindingCancelAndReinviteRequiresNewTargetConsent(t *testing.T) {
+	store := testBrowserStore(t)
+	source, target, ruleID := approvedDeliveryRule(t, store)
+	ctx := context.Background()
+	const first = "dev_remote_exit_a"
+	const second = "dev_remote_exit_b"
+	if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, "login.example.com", first); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, "login.example.com", second); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("outstanding offer modified without cancel: %v", err)
+	}
+	if err := store.RevokeNetworkBinding(ctx, source.ID, ruleID); err != nil {
+		t.Fatalf("source cannot cancel outstanding invitation: %v", err)
+	}
+	if err := store.AcceptNetworkBinding(ctx, target.ID, ruleID, "login.example.com"); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("cancelled invitation accepted: %v", err)
+	}
+	if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, "secure.example.com", second); err != nil {
+		t.Fatalf("new invitation after cancellation denied: %v", err)
+	}
+	binding, err := store.NetworkBinding(ctx, target.ID, ruleID)
+	if err != nil || binding.Status != "offered" || binding.Host != "secure.example.com" || binding.ExitDeviceID != second {
+		t.Fatalf("new invitation not visible: %+v %v", binding, err)
+	}
+	if _, err := store.NetworkDestination(ctx, target.ID, "secure.example.com"); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("reoffered exit used before target approval: %v", err)
+	}
+	if err := store.AcceptNetworkBinding(ctx, target.ID, ruleID, "login.example.com"); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("stale host approval accepted: %v", err)
+	}
+	if err := store.AcceptNetworkBinding(ctx, target.ID, ruleID, "secure.example.com"); err != nil {
+		t.Fatal(err)
+	}
+	id, err := store.NetworkDestination(ctx, target.ID, "secure.example.com")
+	if err != nil || id != second {
+		t.Fatalf("wrong selected remote exit %q: %v", id, err)
+	}
+	if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, "secure.example.com", first); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("active binding was silently overwritten: %v", err)
+	}
+	if err := store.RevokeNetworkBinding(ctx, target.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.NetworkDestination(ctx, target.ID, "secure.example.com"); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("revoked remote exit remains routable: %v", err)
+	}
+	if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, "secure.example.com", first); err != nil {
+		t.Fatalf("reinvite after active binding revoked: %v", err)
+	}
+	if _, err := store.NetworkDestination(ctx, target.ID, "secure.example.com"); !errors.Is(err, ErrRuleDenied) {
+		t.Fatalf("fresh invite bypassed independent target confirmation: %v", err)
+	}
+}
+
 func TestNetworkBindingHostRestrictions(t *testing.T) {
 	for _, host := range []string{"127.0.0.1", "LOCALHOST", "localhost", "a.local", "a.internal", "a.arpa", "[::1]", "bad_.example.com", "bad.example.com:443", "a..example.com", "EXAMPLE.COM", "a.example.com/evil", "example.com\nProxy-Authorization"} {
 		if validNetworkHost(host) {

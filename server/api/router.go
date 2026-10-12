@@ -125,7 +125,7 @@ func NewRouter(authService *service.AuthService, deviceService *service.DeviceSe
 	for _, option := range options {
 		option(r)
 	}
-	if sessions!=nil{
+	if sessions != nil {
 		// Agent tunnel arrivals/departures share the same invalidation path
 		// as Server Web mutations; each UI re-reads its scoped snapshot.
 		sessions.SetPresenceNotifier(r.live.publish)
@@ -246,11 +246,13 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		// invalidation; the extension never gains an admin SSE subscription.
 		if req.URL.Path == "/api/v1/browser-sync/devices/register" &&
 			req.Method == http.MethodPost {
-			tracked := &mutationStatusWriter{ResponseWriter:w}
-			r.browserSync.ServeHTTP(tracked,req)
-			if tracked.succeeded(){r.live.publish("")}
-		}else{
-			r.browserSync.ServeHTTP(w,req)
+			tracked := &mutationStatusWriter{ResponseWriter: w}
+			r.browserSync.ServeHTTP(tracked, req)
+			if tracked.succeeded() {
+				r.live.publish("")
+			}
+		} else {
+			r.browserSync.ServeHTTP(w, req)
 		}
 		return
 	}
@@ -996,17 +998,21 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		ctx := context.WithValue(req.Context(), userContextKey, userID)
 		ctx = context.WithValue(ctx, principalContextKey, user)
-		authorized:=req.WithContext(ctx)
-		if req.Method==http.MethodGet||req.Method==http.MethodHead {
-			next(w,authorized)
+		authorized := req.WithContext(ctx)
+		if req.Method == http.MethodGet || req.Method == http.MethodHead {
+			next(w, authorized)
 			return
 		}
-		tracked:=&mutationStatusWriter{ResponseWriter:w}
-		next(tracked,authorized)
+		tracked := &mutationStatusWriter{ResponseWriter: w}
+		next(tracked, authorized)
 		if tracked.succeeded() {
 			// A successful authenticated state mutation invalidates the scoped
 			// client's read model. Never ship the mutated resource in the event.
-			if user.Role=="admin"{r.live.publish("")}else{r.live.publish(user.IdentityID)}
+			if user.Role == "admin" {
+				r.live.publish("")
+			} else {
+				r.live.publish(user.IdentityID)
+			}
 		}
 	}
 }

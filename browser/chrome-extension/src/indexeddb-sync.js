@@ -5,7 +5,7 @@
 // envelope; persisted extension metadata contains keyed ownership tags only.
 import {validatePolicy} from './envelope.js';
 import {cookieValueTag} from './device-identity.js';
-import {tabFor,execute} from './web-storage.js';
+import {tabFor} from './web-storage.js';
 
 export const MAX_INDEXEDDB_BYTES=4*1024*1024;
 const OWNER_KEY='browserSyncManagedIndexedDBV1';
@@ -316,11 +316,25 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
   throw new Error('IndexedDB 操作模式无效');
 }
 
+// IndexedDB writes must target the website's own database, not a transient
+// isolated execution context. Only the already authorized site's Origin is
+// accepted by siteIndexedDB. No privileged extension API or cross-origin data
+// is exposed to the injected function; all output is revalidated in MV3.
+// MAIN-world use remains a site-interference risk and needs security review.
+async function executeSiteIndexedDB(tabId,args){
+  const result=await chrome.scripting.executeScript({
+    target:{tabId},world:'MAIN',func:siteIndexedDB,args
+  });
+  if(result?.length!==1||!result[0]||!('result' in result[0]))
+    throw new Error('页面 IndexedDB 读取/写入失败');
+  return result[0].result;
+}
+
 export async function captureIndexedDB(policy){
   const p=validatePolicy(policy);
   if(p.schemaVersion!==3)throw new Error('仅双方确认的 v3 站点配对支持 IndexedDB');
   const tabId=await tabFor(p.siteOrigin);
-  return validateIndexedDBSnapshot(await execute(tabId,siteIndexedDB,[p.siteOrigin,'read']));
+  return validateIndexedDBSnapshot(await executeSiteIndexedDB(tabId,[p.siteOrigin,'read']));
 }
 
 export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite=false,tabId=null}={}){
@@ -331,10 +345,10 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
   if(data===undefined)return {tabId,async apply(){},async commit(){},async rollback(){return true;}};
   const incoming=validateIndexedDBSnapshot(data);
   const id=tabId??await tabFor(p.siteOrigin,{create:true});
-  await execute(id,siteIndexedDB,[p.siteOrigin,'validate',incoming]);
+  await executeSiteIndexedDB(id,[p.siteOrigin,'validate',incoming]);
   const journal=(await chrome.storage.local.get(JOURNAL_KEY))[JOURNAL_KEY]||{};
   if(journal[ruleId])throw new Error('PARTIAL_ROLLBACK: IndexedDB 上次写入中断');
-  const before=validateIndexedDBSnapshot(await execute(id,siteIndexedDB,[p.siteOrigin,'read']));
+  const before=validateIndexedDBSnapshot(await executeSiteIndexedDB(id,[p.siteOrigin,'read']));
   const meta=(await chrome.storage.local.get(OWNER_KEY))[OWNER_KEY]||{};
   const owned=meta[ruleId]||{};
   const merged=new Map(before.databases.map(db=>[db.name,db]));
@@ -371,7 +385,7 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
       started=true;
       journal[ruleId]={startedAt:Date.now()};
       await chrome.storage.local.set({[JOURNAL_KEY]:journal});
-      await execute(id,siteIndexedDB,[p.siteOrigin,'write',after,before]);
+      await executeSiteIndexedDB(id,[p.siteOrigin,'write',after,before]);
     },
     async commit(){
       if(!started||finished)throw new Error('IndexedDB 事务状态无效');
@@ -383,7 +397,7 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
     async rollback(){
       if(!started||finished)return true;
       try{
-        const live=validateIndexedDBSnapshot(await execute(id,siteIndexedDB,[p.siteOrigin,'read']));
+        const live=validateIndexedDBSnapshot(await executeSiteIndexedDB(id,[p.siteOrigin,'read']));
         const beforeBy=new Map(before.databases.map(db=>[db.name,db]));
         const afterBy=new Map(after.databases.map(db=>[db.name,db]));
         for(const db of live.databases){
@@ -391,7 +405,7 @@ export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite
           if(JSON.stringify(db)!==JSON.stringify(prev)&&JSON.stringify(db)!==JSON.stringify(next))
             return false;
         }
-        await execute(id,siteIndexedDB,[p.siteOrigin,'write',before,live]);
+        await executeSiteIndexedDB(id,[p.siteOrigin,'write',before,live]);
         const fresh=(await chrome.storage.local.get(JOURNAL_KEY))[JOURNAL_KEY]||{};
         delete fresh[ruleId];
         await chrome.storage.local.set({[JOURNAL_KEY]:fresh});

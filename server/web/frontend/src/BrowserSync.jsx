@@ -7,6 +7,7 @@ export function BrowserSyncAdmin({identities=[]}){
   const [devices,setDevices]=useState([]);
   const [extensions,setExtensions]=useState([]);
   const [rules,setRules]=useState([]);
+  const [ruleNextOffset,setRuleNextOffset]=useState(-1);
   const [presence,setPresence]=useState({online:{},stats:[]});
   const [audit,setAudit]=useState({items:[],nextCursor:0});
   const [loading,setLoading]=useState(true);
@@ -21,6 +22,8 @@ export function BrowserSyncAdmin({identities=[]}){
   const [stateFilter,setStateFilter]=useState('all');
   const [ruleFilter,setRuleFilter]=useState('all');
   const [ruleSearch,setRuleSearch]=useState('');
+  const [ruleSearchDebounced,setRuleSearchDebounced]=useState('');
+  const [ruleIdentity,setRuleIdentity]=useState('');
   const [auditFilter,setAuditFilter]=useState('all');
   const [auditDevice,setAuditDevice]=useState('');
   const activeIdentities=useMemo(()=>list(identities).filter(x=>{
@@ -28,20 +31,30 @@ export function BrowserSyncAdmin({identities=[]}){
     return !state||state==='active';
   }),[identities]);
 
+  useEffect(()=>{
+    const id=setTimeout(()=>setRuleSearchDebounced(ruleSearch.trim()),300);
+    return ()=>clearTimeout(id);
+  },[ruleSearch]);
+  const rulePagePath=useCallback(offset=>'/browser-sync/admin/rules?limit=50&offset='+offset+
+    (ruleFilter==='all'?'':'&status='+encodeURIComponent(ruleFilter))+
+    (ruleIdentity?'&identityId='+encodeURIComponent(ruleIdentity):'')+
+    (ruleSearchDebounced?'&q='+encodeURIComponent(ruleSearchDebounced):''),
+    [ruleFilter,ruleIdentity,ruleSearchDebounced]);
   const refresh=useCallback(async(silent=false)=>{
     if(!silent){setLoading(true);setError('');}
     try{
       const [deviceData,extensionData,ruleData,statusData,auditData]=await Promise.all([
         api('/browser-sync/admin/devices'),
         api('/browser-sync/admin/extensions'),
-        api('/browser-sync/admin/rules'),
+        api(rulePagePath(0)),
         api('/browser-sync/admin/status'),
         api('/browser-sync/admin/audit?limit=50'+(auditFilter==='all'?'':'&type='+encodeURIComponent(auditFilter))+
           (auditDevice?'&device='+encodeURIComponent(auditDevice):''))
       ]);
       setDevices(list(deviceData));
       setExtensions(list(extensionData));
-      setRules(list(ruleData));
+      setRules(list(ruleData?.items));
+      setRuleNextOffset(Number.isInteger(ruleData?.nextOffset)?ruleData.nextOffset:-1);
       setPresence({online:statusData?.online||{},stats:list(statusData?.stats)});
       setAudit({items:list(auditData?.items),nextCursor:auditData?.nextCursor||0});
       setUnavailable(false);
@@ -49,7 +62,7 @@ export function BrowserSyncAdmin({identities=[]}){
       if(err.status===404){setUnavailable(true);if(!silent){setDevices([]);setRules([]);}}
       else setError(err.message);
     }finally{if(!silent)setLoading(false);}
-  },[auditFilter,auditDevice]);
+  },[auditFilter,auditDevice,rulePagePath]);
   useEffect(()=>{
     refresh();
     // Poll only transient presence. A failed poll must not clear the last

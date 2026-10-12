@@ -109,6 +109,16 @@ func TestBrowserAuditStoresOnlyBoundedTerminalMetadataAndPaginates(t *testing.T)
 	if deliveryCount != 3 {
 		t.Fatalf("expected 3 terminal results; got %d", deliveryCount)
 	}
+	filtered, err := store.AdminAuditFiltered(ctx, 0, 50, "delivery_result", source)
+	if err != nil || len(filtered) != 3 {
+		t.Fatalf("server-side audit filter mismatched: %+v %v", filtered, err)
+	}
+	if _, err := store.AdminAuditFiltered(ctx, 0, 50, "cookies", ""); err == nil {
+		t.Fatal("unapproved audit event filter accepted")
+	}
+	if _, err := store.AdminAuditFiltered(ctx, 0, 50, "", "invalid_device"); err == nil {
+		t.Fatal("invalid audit device filter accepted")
+	}
 	first, err := store.AdminAudit(ctx, 0, 2)
 	if err != nil || len(first) != 2 {
 		t.Fatalf("first page: %+v %v", first, err)

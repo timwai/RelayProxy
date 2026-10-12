@@ -262,6 +262,11 @@ export function BrowserSyncAdmin({identities=[]}){
         <div className="browser-sync-toolbar">
           <input className="input browser-sync-search" aria-label="搜索配对规则" placeholder="搜索设备或规则 ID"
             value={ruleSearch} onChange={e=>setRuleSearch(e.target.value)}/>
+          <select className="input browser-sync-search" aria-label="按所属身份筛选配对规则"
+            value={ruleIdentity} onChange={e=>setRuleIdentity(e.target.value)}>
+            <option value="">全部身份</option>
+            {activeIdentities.map(item=><option key={item.id} value={item.id}>{item.name||item.id}</option>)}
+          </select>
           <div className="browser-sync-filters">
             {ruleStates.map(([id,label])=><button type="button" key={id}
               className={'btn '+(ruleFilter===id?'active':'')}
@@ -291,7 +296,11 @@ export function BrowserSyncAdmin({identities=[]}){
             {!visibleRules.length&&<tr><td colSpan={4} className="browser-sync-no-data">暂无匹配规则</td></tr>}
           </tbody>
         </table></div>
-        <p className="browser-sync-footnote">仅展示加密配对的元数据；Server 无法查看网站名称、Cookie 或会话内容。最多列出最近更新的 500 条规则。</p>
+        <div className="browser-sync-audit-footer">
+          <span className="muted">仅展示配对元数据，Server 无法读取站点策略和会话内容。</span>
+          {ruleNextOffset>=0&&<button className="btn" type="button" disabled={!!busy}
+            onClick={moreRules}>加载更多规则</button>}
+        </div>
       </div>:<div className="panel">
         <div className="browser-sync-toolbar">
           <div className="browser-sync-filters">

@@ -13,19 +13,19 @@ import (
 // AdminRule exposes only policy metadata. Encrypted offers, policy digests,
 // website origins, signatures and browser storage never leave this layer.
 type AdminRule struct {
-	ID             string    `json:"id"`
-	SourceID       string    `json:"sourceId"`
-	SourceName     string    `json:"sourceName"`
-	TargetID       string    `json:"targetId"`
-	TargetName     string    `json:"targetName"`
-	IdentityID     string    `json:"identityId"`
-	Status         string    `json:"status"`
-	SourceApproved bool      `json:"sourceApproved"`
-	TargetApproved bool      `json:"targetApproved"`
-	KeysConfirmed  bool      `json:"keysConfirmed"`
-	CreatedAt      time.Time  `json:"createdAt"`
-	UpdatedAt      time.Time  `json:"updatedAt"`
-	SourceApprovedAt time.Time `json:"sourceApprovedAt"`
+	ID               string     `json:"id"`
+	SourceID         string     `json:"sourceId"`
+	SourceName       string     `json:"sourceName"`
+	TargetID         string     `json:"targetId"`
+	TargetName       string     `json:"targetName"`
+	IdentityID       string     `json:"identityId"`
+	Status           string     `json:"status"`
+	SourceApproved   bool       `json:"sourceApproved"`
+	TargetApproved   bool       `json:"targetApproved"`
+	KeysConfirmed    bool       `json:"keysConfirmed"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+	SourceApprovedAt time.Time  `json:"sourceApprovedAt"`
 	TargetApprovedAt *time.Time `json:"targetApprovedAt,omitempty"`
 	ActivatedAt      *time.Time `json:"activatedAt,omitempty"`
 }

@@ -193,10 +193,41 @@ func (s *Store) ClaimDeliveryReceiptWithCode(ctx context.Context, receiverID, ru
 		return "", ErrRuleDenied
 	}
 
-	// The receipt and its terminal result must commit atomically. If A is
-	// temporarily offline, its signed session can still query this outcome.
+	// Revalidate permissions IN the same transaction as the write, not
+	// merely before it: device/rule/Origin revocation can race an ACK.
+	// Pausing a rule still permits already admitted snapshots to settle.
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
+	var authorized int
+	err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM browser_sync_rules r
+		JOIN browser_sync_devices src ON src.id=r.source_id
+		JOIN browser_sync_devices dst ON dst.id=r.target_id
+		JOIN identities i ON i.id=src.identity_id
+		LEFT JOIN browser_sync_device_extensions sx ON sx.device_id=src.id
+		LEFT JOIN browser_sync_extensions se ON se.extension_id=sx.extension_id
+		LEFT JOIN browser_sync_device_extensions dx ON dx.device_id=dst.id
+		LEFT JOIN browser_sync_extensions de ON de.extension_id=dx.extension_id
+		WHERE r.id=? AND r.source_id=? AND r.target_id=?
+		AND r.status IN ('active','paused')
+		AND r.source_approved=1 AND r.target_approved=1 AND r.keys_confirmed=1
+		AND src.state='approved' AND src.can_send=1
+		AND dst.state='approved' AND dst.can_receive=1
+		AND src.identity_id!='' AND src.identity_id=dst.identity_id
+		AND i.status='active'
+		AND (sx.device_id IS NULL OR se.state IN ('pending','approved'))
+		AND (dx.device_id IS NULL OR de.state IN ('pending','approved'))`,
+		ruleID, source.ID, receiverID).Scan(&authorized)
+	if err != nil {
+		return "", err
+	}
+	if authorized != 1 {
+		return "", ErrRuleDenied
+	}
 	if status == "RECEIVED" {
-		result, err := s.db.ExecContext(ctx, `UPDATE browser_sync_deliveries SET received=1
+		result, err := tx.ExecContext(ctx, `UPDATE browser_sync_deliveries SET received=1
 			WHERE message_id=? AND rule_id=? AND source_id=? AND target_id=?
 			AND expires_at>? AND received=0`,
 			messageID, ruleID, source.ID, receiverID, now.Unix())
@@ -204,16 +235,17 @@ func (s *Store) ClaimDeliveryReceiptWithCode(ctx context.Context, receiverID, ru
 			return "", err
 		}
 		count, err := result.RowsAffected()
-		if err != nil || count != 1 {
+		if err != nil {
+			return "", err
+		}
+		if count != 1 {
 			return "", ErrRuleDenied
+		}
+		if err := tx.Commit(); err != nil {
+			return "", err
 		}
 		return source.ID, nil
 	}
-	tx, err := s.db.BeginTx(ctx, nil)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
 	result, err := tx.ExecContext(ctx, `DELETE FROM browser_sync_deliveries
 		WHERE message_id=? AND rule_id=? AND source_id=? AND target_id=?
 		AND expires_at>?`, messageID, ruleID, source.ID, receiverID, now.Unix())

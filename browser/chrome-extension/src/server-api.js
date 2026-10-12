@@ -113,13 +113,20 @@ async function connectFreshBrowser() {
       diagnosing.then(error => fail(new Error(browserWSSFailureMessage(stage) + ' ' + error.message)),
         () => fail(new Error(browserWSSFailureMessage(stage))));
     };
+    let handshakeTimer = null;
     const fail = error => {
       if (finished) return;
       finished = true;
+      if (handshakeTimer) clearTimeout(handshakeTimer);
       connectionState = 'DISCONNECTED';
       socket.close();
       reject(error);
     };
+    // Neither a stalled TCP/WebSocket handshake nor an incomplete proof
+    // may leave a worker indefinitely blocked in CONNECTING.
+    handshakeTimer = setTimeout(() => {
+      if (!authenticated) fail(new Error(browserWSSFailureMessage(stage)+'（握手超时）'));
+    }, 20000);
     socket.addEventListener('open', () => {
       stage = 'hello';
       socket.send(JSON.stringify({ type: 'AUTH_HELLO', deviceId: identity.deviceId }));
@@ -147,6 +154,7 @@ async function connectFreshBrowser() {
           }
           stage = 'authenticated';
           authenticated = true;
+          if (handshakeTimer) clearTimeout(handshakeTimer);
           connectionState = 'AUTHENTICATED';
           if (!finished) { finished = true; resolve({ state: connectionState }); }
           // A live Chrome 116+ MV3 WebSocket needs periodic control traffic.
@@ -183,6 +191,7 @@ async function connectFreshBrowser() {
       if (!authenticated) failWithDiagnosis();
     });
     socket.addEventListener('close', event => {
+      if (handshakeTimer) clearTimeout(handshakeTimer);
       if (!authenticated && event.code === 1008) {
         // 1008 is delivered only AFTER a completed WebSocket Upgrade.
         // Do not mask a failed proof as a TLS/network error.

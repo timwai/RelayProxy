@@ -16,6 +16,7 @@ import (
 type liveUpdates struct {
 	mu          sync.Mutex
 	revision    uint64
+	scopeRevision map[string]uint64
 	subscribers map[chan uint64]liveSubscriber
 }
 type liveSubscriber struct {
@@ -26,7 +27,10 @@ type liveSubscriber struct {
 const maxLiveSubscribers = 128
 
 func newLiveUpdates() *liveUpdates {
-	return &liveUpdates{subscribers: make(map[chan uint64]liveSubscriber)}
+	return &liveUpdates{
+		scopeRevision: make(map[string]uint64),
+		subscribers: make(map[chan uint64]liveSubscriber),
+	}
 }
 
 func (h *liveUpdates) subscribe(identityID string, admin bool) (<-chan uint64, func(), bool) {
@@ -54,12 +58,19 @@ func (h *liveUpdates) publish(identityID string) {
 	h.mu.Lock()
 	defer h.mu.Unlock()
 	h.revision++
+	if identityID!=""{
+		h.scopeRevision[identityID]++
+	}
 	for ch, subscriber := range h.subscribers {
 		if !subscriber.admin && (identityID == "" || subscriber.identityID != identityID) {
 			continue
 		}
+		// Identity subscribers see only their OWN revision sequence, never
+		// gaps revealing how often another identity changed its state.
+		revision:=h.revision
+		if !subscriber.admin{revision=h.scopeRevision[identityID]}
 		select {
-		case ch <- h.revision:
+		case ch <- revision:
 		default:
 			// Keep the MOST RECENT revision when a slow subscriber misses
 			// intermediate invalidations. The buffer remains bounded and a
@@ -69,7 +80,7 @@ func (h *liveUpdates) publish(identityID string) {
 			default:
 			}
 			select {
-			case ch <- h.revision:
+			case ch <- revision:
 			default:
 			}
 		}

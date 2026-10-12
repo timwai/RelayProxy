@@ -179,9 +179,14 @@ func (r *Router) handleBrowserSyncAudit(w http.ResponseWriter, req *http.Request
 		}
 		before = parsed
 	}
-	items, err := r.browserSync.Store.AdminAudit(req.Context(), before, limit)
+	items, err := r.browserSync.Store.AdminAuditFiltered(req.Context(), before, limit,
+		req.URL.Query().Get("type"), req.URL.Query().Get("device"))
 	if err != nil {
-		writeError(w, http.StatusInternalServerError, "unable to load browser audit")
+		if strings.HasPrefix(err.Error(), "invalid browser audit") {
+			writeError(w, http.StatusBadRequest, "invalid browser audit filter")
+		} else {
+			writeError(w, http.StatusInternalServerError, "unable to load browser audit")
+		}
 		return
 	}
 	next := int64(0)

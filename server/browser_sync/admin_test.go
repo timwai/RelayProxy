@@ -74,6 +74,47 @@ func TestBrowserAdminRulesNeverExposeEncryptedOfferAndRequireSafeTransitions(t *
 	}
 }
 
+func TestAdminRulesPageFiltersBeforePagination(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	_, _, firstID := adminTestPair(t, store)
+	_, _, secondID := adminTestPair(t, store)
+	if err := store.AdminRuleAction(ctx, firstID, "pause"); err != nil {
+		t.Fatal(err)
+	}
+	paused, err := store.AdminRulesPage(ctx, 1, 0, "id_1", "paused", "")
+	if err != nil || len(paused) != 1 || paused[0].ID != firstID {
+		t.Fatalf("filtered paused rule missing: %+v %v", paused, err)
+	}
+	empty, err := store.AdminRulesPage(ctx, 10, 0, "id_unknown", "active", "")
+	if err != nil || len(empty) != 0 {
+		t.Fatalf("identity isolation filter failed: %+v %v", empty, err)
+	}
+	page1, err := store.AdminRulesPage(ctx, 1, 0, "id_1", "", "")
+	if err != nil || len(page1) != 1 {
+		t.Fatalf("first page: %+v %v", page1, err)
+	}
+	page2, err := store.AdminRulesPage(ctx, 1, 1, "id_1", "", "")
+	if err != nil || len(page2) != 1 || page2[0].ID == page1[0].ID {
+		t.Fatalf("second page overlap: %+v %v", page2, err)
+	}
+	found, err := store.AdminRulesPage(ctx, 10, 0, "", "", secondID)
+	if err != nil || len(found) != 1 || found[0].ID != secondID {
+		t.Fatalf("rule ID search failed: %+v %v", found, err)
+	}
+	for _, args := range []struct {
+		limit  int
+		offset int
+		status string
+	}{
+		{0, 0, ""}, {101, 0, ""}, {10, -1, ""}, {10, 0, "promoted"},
+	} {
+		if _, err := store.AdminRulesPage(ctx, args.limit, args.offset, "", args.status, ""); err == nil {
+			t.Fatalf("invalid pagination accepted: %+v", args)
+		}
+	}
+}
+
 func TestBrowserAuditTracksActorAndMigratesLegacySchema(t *testing.T) {
 	store := testBrowserStore(t)
 	ctx := context.Background()

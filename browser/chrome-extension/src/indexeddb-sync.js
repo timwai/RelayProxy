@@ -362,15 +362,65 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
 // can replace indexedDB.open/databases, Blob, Promise or other primitives.
 // The website's Origin is checked again by siteIndexedDB before each action.
 // The page can still mutate its own DB; preflight/write/readback checks remain.
-async function executeSiteIndexedDB(tabId,args){
-  const result=await chrome.scripting.executeScript({
-    target:{tabId},world:'ISOLATED',func:siteIndexedDB,args:[...args,true]
-  });
-  if(result?.length!==1||!result[0]||!('result' in result[0])||result[0].result===null)
-    throw new Error('页面 IndexedDB 脚本异常，未确认读写完成');
-  if(result[0].result?.__relayIndexedDBError)
-    throw new Error(result[0].result.__relayIndexedDBError);
-  return result[0].result;
+// Chrome may return an empty/null InjectionResult if the document was
+// replaced or the injected async task stopped before serializing its result.
+// This is NOT evidence that a write failed (or succeeded). Reading and schema
+// validation can be retried; a write must NEVER be sent a second time.
+export async function executeSiteIndexedDB(tabId,args){
+  const [origin,mode,target]=args;
+  const safeToRetry=mode==='read'||mode==='validate';
+  if(!['read','validate','write'].includes(mode))
+    throw new Error('IndexedDB 操作模式无效');
+  const ensureSameOrigin=async()=>{
+    const tab=await chrome.tabs.get(tabId).catch(()=>null);
+    if(!tab)throw new Error('IndexedDB 目标标签页已关闭，请重新打开站点');
+    let currentOrigin;
+    try{currentOrigin=new URL(tab.pendingUrl||tab.url).origin;}
+    catch{throw new Error('IndexedDB 目标页面尚未加载完成，请刷新站点后重试');}
+    if(currentOrigin!==origin)
+      throw new Error('IndexedDB 页面已跳转，拒绝在其他站点继续读写');
+  };
+  for(let attempt=0;attempt<(safeToRetry?2:1);attempt++){
+    let results;
+    try{
+      results=await chrome.scripting.executeScript({
+        target:{tabId,frameIds:[0]},world:'ISOLATED',
+        func:siteIndexedDB,args:[...args,true]
+      });
+    }catch(error){
+      // Chrome's host-permission/extension-policy errors are distinct from
+      // empty results; never change the execution world as a fallback.
+      throw new Error('IndexedDB 注入被 Chrome 拒绝：'+
+        String(error?.message||error).slice(0,160));
+    }
+    const frame=Array.isArray(results)&&results.length===1?results[0]:null;
+    if(frame&&frame.frameId!==undefined&&frame.frameId!==0)
+      throw new Error('IndexedDB 注入目标不是顶层页面，拒绝继续');
+    if(frame?.result?.__relayIndexedDBError)
+      throw new Error(String(frame.result.__relayIndexedDBError).slice(0,256));
+    if(frame&&Object.hasOwn(frame,'result')&&
+        frame.result!==undefined&&frame.result!==null)
+      return frame.result;
+    // No definitive reply; first determine if Chrome navigated or closed
+    // the target tab. Do not accept the old page's undefined outcome.
+    await ensureSameOrigin();
+    if(safeToRetry&&attempt===0){
+      await new Promise(resolve=>setTimeout(resolve,180));
+      continue;
+    }
+    if(mode==='write'){
+      // The write might have committed before Chrome lost its reply. A
+      // fresh READ is safe: accept only byte-equivalent complete snapshots,
+      // otherwise preserve the existing journal / rollback machinery.
+      try{
+        const after=await executeSiteIndexedDB(tabId,[origin,'read']);
+        if(canonicalIndexedDBJSON(after)===canonicalIndexedDBJSON(target))
+          return true;
+      }catch{ /* unverified write must never be reported as applied */ }
+      throw new Error('PARTIAL_ROLLBACK: IndexedDB 写入结果未返回且无法完成写后核验');
+    }
+  }
+  throw new Error('IndexedDB 读取或预校验未返回结果；请保持网站标签页打开并刷新后重试');
 }
 
 export async function captureIndexedDB(policy){

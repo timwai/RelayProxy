@@ -9,7 +9,7 @@ const key='browserSyncManagedWebStorageV2';
 const journalKey='browserSyncStorageRestoreJournal';
 const maxKeys=4096;
 const MAX_STORAGE_BYTES=4*1024*1024; // byte-accurate full-site ceiling, no dropped keys
-function readBoth(expectedOrigin){
+function readBoth(expectedOrigin,includeLocal=true,includeSession=true){
   if(location.origin!==expectedOrigin)throw new Error('站点导航已变化');
   function read(store){
     const result=Object.create(null);
@@ -19,7 +19,7 @@ function readBoth(expectedOrigin){
     }
     return result;
   }
-  return {local:read(localStorage),session:read(sessionStorage)};
+  return {local:includeLocal?read(localStorage):{},session:includeSession?read(sessionStorage):{}};
 }
 function mutate(expectedOrigin,changes){
   if(location.origin!==expectedOrigin)throw new Error('站点导航已变化');
@@ -82,21 +82,25 @@ export async function captureWebStorage(policy){
   const p=validatePolicy(policy);
   if(![2,3,4].includes(p.schemaVersion)||(!p.localStorage&&!p.sessionStorage))throw new Error('需要 Storage 同步授权');
   const id=await tabFor(p.siteOrigin);
-  return verify(await execute(id,readBoth,[p.siteOrigin]));
+  return verify(await execute(id,readBoth,[p.siteOrigin,p.localStorage,p.sessionStorage]));
 }
 export async function prepareWebStorageRestore(ruleId,data,policy,{allowOverwrite=false}={}){
   const p=validatePolicy(policy);
   if(![2,3,4].includes(p.schemaVersion)||(!p.localStorage&&!p.sessionStorage))throw new Error('需要 Storage 同步授权');
   const incoming=verify(data);
+  if(!p.localStorage&&Object.keys(incoming.local).length ||
+     !p.sessionStorage&&Object.keys(incoming.session).length)
+    throw new Error('快照包含未授权的 Storage 数据类型');
   const journal=(await chrome.storage.local.get(journalKey))[journalKey]||{};
   if(journal[ruleId])throw new Error('PARTIAL_ROLLBACK: Storage 上次应用中断');
   const tabId=await tabFor(p.siteOrigin,{create:true});
-  const present=verify(await execute(tabId,readBoth,[p.siteOrigin]));
+  const present=verify(await execute(tabId,readBoth,[p.siteOrigin,p.localStorage,p.sessionStorage]));
   const state=(await chrome.storage.local.get(key))[key]||{};
   const oldOwnership=state[ruleId]||{local:{},session:{}};
   const owner={local:{...oldOwnership.local},session:{...oldOwnership.session}};
   const changes=[];
   for(const kind of ['local','session']){
+    if(kind==='local'&&!p.localStorage || kind==='session'&&!p.sessionStorage)continue;
     for(const [name,value] of Object.entries(incoming[kind])){
       const previous=present[kind][name];
       const tag=previous!==undefined?await cookieValueTag(ruleId,kind+':'+name,previous):null;
@@ -138,7 +142,7 @@ export async function prepareWebStorageRestore(ruleId,data,policy,{allowOverwrit
     async rollback(){
       if(!started||finished)return true;
       try{
-        const live=verify(await execute(tabId,readBoth,[p.siteOrigin]));
+        const live=verify(await execute(tabId,readBoth,[p.siteOrigin,p.localStorage,p.sessionStorage]));
         // Never overwrite a website mutation that appeared after our write.
         for(const change of changes){
           const value=live[change.kind][change.name];

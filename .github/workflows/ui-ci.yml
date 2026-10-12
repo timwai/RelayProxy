@@ -6,6 +6,7 @@ on:
       - main
       - "feature/unified-ui-*"
       - "feature/wails-react-*"
+      - "feat/**"
   pull_request:
     paths:
       - "agent/gui/**"

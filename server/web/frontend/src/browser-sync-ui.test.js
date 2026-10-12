@@ -34,7 +34,8 @@ test('Browser Sync polls only presence and allows metadata rule transitions and 
  assert.match(page,/\/browser-sync\/admin\/rules/);
  assert.match(page,/\/browser-sync\/admin\/audit\?limit=50/);
  assert.match(page,/setInterval\(async\(\)=>\{/);
- assert.match(page,/return \(\)=>clearInterval\(id\)/);
+ assert.match(page,/subscribeLiveUpdates\(/);
+ assert.match(page,/return \(\)=>\{unsubscribe\(\);clearInterval\(id\)\}/);
  assert.match(page,/ruleAction\(r,'pause'\)/);
  assert.match(page,/ruleAction\(r,'resume'\)/);
  assert.match(page,/ruleAction\(r,'revoke'\)/);

@@ -71,6 +71,14 @@ function renderRules(rules, siteOrigin) {
     if (['PARTIAL','CONFLICT','FAILED'].includes(rule.lastTransfer?.state)) detail.classList.add('attention');
     info.append(main,detail);
     const buttons = el('div','quick-actions');
+    let openAfter=null;
+    if(rule.role==='target'){
+      const label=el('label','quick-open-choice');
+      openAfter=document.createElement('input');
+      openAfter.type='checkbox';
+      label.append(openAfter,el('span','','同步成功后打开页面'));
+      info.append(label);
+    }
     const sync = el('button','small-button primary-button',rule.role === 'source' ? '立即发送' : '请求同步');
     sync.type = 'button';
     const paused = rule.role === 'target' && rule.lastTransfer?.state === 'PARTIAL';
@@ -79,26 +87,14 @@ function renderRules(rules, siteOrigin) {
     sync.addEventListener('click',async()=>{
       sync.disabled = true;
       try {
-        const result = await ask(rule.role === 'source' ? 'SEND_SESSION' : 'REQUEST_SESSION',{ruleId:rule.id});
+        const result = await ask(rule.role === 'source'?'SEND_SESSION':
+          openAfter?.checked?'SYNC_THEN_OPEN':'REQUEST_SESSION',{ruleId:rule.id});
         feedback(result.state === 'RELAYED' ? '密文已发送；等待接收端确认。' : '已请求来源设备发送最新会话。');
         await refresh({quiet:true});
       }catch(error){messageError(error);}
       finally{sync.disabled = false;}
     });
     buttons.append(sync);
-    if (rule.role === 'target') {
-      const open = el('button','small-button outline-button','同步后打开');
-      open.type = 'button';
-      open.disabled = paused;
-      if (paused) open.title = '请先在完整设置中检查并恢复暂停的会话';
-      open.addEventListener('click',async()=>{
-        open.disabled = true;
-        try {await ask('SYNC_THEN_OPEN',{ruleId:rule.id});feedback('已请求同步，成功应用后将打开对应的恢复标签页。');}
-        catch(error){messageError(error);}
-        finally{open.disabled = false;}
-      });
-      buttons.append(open);
-    }
     if (rule.lastTransfer?.state === 'PARTIAL' || rule.lastTransfer?.state === 'CONFLICT') {
       const hint = el('button','text-button rule-manage','在设置中处理 →');
       hint.type = 'button';hint.addEventListener('click',optionPage);

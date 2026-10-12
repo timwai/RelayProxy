@@ -129,13 +129,13 @@ export function BrowserSyncAdmin({identities=[]}){
   const stats=new Map(list(presence.stats).map(s=>[s.deviceId,s]));
   const activeCount=devices.filter(d=>d.state==='approved'&&online[d.id]).length;
   const visible=devices.filter(d=>
-    (stateFilter==='all'||d.state===stateFilter)&&
+    (stateFilter==='all'||d.state===stateFilter||(stateFilter==='online'&&d.state==='approved'&&!!online[d.id]))&&
     [d.name,d.id,d.identityId,d.requestedIdentityId,d.state,d.extensionId].join(' ').toLowerCase()
       .includes(filter.trim().toLowerCase()))
     .sort((a,b)=>({pending:0,approved:1,revoked:2}[a.state]??3)-({pending:0,approved:1,revoked:2}[b.state]??3));
   const visibleRules=rules.filter(r=>
     (ruleFilter==='all'||r.status===ruleFilter)&&
-    [r.id,r.sourceID,r.targetID,r.sourceId,r.targetId,r.sourceName,r.targetName,r.identityId,r.status]
+    [r.id,r.sourceId,r.targetId,r.sourceName,r.targetName,r.identityId,r.status]
       .join(' ').toLowerCase().includes(ruleSearch.trim().toLowerCase()));
   const visibleAudit=list(audit.items);
   const linkedExtensions=new Set(devices.filter(d=>d.extensionId).map(d=>d.extensionId));
@@ -163,8 +163,8 @@ export function BrowserSyncAdmin({identities=[]}){
           className={'browser-sync-stat '+(view==='devices'&&stateFilter===id?'selected':'')}
           onClick={()=>{setView('devices');setStateFilter(id);}}>
           <span>{label}</span><strong>{total}</strong></button>)}
-        <button type="button" className={'browser-sync-stat '+(view==='devices'&&stateFilter==='approved'?'':'')}
-          onClick={()=>{setView('devices');setStateFilter('approved');}}>
+        <button type="button" className={'browser-sync-stat '+(view==='devices'&&stateFilter==='online'?'selected':'')}
+          onClick={()=>{setView('devices');setStateFilter('online');}}>
           <span>在线设备</span><strong>{activeCount}</strong></button>
       </div>
       <div className="browser-sync-mode-switch" role="group" aria-label="浏览器同步管理视图">

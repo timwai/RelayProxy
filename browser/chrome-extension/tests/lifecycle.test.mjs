@@ -2,7 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {
   shouldReconcile, acceptDeliveryAck, isTerminalAck, RECONCILE_INTERVAL_MS,
-  DELIVERY_ACK_TIMEOUT_MS, nextSessionSequence
+  DELIVERY_ACK_TIMEOUT_MS, nextSessionSequence, validOverwriteGrant,
+  OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection,
+  RECONNECT_BASE_MS, RECONNECT_MAX_MS
 } from '../src/lifecycle.js';
 
 test('reconcile on new profile or after inactivity, not every minute', () => {
@@ -37,4 +39,31 @@ test('replay cursor resumes after local storage loss without decreasing sequence
   assert.throws(()=>nextSessionSequence(0,Number.MAX_SAFE_INTEGER),/耗尽/);
   assert.throws(()=>nextSessionSequence(0,Number.MAX_SAFE_INTEGER+1));
   assert.throws(()=>nextSessionSequence(1.5,2));
+});
+
+test('one-use overwrite grant rejects legacy booleans, other origins and expiry',()=>{
+  const now=1770000000000,origin='https://example.com';
+  const grant={siteOrigin:origin,expiresAt:now+OVERWRITE_GRANT_TTL_MS};
+  assert.equal(validOverwriteGrant(grant,origin,now),true);
+  assert.equal(validOverwriteGrant(grant,origin,now+OVERWRITE_GRANT_TTL_MS-1),true);
+  assert.equal(validOverwriteGrant(grant,origin,now+OVERWRITE_GRANT_TTL_MS),false);
+  assert.equal(validOverwriteGrant(grant,'https://evil.example',now),false);
+  assert.equal(validOverwriteGrant({...grant,expiresAt:now+OVERWRITE_GRANT_TTL_MS+1},origin,now),false);
+  assert.equal(validOverwriteGrant(true,origin,now),false);
+  assert.equal(validOverwriteGrant({siteOrigin:origin},origin,now),false);
+  assert.equal(validOverwriteGrant(null,origin,now),false);
+});
+
+test('MV3 reconnect retry survives alarm wakeups and caps exponential delay',()=>{
+  const origin='https://relay.example',now=1770000000000;
+  assert.equal(nextReconnectDelay(1),RECONNECT_BASE_MS);
+  assert.equal(nextReconnectDelay(2),2*RECONNECT_BASE_MS);
+  assert.equal(nextReconnectDelay(10),RECONNECT_MAX_MS);
+  assert.equal(nextReconnectDelay(100),RECONNECT_MAX_MS);
+  assert.equal(shouldRetryConnection(null,origin,now),true);
+  assert.equal(shouldRetryConnection({serverOrigin:origin,failures:2,nextRetryAt:now+120000},origin,now),false);
+  assert.equal(shouldRetryConnection({serverOrigin:origin,failures:2,nextRetryAt:now-1},origin,now),true);
+  assert.equal(shouldRetryConnection({serverOrigin:'https://other.example',nextRetryAt:now+120000},origin,now),true);
+  assert.equal(shouldRetryConnection({serverOrigin:origin,nextRetryAt:now+24*3600000},origin,now),true);
+  assert.equal(shouldRetryConnection(null,'',now),false);
 });

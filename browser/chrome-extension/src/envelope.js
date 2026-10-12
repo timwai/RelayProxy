@@ -31,13 +31,20 @@ export function validatePolicy(policy) {
         !/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/.test(n))) throw new Error('Cookie 名称无效');
     return {siteOrigin,cookieNames};
   }
+  if(policy.schemaVersion===4){
+    const flags=['allCookies','localStorage','sessionStorage','indexedDB'];
+    if(flags.some(k=>typeof policy[k]!=='boolean')||
+       !flags.some(k=>policy[k]===true))
+      throw new Error('至少需要选择一种会话数据类型');
+    return {siteOrigin,schemaVersion:4,
+      allCookies:policy.allCookies,localStorage:policy.localStorage,
+      sessionStorage:policy.sessionStorage,indexedDB:policy.indexedDB};
+  }
   if(![2,3].includes(policy.schemaVersion) || policy.allCookies!==true ||
       policy.localStorage!==true || policy.sessionStorage!==true ||
       (policy.schemaVersion===3&&policy.indexedDB!==true))
     throw new Error('会话策略版本或范围无效');
-  // IndexedDB is a material extension of the paired website's credential
-  // scope. Old v2 pairings are never silently upgraded: only an explicit
-  // v3 offer consents to IndexedDB capture and remote restore.
+  // v2/v3 remain fixed-scope: old invitations cannot be silently expanded.
   return {siteOrigin,schemaVersion:policy.schemaVersion,allCookies:true,
     localStorage:true,sessionStorage:true,
     ...(policy.schemaVersion===3?{indexedDB:true}:{})};
@@ -66,12 +73,16 @@ export function offerCanonical(offer, sourceID) {
   return ['browser.sync.v1', 'RULE_OFFER', offer.ruleId, sourceID, offer.targetBrowserDeviceId,
     offer.policyDigest, offer.ephemeralKey, offer.salt, offer.iv, offer.ciphertext].join('\n');
 }
-export async function createEncryptedOffer({ target, siteOrigin }) {
+export async function createEncryptedOffer({ target, siteOrigin, dataTypes }) {
   const identity = await getOrCreateIdentity();
   if (!target?.receive || !target.encryptionPublicKey || !target.signingPublicKey ||
     !target.id || target.id === identity.deviceId) throw new Error('无权选用该接收设备');
-  const policy = validatePolicy({siteOrigin,schemaVersion:3,allCookies:true,
-    localStorage:true,sessionStorage:true,indexedDB:true});
+  // The selected scope is encrypted and signed in the pairing invitation.
+  // Omitted dataTypes retains existing callers' all-enabled v3 behavior.
+  const policy = dataTypes
+    ?validatePolicy({siteOrigin,schemaVersion:4,...dataTypes})
+    :validatePolicy({siteOrigin,schemaVersion:3,allCookies:true,
+      localStorage:true,sessionStorage:true,indexedDB:true});
   const ruleId = crypto.randomUUID();
   const plaintext = utf8(JSON.stringify(policy));
   const ephemeral = await crypto.subtle.generateKey({ name: 'ECDH', namedCurve: 'P-256' }, false, ['deriveBits']);

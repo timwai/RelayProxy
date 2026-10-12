@@ -137,12 +137,52 @@ func (r *Router) handleBrowserSyncExtensionRevoke(w http.ResponseWriter, req *ht
 // Admin-only management metadata. Never return encrypted offers, browser keys,
 // tokens, credential material or arbitrary client-supplied error strings.
 func (r *Router) handleBrowserSyncRules(w http.ResponseWriter, req *http.Request) {
-	items, err := r.browserSync.Store.AdminRules(req.Context())
-	if err != nil {
-		writeError(w, http.StatusInternalServerError, "cannot list browser sync rules")
+	// Preserve the original array response for legacy management clients.
+	// The Server Web opts into pagination with a limit query parameter.
+	values := req.URL.Query()
+	if !values.Has("limit") && !values.Has("offset") &&
+		!values.Has("identityId") && !values.Has("status") && !values.Has("q") {
+		items, err := r.browserSync.Store.AdminRules(req.Context())
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, "cannot list browser sync rules")
+			return
+		}
+		writeJSON(w, http.StatusOK, items)
 		return
 	}
-	writeJSON(w, http.StatusOK, items)
+	limit := 50
+	if raw := values.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 1 || n > 100 {
+			writeError(w, http.StatusBadRequest, "invalid browser rule page size")
+			return
+		}
+		limit = n
+	}
+	offset := 0
+	if raw := values.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 || n > 100000 {
+			writeError(w, http.StatusBadRequest, "invalid browser rule offset")
+			return
+		}
+		offset = n
+	}
+	items, err := r.browserSync.Store.AdminRulesPage(req.Context(), limit, offset,
+		values.Get("identityId"), values.Get("status"), values.Get("q"))
+	if err != nil {
+		if strings.HasPrefix(err.Error(), "invalid browser rule") {
+			writeError(w, http.StatusBadRequest, "invalid browser rule filter")
+		} else {
+			writeError(w, http.StatusInternalServerError, "cannot list browser sync rules")
+		}
+		return
+	}
+	next := -1
+	if len(items) == limit {
+		next = offset + len(items)
+	}
+	writeJSON(w, http.StatusOK, map[string]any{"items": items, "nextOffset": next})
 }
 
 func (r *Router) handleBrowserSyncRuleAction(w http.ResponseWriter, req *http.Request) {

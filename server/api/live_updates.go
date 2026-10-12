@@ -107,7 +107,6 @@ func (r *Router) handleLiveEvents(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
-	w.Header().Set("Connection", "keep-alive")
 	w.WriteHeader(http.StatusOK)
 	_, _ = fmt.Fprint(w, ": connected\n\n")
 	flusher.Flush()

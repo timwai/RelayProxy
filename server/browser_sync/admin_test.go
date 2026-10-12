@@ -14,7 +14,7 @@ import (
 func adminTestPair(t *testing.T, store *Store) (string, string, string) {
 	t.Helper()
 	ctx := context.Background()
-	source, target := "browser_" + uuid.NewString(), "browser_" + uuid.NewString()
+	source, target := "browser_"+uuid.NewString(), "browser_"+uuid.NewString()
 	registerBrowserForRules(t, store, source, true, false)
 	registerBrowserForRules(t, store, target, false, true)
 	id := uuid.NewString()
@@ -263,7 +263,6 @@ func TestBrowserAuditStoresOnlyBoundedTerminalMetadataAndPaginates(t *testing.T)
 		t.Fatalf("did not aggregate both sender and receiver: %d", seen)
 	}
 }
-
 
 func TestBrowserRuleApprovalTimestampsSurviveAdministrativeStateChanges(t *testing.T) {
 	store := testBrowserStore(t)

@@ -144,6 +144,8 @@ async function main(){
   ]);
   assert.equal(registeredA.state,'pending');
   assert.equal(registeredB.state,'pending');
+  assert.equal((await workerCommand(a,{type:'GET_STATUS'})).pendingApproval,true);
+  assert.equal((await workerCommand(b,{type:'GET_STATUS'})).pendingApproval,true);
   // Real Chrome must not establish a signed WSS session merely because it
   // registered a public key and claimed an Identity ID.
   const pendingAuth=await a.options.evaluate(async()=>
@@ -154,8 +156,31 @@ async function main(){
   // No credential content is sent to the fixture-admin HTTP endpoint.
   await deviceDecision(fixture,'approve',identityA.deviceId,true,false);
   await deviceDecision(fixture,'approve',identityB.deviceId,false,true);
-  await workerCommand(a,{type:'CONNECT_BROWSER'});
-  await workerCommand(b,{type:'CONNECT_BROWSER'});
+  // Do NOT invoke CONNECT_BROWSER. Exercise the real persisted pending
+  // enrollment, Chrome alarm, HTTP status recheck and signed WSS auto-dial.
+  // Backdate only the synthetic test Profiles' last-check timestamp to
+  // avoid sleeping through the production 1-minute polling interval.
+  for(const profile of [a,b]){
+    await profile.options.evaluate(async()=>{
+      const key='browserSyncPendingEnrollment';
+      const saved=(await chrome.storage.local.get(key))[key];
+      if(!saved)throw new Error('pending device enrollment was not persisted');
+      await chrome.storage.local.set({[key]:{...saved,lastCheckedAt:Date.now()-65000}});
+      await chrome.alarms.create('browser-sync-reconcile',{when:Date.now()+500});
+    });
+  }
+  await eventually('approved A auto-connect WSS',async()=>{
+    const state=await workerCommand(a,{type:'GET_STATUS'});
+    return state.connected&&!state.pendingApproval;
+  });
+  await eventually('approved B auto-connect WSS',async()=>{
+    const state=await workerCommand(b,{type:'GET_STATUS'});
+    return state.connected&&!state.pendingApproval;
+  });
+  for(const profile of [a,b]){
+    await profile.options.evaluate(()=>chrome.alarms.create(
+      'browser-sync-reconcile',{periodInMinutes:1}));
+  }
   const [peersA,peersB]=await Promise.all([
     workerCommand(a,{type:'LIST_PEERS'}),workerCommand(b,{type:'LIST_PEERS'})
   ]);

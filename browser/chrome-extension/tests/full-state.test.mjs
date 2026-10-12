@@ -234,3 +234,45 @@ test('large 700 KiB Storage snapshot is encrypted, relayed and restored without 
   assert.equal(b.page.session.get('large-tab').length,280*1024);
   assert.equal(b.page.local.get('last-key'),'last-key-must-survive');
 });
+
+test('v4 only Local Storage leaves Cookie and Session Storage unchanged on receiver',async()=>{
+  const selected={siteOrigin:'https://example.com',schemaVersion:4,
+    allCookies:false,localStorage:true,sessionStorage:false,indexedDB:false};
+  const a=profile();use(a);
+  a.page.local.set('token','source-local');
+  a.page.session.set('token','source-private-session');
+  await a.chrome.cookies.set({url:selected.siteOrigin+'/',name:'sid',value:'source-cookie',
+    path:'/',secure:true,httpOnly:true});
+  const snapshot=await captureWebStorage(selected);
+  assert.deepEqual({...snapshot.local},{token:'source-local'});
+  assert.deepEqual({...snapshot.session},{});
+  const b=profile();use(b);
+  b.page.session.set('token','receiver-private-session');
+  await b.chrome.cookies.set({url:selected.siteOrigin+'/',name:'sid',value:'receiver-cookie',
+    path:'/',secure:true,httpOnly:true});
+  const txn=await prepareWebStorageRestore('select-local',snapshot,selected);
+  await txn.apply();await txn.commit();
+  assert.equal(b.page.local.get('token'),'source-local');
+  assert.equal(b.page.session.get('token'),'receiver-private-session');
+  const live=await b.chrome.cookies.getAll({url:selected.siteOrigin+'/'});
+  assert.equal(live.find(c=>c.name==='sid').value,'receiver-cookie');
+  await assert.rejects(prepareWebStorageRestore('select-local',
+    {local:{token:'source-local'},session:{token:'injected'}},selected),/未授权/);
+});
+
+test('v4 only Session Storage does not even read Local Storage from page',async()=>{
+  const selected={siteOrigin:'https://example.com',schemaVersion:4,
+    allCookies:false,localStorage:false,sessionStorage:true,indexedDB:false};
+  const a=profile();use(a);
+  a.page.local.set('secret-key','not-allowed');
+  a.page.session.set('tab','selected');
+  const snapshot=await captureWebStorage(selected);
+  assert.deepEqual({...snapshot.local},{});
+  assert.deepEqual({...snapshot.session},{tab:'selected'});
+  const b=profile();use(b);
+  b.page.local.set('secret-key','receiver-only');
+  const txn=await prepareWebStorageRestore('select-session',snapshot,selected);
+  await txn.apply();await txn.commit();
+  assert.equal(b.page.local.get('secret-key'),'receiver-only');
+  assert.equal(b.page.session.get('tab'),'selected');
+});

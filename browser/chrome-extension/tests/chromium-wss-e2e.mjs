@@ -132,6 +132,11 @@ async function main(){
   ]);
   assert.equal(registeredA.state,'pending');
   assert.equal(registeredB.state,'pending');
+  // Real Chrome must not establish a signed WSS session merely because it
+  // registered a public key and claimed an Identity ID.
+  const pendingAuth=await a.options.evaluate(async()=>
+    chrome.runtime.sendMessage({type:'CONNECT_BROWSER'}));
+  assert.equal(pendingAuth.ok,false,'pending browser authenticated before approval');
   // The production WSS Handler MUST refuse a browser until its server-side
   // approval is granted; the fixture never modifies the browser request.
   // No credential content is sent to the fixture-admin HTTP endpoint.
@@ -271,13 +276,17 @@ async function main(){
   // Administrator revocation invalidates the session and its pairing: even
   // a browser holding its Profile-local signing key must be denied.
   await deviceDecision(fixture,'revoke',identityB.deviceId);
+  const staleSocket=await b.options.evaluate(async()=>
+    chrome.runtime.sendMessage({type:'LIST_RULES'}));
+  assert.equal(staleSocket.ok,false,
+    'revoked browser used an already-authenticated WSS socket');
   await workerCommand(b,{type:'SAVE_SERVER',serverOrigin:fixture.serverOrigin});
   const denied=await b.options.evaluate(async()=>chrome.runtime.sendMessage({type:'CONNECT_BROWSER'}));
   assert.equal(denied.ok,false,'revoked Chrome device reauthenticated over WSS');
   console.log('Real RelayProxy TLS/WSS + Chromium A/B passed: enrolled/approved,');
   console.log('signed challenge, E2EE rule/code, opaque WSS delivery, APPLIED ACK,');
   console.log('actual website login+IndexedDB, MV3 alarm WSS reconnect + durable ACK recovery,');
-  console.log('post-reconnect delivery and revoked-device reconnect rejection.');
+  console.log('post-reconnect delivery, pending-auth denial and live/reconnect revocation.');
 }
 
 let error;

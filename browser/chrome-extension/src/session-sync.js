@@ -87,9 +87,14 @@ export async function sendSnapshot(ruleId, transferRequestId='') {
   try{
     const ctx=await ruleContext(ruleId);
     if(!ctx.sourceRole)throw new Error('只有来源设备可以发送登录状态');
+    // Scope is a signed, encrypted pairing policy. Never collect an
+    // unchecked category, even transiently before encryption.
     const payload=ctx.policy.schemaVersion>=2
-      ? {...await captureAllCookies(ctx.policy),storage:await captureWebStorage(ctx.policy),
-          ...(ctx.policy.schemaVersion===3?{indexedDB:await captureIndexedDB(ctx.policy)}:{})}
+      ? {schemaVersion:2,siteOrigin:ctx.policy.siteOrigin,
+          ...(ctx.policy.allCookies?await captureAllCookies(ctx.policy):{}),
+          ...(ctx.policy.localStorage||ctx.policy.sessionStorage
+            ?{storage:await captureWebStorage(ctx.policy)}:{}),
+          ...(ctx.policy.indexedDB?{indexedDB:await captureIndexedDB(ctx.policy)}:{})}
       : await captureCookies(ctx.policy);
     const stored=(await chrome.storage.local.get(LAST_SEQUENCE))[LAST_SEQUENCE]||{};
     // The server is authoritative after a crash, upgrade or lost local
@@ -170,14 +175,14 @@ export async function requestSnapshot(ruleId, transferRequestId='') {
   return {state:'REQUESTED'};
 }
 
-export async function syncThenOpen(ruleId) {
+export async function syncThenOpen(ruleId,transferRequestId='') {
   const ctx=await ruleContext(ruleId);
   if(!ctx.targetRole)throw new Error('只能由接收设备发起同步后打开');
   await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
   const pending=(await chrome.storage.local.get(pendingOpenKey))[pendingOpenKey]||{};
   pending[ruleId]={origin:ctx.policy.siteOrigin,expiresAt:Date.now()+30000};
   await chrome.storage.local.set({[pendingOpenKey]:pending});
-  try{return await requestSnapshot(ruleId);}
+  try{return await requestSnapshot(ruleId,transferRequestId);}
   catch(error){
     delete pending[ruleId];
     await chrome.storage.local.set({[pendingOpenKey]:pending});
@@ -248,26 +253,35 @@ async function handleIncomingSnapshot(envelope) {
     let restoredTabId=null;
     try{
       if(ctx.policy.schemaVersion>=2){
-        const txn=await prepareWebStorageRestore(ruleId,payload.storage,ctx.policy,
-          {allowOverwrite:allowOverwrite});
-        // Preflight conflicts and schema BEFORE any Cookie/Storage mutation.
-        if(ctx.policy.schemaVersion===3 && payload.indexedDB===undefined)
-          throw new Error('IndexedDB v3 快照缺失，拒绝不完整的登录状态');
-        const idb=ctx.policy.schemaVersion===3
+        // Reject extra categories as well as missing selected categories.
+        // The sender may be compromised: UI choices are not an authorization
+        // check. v2/v3 consent remains all-on by policy.
+        const has=(name)=>Object.hasOwn(payload||{},name);
+        if(payload?.siteOrigin!==ctx.policy.siteOrigin ||
+           has('cookies')!==ctx.policy.allCookies ||
+           has('storage')!==(ctx.policy.localStorage||ctx.policy.sessionStorage) ||
+           has('indexedDB')!==!!ctx.policy.indexedDB)
+          throw new Error('快照范围与已签名配对数据类型不一致');
+        const useStorage=ctx.policy.localStorage||ctx.policy.sessionStorage;
+        const txn=useStorage
+          ?await prepareWebStorageRestore(ruleId,payload.storage,ctx.policy,
+            {allowOverwrite:allowOverwrite}):null;
+        const idb=ctx.policy.indexedDB
           ?await prepareIndexedDBRestore(ruleId,payload.indexedDB,ctx.policy,
-            {allowOverwrite:allowOverwrite,tabId:txn.tabId}):null;
+            {allowOverwrite:allowOverwrite,tabId:txn?.tabId??null}):null;
         let applied=false;
         try{
           if(idb)await idb.apply();
-          await txn.apply();
-          await applyAllCookies(ruleId,payload,ctx.policy,{allowOverwrite:allowOverwrite});
+          if(txn)await txn.apply();
+          if(ctx.policy.allCookies)
+            await applyAllCookies(ruleId,payload,ctx.policy,{allowOverwrite:allowOverwrite});
           applied=true;
-          await txn.commit();
+          if(txn)await txn.commit();
           if(idb)await idb.commit();
-          restoredTabId=txn.tabId;
-          await chrome.tabs.reload(txn.tabId).catch(()=>{});
+          restoredTabId=txn?.tabId??idb?.tabId??null;
+          if(restoredTabId!==null)await chrome.tabs.reload(restoredTabId).catch(()=>{});
         }catch(error){
-          const storageRolledBack=await txn.rollback();
+          const storageRolledBack=txn?await txn.rollback():true;
           const idbRolledBack=idb?await idb.rollback():true;
           if(!storageRolledBack||!idbRolledBack||applied)
             throw new Error('PARTIAL_ROLLBACK: Cookie、Storage 或 IndexedDB 恢复不完整');
@@ -358,7 +372,8 @@ export async function onCookieChange(cookie) {
     const host=new URL(policy.siteOrigin).hostname;
     if(!(host===hostname||host.endsWith('.'+hostname)))continue;
     if(policy.siteOrigin.startsWith('http://') && (cookie.secure || cookie.partitionKey))continue;
-    if(![2,3].includes(policy.schemaVersion) &&
+    if(policy.allCookies===false)continue;
+    if(![2,3,4].includes(policy.schemaVersion) &&
        (cookie.path!=='/'||!cookie.hostOnly||!cookie.secure||cookie.partitionKey||
         !policy.cookieNames.includes(cookie.name)))continue;
     clearTimeout(cookieTimers.get(ruleId));

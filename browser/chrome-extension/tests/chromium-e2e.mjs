@@ -129,13 +129,24 @@ async function applyToTarget(profile,ruleId,policy,payload){
     ]);
     const storage=await prepareWebStorageRestore(ruleId,payload.storage,policy);
     const indexedDB=await prepareIndexedDBRestore(ruleId,payload.indexedDB,policy,{tabId:storage.tabId});
+    const schema=async()=>{
+      const {captureIndexedDB}=await import(chrome.runtime.getURL('src/indexeddb-sync.js'));
+      const data=await captureIndexedDB(policy);
+      return data.databases.map(db=>({name:db.name,stores:db.stores.map(s=>s.name)}));
+    };
+    const stages=[];
     try{
+      stages.push({step:'before',db:await schema()});
       await indexedDB.apply();
+      stages.push({step:'after-indexeddb',db:await schema()});
       await storage.apply();
+      stages.push({step:'after-storage',db:await schema()});
       await applyAllCookies(ruleId,payload,policy);
+      stages.push({step:'after-cookies',db:await schema()});
       await storage.commit();
       await indexedDB.commit();
-      return 'APPLIED';
+      stages.push({step:'after-commit',db:await schema()});
+      return {status:'APPLIED',stages};
     }catch(err){
       const storageRecovered=await storage.rollback().catch(()=>false);
       const indexedDBRecovered=await indexedDB.rollback().catch(()=>false);
@@ -239,7 +250,9 @@ async function main(){
   rejected.ciphertext=rejected.ciphertext.replace(/^./,v=>v==='A'?'B':'A');
   await assert.rejects(decryptInTarget(b,rejected,source),/签名|decryption|decrypt/i,
     'tampered Chrome encrypted envelope must be rejected');
-  assert.equal(await applyToTarget(b,ruleId,policy,restored),'APPLIED');
+  const applied=await applyToTarget(b,ruleId,policy,restored);
+  console.log('IndexedDB restore phases (schema only):',JSON.stringify(applied.stages));
+  assert.equal(applied.status,'APPLIED');
   const [extView,pageView]=await Promise.all([
     b.options.evaluate(async policy=>{
       const {captureIndexedDB}=await import(chrome.runtime.getURL('src/indexeddb-sync.js'));

@@ -80,13 +80,13 @@ function verify(data){
 }
 export async function captureWebStorage(policy){
   const p=validatePolicy(policy);
-  if(![2,3].includes(p.schemaVersion))throw new Error('需要 Storage 同步授权');
+  if(![2,3,4].includes(p.schemaVersion)||(!p.localStorage&&!p.sessionStorage))throw new Error('需要 Storage 同步授权');
   const id=await tabFor(p.siteOrigin);
   return verify(await execute(id,readBoth,[p.siteOrigin]));
 }
 export async function prepareWebStorageRestore(ruleId,data,policy,{allowOverwrite=false}={}){
   const p=validatePolicy(policy);
-  if(![2,3].includes(p.schemaVersion))throw new Error('需要 Storage 同步授权');
+  if(![2,3,4].includes(p.schemaVersion)||(!p.localStorage&&!p.sessionStorage))throw new Error('需要 Storage 同步授权');
   const incoming=verify(data);
   const journal=(await chrome.storage.local.get(journalKey))[journalKey]||{};
   if(journal[ruleId])throw new Error('PARTIAL_ROLLBACK: Storage 上次应用中断');

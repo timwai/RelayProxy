@@ -31,6 +31,7 @@ type ApprovedRule struct {
 	TargetApproved          bool
 	KeyFingerprintsVerified bool
 	Active                  bool
+	Status                  string
 }
 
 // AuthorizeRelay denies by default. It authorizes message routing, not the

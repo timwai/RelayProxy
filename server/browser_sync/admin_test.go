@@ -33,7 +33,7 @@ func adminTestPair(t *testing.T, store *Store) (string, string, string) {
 func TestBrowserAdminRulesNeverExposeEncryptedOfferAndRequireSafeTransitions(t *testing.T) {
 	store := testBrowserStore(t)
 	ctx := context.Background()
-	source, target, ruleID := adminTestPair(t, store)
+	_, target, ruleID := adminTestPair(t, store)
 	rules, err := store.AdminRules(ctx)
 	if err != nil || len(rules)!=1 || rules[0].Status!="active" ||
 		!rules[0].SourceApproved || !rules[0].TargetApproved || !rules[0].KeysConfirmed {

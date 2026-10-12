@@ -17,18 +17,18 @@ var ErrExtensionStillLinked = errors.New("delete linked browser devices before d
 
 // BrowserDevice is entirely separate from the privileged RelayProxy Agent model.
 type BrowserDevice struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	SigningKey     string    `json:"signingPublicKey"`
-	EncryptionKey  string    `json:"encryptionPublicKey"`
-	IdentityID     string    `json:"identityId,omitempty"`
-	RequestedIdentityID string `json:"requestedIdentityId,omitempty"`
-	State          string    `json:"state"`
-	Send           bool      `json:"send"`
-	Receive        bool      `json:"receive"`
-	CreatedAt      time.Time `json:"createdAt"`
-	ExtensionID    string    `json:"extensionId,omitempty"`
-	ExtensionState string    `json:"extensionState,omitempty"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	SigningKey          string    `json:"signingPublicKey"`
+	EncryptionKey       string    `json:"encryptionPublicKey"`
+	IdentityID          string    `json:"identityId,omitempty"`
+	RequestedIdentityID string    `json:"requestedIdentityId,omitempty"`
+	State               string    `json:"state"`
+	Send                bool      `json:"send"`
+	Receive             bool      `json:"receive"`
+	CreatedAt           time.Time `json:"createdAt"`
+	ExtensionID         string    `json:"extensionId,omitempty"`
+	ExtensionState      string    `json:"extensionState,omitempty"`
 }
 
 type Store struct{ db *sql.DB }
@@ -225,6 +225,7 @@ func (s *Store) Revoke(ctx context.Context, id string) error {
 	}
 	return tx.Commit()
 }
+
 // DeleteRevokedDevice permanently removes a revoked browser and every
 // dependent session/rule record in one transaction. Revocation remains a
 // separate explicit admin action: a pending or approved browser can never

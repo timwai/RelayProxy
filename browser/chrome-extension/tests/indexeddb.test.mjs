@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {siteIndexedDB,validateIndexedDBSnapshot,MAX_INDEXEDDB_BYTES,captureIndexedDB,prepareIndexedDBRestore} from '../src/indexeddb-sync.js';
+import {siteIndexedDB,validateIndexedDBSnapshot,MAX_INDEXEDDB_BYTES,captureIndexedDB,prepareIndexedDBRestore,canonicalIndexedDBJSON} from '../src/indexeddb-sync.js';
 
 // Small IndexedDB simulator for the injected ISOLATED-world routine. It
 // reproduces upgrade callbacks, cursor order, transaction completion and
@@ -200,4 +200,22 @@ test('real capture/restore entry points accept explicit v3 pairing, never old v2
     await assert.rejects(captureIndexedDB(v2),/v3/);
     await assert.rejects(prepareIndexedDBRestore('test-rule',undefined,v2),/v3/);
   }finally{globalThis.chrome=oldChrome;}
+});
+
+test('IndexedDB object-key ordering across Chrome scripting boundaries never causes false conflict',()=>{
+  const snapshot={schemaVersion:1,databases:[{
+    name:'auth',version:1,stores:[{
+      name:'tokens',keyPath:null,autoIncrement:false,indexes:[],
+      rows:[{key:['s','id'],value:['o',[['account',['s','alice']]]]}]
+    }]
+  }]};
+  const ipcReordered={
+    databases:[{stores:[{rows:[{value:['o',[['account',['s','alice']]]],key:['s','id']}],
+      indexes:[],autoIncrement:false,keyPath:null,name:'tokens'}],
+      version:1,name:'auth'}],schemaVersion:1
+  };
+  assert.equal(canonicalIndexedDBJSON(snapshot),canonicalIndexedDBJSON(ipcReordered));
+  const changed=structuredClone(ipcReordered);
+  changed.databases[0].stores[0].rows[0].value[1][0][1][1]='bob';
+  assert.notEqual(canonicalIndexedDBJSON(snapshot),canonicalIndexedDBJSON(changed));
 });

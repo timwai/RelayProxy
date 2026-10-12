@@ -11,7 +11,7 @@ import {captureAllCookies,applyAllCookies} from './cookies-all.js';
 import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
 import {captureIndexedDB,prepareIndexedDBRestore,JOURNAL_KEY as IDB_JOURNAL} from './indexeddb-sync.js';
 import {showRestoredWebsiteTab} from './session-tabs.js';
-import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence, validOverwriteGrant, OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection } from './lifecycle.js';
+import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence, validOverwriteGrant, OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection, singleFlight } from './lifecycle.js';
 import {ensureNetworkForRule} from './network-binding.js';
 
 const sourceBusy = new Set();
@@ -390,7 +390,7 @@ export async function reconcilePendingDeliveries() {
 // A disconnected Chrome MV3 worker must re-establish its authenticated WSS
 // listener even if the five-minute scheduled snapshot cycle is not due.
 // Persist the retry deadline because the service worker can be destroyed.
-export async function restoreActiveSubscriptions({force=false}={}) {
+export const restoreActiveSubscriptions = singleFlight(async ({force=false}={}) => {
   const settings=await getSettings();
   if(!settings.serverOrigin)return;
   const now=Date.now();
@@ -424,7 +424,7 @@ export async function restoreActiveSubscriptions({force=false}={}) {
     if(rule.status==='active'&&rule.targetBrowserDeviceId===identity.deviceId)
       await requestSnapshot(rule.ruleId).catch(()=>{});
   }
-}
+});
 
 export async function pruneOverwriteGrants(){
   const all=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};

@@ -33,6 +33,13 @@ test('Browser Sync polls only presence and allows metadata rule transitions and 
  assert.match(page,/ruleAction\(r,'pause'\)/);
  assert.match(page,/ruleAction\(r,'resume'\)/);
  assert.match(page,/ruleAction\(r,'revoke'\)/);
+ assert.match(page,/rulePagePath\(0\)/);
+ assert.match(page,/ruleNextOffset>=0/);
+ assert.match(page,/moreRules/);
+ assert.match(page,/ruleIdentity\?'&identityId='/);
+ assert.match(page,/ruleSearchDebounced\?'&q='/);
+ assert.match(page,/aria-label="按所属身份筛选配对规则"/);
+ assert.match(page,/e\.actorId\|\|'—'/);
  assert.match(page,/\/browser-sync\/admin\/audit\?limit=50&before=/);
  assert.match(page,/auditFilter==='all'/);
  assert.match(page,/auditDevice\?'&device='/);

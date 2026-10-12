@@ -58,8 +58,20 @@ func (l *browserLimiter) allowAt(key string, max int, interval time.Duration, no
 // A sender may naturally issue cursor/list queries before each snapshot.
 // Rule-specific budgets prevent a single policy from dominating the relay.
 func (h *Handler) permitControl(deviceID string, msg ruleControlFrame) bool {
-	if !h.limits.allow("device-minute:"+deviceID, 240, time.Minute) ||
-		!h.limits.allow("device-burst:"+deviceID, 30, 10*time.Second) {
+	// Browser startup, reconnect and ACK replay legitimately burst several
+	// cheap read-only control frames. Isolate their burst window so they
+	// cannot starve security-critical writes (or vice versa). Both classes
+	// still share the strict per-device minute cap and per-message budgets.
+	if !h.limits.allow("device-minute:"+deviceID, 240, time.Minute) {
+		return false
+	}
+	burstKey, burstLimit := "device-burst:"+deviceID, 30
+	switch msg.Type {
+	case "LIST_PEERS", "LIST_RULES", "NETWORK_EXITS", "NETWORK_BINDING",
+		"DELIVERY_STATUS", "SEQUENCE_CURSOR":
+		burstKey, burstLimit = "device-read-burst:"+deviceID, 64
+	}
+	if !h.limits.allow(burstKey, burstLimit, 10*time.Second) {
 		return false
 	}
 	ruleID := msg.RuleID

@@ -33,6 +33,40 @@ const pendingOpenKey = 'browserSyncPendingOpen';
 // sender control replies otherwise overwrite each other's read-modify-write.
 // Only the opaque per-delivery ID is retained, never session or Cookie data.
 let statusWriteQueue=Promise.resolve();
+// Chrome storage has no atomic read-modify-write. Serialize ALL mutations of
+// the opaque pending-delivery map, and delete only the exact acknowledged
+// message ID. Otherwise a slow ACK for M1 can erase M2's recovery record.
+let pendingWriteQueue=Promise.resolve();
+function mutatePendingDelivery(ruleId,update){
+  const write=pendingWriteQueue.catch(()=>{}).then(async()=>{
+    const all=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+    const previous=all[ruleId];
+    const next=update(previous);
+    if(next===previous)return;
+    if(next===null){
+      if(previous===undefined)return;
+      delete all[ruleId];
+    }else{
+      all[ruleId]=next;
+    }
+    await chrome.storage.local.set({[PENDING_DELIVERY]:all});
+  });
+  pendingWriteQueue=write;
+  return write;
+}
+async function getPendingDelivery(ruleId){
+  await pendingWriteQueue.catch(()=>{});
+  const all=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+  return all[ruleId];
+}
+async function listPendingDeliveries(){
+  await pendingWriteQueue.catch(()=>{});
+  return (await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+}
+function clearPendingDelivery(ruleId,messageId){
+  return mutatePendingDelivery(ruleId,previous=>
+    previous?.messageId===messageId?null:previous);
+}
 function setStatus(ruleId,result,messageId='') {
   const write=statusWriteQueue.catch(()=>{}).then(async()=>{
     const all=(await chrome.storage.local.get(statusKey))[statusKey]||{};
@@ -84,6 +118,7 @@ export async function sendSnapshot(ruleId, transferRequestId='') {
   }
   sourceBusy.add(ruleId);
   let transmissionAttempted=false;
+  let outgoingMessageId='';
   try{
     const ctx=await ruleContext(ruleId);
     if(!ctx.sourceRole)throw new Error('只有来源设备可以发送登录状态');
@@ -112,28 +147,31 @@ export async function sendSnapshot(ruleId, transferRequestId='') {
     const envelope=await encryptSnapshot(ctx.rule,ctx.remote,sequence,payload,transferRequestId);
     // Keep only opaque IDs and timestamps, not credential contents.
     // This is written before sending: a fast APPLIED cannot race the record.
-    const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
-    pending[ruleId]={ruleId,messageId:envelope.messageId,createdAt:Date.now()};
-    await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
-    await setStatus(ruleId,'SENDING',envelope.messageId);
+    outgoingMessageId=envelope.messageId;
+    await mutatePendingDelivery(ruleId,()=>({
+      ruleId,messageId:outgoingMessageId,createdAt:Date.now()
+    }));
+    await setStatus(ruleId,'SENDING',outgoingMessageId);
     transmissionAttempted=true;
     const ack=await sendControl('SESSION_SNAPSHOT',{envelope});
     if(ack.status!=='RELAYED')throw new Error('中继没有接受加密快照');
-    const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+    const latest=await getPendingDelivery(ruleId);
     // A fast target APPLIED may have consumed this pending entry already.
-    if(latest[ruleId]?.messageId===envelope.messageId)await setStatus(ruleId,'RELAYED',envelope.messageId);
-    return {state:'RELAYED',count:payload.cookies.length};
+    if(latest?.messageId===outgoingMessageId)await setStatus(ruleId,'RELAYED',outgoingMessageId);
+    return {state:'RELAYED',count:payload.cookies?.length||0};
   }catch(error){
     if(!transmissionAttempted){
-      const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
-      delete pending[ruleId];
-      await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
+      // A failure before transmission must not delete a PREVIOUS snapshot's
+      // outstanding ACK. No data was sent in this attempt.
+      if(outgoingMessageId)
+        await clearPendingDelivery(ruleId,outgoingMessageId);
       await setStatus(ruleId,'FAILED');
     }else{
-      // A timed-out WSS response does NOT prove B failed to apply a Cookie.
-      // Retain messageId so reconnect can query the durable terminal receipt.
-      const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
-      if(latest[ruleId]?.messageId===envelope.messageId)await setStatus(ruleId,'UNKNOWN',envelope.messageId);
+      // WSS timeout does not prove the website restore failed. Keep the
+      // opaque receipt ID for reconciliation after worker restart.
+      const latest=await getPendingDelivery(ruleId);
+      if(latest?.messageId===outgoingMessageId)
+        await setStatus(ruleId,'UNKNOWN',outgoingMessageId);
     }
     throw error;
   }finally{
@@ -351,14 +389,11 @@ onServerPush(async message => {
     try{await sendSnapshot(message.ruleId,message.transferRequestId||'');}catch{ /* offline or Cookie scope incompatible */ }
   }
   if(message.type==='SYNC_ACK'&&typeof message.ruleId==='string'){
-    const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
-    const item=pending[message.ruleId];
+    const item=await getPendingDelivery(message.ruleId);
     if(!acceptDeliveryAck(item,message,Date.now()))return;
     await setStatus(message.ruleId,message.status,item.messageId);
-    if(isTerminalAck(message.status)){
-      delete pending[message.ruleId];
-      await chrome.storage.local.set({[PENDING_DELIVERY]:pending});
-    }
+    if(isTerminalAck(message.status))
+      await clearPendingDelivery(message.ruleId,item.messageId);
   }
 });
 
@@ -385,7 +420,7 @@ export async function onCookieChange(cookie) {
 }
 
 export async function reconcilePendingDeliveries() {
-  const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
+  const pending=await listPendingDeliveries();
   for(const [ruleId,item] of Object.entries(pending)){
     if(!item||typeof item.messageId!=='string')continue;
     let statusReply;
@@ -394,17 +429,15 @@ export async function reconcilePendingDeliveries() {
     }catch{continue;} // leave pending for next reconnect
     if(statusReply?.type!=='DELIVERY_RESULT'||statusReply.ruleId!==ruleId||
        statusReply.messageId!==item.messageId)continue;
-    const latest=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
-    if(latest[ruleId]?.messageId!==item.messageId)continue;
+    const latest=await getPendingDelivery(ruleId);
+    if(latest?.messageId!==item.messageId)continue;
     if(['APPLIED','FAILED','CONFLICT'].includes(statusReply.status)){
       await setStatus(ruleId,statusReply.status,item.messageId);
-      delete latest[ruleId];
-      await chrome.storage.local.set({[PENDING_DELIVERY]:latest});
+      await clearPendingDelivery(ruleId,item.messageId);
     }else if(statusReply.status==='UNKNOWN'){
       // Outcome was lost or expired: never claim a login actually failed.
       await setStatus(ruleId,'UNKNOWN',item.messageId);
-      delete latest[ruleId];
-      await chrome.storage.local.set({[PENDING_DELIVERY]:latest});
+      await clearPendingDelivery(ruleId,item.messageId);
     }else if(statusReply.status==='RECEIVED'){
       await setStatus(ruleId,'RECEIVED',item.messageId);
     }

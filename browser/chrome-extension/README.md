@@ -1,3 +1,11 @@
+## Browser Sync 真实 Relay TLS/WSS + Chromium A/B 集成测试
+
+CI 独立运行 `node browser/chrome-extension/tests/chromium-wss-e2e.mjs`。首先编译 `go build -o <临时测试可执行文件> ./browser/chrome-extension/tests/wss-fixture`，由测试程序以一次性随机 Bearer 令牌启动两个仅监听 `127.0.0.1` 的随机端口：真实 `server/browser_sync.NewHandler` HTTPS/WSS 和仅供 CI 调用的 Store 管理员批准/撤销接口。**管理员控制接口从未接入正式 Server 路由，也不能与生产数据一起运行。** CI 使用单独的 throwaway Chromium 141 双 Profile，且仅为自签测试 HTTPS 证书开启 `--ignore-certificate-errors`、仅为 `127.0.0.1` 增加 Host 授权；这两项不属于正式 Chrome 扩展安装包。
+
+A/B 均使用真实 MV3 Service Worker，经生产 HTTP 注册（pending）→ 测试专用 Admin Store 审批 → 正式 WSS 挑战签名认证 → E2EE v3 邀请与双端独立校验码 → 接受和确认 → 来源真实 Cookie/Local/Session/IndexedDB 快照经 Relay Server 密文中继 → 接收端实际网页恢复 → B `APPLIED` ACK、A 接受终态回执。另测试撤销接收设备后重连必须拒绝。该测试与不依赖 Server 的 `npm run test:chromium` 互补。
+
+**仍待实机验收：** Windows/macOS 双设备、生产 Server Web 管理员人工审批、真实公网上证书/反代 WSS、Chrome Worker 熄屏重启、断线恢复、Cookie 冲突和登出连通流程、DNS/QUIC/WebRTC、防止页面 MAIN world 干扰、Chrome 打包/版本升级。进度文档：[`docs/browser-session-sync-progress.md`](../../docs/browser-session-sync-progress.md)。
+
 ## 真实 Chromium 双 Profile 自动化验收（开发分支）
 
 `.github/workflows/ui-ci.yml` 的 `browser-sync-chromium` job 使用 Playwright 的 Chromium 和两套独立持久 Profile，加载真实 MV3 扩展，通过仅在 127.0.0.1 监听的自有 HTTP 测试网站验证 HttpOnly Cookie 登录、Local/Session Storage、IndexedDB v3 的 Store/索引/Blob/Date、真实 WebCrypto 设备密钥与签名加密、篡改拒绝及 B 设备独立账号冲突保护。运行：在 `browser/chrome-extension` 目录执行 `npm install`、`npx playwright install --with-deps chromium`、`npm run test:chromium`。测试临时复制扩展并只给自有本机测试站点预授权，**不改变正式 Manifest 的可选权限与用户点击授权要求**。

@@ -282,10 +282,17 @@ async function main(){
   console.log('all local/session storage, IndexedDB v3 Blob/Date, E2EE, tamper + account conflict.');
 }
 
-let error;
-try{await main();}catch(e){error=e;console.error(e);}finally{
-  for(const cleanup of scope.reverse()){
-    try{await cleanup();}catch(e){console.error('cleanup:',e);}
+// Also used by the separate real-Server WSS acceptance test. Importing this
+// fixture library never launches browsers or prints website credentials.
+export {scope, extensionRoot, listenLocalServer, extensionContext,
+  extensionIdentity, sourceSiteState, verifyTargetSite};
+
+if(process.argv[1] && fileURLToPath(import.meta.url)===process.argv[1]){
+  let error;
+  try{await main();}catch(e){error=e;console.error(e);}finally{
+    for(const cleanup of scope.reverse()){
+      try{await cleanup();}catch(e){console.error('cleanup:',e);}
+    }
   }
+  if(error)process.exitCode=1;
 }
-if(error)process.exitCode=1;

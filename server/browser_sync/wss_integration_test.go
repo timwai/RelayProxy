@@ -532,6 +532,15 @@ func TestWSSReceiverTransferRequestTokenIsRoutedAndSigned(t *testing.T) {
 	rVal.FillBytes(signature[:32])
 	sVal.FillBytes(signature[32:])
 	envelope.Signature = base64.RawURLEncoding.EncodeToString(signature)
+	// Even a fully authenticated source cannot swap the receiver's token
+	// without invalidating its signature. Rejected frames use no sequence.
+	swapped := envelope
+	swapped.TransferRequestID = uuid.NewString()
+	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT",
+		"requestId": "tamper", "envelope": swapped})
+	if reply := readWSSControl(t, a); reply["type"] != "RULE_ERROR" {
+		t.Fatalf("tampered receiver request token accepted: %v", reply)
+	}
 	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT",
 		"requestId": "snapshot-one", "envelope": envelope})
 	if reply := readWSSControl(t, a); reply["status"] != "RELAYED" {

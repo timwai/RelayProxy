@@ -51,22 +51,13 @@ func (p *NetworkProxy) AllowedExit(browserIdentity, exitID string) bool {
 		return false
 	}
 	exit, ok := p.Sessions.Get(exitID)
+	// Browser network binding is explicitly approved at BOTH ends of the
+	// pairing. Any online Agent with the identity's approved proxy.exit grant
+	// is eligible, including remote exits without a local browser-share flag.
+	// Keep the identity, relay tunnel and proxy.exit checks on every CONNECT
+	// and on the established stream watchdog (not only when listing exits).
 	return ok && exit != nil && exit.IsExit() && exit.IdentityID == browserIdentity &&
-		exit.Tunnel != nil && browserExitOptedIn(exit)
-}
-
-// The Agent must expose an approved proxy.exit session under the browser's
-// same identity AND actively advertise its signed local browser-share opt-in.
-func browserExitOptedIn(exit *session.DeviceSession) bool {
-	if exit == nil {
-		return false
-	}
-	for _, capability := range exit.Capabilities {
-		if capability == protocol.CapabilityBrowserNetworkExit {
-			return true
-		}
-	}
-	return false
+		exit.Tunnel != nil
 }
 
 func (p *NetworkProxy) AvailableExits(ctx context.Context, browserID string) []map[string]string {

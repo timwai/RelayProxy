@@ -47,7 +47,8 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	relay := httptest.NewTLSServer(browsersync.NewHandler(store, nil))
+	handler := browsersync.NewHandler(store, nil)
+	relay := httptest.NewTLSServer(handler)
 	defer relay.Close()
 
 	// Only the local test controller may approve/revoke devices. Do not
@@ -78,6 +79,10 @@ func main() {
 			actionErr = store.Approve(req.Context(), body.ID, "id_1", body.Send, body.Receive)
 		case "revoke":
 			actionErr = store.Revoke(req.Context(), body.ID)
+		case "drop":
+			// Test-only forced WSS disconnect without revoking enrollment.
+			// Exercises Chrome alarm reconnect and durable ACK recovery.
+			handler.DisconnectDevice(body.ID)
 		default:
 			http.Error(w, "unknown action", http.StatusBadRequest)
 			return

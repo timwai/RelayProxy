@@ -23,8 +23,11 @@ type AdminRule struct {
 	SourceApproved bool      `json:"sourceApproved"`
 	TargetApproved bool      `json:"targetApproved"`
 	KeysConfirmed  bool      `json:"keysConfirmed"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	CreatedAt      time.Time  `json:"createdAt"`
+	UpdatedAt      time.Time  `json:"updatedAt"`
+	SourceApprovedAt time.Time `json:"sourceApprovedAt"`
+	TargetApprovedAt *time.Time `json:"targetApprovedAt,omitempty"`
+	ActivatedAt      *time.Time `json:"activatedAt,omitempty"`
 }
 
 type AdminAuditEvent struct {
@@ -170,7 +173,7 @@ func (s *Store) AdminRulesPage(ctx context.Context, limit, offset int, identityI
 func (s *Store) adminRulesQuery(ctx context.Context, limit, offset int, identityID, status, search string) ([]AdminRule, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT r.id,r.source_id,sd.name,r.target_id,td.name,
 		sd.identity_id,r.status,r.source_approved,r.target_approved,r.keys_confirmed,
-		r.created_at,r.updated_at FROM browser_sync_rules r
+		r.created_at,r.updated_at,r.target_approved_at,r.activated_at FROM browser_sync_rules r
 		INNER JOIN browser_sync_devices sd ON sd.id=r.source_id
 		INNER JOIN browser_sync_devices td ON td.id=r.target_id
 		WHERE (?='' OR sd.identity_id=?)
@@ -192,11 +195,20 @@ func (s *Store) adminRulesQuery(ctx context.Context, limit, offset int, identity
 	for rows.Next() {
 		var rule AdminRule
 		var source, target, keys int
+		var targetAt, activatedAt sql.NullTime
 		if err := rows.Scan(&rule.ID, &rule.SourceID, &rule.SourceName, &rule.TargetID, &rule.TargetName,
-			&rule.IdentityID, &rule.Status, &source, &target, &keys, &rule.CreatedAt, &rule.UpdatedAt); err != nil {
+			&rule.IdentityID, &rule.Status, &source, &target, &keys, &rule.CreatedAt, &rule.UpdatedAt,
+			&targetAt, &activatedAt); err != nil {
 			return nil, err
 		}
 		rule.SourceApproved, rule.TargetApproved, rule.KeysConfirmed = source != 0, target != 0, keys != 0
+		rule.SourceApprovedAt = rule.CreatedAt
+		if targetAt.Valid {
+			rule.TargetApprovedAt = &targetAt.Time
+		}
+		if activatedAt.Valid {
+			rule.ActivatedAt = &activatedAt.Time
+		}
 		items = append(items, rule)
 	}
 	return items, rows.Err()

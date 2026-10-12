@@ -106,9 +106,22 @@ func (r *Router) handleBrowserSyncExtensions(w http.ResponseWriter, req *http.Re
 	writeJSON(w, http.StatusOK, items)
 }
 func (r *Router) handleBrowserSyncExtensionRevoke(w http.ResponseWriter, req *http.Request) {
-	if err := r.browserSync.Store.SetExtensionApproved(req.Context(), req.PathValue("id"), false); err != nil {
+	id := req.PathValue("id")
+	if err := r.browserSync.Store.SetExtensionApproved(req.Context(), id, false); err != nil {
 		writeError(w, http.StatusBadRequest, "approved extension not found")
 		return
+	}
+	// Legacy origin-wide disable must also tear down existing WSS sessions,
+	// not merely block the next inbound message from an already-online device.
+	devices, err := r.browserSync.Store.Devices(req.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "extension revoked; unable to enumerate browser sessions")
+		return
+	}
+	for _, device := range devices {
+		if device.ExtensionID == id {
+			r.browserSync.DisconnectDevice(device.ID)
+		}
 	}
 	writeJSON(w, http.StatusOK, map[string]string{"state": "revoked"})
 }

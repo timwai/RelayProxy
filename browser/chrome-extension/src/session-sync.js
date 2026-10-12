@@ -414,18 +414,24 @@ export async function pruneOverwriteGrants(){
 
 
 export async function setOverwritePermission(ruleId,allowed) {
-  const ctx=await ruleContext(ruleId);
-  if(!ctx.targetRole||ctx.rule.status!=='active')throw new Error('仅已激活配对的接收端可以确认覆盖');
+  if(typeof ruleId!=='string'||ruleId.length>128||!ruleId)
+    throw new Error('无效的配对规则');
+  // Revocation must work offline. If the SYNC_REQUEST fails after user
+  // approval, do not leave a two-minute overwrite grant behind.
   const grants=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
-  delete grants[ruleId]; // discard any legacy boolean/expired grant first
-  if(allowed===true) {
-    grants[ruleId]={
-      siteOrigin:ctx.policy.siteOrigin,
-      expiresAt:Date.now()+OVERWRITE_GRANT_TTL_MS
-    };
+  if(allowed!==true) {
+    delete grants[ruleId];
+    await chrome.storage.local.set({[ALLOW_OVERRIDE]:grants});
+    return {ruleId,allowed:false,expiresAt:null};
   }
+  const ctx=await ruleContext(ruleId);
+  if(!ctx.targetRole||ctx.rule.status!=='active')
+    throw new Error('仅已激活配对的接收端可以确认覆盖');
+  delete grants[ruleId]; // discard any legacy boolean/expired grant first
+  grants[ruleId]={siteOrigin:ctx.policy.siteOrigin,
+    expiresAt:Date.now()+OVERWRITE_GRANT_TTL_MS};
   await chrome.storage.local.set({[ALLOW_OVERRIDE]:grants});
-  return {ruleId,allowed:allowed===true,expiresAt:grants[ruleId]?.expiresAt||null};
+  return {ruleId,allowed:true,expiresAt:grants[ruleId].expiresAt};
 }
 
 export async function resumePausedRestore(ruleId,confirmed) {

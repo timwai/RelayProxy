@@ -396,12 +396,25 @@ async function main(){
   // silently inherit the old browser's approval or encrypted pairing.
   const rotatedB=await restartedB.options.evaluate(async()=>{
     const before=(await chrome.storage.local.get('browserDeviceId')).browserDeviceId;
-    await new Promise((resolve,reject)=>{
-      const request=indexedDB.deleteDatabase('relayproxy-browser-sync');
-      request.onsuccess=resolve;
-      request.onerror=()=>reject(request.error||new Error('identity key reset failed'));
-      request.onblocked=()=>reject(new Error('identity keys remained open'));
+    // A committed key-store transaction simulates private-key loss without
+    // racing open handles from Chrome's MV3 alarm or readKey(). Whole-database
+    // deletion can spuriously fail with onblocked even when the keys are safe
+    // to remove and correctly re-enroll.
+    const db=await new Promise((resolve,reject)=>{
+      const request=indexedDB.open('relayproxy-browser-sync',1);
+      request.onsuccess=()=>resolve(request.result);
+      request.onerror=()=>reject(request.error||new Error('identity database unavailable'));
     });
+    try{
+      await new Promise((resolve,reject)=>{
+        const tx=db.transaction('keys','readwrite');
+        tx.objectStore('keys').delete('signing');
+        tx.objectStore('keys').delete('encryption');
+        tx.oncomplete=resolve;
+        tx.onerror=()=>reject(tx.error||new Error('identity key deletion failed'));
+        tx.onabort=()=>reject(tx.error||new Error('identity key deletion aborted'));
+      });
+    }finally{db.close();}
     const {getOrCreateIdentity}=await import(
       chrome.runtime.getURL('src/device-identity.js'));
     const current=await getOrCreateIdentity();

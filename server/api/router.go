@@ -130,6 +130,11 @@ func NewRouter(authService *service.AuthService, deviceService *service.DeviceSe
 		// as Server Web mutations; each UI re-reads its scoped snapshot.
 		sessions.SetPresenceNotifier(r.live.publish)
 	}
+	if r.browserSync != nil {
+		// Browser online status is admin-only; WSS connections never gain
+		// access to the admin event stream or receive user identity metadata.
+		r.browserSync.SetPresenceNotifier(func() { r.live.publish("") })
+	}
 	r.registerRoutes()
 	return r
 }

@@ -540,7 +540,19 @@ async function updateConnectionState(){
 }
 load().then(()=>{
   updateConnectionState().catch(()=>{});
+  // Chrome's authenticated WSS connection and pending-approval lifecycle
+  // trigger sanitized storage invalidations. Fetch authoritative GET_STATUS
+  // only on events, focus, or a slow fallback (not an 8-second UI poll).
+  chrome.storage.onChanged.addListener((changes,area)=>{
+    if(area==='local'&&(changes.browserSyncConnectionNotice||
+       changes.browserSyncPendingEnrollment))
+      updateConnectionState().catch(()=>{});
+  });
+  document.addEventListener('visibilitychange',()=>{
+    if(document.visibilityState==='visible')updateConnectionState().catch(()=>{});
+  });
+  window.addEventListener('focus',()=>updateConnectionState().catch(()=>{}));
   setInterval(()=>{if(document.visibilityState==='visible')
-    updateConnectionState().catch(()=>{});},8000);
+    updateConnectionState().catch(()=>{});},60000);
 }).catch(failure);
 

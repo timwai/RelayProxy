@@ -82,7 +82,7 @@ function removeDetails(c,origin){
 }
 export async function captureAllCookies(policy){
   const p=validatePolicy(policy);
-  if(![2,3].includes(p.schemaVersion))throw new Error('需要全量站点授权');
+  if(![2,3,4].includes(p.schemaVersion) || p.allCookies!==true)throw new Error('需要全量站点授权');
   const jar=await allFor(p.siteOrigin);
   const cookies=[...jar.values()].map(fromChrome).sort((a,b)=>cookieIdentity(a).localeCompare(cookieIdentity(b)));
   if(cookies.length>1000)throw new Error('站点 Cookie 超过 1000 条安全上限');

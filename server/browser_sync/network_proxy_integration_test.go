@@ -78,7 +78,7 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 	}
 
 	sessions := session.NewManager()
-	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1),frames: make(chan protocol.FrameType, 1)}
+	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1), frames: make(chan protocol.FrameType, 1)}
 	sessions.Register(&session.DeviceSession{
 		DeviceID: exitID, IdentityID: "id_1", DeviceName: "Approved Agent",
 		Grants:       []string{protocol.CapabilityProxyExit},
@@ -158,7 +158,7 @@ func TestNetworkProxyCONNECTRelaysBytesThroughApprovedAgent(t *testing.T) {
 		if frameType != protocol.FrameTypeOpenTCP {
 			t.Fatalf("remote authorized Agent without opt-in received unexpected frame %v", frameType)
 		}
-	case <-time.After(3*time.Second):
+	case <-time.After(3 * time.Second):
 		t.Fatal("remote Agent never received standard proxy.exit TCP frame")
 	}
 	select {

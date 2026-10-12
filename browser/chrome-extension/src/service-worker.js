@@ -3,13 +3,20 @@
 import { getOrCreateIdentity } from './device-identity.js';
 import {PENDING_ENROLLMENT_KEY,recordEnrollment,pollPendingEnrollment,validPendingEnrollment} from './enrollment-auto.js';
 import { getSettings, updateSettings, parseServerOrigin } from './rules.js';
-import { registerBrowser, connectBrowser, currentConnectionState, disconnect, sendControl } from './server-api.js';
+import { registerBrowser, connectBrowser, currentConnectionState, disconnect, sendControl, onBrowserConnectionChange } from './server-api.js';
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
 import { getTrustedPeer, pinPeer } from './rules.js';
 import { sendSnapshot, requestSnapshot, onCookieChange, restoreActiveSubscriptions, pruneOverwriteGrants, setOverwritePermission, syncThenOpen, forgetRuleLocalState, resumePausedRestore } from './session-sync.js';
 import {parseBoundHost, installNetworkGuard, startNetworkGuard, startLocalNetworkGuard, stopNetworkGuard, selectedNetworkRules, localAgentGlobal, setLocalAgentGlobal, refreshNetworkBinding, registerNetworkAuth} from './network-binding.js';
 
 registerNetworkAuth();
+// A local invalidation only. Never serialize tokens, registration proofs,
+// website state or WSS frames to chrome.storage.
+onBrowserConnectionChange(state=>{
+  chrome.storage.local.set({browserSyncConnectionNotice:{
+    state,updatedAt:Date.now()
+  }}).catch(()=>{});
+});
 
 async function restoreApprovedBrowser({force=false}={}){
   const settings=await getSettings();

@@ -21,7 +21,7 @@ test('website permission is selected from open HTTP or HTTPS tabs in Settings',(
 });
 
 test('one browser-device registration includes its identity preference and public keys',()=>{
- assert.match(optionsJS,/type:\\s*'REGISTER_BROWSER'/);
+ assert.ok(optionsJS.includes("type:'REGISTER_BROWSER'"));
  assert.match(worker,/case 'REGISTER_BROWSER'/);
  assert.match(serverAPI,/\/api\/v1\/browser-sync\/devices\/register/);
  assert.match(serverAPI,/requestedIdentityId/);

@@ -126,7 +126,7 @@ func (r *Router) handleBrowserSyncExtensionRevoke(w http.ResponseWriter, req *ht
 	writeJSON(w, http.StatusOK, map[string]string{"state": "revoked"})
 }
 
-	
+
 // Admin-only management metadata. Never return encrypted offers, browser keys,
 // tokens, credential material or arbitrary client-supplied error strings.
 func (r *Router) handleBrowserSyncRules(w http.ResponseWriter, req *http.Request) {

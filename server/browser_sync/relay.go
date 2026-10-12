@@ -41,6 +41,7 @@ func (h *Handler) detach(id string, c *browserConnection) {
 	}
 	h.clientMu.Unlock()
 }
+
 // DisconnectDevice terminates any authenticated websocket still attached to
 // a revoked/deleted browser before its old credentials can be reused.
 func (h *Handler) DisconnectDevice(id string) {
@@ -52,6 +53,7 @@ func (h *Handler) DisconnectDevice(id string) {
 		_ = c.conn.Close(websocket.StatusPolicyViolation, "browser authorization revoked")
 	}
 }
+
 // OnlineSnapshot is a transient observation of authenticated WSS sessions.
 // Only admin handlers call it; no keys or browser messages are exposed.
 func (h *Handler) OnlineSnapshot() map[string]time.Time {

@@ -5,7 +5,7 @@ import { getOrCreateIdentity } from './device-identity.js';
 import { getSettings, getTrustedPeer } from './rules.js';
 import { sendControl, connectBrowser, onServerPush } from './server-api.js';
 import { decryptEncryptedOffer } from './envelope.js';
-import { encryptSnapshot, decryptSnapshot } from './session-envelope.js';
+import { encryptSnapshot, decryptSnapshot, isTransferRequestId } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
 import {captureAllCookies,applyAllCookies} from './cookies-all.js';
 import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
@@ -16,6 +16,7 @@ import {ensureNetworkForRule} from './network-binding.js';
 
 const sourceBusy = new Set();
 const sourceDirty = new Set();
+const sourceRequested = new Map();
 const cookieTimers = new Map();
 const incomingQueue = new Map();
 const LAST_SEQUENCE = 'browserSyncOutgoingSequence';
@@ -64,9 +65,12 @@ async function ruleContext(ruleId) {
   return {rule,remote,policy,sourceRole,targetRole};
 }
 
-export async function sendSnapshot(ruleId) {
+export async function sendSnapshot(ruleId, transferRequestId='') {
+  if(transferRequestId!==''&&!isTransferRequestId(transferRequestId))
+    throw new Error('无效的一次性同步请求 ID');
   if(sourceBusy.has(ruleId)){
-    sourceDirty.add(ruleId);
+    if(transferRequestId)sourceRequested.set(ruleId,transferRequestId);
+    else sourceDirty.add(ruleId);
     return {state:'BUSY'};
   }
   sourceBusy.add(ruleId);
@@ -91,7 +95,7 @@ export async function sendSnapshot(ruleId) {
     // sequence even if WSS rejects the delivery or worker suspends.
     stored[ruleId]=sequence;
     await chrome.storage.local.set({[LAST_SEQUENCE]:stored});
-    const envelope=await encryptSnapshot(ctx.rule,ctx.remote,sequence,payload);
+    const envelope=await encryptSnapshot(ctx.rule,ctx.remote,sequence,payload,transferRequestId);
     // Keep only opaque IDs and timestamps, not credential contents.
     // This is written before sending: a fast APPLIED cannot race the record.
     const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
@@ -120,15 +124,22 @@ export async function sendSnapshot(ruleId) {
     throw error;
   }finally{
     sourceBusy.delete(ruleId);
-    if(sourceDirty.delete(ruleId)){
-      // An onChanged event arrived while a previous encrypted snapshot was
-      // in flight. Re-read the latest Cookie state rather than dropping it.
+    const requested=sourceRequested.get(ruleId);
+    if(requested){
+      sourceRequested.delete(ruleId);
+      // A user-initiated receiver request takes priority over a debounced
+      // cookie refresh. Its token must not be silently discarded.
+      queueMicrotask(()=>{sendSnapshot(ruleId,requested).catch(()=>{});});
+    }else if(sourceDirty.delete(ruleId)){
+      // The next unsolicited snapshot does not inherit a user token.
       queueMicrotask(()=>{sendSnapshot(ruleId).catch(()=>{});});
     }
   }
 }
 
-export async function requestSnapshot(ruleId) {
+export async function requestSnapshot(ruleId, transferRequestId='') {
+  if(transferRequestId!==''&&!isTransferRequestId(transferRequestId))
+    throw new Error('无效的一次性同步请求 ID');
   const ctx=await ruleContext(ruleId);
   if(!ctx.targetRole)throw new Error('只有接收设备能请求同步');
   await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
@@ -139,7 +150,8 @@ export async function requestSnapshot(ruleId) {
      interruptedKeys.browserSyncStorageRestoreJournal?.[ruleId]||
      interruptedKeys[IDB_JOURNAL]?.[ruleId])
     throw new Error('此规则因上次会话恢复未完成已暂停，请先检查目标网站');
-  const answer=await sendControl('SYNC_REQUEST',{ruleId});
+  const answer=await sendControl('SYNC_REQUEST',{ruleId,
+    ...(transferRequestId?{transferRequestId}:{})});
   if(answer.status!=='REQUESTED')throw new Error('来源设备不在线');
   return {state:'REQUESTED'};
 }
@@ -176,13 +188,23 @@ export function browserRestoreFailureCode(error) {
 
 // Consume BEFORE any mutation, so a failed restore or MV3 restart cannot
 // turn one user's account-switch confirmation into a reusable permission.
-export async function consumeOneTimeOverwrite(ruleId, siteOrigin) {
+export async function consumeOneTimeOverwrite(ruleId, siteOrigin, requestId='') {
   const stored=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
   const candidate=stored[ruleId];
   if(candidate===undefined)return false;
+  const valid=validOverwriteGrant(candidate,siteOrigin,Date.now(),requestId);
+  if(!valid){
+    // An unrelated automatic snapshot must NOT consume an armed, valid
+    // one-time user request. Prune expired and legacy permissions only.
+    if(!validOverwriteGrant(candidate,candidate?.siteOrigin,Date.now(),candidate?.transferRequestId)){
+      delete stored[ruleId];
+      await chrome.storage.local.set({[ALLOW_OVERRIDE]:stored});
+    }
+    return false;
+  }
   delete stored[ruleId];
   await chrome.storage.local.set({[ALLOW_OVERRIDE]:stored});
-  return validOverwriteGrant(candidate,siteOrigin,Date.now());
+  return true;
 }
 
 async function handleIncomingSnapshot(envelope) {
@@ -208,7 +230,7 @@ async function handleIncomingSnapshot(envelope) {
       throw new Error('旧会话快照已拒绝');
     const payload=await decryptSnapshot(envelope,ctx.remote);
     await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
-    const allowOverwrite=await consumeOneTimeOverwrite(ruleId,ctx.policy.siteOrigin);
+    const allowOverwrite=await consumeOneTimeOverwrite(ruleId,ctx.policy.siteOrigin,envelope.transferRequestId);
     let restoredTabId=null;
     try{
       if(ctx.policy.schemaVersion>=2){
@@ -298,7 +320,7 @@ function enqueueIncoming(envelope) {
 onServerPush(async message => {
   if(message.type==='SESSION_SNAPSHOT')return enqueueIncoming(message.envelope);
   if(message.type==='SYNC_REQUEST'&&typeof message.ruleId==='string'){
-    try{await sendSnapshot(message.ruleId);}catch{ /* offline or Cookie scope incompatible */ }
+    try{await sendSnapshot(message.ruleId,message.transferRequestId||'');}catch{ /* offline or Cookie scope incompatible */ }
   }
   if(message.type==='SYNC_ACK'&&typeof message.ruleId==='string'){
     const pending=(await chrome.storage.local.get(PENDING_DELIVERY))[PENDING_DELIVERY]||{};
@@ -404,7 +426,7 @@ export async function pruneOverwriteGrants(){
   const clean={};
   const now=Date.now();
   for(const [id,grant] of Object.entries(all)){
-    if(validOverwriteGrant(grant,grant?.siteOrigin,now))clean[id]=grant;
+    if(validOverwriteGrant(grant,grant?.siteOrigin,now,grant?.transferRequestId))clean[id]=grant;
   }
   // Old releases stored persistent booleans. They must never be honored
   // after upgrade, even if the worker has no Server connection yet.
@@ -428,10 +450,11 @@ export async function setOverwritePermission(ruleId,allowed) {
   if(!ctx.targetRole||ctx.rule.status!=='active')
     throw new Error('仅已激活配对的接收端可以确认覆盖');
   delete grants[ruleId]; // discard any legacy boolean/expired grant first
-  grants[ruleId]={siteOrigin:ctx.policy.siteOrigin,
+  const transferRequestId=crypto.randomUUID();
+  grants[ruleId]={siteOrigin:ctx.policy.siteOrigin,transferRequestId,
     expiresAt:Date.now()+OVERWRITE_GRANT_TTL_MS};
   await chrome.storage.local.set({[ALLOW_OVERRIDE]:grants});
-  return {ruleId,allowed:true,expiresAt:grants[ruleId].expiresAt};
+  return {ruleId,allowed:true,transferRequestId,expiresAt:grants[ruleId].expiresAt};
 }
 
 export async function resumePausedRestore(ruleId,confirmed) {

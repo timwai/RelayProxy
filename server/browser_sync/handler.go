@@ -551,17 +551,17 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 }
 
 type ruleControlFrame struct {
-	Type         string             `json:"type"`
-	RequestID    string             `json:"requestId"`
-	RuleID       string             `json:"ruleId"`
-	Offer        *EncryptedOffer    `json:"offer"`
-	Envelope     *protocol.Envelope `json:"envelope"`
-	MessageID    string             `json:"messageId"`
-	TransferRequestID string       `json:"transferRequestId"`
-	Status       string             `json:"status"`
-	ErrorCode    string             `json:"errorCode"`
-	Host         string             `json:"host"`
-	ExitDeviceID string             `json:"exitDeviceId"`
+	Type              string             `json:"type"`
+	RequestID         string             `json:"requestId"`
+	RuleID            string             `json:"ruleId"`
+	Offer             *EncryptedOffer    `json:"offer"`
+	Envelope          *protocol.Envelope `json:"envelope"`
+	MessageID         string             `json:"messageId"`
+	TransferRequestID string             `json:"transferRequestId"`
+	Status            string             `json:"status"`
+	ErrorCode         string             `json:"errorCode"`
+	Host              string             `json:"host"`
+	ExitDeviceID      string             `json:"exitDeviceId"`
 }
 
 // Codes are fixed, non-secret operator diagnostics, only returned on an

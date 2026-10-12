@@ -223,6 +223,10 @@ async function main(){
   const payload=await chromiumCapture(a,policy);
   assert.equal(payload.cookies.some(c=>c.name==='rp_e2e_session'&&c.httpOnly&&c.value==='alice'),true,
     'the source Chrome API must collect HTTP-only session Cookies');
+  const sourceDB=payload.indexedDB.databases.find(db=>db.name==='rp-e2e-auth');
+  assert.ok(sourceDB,'the real website IndexedDB must be visible from the extension');
+  assert.deepEqual(sourceDB.stores.map(x=>x.name),['accounts'],
+    'source IndexedDB must include the real website Object Store, not only DB metadata');
   assert.equal(payload.indexedDB.databases.some(db=>db.name==='rp-e2e-auth'),true);
   const ruleId=crypto.randomUUID();
   const rule={ruleId,status:'active',sourceBrowserDeviceId:idA.deviceId,targetBrowserDeviceId:idB.deviceId};
@@ -236,6 +240,15 @@ async function main(){
   await assert.rejects(decryptInTarget(b,rejected,source),/签名|decryption|decrypt/i,
     'tampered Chrome encrypted envelope must be rejected');
   assert.equal(await applyToTarget(b,ruleId,policy,restored),'APPLIED');
+  const [extView,pageView]=await Promise.all([
+    b.options.evaluate(async policy=>{
+      const {captureIndexedDB}=await import(chrome.runtime.getURL('src/indexeddb-sync.js'));
+      const result=await captureIndexedDB(policy);
+      return result.databases.map(db=>({name:db.name,stores:db.stores.map(s=>s.name)}));
+    },policy),
+    pageB.evaluate(async()=>indexedDB.databases())
+  ]);
+  console.log('IndexedDB post-restore schemas (no values):',JSON.stringify({extView,pageView}));
   await verifyTargetSite(pageB,origin);
   // A separate login on B must not be silently overwritten by an old A
   // snapshot. This checks actual browser Cookie ownership/HMAC integration.

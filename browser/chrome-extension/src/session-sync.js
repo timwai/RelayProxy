@@ -166,7 +166,7 @@ export function browserRestoreFailureCode(error) {
   if(message.startsWith('CONFLICT:'))return 'CONFLICT';
   if(/旧会话快照|replay|sequence/i.test(message))return 'REPLAY_REJECTED';
   if(/IndexedDB|indexeddb/i.test(message))return 'INDEXEDDB_FAILURE';
-  if(/cookie/i.test(message))return 'COOKIE_FAILURE';
+  if(/cookie.{0,60}(?:failed|失败|rejected|denied|回滚|写入)|(?:failed|失败).{0,60}cookie/i.test(message))return 'COOKIE_FAILURE';
   if(/storage/i.test(message))return 'STORAGE_FAILURE';
   if(/解密|decrypt|signature/i.test(message))return 'DECRYPT_FAILED';
   if(/网络|proxy|PAC|出口|connect|network/i.test(message))return 'NETWORK_UNAVAILABLE';

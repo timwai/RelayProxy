@@ -419,10 +419,12 @@ function renderRules(rules,peers=[]) {
           if(!window.confirm('本次同步可能覆盖目标端 Cookie、Local/Session Storage 与 IndexedDB，并切换当前登录账号。确认仅允许下一次同步覆盖吗？'))return;
           overwrite.disabled = true;
           try{
-            await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:true});
+            const granted=await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:true});
+            if(!granted.transferRequestId)throw new Error('缺少一次性请求授权标识');
             try{
-              await ask({type:'REQUEST_SESSION',ruleId:rule.id});
-              status('已请求本次同步。覆盖授权最多有效 2 分钟，接收首份合法快照后即失效；失败不会自动续期。');
+              await ask({type:'REQUEST_SESSION',ruleId:rule.id,
+                transferRequestId:granted.transferRequestId});
+              status('已发起单次覆盖同步。仅本次请求对应的已签名快照可覆盖目标账号；2 分钟内有效，消费后不再续期。');
             }catch(error){
               await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:false}).catch(()=>{});
               throw error;

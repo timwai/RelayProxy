@@ -116,12 +116,16 @@ func (h *Handler) requestSnapshot(ctx context.Context, receiverID, ruleID string
 }
 
 func (h *Handler) relayAcknowledgement(ctx context.Context, receiverID, ruleID, messageID, status string) error {
+	return h.relayAcknowledgementWithCode(ctx, receiverID, ruleID, messageID, status, "")
+}
+
+func (h *Handler) relayAcknowledgementWithCode(ctx context.Context, receiverID, ruleID, messageID, status, code string) error {
 	switch status {
 	case "RECEIVED", "APPLIED", "FAILED", "CONFLICT":
 	default:
 		return ErrRuleDenied
 	}
-	sourceID, err := h.Store.ClaimDeliveryReceipt(ctx, receiverID, ruleID, messageID, status, time.Now().UTC())
+	sourceID, err := h.Store.ClaimDeliveryReceiptWithCode(ctx, receiverID, ruleID, messageID, status, code, time.Now().UTC())
 	if err != nil {
 		return err
 	}

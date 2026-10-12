@@ -59,6 +59,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       case 'SAVE_SERVER': {
         const serverOrigin = parseServerOrigin(message.serverOrigin);
         disconnect();
+        await chrome.storage.local.remove('browserSyncConnectionRetry');
         const saved=await updateSettings({ serverOrigin });
         // Rebuild PAC for the new Relay control-plane host. When a previous
         // Server had a bound website, refreshNetworkBinding will fail closed
@@ -72,6 +73,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       }
       case 'CONNECT_BROWSER': {
         const result = await connectBrowser();
+        // A successful manual connection overrides a previous automatic
+        // backoff, allowing the next MV3 alarm to reconcile pending ACKs.
+        await chrome.storage.local.remove('browserSyncConnectionRetry');
         return { ok: true, ...result };
       }
       case 'LIST_PEERS': {

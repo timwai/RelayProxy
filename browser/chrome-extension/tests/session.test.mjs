@@ -105,6 +105,31 @@ test('two Chrome profiles encrypt/decrypt a signed session envelope and block ta
   await assert.rejects(decryptSnapshot(corrupted,{...a,id:a.deviceId}),/签名/);
 });
 
+test('receiver request token is covered by source ECDSA signature and AES-GCM',async()=>{
+  const source=createProfile(),target=createProfile();
+  use(source);
+  const a=await getOrCreateIdentity();
+  use(target);
+  const b=await getOrCreateIdentity();
+  const rule={ruleId:crypto.randomUUID(),status:'active',
+    sourceBrowserDeviceId:a.deviceId,targetBrowserDeviceId:b.deviceId};
+  const payload={siteOrigin:policy.siteOrigin,cookies:[],removedNames:[],cookieNames:[]};
+  const requestId=crypto.randomUUID();
+  use(source);
+  const encrypted=await encryptSnapshot(rule,{...b,id:b.deviceId},1,payload,requestId);
+  assert.equal(encrypted.transferRequestId,requestId);
+  assert.ok(signedHeader(encrypted).endsWith(requestId));
+  use(target);
+  assert.deepEqual(await decryptSnapshot(encrypted,{...a,id:a.deviceId}),payload);
+  const swapped={...encrypted,transferRequestId:crypto.randomUUID()};
+  await assert.rejects(decryptSnapshot(swapped,{...a,id:a.deviceId}),/签名/);
+  const missing={...encrypted};
+  delete missing.transferRequestId;
+  await assert.rejects(decryptSnapshot(missing,{...a,id:a.deviceId}),/签名/);
+  const forged={...encrypted,transferRequestId:'not-a-uuid'};
+  await assert.rejects(decryptSnapshot(forged,{...a,id:a.deviceId}),/请求 ID/);
+});
+
 test('host-only root and existing-login conflicts are enforced without token storage',async()=>{
   const p=createProfile();use(p);
   const conflicting={name:'session',value:'existing-browser-account',secure:true,

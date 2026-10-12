@@ -12,6 +12,9 @@ import {parseBoundHost, installNetworkGuard, startNetworkGuard, startLocalNetwor
 registerNetworkAuth();
 
 async function restoreApprovedBrowser({force=false}={}){
+  const settings=await getSettings();
+  if(!settings.serverOrigin||!settings.requestedIdentityId?.trim()||
+     !settings.deviceName?.trim())return;
   const status=await pollPendingEnrollment({force});
   if(!['none','approved'].includes(status.state))return;
   // The Server has affirmatively returned approved (or the browser was
@@ -89,6 +92,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return { ok: true, ...result };
       }
       case 'CONNECT_BROWSER': {
+        const settings=await getSettings();
+        if(!settings.requestedIdentityId?.trim()||!settings.deviceName?.trim())
+          throw new Error('身份 ID 和设备名称必须填写');
         const enrollment=(await chrome.storage.local.get(PENDING_ENROLLMENT_KEY))[PENDING_ENROLLMENT_KEY];
         if(enrollment)throw new Error('设备仍在等待管理员审批，审批通过后将自动连接');
         const result = await connectBrowser();

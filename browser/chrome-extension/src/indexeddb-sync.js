@@ -253,8 +253,11 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
     name:s.name,keyPath:s.keyPath,autoIncrement:s.autoIncrement,indexes:s.indexes
   })));}
   async function write(current,next){
-    if(JSON.stringify(await read())!==JSON.stringify(current))
-      throw new Error('CONFLICT: IndexedDB 在准备恢复后被网站修改');
+    const liveBeforeWrite=await read();
+    if(JSON.stringify(liveBeforeWrite)!==JSON.stringify(current))
+      throw new Error('CONFLICT: IndexedDB 在准备恢复后被网站修改' +
+        ' (expected DBs='+current.databases.length+
+        ', actual DBs='+liveBeforeWrite.databases.length+')');
     for(const oldDB of current.databases){
       const newDB=next.databases.find(d=>d.name===oldDB.name);
       if(newDB&&(oldDB.version!==newDB.version||schema(oldDB)!==schema(newDB)))

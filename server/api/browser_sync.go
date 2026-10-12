@@ -287,14 +287,14 @@ func (r *Router) handleBrowserSyncAuditExport(w http.ResponseWriter, req *http.R
 	var buf bytes.Buffer
 	writer := csv.NewWriter(&buf)
 	if err := writer.Write([]string{"id", "time_utc", "event", "actor_id",
-		"device_id", "peer_id", "rule_id", "outcome"}); err != nil {
+		"device_id", "peer_id", "rule_id", "outcome", "error_code"}); err != nil {
 		writeError(w, http.StatusInternalServerError, "cannot serialize browser audit")
 		return
 	}
 	for _, entry := range entries {
 		values := []string{
 			strconv.FormatInt(entry.ID, 10), entry.CreatedAt.UTC().Format(time.RFC3339),
-			entry.Type, entry.ActorID, entry.DeviceID, entry.PeerID, entry.RuleID, entry.Outcome,
+			entry.Type, entry.ActorID, entry.DeviceID, entry.PeerID, entry.RuleID, entry.Outcome, entry.ErrorCode,
 		}
 		for i := range values {
 			values[i] = browserAuditCSVCell(values[i])

@@ -330,7 +330,10 @@ func main() {
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
 	publicRelayHandler := api.PublicRelayHandler(publicPushHandler,
 		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
-			if browserSyncHandler == nil { http.NotFound(w, req); return }
+			if browserSyncHandler == nil {
+				http.NotFound(w, req)
+				return
+			}
 			browserSyncHandler.ServeHTTP(w, req)
 		}),
 		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {

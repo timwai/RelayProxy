@@ -155,6 +155,12 @@ jobs:
         env:
           RELAY_BROWSER_WSS_FIXTURE: ${{ runner.temp }}/relay-browser-wss-fixture
         run: node tests/chromium-wss-e2e.mjs
+      - name: Real HTTPS reverse proxy WSS Upgrade + Chromium A/B session
+        working-directory: browser/chrome-extension
+        env:
+          RELAY_BROWSER_WSS_FIXTURE: ${{ runner.temp }}/relay-browser-wss-fixture
+          RELAY_BROWSER_WSS_USE_PROXY: "1"
+        run: node tests/chromium-wss-e2e.mjs
 
   desktop-platforms:
     strategy:

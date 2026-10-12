@@ -154,13 +154,21 @@ jobs:
         working-directory: browser/chrome-extension
         env:
           RELAY_BROWSER_WSS_FIXTURE: ${{ runner.temp }}/relay-browser-wss-fixture
-        run: node tests/chromium-wss-e2e.mjs
+        run: |
+          for attempt in 1 2; do
+            echo "Direct WSS Chrome acceptance iteration $attempt"
+            node tests/chromium-wss-e2e.mjs
+          done
       - name: Real HTTPS reverse proxy WSS Upgrade + Chromium A/B session
         working-directory: browser/chrome-extension
         env:
           RELAY_BROWSER_WSS_FIXTURE: ${{ runner.temp }}/relay-browser-wss-fixture
           RELAY_BROWSER_WSS_USE_PROXY: "1"
-        run: node tests/chromium-wss-e2e.mjs
+        run: |
+          for attempt in 1 2; do
+            echo "HTTPS reverse proxy WSS Chrome acceptance iteration $attempt"
+            node tests/chromium-wss-e2e.mjs
+          done
 
   desktop-platforms:
     strategy:

@@ -212,6 +212,9 @@ func (s *Store) ApproveEnrollment(ctx context.Context, id, identityID string, ca
 	if extensionState != "pending" && extensionState != "approved" {
 		return ErrNotFound // revoked extensions cannot be enrolled
 	}
+	if err := checkApprovedBrowserDeviceQuota(ctx, tx, identityID); err != nil {
+		return err
+	}
 	result, err := tx.ExecContext(ctx, `UPDATE browser_sync_devices
         SET identity_id=?,state='approved',can_send=?,can_receive=?,updated_at=?
         WHERE id=? AND state='pending'`, identityID, boolInt(canSend), boolInt(canReceive), time.Now().UTC(), id)

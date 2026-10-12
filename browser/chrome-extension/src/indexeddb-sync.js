@@ -356,14 +356,15 @@ export async function siteIndexedDB(expectedOrigin,mode,target=null,expected=nul
   }
 }
 
-// IndexedDB writes must target the website's own database, not a transient
-// isolated execution context. Only the already authorized site's Origin is
-// accepted by siteIndexedDB. No privileged extension API or cross-origin data
-// is exposed to the injected function; all output is revalidated in MV3.
-// MAIN-world use remains a site-interference risk and needs security review.
+// ISOLATED-world content scripts share the page origin's actual IndexedDB
+// storage, while their JS globals/prototypes are separate from page scripts.
+// Do not execute sensitive restore logic in MAIN, where a malicious website
+// can replace indexedDB.open/databases, Blob, Promise or other primitives.
+// The website's Origin is checked again by siteIndexedDB before each action.
+// The page can still mutate its own DB; preflight/write/readback checks remain.
 async function executeSiteIndexedDB(tabId,args){
   const result=await chrome.scripting.executeScript({
-    target:{tabId},world:'MAIN',func:siteIndexedDB,args:[...args,true]
+    target:{tabId},world:'ISOLATED',func:siteIndexedDB,args:[...args,true]
   });
   if(result?.length!==1||!result[0]||!('result' in result[0])||result[0].result===null)
     throw new Error('页面 IndexedDB 脚本异常，未确认读写完成');

@@ -74,6 +74,48 @@ func TestBrowserAdminRulesNeverExposeEncryptedOfferAndRequireSafeTransitions(t *
 	}
 }
 
+func TestBrowserAuditTracksActorAndMigratesLegacySchema(t *testing.T) {
+	store := testBrowserStore(t)
+	ctx := context.Background()
+	if _, err := store.db.ExecContext(ctx, `DROP TABLE browser_sync_audit`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.db.ExecContext(ctx, `CREATE TABLE browser_sync_audit (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		type TEXT NOT NULL,
+		device_id TEXT NOT NULL DEFAULT '',
+		peer_id TEXT NOT NULL DEFAULT '',
+		rule_id TEXT NOT NULL DEFAULT '',
+		outcome TEXT NOT NULL DEFAULT '',
+		created_at TIMESTAMP NOT NULL
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.EnsureAdminSchema(ctx); err != nil {
+		t.Fatalf("failed legacy audit migration: %v", err)
+	}
+	if err := store.EnsureAdminSchema(ctx); err != nil {
+		t.Fatalf("audit migration was not idempotent: %v", err)
+	}
+	deviceID := "browser_" + uuid.NewString()
+	_, signing := makeKey(t)
+	_, encryption := makeKey(t)
+	if _, err := store.Register(ctx, BrowserDevice{
+		ID: deviceID, Name: "Audit actor", SigningKey: signing, EncryptionKey: encryption,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	actorID := "admin-review-001"
+	if err := store.Approve(WithAdminActor(ctx, actorID), deviceID, "id_1", true, false); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.AdminAudit(ctx, 0, 10)
+	if err != nil || len(events) != 1 || events[0].Type != "device_approved" ||
+		events[0].ActorID != actorID {
+		t.Fatalf("admin actor was lost during audit migration: %+v %v", events, err)
+	}
+}
+
 func TestBrowserAuditStoresOnlyBoundedTerminalMetadataAndPaginates(t *testing.T) {
 	store := testBrowserStore(t)
 	ctx := context.Background()

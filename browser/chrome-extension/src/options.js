@@ -407,20 +407,27 @@ function renderRules(rules,peers=[]) {
           }catch(error){failure(error);}
         });
         card.append(open);
-        const label = document.createElement('label');
-        const checked = document.createElement('input');
-        checked.type = 'checkbox';
-        label.append(checked, textNode('span', '允许覆盖目标端 Cookie、Local/Session Storage 与 IndexedDB（可能切换账号）'));
-        checked.addEventListener('change', async () => {
-          if (checked.checked && !window.confirm('确定允许覆盖目标网站的 Cookie、Storage 与 IndexedDB 登录数据吗？覆盖可能切换账号；数据库版本或索引冲突仍会拒绝。')) {
-            checked.checked = false; return;
-          }
-          try {
-            await ask({ type: 'ALLOW_OVERWRITE', ruleId: rule.id, allowed: checked.checked });
-            status(checked.checked ? '此规则允许覆盖。可立即从来源设备请求同步。' : '已恢复冲突保护。');
-          } catch (error) { checked.checked = !checked.checked; failure(error); }
+        // A deliberate click authorizes ONLY the next authenticated snapshot,
+        // for at most two minutes. There is no persistent "always allow".
+        const overwrite = document.createElement('button');
+        overwrite.type = 'button';
+        overwrite.textContent = '允许本次覆盖并请求同步';
+        overwrite.addEventListener('click',async()=>{
+          if(!window.confirm('本次同步可能覆盖目标端 Cookie、Local/Session Storage 与 IndexedDB，并切换当前登录账号。确认仅允许下一次同步覆盖吗？'))return;
+          overwrite.disabled = true;
+          try{
+            await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:true});
+            try{
+              await ask({type:'REQUEST_SESSION',ruleId:rule.id});
+              status('已请求本次同步。覆盖授权最多有效 2 分钟，接收首份合法快照后即失效；失败不会自动续期。');
+            }catch(error){
+              await ask({type:'ALLOW_OVERWRITE',ruleId:rule.id,allowed:false}).catch(()=>{});
+              throw error;
+            }
+          }catch(error){failure(error);}
+          finally{overwrite.disabled=false;}
         });
-        card.append(label);
+        card.append(overwrite);
       }
     }
     const revoke = document.createElement('button');

@@ -36,6 +36,7 @@ type Router struct {
 	db                             *repository.DB
 	mux                            *http.ServeMux
 	browserSync                    *browsersync.Handler
+	live                           *liveUpdates
 	settings                       *config.ServerSettings
 	onDeviceRevoked                func(string)
 	onDeviceAuthorizationChanged   func(string)
@@ -117,6 +118,7 @@ func NewRouter(authService *service.AuthService, deviceService *service.DeviceSe
 		sessions:            sessions,
 		db:                  db,
 		mux:                 http.NewServeMux(),
+		live:                newLiveUpdates(),
 		rdpIngressPortStart: 33900,
 		rdpIngressPortEnd:   34000,
 	}
@@ -234,7 +236,17 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 		(req.URL.Path == "/api/v1/browser-sync/devices/register" ||
 			req.URL.Path == "/api/v1/browser-sync/ws" ||
 			req.URL.Path == "/api/v1/browser-sync/extensions/register") {
-		r.browserSync.ServeHTTP(w, req)
+		// Pending browser registration is intentionally unauthenticated.
+		// Only a successful validated enrollment triggers an admin-only
+		// invalidation; the extension never gains an admin SSE subscription.
+		if req.URL.Path == "/api/v1/browser-sync/devices/register" &&
+			req.Method == http.MethodPost {
+			tracked := &mutationStatusWriter{ResponseWriter:w}
+			r.browserSync.ServeHTTP(tracked,req)
+			if tracked.succeeded(){r.live.publish("")}
+		}else{
+			r.browserSync.ServeHTTP(w,req)
+		}
 		return
 	}
 	if strings.HasPrefix(req.URL.Path, "/api/") &&
@@ -280,6 +292,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/login", r.handleLogin)
 	r.mux.HandleFunc("POST /api/v1/auth/logout", r.handleLogout)
 	r.mux.HandleFunc("GET /api/v1/auth/me", r.requireAuth(r.handleMe))
+	r.mux.HandleFunc("GET /api/v1/live/events", r.requireAuth(r.handleLiveEvents))
 	r.mux.HandleFunc("PUT /api/v1/auth/password", r.requireAuth(r.handleChangePassword))
 
 	// Message channels are configured from the authenticated Server console.
@@ -978,7 +991,18 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		ctx := context.WithValue(req.Context(), userContextKey, userID)
 		ctx = context.WithValue(ctx, principalContextKey, user)
-		next(w, req.WithContext(ctx))
+		authorized:=req.WithContext(ctx)
+		if req.Method==http.MethodGet||req.Method==http.MethodHead {
+			next(w,authorized)
+			return
+		}
+		tracked:=&mutationStatusWriter{ResponseWriter:w}
+		next(tracked,authorized)
+		if tracked.succeeded() {
+			// A successful authenticated state mutation invalidates the scoped
+			// client's read model. Never ship the mutated resource in the event.
+			if user.Role=="admin"{r.live.publish("")}else{r.live.publish(user.IdentityID)}
+		}
 	}
 }
 

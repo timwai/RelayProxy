@@ -1,5 +1,6 @@
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
 import {api,json,fmtDate,list} from './api.js';
+import {subscribeLiveUpdates} from './live-updates.js';
 
 // This admin page displays metadata only. Website origins, policies, secrets,
 // encrypted payloads and browser public/private keys are never rendered here.
@@ -64,15 +65,21 @@ export function BrowserSyncAdmin({identities=[]}){
   },[auditFilter,auditDevice,rulePagePath]);
   useEffect(()=>{
     refresh();
-    // Poll only transient presence. A failed poll must not clear the last
-    // successfully loaded authorization and audit tables.
+    // One shared SSE stream notifies all console subscribers about mutation
+    // revisions. Re-read the protected API; never trust event contents for
+    // approvals, rules or audit rows.
+    const unsubscribe=subscribeLiveUpdates(()=>{refresh(true).catch(()=>{})});
+    // Live WebSocket presence also changes independently of admin writes.
+    // This bounded fallback keeps online status accurate across dropped SSE
+    // connections, older Server deployments and browser sleep.
     const id=setInterval(async()=>{
+      if(document.visibilityState!=='visible')return;
       try{
         const result=await api('/browser-sync/admin/status');
         setPresence({online:result?.online||{},stats:list(result?.stats)});
-      }catch{ /* The manual refresh path reports administrative API errors. */ }
+      }catch{ /* Keep last known authorization and audit data. */ }
     },15000);
-    return ()=>clearInterval(id);
+    return ()=>{unsubscribe();clearInterval(id)};
   },[refresh]);
 
   // The requested identity is immutable once the browser enrolls.

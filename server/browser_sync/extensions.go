@@ -143,40 +143,12 @@ func (s *Store) EnrollExtensionDevice(ctx context.Context, extensionID string, d
 	if state == "revoked" {
 		return BrowserDevice{}, "", ErrNotFound
 	}
-	// Do not mutate even advisory enrollment metadata when the claimed
-	// device is already pinned to a different extension Origin. Public keys
-	// alone are not proof of possession and cannot authorize rebinding.
-	if existing, err := s.Device(ctx, device.ID); err == nil {
-		if (existing.ExtensionID != "" && existing.ExtensionID != extensionID) ||
-			(existing.State == "approved" && existing.ExtensionID == "") {
-			return BrowserDevice{}, "", ErrDeviceConflict
-		}
-	} else if !errors.Is(err, ErrNotFound) {
-		return BrowserDevice{}, "", err
-	}
-	// Registration cannot assign an identity or a capability.
-	// The device key check in Register denies changed key material.
-	saved, err := s.Register(ctx, device)
+	// Inventory quota, public key pinning and Origin association are
+	// committed together. The previous multi-query implementation could
+	// leave an orphaned pending device when association failed.
+	saved, err := s.registerBrowserDevice(ctx, device, extensionID)
 	if err != nil {
 		return BrowserDevice{}, "", err
-	}
-	// Never allow an unbound legacy approved device to pick up a new
-	// extension origin based on public keys alone.
-	if saved.State == "approved" && saved.ExtensionID == "" {
-		return BrowserDevice{}, "", ErrDeviceConflict
-	}
-	_, err = s.db.ExecContext(ctx, `INSERT INTO browser_sync_device_extensions(device_id,extension_id,created_at)
-        VALUES(?,?,?) ON CONFLICT(device_id) DO NOTHING`, device.ID, extensionID, time.Now().UTC())
-	if err != nil {
-		return BrowserDevice{}, "", err
-	}
-	var linked string
-	if err := s.db.QueryRowContext(ctx, `SELECT extension_id FROM browser_sync_device_extensions
-        WHERE device_id=?`, device.ID).Scan(&linked); err != nil {
-		return BrowserDevice{}, "", err
-	}
-	if linked != extensionID {
-		return BrowserDevice{}, "", ErrDeviceConflict
 	}
 	saved.ExtensionID, saved.ExtensionState = extensionID, state
 	return saved, state, nil

@@ -89,7 +89,9 @@ export function singleFlight(task) {
 // result for the same opaque message ID. A new message may start fresh.
 // This pure reducer intentionally stores no website content or credentials.
 export function nextDeliveryStatus(previous,state,messageId='',now=Date.now()){
-  const terminal=new Set(['APPLIED','FAILED','CONFLICT','UNKNOWN','PARTIAL']);
+  // UNKNOWN is provisional: the durable APPLIED/FAILED/CONFLICT receipt may
+  // arrive after a timeout and must still be allowed to resolve it.
+  const terminal=new Set(['APPLIED','FAILED','CONFLICT','PARTIAL']);
   if(messageId&&previous?.messageId&&previous.messageId!==messageId&&state!=='SENDING')
     return previous;
   if(messageId&&previous?.messageId===messageId&&terminal.has(previous.state))

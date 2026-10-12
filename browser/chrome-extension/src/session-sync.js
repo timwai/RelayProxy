@@ -142,6 +142,11 @@ export async function requestSnapshot(ruleId, transferRequestId='') {
     throw new Error('无效的一次性同步请求 ID');
   const ctx=await ruleContext(ruleId);
   if(!ctx.targetRole)throw new Error('只有接收设备能请求同步');
+  if(transferRequestId){
+    const permits=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
+    if(!validOverwriteGrant(permits[ruleId],ctx.policy.siteOrigin,Date.now(),transferRequestId))
+      throw new Error('本次覆盖请求已失效，请重新确认');
+  }
   await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
   const paused=(await chrome.storage.local.get(PAUSED_RESTORE))[PAUSED_RESTORE]||{};
   const interruptedKeys=await chrome.storage.local.get([

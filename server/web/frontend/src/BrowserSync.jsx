@@ -22,6 +22,7 @@ export function BrowserSyncAdmin({identities=[]}){
   const [ruleFilter,setRuleFilter]=useState('all');
   const [ruleSearch,setRuleSearch]=useState('');
   const [auditFilter,setAuditFilter]=useState('all');
+  const [auditDevice,setAuditDevice]=useState('');
   const activeIdentities=useMemo(()=>list(identities).filter(x=>{
     const state=x.status??x.state;
     return !state||state==='active';
@@ -35,7 +36,8 @@ export function BrowserSyncAdmin({identities=[]}){
         api('/browser-sync/admin/extensions'),
         api('/browser-sync/admin/rules'),
         api('/browser-sync/admin/status'),
-        api('/browser-sync/admin/audit?limit=50')
+        api('/browser-sync/admin/audit?limit=50'+(auditFilter==='all'?'':'&type='+encodeURIComponent(auditFilter))+
+          (auditDevice?'&device='+encodeURIComponent(auditDevice):''))
       ]);
       setDevices(list(deviceData));
       setExtensions(list(extensionData));
@@ -47,7 +49,7 @@ export function BrowserSyncAdmin({identities=[]}){
       if(err.status===404){setUnavailable(true);if(!silent){setDevices([]);setRules([]);}}
       else setError(err.message);
     }finally{if(!silent)setLoading(false);}
-  },[]);
+  },[auditFilter,auditDevice]);
   useEffect(()=>{
     refresh();
     // Poll only transient presence. A failed poll must not clear the last
@@ -112,7 +114,9 @@ export function BrowserSyncAdmin({identities=[]}){
     if(busy||!audit.nextCursor)return;
     setBusy('audit');setError('');
     try{
-      const result=await api('/browser-sync/admin/audit?limit=50&before='+encodeURIComponent(audit.nextCursor));
+      const result=await api('/browser-sync/admin/audit?limit=50&before='+encodeURIComponent(audit.nextCursor)+
+        (auditFilter==='all'?'':'&type='+encodeURIComponent(auditFilter))+
+        (auditDevice?'&device='+encodeURIComponent(auditDevice):''));
       setAudit(old=>({
         items:[...old.items,...list(result?.items).filter(e=>!old.items.some(p=>p.id===e.id))],
         nextCursor:result?.nextCursor||0
@@ -133,7 +137,7 @@ export function BrowserSyncAdmin({identities=[]}){
     (ruleFilter==='all'||r.status===ruleFilter)&&
     [r.id,r.sourceID,r.targetID,r.sourceId,r.targetId,r.sourceName,r.targetName,r.identityId,r.status]
       .join(' ').toLowerCase().includes(ruleSearch.trim().toLowerCase()));
-  const visibleAudit=list(audit.items).filter(e=>auditFilter==='all'||e.type===auditFilter);
+  const visibleAudit=list(audit.items);
   const linkedExtensions=new Set(devices.filter(d=>d.extensionId).map(d=>d.extensionId));
   const count=state=>devices.filter(d=>d.state===state).length;
   const states=[['all','全部',devices.length],['pending','待审批',count('pending')],
@@ -276,6 +280,11 @@ export function BrowserSyncAdmin({identities=[]}){
               <button type="button" key={id} className={'btn '+(auditFilter===id?'active':'')}
                 aria-pressed={auditFilter===id} onClick={()=>setAuditFilter(id)}>{label}</button>)}
           </div>
+          <select className="input browser-sync-search" aria-label="筛选浏览器设备"
+            value={auditDevice} onChange={e=>setAuditDevice(e.target.value)}>
+            <option value="">所有浏览器设备</option>
+            {devices.map(d=><option key={d.id} value={d.id}>{d.name||d.id}</option>)}
+          </select>
         </div>
         <div className="table-wrap"><table>
           <thead><tr><th>时间</th><th>事件</th><th>设备 / 配对</th><th>结果</th></tr></thead>

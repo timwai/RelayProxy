@@ -11,7 +11,7 @@ import {captureAllCookies,applyAllCookies} from './cookies-all.js';
 import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
 import {captureIndexedDB,prepareIndexedDBRestore,JOURNAL_KEY as IDB_JOURNAL} from './indexeddb-sync.js';
 import {showRestoredWebsiteTab} from './session-tabs.js';
-import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence } from './lifecycle.js';
+import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence, validOverwriteGrant, OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection } from './lifecycle.js';
 import {ensureNetworkForRule} from './network-binding.js';
 
 const sourceBusy = new Set();
@@ -23,6 +23,7 @@ const LAST_APPLIED = 'browserSyncLastAppliedSequence';
 const PENDING_DELIVERY = 'browserSyncPendingDelivery';
 const LAST_RECONCILE = 'browserSyncLastReconcileAt';
 const ALLOW_OVERRIDE = 'browserSyncAllowOverwrite';
+const CONNECTION_RETRY = 'browserSyncConnectionRetry';
 const PAUSED_RESTORE = 'browserSyncRestorePaused';
 const statusKey = 'browserSyncTransferStatus';
 const pendingOpenKey = 'browserSyncPendingOpen';
@@ -173,6 +174,17 @@ export function browserRestoreFailureCode(error) {
   return 'UNSPECIFIED';
 }
 
+// Consume BEFORE any mutation, so a failed restore or MV3 restart cannot
+// turn one user's account-switch confirmation into a reusable permission.
+async function consumeOneTimeOverwrite(ruleId, siteOrigin) {
+  const stored=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
+  const candidate=stored[ruleId];
+  if(candidate===undefined)return false;
+  delete stored[ruleId];
+  await chrome.storage.local.set({[ALLOW_OVERRIDE]:stored});
+  return validOverwriteGrant(candidate,siteOrigin,Date.now());
+}
+
 async function handleIncomingSnapshot(envelope) {
   const ruleId=envelope?.ruleId;
   if(typeof ruleId!=='string'||ruleId.length>128)return;
@@ -196,23 +208,23 @@ async function handleIncomingSnapshot(envelope) {
       throw new Error('旧会话快照已拒绝');
     const payload=await decryptSnapshot(envelope,ctx.remote);
     await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
-    const switches=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
+    const allowOverwrite=await consumeOneTimeOverwrite(ruleId,ctx.policy.siteOrigin);
     let restoredTabId=null;
     try{
       if(ctx.policy.schemaVersion>=2){
         const txn=await prepareWebStorageRestore(ruleId,payload.storage,ctx.policy,
-          {allowOverwrite:switches[ruleId]===true});
+          {allowOverwrite:allowOverwrite});
         // Preflight conflicts and schema BEFORE any Cookie/Storage mutation.
         if(ctx.policy.schemaVersion===3 && payload.indexedDB===undefined)
           throw new Error('IndexedDB v3 快照缺失，拒绝不完整的登录状态');
         const idb=ctx.policy.schemaVersion===3
           ?await prepareIndexedDBRestore(ruleId,payload.indexedDB,ctx.policy,
-            {allowOverwrite:switches[ruleId]===true,tabId:txn.tabId}):null;
+            {allowOverwrite:allowOverwrite,tabId:txn.tabId}):null;
         let applied=false;
         try{
           if(idb)await idb.apply();
           await txn.apply();
-          await applyAllCookies(ruleId,payload,ctx.policy,{allowOverwrite:switches[ruleId]===true});
+          await applyAllCookies(ruleId,payload,ctx.policy,{allowOverwrite:allowOverwrite});
           applied=true;
           await txn.commit();
           if(idb)await idb.commit();
@@ -226,7 +238,7 @@ async function handleIncomingSnapshot(envelope) {
           throw error;
         }
       }else{
-        await applyCookies(ruleId,payload,ctx.policy,{allowOverwrite:switches[ruleId]===true});
+        await applyCookies(ruleId,payload,ctx.policy,{allowOverwrite:allowOverwrite});
       }
       sequences[ruleId]=envelope.sequence;
       await chrome.storage.local.set({[LAST_APPLIED]:sequences});
@@ -368,11 +380,17 @@ export async function restoreActiveSubscriptions({force=false}={}) {
 
 export async function setOverwritePermission(ruleId,allowed) {
   const ctx=await ruleContext(ruleId);
-  if(!ctx.targetRole)throw new Error('只能在接收设备确认覆盖');
-  const flags=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
-  flags[ruleId]=allowed===true;
-  await chrome.storage.local.set({[ALLOW_OVERRIDE]:flags});
-  return {ruleId,allowed:flags[ruleId]};
+  if(!ctx.targetRole||ctx.rule.status!=='active')throw new Error('仅已激活配对的接收端可以确认覆盖');
+  const grants=(await chrome.storage.local.get(ALLOW_OVERRIDE))[ALLOW_OVERRIDE]||{};
+  delete grants[ruleId]; // discard any legacy boolean/expired grant first
+  if(allowed===true) {
+    grants[ruleId]={
+      siteOrigin:ctx.policy.siteOrigin,
+      expiresAt:Date.now()+OVERWRITE_GRANT_TTL_MS
+    };
+  }
+  await chrome.storage.local.set({[ALLOW_OVERRIDE]:grants});
+  return {ruleId,allowed:allowed===true,expiresAt:grants[ruleId]?.expiresAt||null};
 }
 
 export async function resumePausedRestore(ruleId,confirmed) {

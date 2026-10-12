@@ -1,6 +1,7 @@
 package browsersync
 
 import (
+	"github.com/google/uuid"
 	"context"
 	"errors"
 	"sync"
@@ -95,6 +96,18 @@ func (h *Handler) relaySnapshot(ctx context.Context, senderID string, e *protoco
 }
 
 func (h *Handler) requestSnapshot(ctx context.Context, receiverID, ruleID string) error {
+	return h.requestSnapshotWithToken(ctx, receiverID, ruleID, "")
+}
+
+func (h *Handler) requestSnapshotWithToken(ctx context.Context, receiverID, ruleID, transferRequestID string) error {
+	if transferRequestID != "" {
+		if len(transferRequestID) != 36 {
+			return ErrRuleDenied
+		}
+		if _, err := uuid.Parse(transferRequestID); err != nil {
+			return ErrRuleDenied
+		}
+	}
 	receiver, err := h.Store.deviceAllowed(ctx, receiverID)
 	if err != nil || !receiver.Receive {
 		return ErrRuleDenied
@@ -112,7 +125,8 @@ func (h *Handler) requestSnapshot(ctx context.Context, receiverID, ruleID string
 	if target == nil {
 		return errors.New("source browser offline")
 	}
-	return target.send(ctx, map[string]any{"type": "SYNC_REQUEST", "ruleId": ruleID})
+	return target.send(ctx, map[string]any{"type": "SYNC_REQUEST", "ruleId": ruleID,
+		"transferRequestId": transferRequestID})
 }
 
 func (h *Handler) relayAcknowledgement(ctx context.Context, receiverID, ruleID, messageID, status string) error {

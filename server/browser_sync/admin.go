@@ -301,7 +301,7 @@ func (s *Store) AdminAuditFiltered(ctx context.Context, before int64, limit int,
 	if eventType != "" {
 		switch eventType {
 		case "device_approved", "device_revoked", "device_deleted",
-			"rule_paused", "rule_resumed", "rule_revoked", "delivery_result":
+			"rule_paused", "rule_resumed", "rule_revoked", "delivery_result", "audit_cleared":
 		default:
 			return nil, errors.New("invalid browser audit event filter")
 		}

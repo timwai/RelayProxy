@@ -3,9 +3,11 @@ package api
 import (
 	"context"
 	"database/sql"
+	"encoding/csv"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	_ "modernc.org/sqlite"
@@ -122,5 +124,54 @@ func TestBrowserAdminActionGetsActorFromAuthenticatedContextOnly(t *testing.T) {
 	if err != nil || len(events) < 2 || events[0].Type != "device_revoked" ||
 		events[0].ActorID != "user-admin-1" {
 		t.Fatalf("admin actor not attached to mutation audit: %+v %v", events, err)
+	}
+}
+
+
+func TestBrowserAdminAuditCSVExportAndClearRequireActor(t *testing.T) {
+	router, store := testBrowserAdminRouter(t)
+	ctx := context.Background()
+	deviceID := "browser_69064be2-ea88-4e8d-9aa1-a0c55e7a0d5e"
+	if _, err := store.Register(ctx, browsersync.BrowserDevice{
+		ID: deviceID, Name: "Audit export",
+		SigningKey: "test-signing-public", EncryptionKey: "test-encryption-public",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.Approve(browsersync.WithAdminActor(ctx, "admin-export"), deviceID, "id_1", true, false); err != nil {
+		t.Fatal(err)
+	}
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/browser-sync/admin/audit/export", nil)
+	w := httptest.NewRecorder()
+	router.handleBrowserSyncAuditExport(w, req)
+	if w.Code != http.StatusOK ||
+		!strings.HasPrefix(w.Header().Get("Content-Type"), "text/csv") ||
+		w.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unsafe audit CSV response: %d %v", w.Code, w.Header())
+	}
+	records, err := csv.NewReader(strings.NewReader(w.Body.String())).ReadAll()
+	if err != nil || len(records) != 2 ||
+		records[1][3] != "admin-export" || records[1][2] != "device_approved" {
+		t.Fatalf("invalid audit export: %+v %v", records, err)
+	}
+	if got := browserAuditCSVCell("=HYPERLINK(1,2)"); got != "'=HYPERLINK(1,2)" {
+		t.Fatalf("CSV formula injection was not neutralized: %q", got)
+	}
+	clearReq := httptest.NewRequest(http.MethodDelete, "/api/v1/browser-sync/admin/audit", nil)
+	clearW := httptest.NewRecorder()
+	router.handleBrowserSyncAuditClear(clearW, clearReq)
+	if clearW.Code != http.StatusForbidden {
+		t.Fatalf("audit cleared without a validated admin actor: %d", clearW.Code)
+	}
+	clearReq = clearReq.WithContext(context.WithValue(clearReq.Context(), userContextKey, "admin-export"))
+	clearW = httptest.NewRecorder()
+	router.handleBrowserSyncAuditClear(clearW, clearReq)
+	if clearW.Code != http.StatusOK {
+		t.Fatalf("admin audit clear failed: %d %s", clearW.Code, clearW.Body.String())
+	}
+	events, err := store.AdminAudit(ctx, 0, 10)
+	if err != nil || len(events) != 1 || events[0].Type != "audit_cleared" ||
+		events[0].ActorID != "admin-export" {
+		t.Fatalf("audit clear had no immutable actor trail: %+v %v", events, err)
 	}
 }

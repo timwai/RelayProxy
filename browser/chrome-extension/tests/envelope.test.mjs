@@ -174,10 +174,10 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
     targetBrowserDeviceId:target.deviceId, offer};
   const sourcePeer = {id:source.deviceId,signingPublicKey:source.signingPublicKey};
   assert.deepEqual(await decryptEncryptedOffer(rule, sourcePeer), policy);
-  assert.rejects(decryptEncryptedOffer({
+  await assert.rejects(decryptEncryptedOffer({
     ...rule, offer:{...offer,policyDigest:'f'.repeat(64)}
   },sourcePeer), /签名/);
-  assert.rejects(decryptEncryptedOffer({
+  await assert.rejects(decryptEncryptedOffer({
     ...rule, offer:{...offer,ciphertext:(offer.ciphertext[0] === 'A' ? 'B' : 'A') + offer.ciphertext.slice(1)}
   },sourcePeer));
   use(a);

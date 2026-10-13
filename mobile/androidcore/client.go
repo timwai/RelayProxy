@@ -1107,20 +1107,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 			},
 			accepted.P2PRendezvousAddress,
 			lease,
-			proxyp2p.QUICManagerOptions{
-				PunchTimeout:            1200 * time.Millisecond,
-				KeepAlive:               10 * time.Second,
-				IdleTimeout:             120 * time.Second,
-				MaxExitSessions:         1,
-				PortStart:               accepted.P2PPortStart,
-				PortEnd:                 accepted.P2PPortEnd,
-				UPnPEnabled:             accepted.P2PUPnPEnabled && c.cfg.UPnPAllowed != nil && *c.cfg.UPnPAllowed,
-				LowPowerIdleTimeout:     60 * time.Second,
-				LowPowerMaxSessions:     1,
-				BrutalUploadBPS:         accepted.BrutalUploadBPS,
-				BrutalDownloadBPS:       accepted.BrutalDownloadBPS,
-				DisableLossCompensation: c.cfg.DisableLossCompensation,
-			},
+			androidP2PManagerOptions(c.cfg, accepted),
 		)
 		proxyP2PManager.SetPowerConstrained(powerConstrained)
 		c.mu.Lock()
@@ -1318,6 +1305,25 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 				c.refreshProxyExits(sess, *pong.ProxyExits, pong.ProxyExitRevision)
 			}
 		}
+	}
+}
+
+// androidP2PManagerOptions uses the shared Agent P2P manager's punch timeout
+// (currently five seconds). Do not override it with the old Android 1.2s
+// value: a shorter window defeats LAN/WAN retries and NAT mapping discovery.
+func androidP2PManagerOptions(cfg clientConfig, accepted protocol.DeviceAccepted) proxyp2p.QUICManagerOptions {
+	return proxyp2p.QUICManagerOptions{
+		KeepAlive:               10 * time.Second,
+		IdleTimeout:             120 * time.Second,
+		MaxExitSessions:         1,
+		PortStart:               accepted.P2PPortStart,
+		PortEnd:                 accepted.P2PPortEnd,
+		UPnPEnabled:             accepted.P2PUPnPEnabled && cfg.UPnPAllowed != nil && *cfg.UPnPAllowed,
+		LowPowerIdleTimeout:     60 * time.Second,
+		LowPowerMaxSessions:     1,
+		BrutalUploadBPS:         accepted.BrutalUploadBPS,
+		BrutalDownloadBPS:       accepted.BrutalDownloadBPS,
+		DisableLossCompensation: cfg.DisableLossCompensation,
 	}
 }
 

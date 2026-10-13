@@ -90,6 +90,49 @@ func TestDiscoverLimitRetainsSingleIPv4AmongManyIPv6Addresses(t *testing.T) {
 	}
 }
 
+func TestPrioritizeSameSubnetKeepsWANFallbackAndDoesNotModifyInput(t *testing.T) {
+	localSubnets := []netip.Prefix{
+		netip.MustParsePrefix("192.168.40.0/24"),
+		netip.MustParsePrefix("fd42:abcd::/64"),
+	}
+	input := []protocol.P2PCandidate{
+		{Protocol: "udp", Type: "lan", Address: "192.168.40.22:45001", Priority: 1200},
+		{Protocol: "udp", Type: "lan", Address: "192.168.41.22:45001", Priority: 1200},
+		{Protocol: "udp", Type: "lan", Address: "[fd42:abcd::22]:45001", Priority: 1200},
+		{Protocol: "udp", Type: "reflexive", Address: "203.0.113.22:45001", Priority: 800},
+		{Protocol: "udp", Type: "reflexive", Address: "192.168.40.33:45001", Priority: 800},
+	}
+	got := PrioritizeSameSubnet(input, localSubnets)
+	want := []uint32{1600, 1200, 1600, 800, 800}
+	if len(got) != len(want) {
+		t.Fatalf("candidate count=%d, want %d", len(got), len(want))
+	}
+	for i, priority := range want {
+		if got[i].Priority != priority || got[i].Address != input[i].Address {
+			t.Fatalf("candidate %d = %+v, expected priority %d and address %q", i, got[i], priority, input[i].Address)
+		}
+	}
+	if input[0].Priority != 1200 || input[2].Priority != 1200 {
+		t.Fatal("peer-advertised candidate priorities were modified")
+	}
+}
+
+func TestPrioritizeSameSubnetDoesNotTrustUnrelatedPrivateRanges(t *testing.T) {
+	peers := []protocol.P2PCandidate{
+		{Protocol: "udp", Type: "lan", Address: "10.20.1.10:9000", Priority: 1200},
+		{Protocol: "udp", Type: "lan", Address: "10.21.1.10:9000", Priority: 1200},
+	}
+	got := PrioritizeSameSubnet(peers, []netip.Prefix{netip.MustParsePrefix("10.20.0.0/16")})
+	if got[0].Priority <= got[1].Priority {
+		t.Fatalf("same-subnet candidate was not preferred: %+v", got)
+	}
+	for _, item := range PrioritizeSameSubnet(peers, nil) {
+		if item.Priority != 1200 {
+			t.Fatal("empty local networks incorrectly boosted private peer address")
+		}
+	}
+}
+
 func TestProbeReflexiveAllWorksWithIPv4OnlySocket(t *testing.T) {
 	server, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 	if err != nil {

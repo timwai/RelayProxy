@@ -96,6 +96,68 @@ func TestSymmetricPunchStillRequiresPeerRequest(t *testing.T) {
 	}
 }
 
+// The peer can acquire a different NAT mapping when sending to us than the
+// address observed by rendezvous. An authenticated incoming request must teach
+// the other side to send its own punches to the rebound address.
+func TestSymmetricPunchLearnsPeerMappingChangedSinceRendezvous(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	left, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer left.Close()
+	right, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer right.Close()
+	// This listener represents the obsolete rendezvous mapping: it never
+	// answers and is deliberately different from the peer's real UDP socket.
+	obsolete, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer obsolete.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	type outcome struct {
+		name   string
+		result *UDPResult
+		err    error
+	}
+	results := make(chan outcome, 2)
+	go func() {
+		result, punchErr := Punch(ctx, left, []protocol.P2PCandidate{{
+			Protocol: "udp", Address: obsolete.LocalAddr().String(),
+		}}, 42, key, 2*time.Second)
+		results <- outcome{name: "left", result: result, err: punchErr}
+	}()
+	go func() {
+		result, punchErr := Punch(ctx, right, []protocol.P2PCandidate{{
+			Protocol: "udp", Address: left.LocalAddr().String(),
+		}}, 42, key, 2*time.Second)
+		results <- outcome{name: "right", result: result, err: punchErr}
+	}()
+	for i := 0; i < 2; i++ {
+		select {
+		case received := <-results:
+			if received.err != nil || received.result == nil {
+				t.Fatalf("%s: expected NAT-rebound path to succeed, result=%+v err=%v", received.name, received.result, received.err)
+			}
+			want := left.LocalAddr().String()
+			if received.name == "left" {
+				want = right.LocalAddr().String()
+			}
+			if received.result.RemoteAddr.String() != want {
+				t.Fatalf("%s: selected %s, want %s", received.name, received.result.RemoteAddr, want)
+			}
+		case <-ctx.Done():
+			t.Fatal("timed out waiting for both NAT-rebound punches")
+		}
+	}
+}
+
 func TestPunchResponderKeepsMultipleCandidateSelection(t *testing.T) {
 	key := []byte("0123456789abcdef0123456789abcdef")
 	first := newPassiveResponder(t, 42, key, func(p secure.PunchPacket) []byte {

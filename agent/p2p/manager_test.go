@@ -238,9 +238,9 @@ func TestLANAgentsEstablishDirectQUICWithoutRendezvous(t *testing.T) {
 	go exitSession.establish(false)
 	go clientSession.establish(true)
 	for _, tc := range []struct {
-		name string
+		name  string
 		ready <-chan *Session
-		want *Session
+		want  *Session
 	}{
 		{"client", client.ReadySessions(), clientSession},
 		{"exit", exit.ReadySessions(), exitSession},

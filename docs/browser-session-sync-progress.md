@@ -1,3 +1,19 @@
+# Browser Session Sync 当前发布准入核查 · 2026-10-13 23:38（北京时间）
+
+> **本节是当前有效状态。** 下方按 2026-10-10 至 2026-10-13 记录的“Draft / 待 CI / 未合并”等原始文字是**历史时间点的记录**，不可用于判断今天的 PR 状态。核查基准为 [main `7d8ef7f8`](https://github.com/timwai/RelayProxy/commit/7d8ef7f8e8fe7f580688f055fa56f5af0105dfbe)；本次只更新进度文档，保留历史，不修改业务代码，也不合并到 main。
+>
+> **分支流转：** [Browser Sync PR #194](https://github.com/timwai/RelayProxy/pull/194) 已于 **2026-10-13 04:52:29 UTC** 合并 main（merge `60d39fd`；最终功能提交 `f4b2302`）。随后发现 Chrome 私钥丢失并发初始化可能出现“新密钥 + 旧已批准设备 ID”的竞态，已在独立的 [安全修复 PR #200](https://github.com/timwai/RelayProxy/pull/200) 采用 IndexedDB 原子身份 bundle 及旧 WSS 身份重检修复，**2026-10-13 05:39:15 UTC** 合并 main（merge `ce5e28f`）。原 `feat/browser-session-sync` 分支仍可读，但已不是当前开发进度的权威基线；本轮从最新 main 创建专用 `docs/browser-sync-progress-20261013` 文档分支，**不回写已合并的旧功能分支**。
+>
+> **CI 已确认成功（按 SHA 区分）：** 合并 PR #194 后 `60d39fd` 的 [Go](https://github.com/timwai/RelayProxy/actions/runs/38348585087)、[UI（含 Chromium A/B）](https://github.com/timwai/RelayProxy/actions/runs/38348585104)、[Android](https://github.com/timwai/RelayProxy/actions/runs/38348585147) 均成功；PR #200 合并后的 `ce5e28f` [Go](https://github.com/timwai/RelayProxy/actions/runs/38352500469)、[UI（含真实 Chromium TLS/WSS、HTTPS 反向代理）](https://github.com/timwai/RelayProxy/actions/runs/38352500405) 均成功；当前 main `7d8ef7f8` [Go](https://github.com/timwai/RelayProxy/actions/runs/38418419336)、[UI（含 Chromium、Windows/macOS 桌面）](https://github.com/timwai/RelayProxy/actions/runs/38418419312)、[Android](https://github.com/timwai/RelayProxy/actions/runs/38418419281) 均成功。main 的最后一次合并 `#201` 为 P2P 改动，不应误算为新的 Browser Sync 交付。
+>
+> **曾出现真实失败且已处理的安全问题：** PR #194 最终 SHA `f4b2302` 的并行 [UI CI #38348197443](https://github.com/timwai/RelayProxy/actions/runs/38348197443) 在真实 Chromium WSS 测试失败，同 SHA 的 [UI CI #38348201899](https://github.com/timwai/RelayProxy/actions/runs/38348201899) 成功，暴露私钥丢失/设备 ID 非原子迁移的时序风险。PR #200 引入原子 bundle、旧授权 WSS 复用前与入站业务帧身份重检；合并后 UI CI 成功。**不能仅因 CI 转绿就认定实体设备安全验收已完成**，必须在真实用户 Chrome Profile、异常重启、旧授权会话和重新审批场景复测。
+>
+> **发布结论：仍不放行正式版。** P0-01 实体 Windows/macOS Chrome 登录/登出与真实网站验收、P0-07 独立密码学/安全审查均无可核实的完成证据；P0-05/06 的异常恢复、24h 多连接压力和资源审计，P0-08 本机 Agent 网络代理真实协议/安全边界，P0-09 IndexedDB/分区/回滚的实体浏览器验证仍待完成。自动化真实 Chromium 测试（GitHub Linux runner）**不等于**真实 Windows/macOS 终端和授权网站的人工验收。P1-01/02/03/06 保持部分完成，P1-04 为需求替代，P1-05 未开始；P2-01/02 已实现待真机/安全验收，P2-03/04 未开始。
+>
+> **P0 状态汇总：** 9 项中 **5 项已实现待验收（02/03/04/08/09）、2 项部分完成（05/06）、2 项未完成正式验收（01/07）**，**0 项正式已验收**。P0-04 的设备身份安全竞态已修复并通过当前自动化，但人工场景尚缺；P0-09 从“等待 CI”改为“CI 已通过、待实体 Chrome 与独立安全验收”，其余状态不擅自升级。
+
+---
+
 > **2026-10-13 · Node 模拟 A/B 异步拒绝用例自审（最终 SHA 待验证）：** [UI CI #38349793659](https://github.com/timwai/RelayProxy/actions/runs/38349793659) 的旧 `envelope.test.mjs` 在明文篡改两处调用 `assert.rejects(decryptEncryptedOffer(...))` 时**未 await**，然后立即通过全局 `use(a)` 将模拟 Chrome Profile 从 B 切换回 A，导致 B 的异步解密沿用已切换的 `globalThis.indexedDB/chrome`，最终把来源设备与接收设备误判为同一个 ID。已补两个 `await assert.rejects`，强制前一 Profile 的异步工作结束后再切换；未修改生产加密/认证业务。此处与实际 Chromium“旧 ID+新密钥”非原子写入竞态**是两个不同问题**，两项都需要独立测试。最终 SHA 必须通过 Node + 两轮真实 Chromium WSS/反代、Go CI、跨平台 UI 构建后再合并 PR #200。
 
 > **2026-10-13 · 原子身份记录修复测试闭环补充（最新 HEAD CI 待核验）：** 已新增 `browser/chrome-extension/tests/device-identity.test.mjs`，直接用真实 WebCrypto P-256 加密/签名密钥和共享、可串行读写的模拟 IndexedDB，构造 12 个 Options/MV3 并发请求、删除权威 bundle 后重复 12 个并发请求，要求新/旧 Browser ID 不同、所有 Profile 内调用者使用同一新 ID 与公钥、挑战签名拒绝旧 ID；同时测试现有 Profile 同一事务合法迁移旧设备 ID 与两把私钥，以及旧记录缺一把/原子记录损坏都强制轮换。此前三个 Node 模拟 Profile（`envelope.test.mjs`、`full-state.test.mjs`、`server-api.test.mjs`、`session.test.mjs`）已全部改为尊重 `readwrite` 的 `get/put/delete` 与事务完成时序，避免旧 stub 因未实现 `IDBObjectStore.delete` 报错；不调整生产 E2EE/审批/出口授权策略。**真实 Chromium 双端 E2E** 在私钥丢失后并发调用 Options 页与 MV3 Worker 的新 bundle 初始化，核验两端取得相同新身份、旧签名不可继承、重新注册必须 pending。此前某一中间提交 UI CI 失败属旧 Mock/进度文档门禁，已逐项修复；最终 HEAD 的 Go/UI/Chromium/桌面测试仍需 GitHub Actions 结果。用户原需求为排查与修复，新的 PR #200 保持 Draft 待 CI，不在未验证时声称已进入 main。
@@ -112,7 +128,7 @@
 >
 > 2026-10-10 基准之后的新增提交，必须查看**相应 SHA** 的 CI 检查；不能沿用基准成功结论。
 
-## 最新状态快照（2026-10-11 23:12 +08:00，按当前分支 HEAD 核对）
+## 历史状态快照（2026-10-11 23:12 +08:00，当时分支 HEAD；非当前状态）
 
 | 核对项 | 结果 |
 |---|---|
@@ -167,18 +183,18 @@
 
 > **准入规则：** 本节全部达到“已验收”，且无阻塞项，才允许从开发预览进入首批正式可用评审。目前 **P0 未完成**。
 
-| ID | 交付项 | 当前状态（2026-10-11） | 已有实现/证据 | 剩余工作与验收条件 |
+| ID | 交付项 | 当前状态（截至 2026-10-13） | 已有实现/证据 | 剩余工作与验收条件 |
 |---|---|---|---|---|
-| P0-01 | **真实 Chrome A→B 端到端验收** | **未开始（人工验收）** | [扩展测试](../browser/chrome-extension/tests/session.test.mjs)使用模拟 Chrome API；[WSS 集成测试](../server/browser_sync/wss_integration_test.go)使用 Go 测试客户端 | Windows/macOS 各至少 1 个真实双端组合，测试注册→配对→登录→刷新→登出→撤销→重启→断网；授权测试站点至少包含可迁移与不可迁移场景；保留匿名记录；`APPLIED` 只代表 Cookie API 成功，不代表网站登录成功 |
+| P0-01 | **真实 Chrome A→B 端到端验收** | **未开始（人工验收）** | [扩展测试](../browser/chrome-extension/tests/session.test.mjs)使用模拟 Chrome API；[WSS 集成测试](../server/browser_sync/wss_integration_test.go)使用 Go 测试客户端；[GitHub Linux Chromium 双 Profile 端到端 UI CI](https://github.com/timwai/RelayProxy/actions/runs/38418419312) 已通过（不等于实体 Windows/macOS 站点验收） | Windows/macOS 各至少 1 个真实双端组合，测试注册→配对→登录→刷新→登出→撤销→重启→断网；授权测试站点至少包含可迁移与不可迁移场景；保留匿名记录；`APPLIED` 只代表 Cookie API 成功，不代表网站登录成功 |
 | P0-02 | **最终同步状态一致性 / 丢 ACK 恢复** | **已实现·待验收** | [Server 投递结果](../server/browser_sync/delivery.go)、[WSS 路由](../server/browser_sync/relay.go)、[扩展恢复](../browser/chrome-extension/src/session-sync.js)；有终态短期记录、`DELIVERY_STATUS` 查询、`UNKNOWN` 状态 | 真机断网/Worker 强退/重连演练；测 A 离线时 B 的 `APPLIED`、过期结果、重复请求，确认不误报失败、不将旧 ACK 覆盖新 ACK；检查存储清理与边界 |
 | P0-03 | **多 Cookie 失败补偿 / 崩溃保护** | **已实现·待验收** | [Cookie 预检查和逆序补偿](../browser/chrome-extension/src/cookies.js)、仅元数据的恢复意图、`PARTIAL` 暂停/人工恢复；[故障注入测试](../browser/chrome-extension/tests/session.test.mjs) | 在真实 Chrome 注入中途失败/退出/网站并发刷新；确保无静默账号串换、可判别部分恢复、不会自动恢复有风险的写入；记录无法完全回滚时的手工处置流程 |
-| P0-04 | **防重放序号恢复 / 重装语义** | **已实现·待验收** | [持久递增序号](../server/browser_sync/session.go)、来源侧 `SEQUENCE_CURSOR`、[序号与授权测试](../server/browser_sync/session_test.go)、[浏览器工具测试](../browser/chrome-extension/tests/lifecycle.test.mjs) | 真机重启、扩展本地数据清除、密钥丢失、规则撤销后的重新配对；证明新 Profile/设备不会擅自复用原设备身份；长时间运行、并发发送与序号上限测试 |
+| P0-04 | **防重放序号恢复 / 重装语义** | **已实现·待验收** | [持久递增序号](../server/browser_sync/session.go)、来源侧 `SEQUENCE_CURSOR`、[序号与授权测试](../server/browser_sync/session_test.go)、[浏览器工具测试](../browser/chrome-extension/tests/lifecycle.test.mjs)；[PR #200](https://github.com/timwai/RelayProxy/pull/200) 已合并原子设备 ID + 两把私钥同事务绑定及旧 WSS 连接身份重检，[合并后 UI CI](https://github.com/timwai/RelayProxy/actions/runs/38352500405) 成功 | 真机重启、扩展本地数据清除、密钥丢失、规则撤销后的重新配对；证明新 Profile/设备不会擅自复用原设备身份；长时间运行、并发发送与序号上限测试 |
 | P0-05 | **MV3 生命周期 / 异常网络恢复** | **部分完成** | [服务 Worker](../browser/chrome-extension/src/service-worker.js)含启动/Alarm；[WSS 连接单飞](../browser/chrome-extension/src/server-api.js)、[五分钟对账限频](../browser/chrome-extension/src/lifecycle.js)及对应模拟测试 | 真机测试 Worker 休眠/系统睡眠/网络切换/TLS 续连、离线期间 Cookie 改动最终一致性；增加失败退避与网络状态提示；验证不会无限重连或漏同步 |
 | P0-06 | **限流、资源配额、DoS 防护** | **部分完成** | [Server Handler](../server/browser_sync/handler.go)已有注册 IP 限频、64 连接槽及单帧限制；新增 [分层限流](../server/browser_sync/limits.go)（直接 IP 握手、设备重连、设备帧速率、单规则传输/突发频率、邀请及查询）、[规则数量上限](../server/browser_sync/rules.go)（每设备最多 32 条非撤销规则）、[待确认投递上限](../server/browser_sync/delivery.go)（每规则 16、每来源 128），有对应单测 | 已为未过期待投递+持久终态记录增加来源 2048/身份 4096/全局 32768 的事务配额，并预留 ACK 恢复容量；已新增已批准设备每身份 32、非撤销规则每身份 128 的事务配额；已增加未批准设备每 Server 512、每 Extension Origin 64 条库存配额及事务原子登记；已新增并发注册/审批/规则/投递/ACK 的 5 轮 -race 限额回归和 ACK 事务内撤销复核；仍需跨实例协调、实际多连接与 24h 压力验收、资源曲线、多设备真实断网重连与撤销验证；窗口限流仅在单 Server 进程内生效 |
 | P0-07 | **独立安全审查 / 密码学复核** | **未开始（正式评审）** | [加密信封](../browser/chrome-extension/src/session-envelope.js)、[邀请加密](../browser/chrome-extension/src/envelope.js)和 Server 验签已有开发实现与单测 | 独立审查现有 P-256 ECDH+HKDF+AES-GCM 组合，优先评估标准 HPKE (RFC 9180)；核对签名/密钥绑定、来源 pin、重放、时序、恶意网站、扩展权限、日志、认证降级与密钥轮换；漏洞关闭后复测 |
 | P0-08 | **Chrome 本机 Agent 完整网络代理能力与兼容性验收（新增）** | **已实现·待真机/安全验收** | [Agent 本机入口](../agent/app/browser_local_proxy.go)已支持 HTTP 正向代理、任意 TCP CONNECT Host/IP/端口；[RoutingDialer](../agent/routing/dialer.go)委托现有 DIRECT/PROXY/REJECT；[Chrome PAC](../browser/chrome-extension/src/network-binding.js)支持与 Cookie 配对无关的全 Profile 本机模式；[协议单测](../agent/app/browser_local_proxy_test.go)、[Chrome PAC 测试](../browser/chrome-extension/tests/network-binding.test.mjs)纳入 Go/UI CI | 仍需真实 Windows/macOS Chrome 的 HTTP/HTTPS/WebSocket、IPv4/IPv6、Agent 异常、回环绕过、DNS/WebRTC/QUIC 行为验收，以及无鉴权本机代理的安全/资源审计。Chrome proxy API 不等于透明 VPN，不得声称全协议覆盖 |
 
-| P0-09 | **IndexedDB v3 新增敏感会话面验收** | **已实现·待 CI/真机/安全验收** | [`1334fd4`](https://github.com/timwai/RelayProxy/commit/1334fd4d8f) 新增 v3 双端同意、同 Origin IndexedDB 全量采集/恢复、Schema/记录校验、冲突保护与多库回滚；[`e9aa691`](https://github.com/timwai/RelayProxy/commit/e9aa691963de926af3f7628f138fdbb26da600a5) 对无效日期和别名对象图 fail-closed；[实现](../browser/chrome-extension/src/indexeddb-sync.js)、[模拟测试](../browser/chrome-extension/tests/indexeddb.test.mjs) | 已修复 v3 入口误判、Chrome 注入静默错误和跨上下文 JSON 顺序假冲突；Chromium 双 Profile 真实 Chrome API 自动化首次通过，最终 SHA 的全部 CI 待核验；仍需 Windows/macOS 实体 Chrome A/B 测试数据库版本/索引/Blob/非导出 CryptoKey/别名对象、打开中的 DB、断线、崩溃/部分回滚、旧 v1/v2 规则不自动升级、大小配额与双端确认。IndexedDB 不保证所有网站能迁移登录，未验收前不得发布 |
+| P0-09 | **IndexedDB v3/v4 敏感会话面验收** | **已实现·CI 已通过，待实体 Chrome/安全验收** | [`1334fd4`](https://github.com/timwai/RelayProxy/commit/1334fd4d8f) 新增 v3 双端同意、同 Origin IndexedDB 全量采集/恢复、Schema/记录校验、冲突保护与多库回滚；[`e9aa691`](https://github.com/timwai/RelayProxy/commit/e9aa691963de926af3f7628f138fdbb26da600a5) 对无效日期和别名对象图 fail-closed；[实现](../browser/chrome-extension/src/indexeddb-sync.js)、[模拟测试](../browser/chrome-extension/tests/indexeddb.test.mjs) | 已修复 v3 入口误判、Chrome 注入静默错误和跨上下文 JSON 顺序假冲突；Chromium 双 Profile 真实 Chrome API 自动化已在 [main UI CI #38418419312](https://github.com/timwai/RelayProxy/actions/runs/38418419312) 通过，Go/Android 同 SHA 成功；v4 可分别选择 Cookie/Local Storage/Session Storage/IndexedDB，旧规则不得自动扩权；仍需 Windows/macOS 实体 Chrome A/B 测试数据库版本/索引/Blob/非导出 CryptoKey/别名对象、打开中的 DB、断线、崩溃/部分回滚、旧 v1/v2 规则不自动升级、大小配额与双端确认。IndexedDB 不保证所有网站能迁移登录，未验收前不得发布 |
 
 ### P0 真机验收矩阵（每格都需要测试记录）
 
@@ -233,6 +249,7 @@
 
 | 日期（本地） | 代码基准/PR | 变化与证据 | 进度影响 | 维护结果 |
 |---|---|---|---|---|
+| 2026-10-13 | [#194 合并 `60d39fd`](https://github.com/timwai/RelayProxy/commit/60d39fda2787bd561751ef8a866d93e1f168a1b2) → [#200 安全修复合并 `ce5e28f`](https://github.com/timwai/RelayProxy/commit/ce5e28f25e1cc8b7ec879f7c063fcf8124c4c686) → [main `7d8ef7f8`](https://github.com/timwai/RelayProxy/commit/7d8ef7f8e8fe7f580688f055fa56f5af0105dfbe) | #194 2026-10-13 04:52 UTC 已合并；并行 Chromium CI 曾发现旧设备 ID/新密钥竞态；#200 05:39 UTC 合并原子身份 bundle、WSS 旧身份重检。main 当前 [Go](https://github.com/timwai/RelayProxy/actions/runs/38418419336)、[UI（含 Chromium/WSS/反代）](https://github.com/timwai/RelayProxy/actions/runs/38418419312)、[Android](https://github.com/timwai/RelayProxy/actions/runs/38418419281) 均成功；历史失败 [UI #38348197443](https://github.com/timwai/RelayProxy/actions/runs/38348197443) 仍保留为问题证据 | **P0-04** 补充安全修复及 CI 证据，仍为已实现待实体验收；**P0-09** 由“待 CI”调整为“CI 已通过、待实体 Chrome/安全验收”；**P0-01/05/06/07/08 与 P1/P2 状态不变**；正式发布仍不放行 | 因原开发 PR 已合并，基于 main 新建 `docs/browser-sync-progress-20261013`，仅更新本文件，不合并 main；后续新代码必须重新按 SHA 复核 |
 | 2026-10-10 | [PR #194 · `2050d08e`](https://github.com/timwai/RelayProxy/pull/194) | 按代码、开发说明、Go/UI/Android 基准成功 CI 核对。覆盖 E2EE、双端配对、Cookie 同步、登出、ACK、防重放、序号及故障恢复；无真实 Chrome E2E/外部安全验收记录 | P0-02/03/04 标为已实现待验收；P0-05/06 为部分完成；P0-01/07 未开始；P1 为部分完成/未开始；P2 尚未开始 | 建立发布准入、测试矩阵和进度更新规范 |
 | 2026-10-10 | [PR #194 · 文档/CI `28f6fd59`](https://github.com/timwai/RelayProxy/commit/28f6fd59d3e9b9a8b78dcdc1d0a4c5f32bfa21c2) | 建立本持续进度表，设计文档和扩展 README 均链接本表；UI CI 增加 Git 历史检查，要求 Browser Sync 源码变更后在同 PR 更新本表 | P0/P1/P2 各项状态 **保持不变**，未新增真机或独立安全验收 | 维护机制已提交；该文档/CI 改动对应的检查仍需以实际运行结果为准 |
 | 2026-10-10 | [PR #194 · 配额提交 `20cbcd1`](https://github.com/timwai/RelayProxy/commit/20cbcd1a906f39eefb08ae52250cf63c8d711d55) | 新增设备/规则双窗口限流、直接 IP 握手及重连限频、SQLite 规则/待确认投递容量；增加并发、上限及配额释放单测。[Go CI #38063453648](https://github.com/timwai/RelayProxy/actions/runs/38063453648) **失败：gofmt 格式检查**，本次格式修复后须以新 SHA 重跑 | P0-06 仍为**部分完成**；其余 P0/P1/P2 状态不变；正式 Chrome、安全及压力验收仍缺 | 已修复已知格式阻塞，待新提交 CI 核对 |

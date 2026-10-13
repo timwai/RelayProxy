@@ -514,7 +514,7 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 		cfg.P2P.Mode = "auto"
 	}
 	if cfg.P2P.PunchTimeoutMs == 0 {
-		cfg.P2P.PunchTimeoutMs = 1200
+		cfg.P2P.PunchTimeoutMs = 5000
 	}
 	if cfg.P2P.KeepaliveSec == 0 {
 		cfg.P2P.KeepaliveSec = 10

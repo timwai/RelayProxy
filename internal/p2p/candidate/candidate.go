@@ -196,6 +196,77 @@ func discoveryPriority(ip netip.Addr, protocolName string) uint32 {
 	return priority
 }
 
+// LocalInterfaceSubnets describes the up, non-loopback interface networks.
+// It is used only as a local routing hint: peers still prove reachability
+// through authenticated UDP punches before any direct QUIC path is selected.
+func LocalInterfaceSubnets() []netip.Prefix {
+	interfaces, _ := net.Interfaces()
+	prefixes := make([]netip.Prefix, 0, len(interfaces))
+	seen := make(map[netip.Prefix]struct{})
+	for _, iface := range interfaces {
+		if iface.Flags&net.FlagUp == 0 || iface.Flags&net.FlagLoopback != 0 {
+			continue
+		}
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		for _, raw := range addrs {
+			ipNet, ok := raw.(*net.IPNet)
+			if !ok {
+				continue
+			}
+			ip, ok := netip.AddrFromSlice(ipNet.IP)
+			if !ok {
+				continue
+			}
+			ip = ip.Unmap()
+			if ip.IsUnspecified() || ip.IsLoopback() || ip.IsMulticast() || ip.IsLinkLocalUnicast() {
+				continue
+			}
+			ones, bits := ipNet.Mask.Size()
+			if ones < 0 || bits != ip.BitLen() {
+				continue
+			}
+			prefix := netip.PrefixFrom(ip, ones).Masked()
+			if _, exists := seen[prefix]; !exists {
+				seen[prefix] = struct{}{}
+				prefixes = append(prefixes, prefix)
+			}
+		}
+	}
+	return prefixes
+}
+
+const sameSubnetLANPriority uint32 = 1600
+
+// PrioritizeSameSubnet boosts LAN candidates that are on one of our actual
+// interface subnets. Other candidates remain in the race, so VLAN isolation,
+// VPNs, multi-homing and mismatched subnet masks cannot disable WAN P2P.
+// The peer-advertised values are never modified; this is only a local hint.
+func PrioritizeSameSubnet(input []protocol.P2PCandidate, subnets []netip.Prefix) []protocol.P2PCandidate {
+	out := append([]protocol.P2PCandidate(nil), input...)
+	for i := range out {
+		if out[i].Protocol != "udp" || out[i].Type != "lan" {
+			continue
+		}
+		addr, err := netip.ParseAddrPort(out[i].Address)
+		if err != nil {
+			continue
+		}
+		ip := addr.Addr().Unmap()
+		for _, subnet := range subnets {
+			if subnet.IsValid() && subnet.Contains(ip) {
+				if out[i].Priority < sameSubnetLANPriority {
+					out[i].Priority = sameSubnetLANPriority
+				}
+				break
+			}
+		}
+	}
+	return out
+}
+
 // Probe messages are fixed-size, versioned, network-byte-order structures.
 // Keep client and Server validation in one place; do not infer addresses
 // from partially received or mismatched rendezvous datagrams.

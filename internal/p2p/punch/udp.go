@@ -19,6 +19,9 @@ import (
 const dataWireOverhead = 24 + 16
 const punchKeepInterval = 10 * time.Second
 const punchSelectionWindow = 120 * time.Millisecond
+
+// Bound endpoint-dependent NAT address learning even for an authenticated peer.
+const maxLearnedPunchAddresses = 8
 const candidatePriorityRTTWeight = int64(2)
 
 type UDPResult struct {
@@ -57,14 +60,15 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 		return nil, errors.New("invalid P2P UDP punch session")
 	}
 	if timeout <= 0 {
-		timeout = 1200 * time.Millisecond
+		timeout = 5 * time.Second
 	}
 	deadline := time.Now().Add(timeout)
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
 	defer conn.SetReadDeadline(time.Time{})
-	addresses := make([]netip.AddrPort, 0, len(candidates))
+	addresses := make([]netip.AddrPort, 0, len(candidates)+maxLearnedPunchAddresses)
+	learned := 0
 	observations := make(map[netip.AddrPort]*punchObservation, len(candidates))
 	for _, candidate := range candidates {
 		if candidate.Protocol != "udp" {
@@ -140,10 +144,29 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 		}
 		observation := observations[remote]
 		if observation == nil {
-			// A valid authenticated peer can appear from a mapping that differs
-			// from rendezvous. Keep it usable, but below advertised candidates.
+			// Endpoint-dependent NAT can change the peer's mapped port when
+			// targeting us instead of rendezvous. ACKing that peer request
+			// alone is insufficient: our own authenticated request must also
+			// reach the new address for symmetric punching to complete.
+			// Never learn unauthenticated traffic or unsolicited ACKs.
+			if packet.Type != secure.PunchRequest && packet.Type != secure.PunchKeep {
+				if packet.Type != secure.PunchAck {
+					continue
+				}
+				if _, ok := pending[packet.Nonce]; !ok {
+					continue
+				}
+			}
+			if learned >= maxLearnedPunchAddresses {
+				continue
+			}
 			observation = &punchObservation{}
 			observations[remote] = observation
+			addresses = append(addresses, remote)
+			learned++
+			// Probe the newly observed endpoint immediately. The existing
+			// nonce / HMAC validation still gates successful path selection.
+			nextSend = time.Time{}
 		}
 		switch packet.Type {
 		case secure.PunchRequest, secure.PunchKeep:

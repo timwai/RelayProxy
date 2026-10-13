@@ -61,7 +61,7 @@ func TestNormalizedDefaultsAreConcreteAndNeverPersistAsNull(t *testing.T) {
 	if agent.Exit.Access.Domains == nil || agent.Exit.Access.CIDRs == nil {
 		t.Fatal("agent access-list defaults must be concrete empty lists")
 	}
-	if agent.P2P.Mode != "auto" || agent.P2P.PunchTimeoutMs != 1200 || agent.P2P.KeepaliveSec != 10 ||
+	if agent.P2P.Mode != "auto" || agent.P2P.PunchTimeoutMs != 5000 || agent.P2P.KeepaliveSec != 10 ||
 		agent.P2P.IdleTimeoutSec != 120 || agent.P2P.MaxExitSessions != 4 {
 		t.Fatalf("unexpected P2P defaults: %+v", agent.P2P)
 	}

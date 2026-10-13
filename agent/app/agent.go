@@ -397,7 +397,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		return nil, fmt.Errorf("invalid P2P mode %q", cfg.P2PMode)
 	}
 	if cfg.P2PPunchTimeout <= 0 {
-		cfg.P2PPunchTimeout = 1200 * time.Millisecond
+		cfg.P2PPunchTimeout = 5 * time.Second
 	}
 	if cfg.P2PKeepalive <= 0 {
 		cfg.P2PKeepalive = 10 * time.Second

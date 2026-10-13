@@ -173,6 +173,95 @@ func TestRevokeClosesLocalSession(t *testing.T) {
 	}
 }
 
+// Run two actual Agent endpoints on the same host's non-loopback LAN
+// interface. No STUN/rendezvous, UPnP or public IPv4 is involved; a successful
+// pinned QUIC handshake proves the LAN candidates can carry the data path.
+func TestLANAgentsEstablishDirectQUICWithoutRendezvous(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	clientEndpoint := NewEndpoint("")
+	if err := clientEndpoint.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer clientEndpoint.Close()
+	exitEndpoint := NewEndpoint("")
+	if err := exitEndpoint.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	defer exitEndpoint.Close()
+
+	clientCandidates, clientFP, err := clientEndpoint.Description()
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitCandidates, exitFP, err := exitEndpoint.Description()
+	if err != nil {
+		t.Fatal(err)
+	}
+	var chosenClient, chosenExit protocol.P2PCandidate
+	for _, left := range clientCandidates {
+		leftAddr, parseErr := netip.ParseAddrPort(left.Address)
+		if parseErr != nil || left.Protocol != "udp" || left.Type != "lan" || !leftAddr.Addr().Is4() {
+			continue
+		}
+		for _, right := range exitCandidates {
+			rightAddr, peerErr := netip.ParseAddrPort(right.Address)
+			if peerErr == nil && right.Protocol == "udp" && right.Type == "lan" &&
+				rightAddr.Addr() == leftAddr.Addr() {
+				chosenClient, chosenExit = left, right
+				break
+			}
+		}
+		if chosenClient.Address != "" {
+			break
+		}
+	}
+	if chosenClient.Address == "" {
+		t.Skip("runner has no shared non-loopback IPv4 LAN interface")
+	}
+	client := NewManager(ctx, nil, nil, time.Minute)
+	defer client.Close()
+	exit := NewManager(ctx, nil, nil, time.Minute)
+	defer exit.Close()
+	key := []byte("0123456789abcdef0123456789abcdef")
+	expiry := time.Now().Add(time.Minute).UnixMilli()
+	clientSession := client.newSessionWithEndpoint(818, "client", "exit", key, expiry, clientEndpoint)
+	exitSession := exit.newSessionWithEndpoint(818, "client", "exit", key, expiry, exitEndpoint)
+	if clientSession == nil || exitSession == nil {
+		t.Fatal("could not establish LAN session state")
+	}
+	clientSession.mu.Lock()
+	clientSession.clientRole = true
+	clientSession.mu.Unlock()
+	clientSession.setPeer([]protocol.P2PCandidate{chosenExit}, exitFP)
+	exitSession.setPeer([]protocol.P2PCandidate{chosenClient}, clientFP)
+	go exitSession.establish(false)
+	go clientSession.establish(true)
+	for _, tc := range []struct {
+		name  string
+		ready <-chan *Session
+		want  *Session
+	}{
+		{"client", client.ReadySessions(), clientSession},
+		{"exit", exit.ReadySessions(), exitSession},
+	} {
+		select {
+		case actual := <-tc.ready:
+			if actual != tc.want || actual.State() != StateReady {
+				t.Fatalf("%s selected unexpected LAN session %+v", tc.name, actual)
+			}
+		case <-ctx.Done():
+			t.Fatalf("%s LAN QUIC never became READY; client=%+v exit=%+v", tc.name, clientSession.Snapshot(), exitSession.Snapshot())
+		}
+	}
+	if _, ok := client.ReadyForExit("exit"); !ok {
+		t.Fatal("authenticated LAN QUIC was not returned as a client direct path")
+	}
+	if _, ok := exitSession.Tunnel(); !ok {
+		t.Fatal("LAN exit did not retain authenticated direct QUIC")
+	}
+}
+
 func TestReadyForExitIgnoresSignalingOnlySession(t *testing.T) {
 	manager := NewManager(context.Background(), nil, nil, time.Minute)
 	defer manager.Close()

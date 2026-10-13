@@ -1,0 +1,26 @@
+{
+  "client_region": "CHANGE_ME_CLIENT_CITY_ISP",
+  "server_region": "CHANGE_ME_SERVER_CITY_ISP",
+  "client_hardware": "CHANGE_ME_CPU_RAM_NIC_OS",
+  "server_hardware": "CHANGE_ME_CPU_RAM_NIC_OS",
+  "network_path": "CHANGE_ME_ACTUAL_WAN_IP_PORT_MTU_LINK_CAPACITY",
+  "relayproxy_commit": "CHANGE_ME_FULL_40_DIGIT_SHA",
+  "relayproxy_agent_sha256": "CHANGE_ME_64_DIGIT_SHA256",
+  "relayproxy_server_sha256": "CHANGE_ME_64_DIGIT_SHA256",
+  "hysteria2_version": "CHANGE_ME_EXACT_HYSTERIA2_VERSION",
+  "hysteria2_sha256": "CHANGE_ME_64_DIGIT_SHA256",
+  "origin_fixture_sha256": "CHANGE_ME_64_DIGIT_SHA256",
+  "rtt_probe_target": "CHANGE_ME_ICMP_SERVER_WAN_HOST",
+  "loss_evidence": {
+    "0": {
+      "impairment_log": "evidence/loss-0/tc-before-and-after.log"
+    },
+    "1": {
+      "impairment_log": "evidence/loss-1/tc-before-and-after.log"
+    },
+    "5": {
+      "impairment_log": "evidence/loss-5/tc-before-and-after.log"
+    }
+  },
+  "important": "THIS IS A TEMPLATE, NOT REAL MEASUREMENTS OR AN ACCEPTANCE REPORT"
+}

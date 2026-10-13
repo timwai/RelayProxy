@@ -48,6 +48,8 @@ type P2PControlMessage struct {
 	// Peers must never trust capabilities echoed from the remote P2P endpoint.
 	PeerCapabilities  []string    `json:"peerCapabilities,omitempty"`
 	RelayPolicy       *acl.Policy `json:"relayPolicy,omitempty"`
+	BrutalUploadBPS   uint64      `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS uint64      `json:"brutalDownloadBps,omitempty"`
 	LeaseExpiresAt    int64       `json:"leaseExpiresAt,omitempty"`
 	RendezvousAddress string      `json:"rendezvousAddress,omitempty"`
 	LeaseSec          int         `json:"leaseSec,omitempty"`

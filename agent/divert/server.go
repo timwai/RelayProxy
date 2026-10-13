@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -45,25 +46,27 @@ type Options struct {
 	LocalExitReady        func(string) bool
 	Traffic               *traffic.Registry
 	DefaultExitID         func() string
-	FakeIPEnabled         func() bool     // dynamically consulted for new transparent DNS queries
-	ProxyDNSEnabled       func() bool     // real A/AAAA and other DNS via authenticated DoT; not FakeIP
-	DNSAssociationEnabled func() bool     // observed DNS->real IP attribution; defaults to enabled
-	BlockDoHEndpoints     func() bool     // opt-in domain-based DoH endpoint guard
-	ForwardOtherDNS       func() bool     // opt-in authenticated DoT via proxy for TXT/SRV
-	DNSExitID             func() string   // optional pinned exit for DNS, independent from app flows
-	DoHBlockedIPs         func() []string // opt-in fixed HTTPS/443 IP or CIDR denylist
+	FakeIPEnabled         func() bool          // dynamically consulted for new transparent DNS queries
+	ProxyDNSEnabled       func() bool          // real A/AAAA and other DNS via proxy DoH/443 or DoT/853; not FakeIP
+	DNSAssociationEnabled func() bool          // observed DNS->real IP attribution; defaults to enabled
+	BlockDoHEndpoints     func() bool          // opt-in domain-based DoH endpoint guard
+	ForwardOtherDNS       func() bool          // opt-in authenticated DoT via proxy for TXT/SRV
+	DNSExitID             func() string        // optional pinned exit for DNS, independent from app flows
+	DNSUpstreams          func() []DNSUpstream // optional custom pinned HTTPS resolvers from active policy
+	DoHBlockedIPs         func() []string      // opt-in fixed HTTPS/443 IP or CIDR denylist
 }
 
 // Server owns classified flows. OS interception is separately gated by a
 // side-effect-free capability preflight. Trusted platform adapters must retain
 // ClassifiedFlow and implement DIRECT/reject and original-source reply injection.
 type Server struct {
-	opts     Options
-	engine   *Engine
-	dialer   Dialer
-	guard    LoopGuard
-	fakeDNS  *fakeIPDNS
-	dnsLimit chan struct{} // bound concurrent TLS resolver requests
+	opts              Options
+	engine            *Engine
+	dialer            Dialer
+	guard             LoopGuard
+	fakeDNS           *fakeIPDNS
+	dnsLimit          chan struct{} // bound concurrent encrypted resolver requests
+	lastDNSFailureLog atomic.Int64
 
 	ctx         context.Context
 	cancel      context.CancelFunc

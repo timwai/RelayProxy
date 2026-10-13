@@ -15,6 +15,7 @@
   window.goGetDiagnostics = () => invoke('GetDiagnostics');
   window.goRunSpeedTest = (exitID, durationSeconds) => invoke('RunSpeedTest', exitID, durationSeconds);
   window.goTestCustomExit = (exitID) => invoke('TestCustomExit', exitID);
+  window.goProbeDNS = () => invoke('ProbeDNS');
   window.goGetProxyExits = () => invoke('GetProxyExits');
   window.goGetRoutingSubscriptions = () => invoke('GetRoutingSubscriptions');
   window.goGetRDPTargets = () => invoke('GetRDPTargets');

@@ -55,7 +55,7 @@ func testDialConfig(listener *direct.PublicListener, ticket []byte) direct.DialC
 	}
 }
 
-func newSignedTestListener(t *testing.T) (*direct.PublicListener, []byte, *tls.Config) {
+func newSignedTestListener(t *testing.T, brutalRates ...uint64) (*direct.PublicListener, []byte, *tls.Config) {
 	t.Helper()
 	checker, err := acl.NewChecker(acl.Policy{
 		ID: "relay-test", AllowInternet: true, AllowPrivateNetwork: true, AllowLoopback: true,
@@ -64,10 +64,10 @@ func newSignedTestListener(t *testing.T) (*direct.PublicListener, []byte, *tls.C
 		t.Fatal(err)
 	}
 	policy := checker.Policy()
-	return newSignedTestListenerWithPolicy(t, &policy)
+	return newSignedTestListenerWithPolicy(t, &policy, brutalRates...)
 }
 
-func newSignedTestListenerWithPolicy(t *testing.T, relayPolicy *acl.Policy) (*direct.PublicListener, []byte, *tls.Config) {
+func newSignedTestListenerWithPolicy(t *testing.T, relayPolicy *acl.Policy, brutalRates ...uint64) (*direct.PublicListener, []byte, *tls.Config) {
 	t.Helper()
 	identity, err := secure.GenerateEphemeralIdentity()
 	if err != nil {
@@ -81,12 +81,17 @@ func newSignedTestListenerWithPolicy(t *testing.T, relayPolicy *acl.Policy) (*di
 	if err != nil {
 		t.Fatal(err)
 	}
-	authenticator.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (*acl.Policy, error) {
+	authenticator.SetCurrentValidator(func(context.Context, protocol.PublicDirectTicketClaims) (direct.Authorization, error) {
 		if relayPolicy == nil {
-			return nil, errors.New("relay policy unavailable")
+			return direct.Authorization{}, errors.New("relay policy unavailable")
 		}
 		copy := *relayPolicy
-		return &copy, nil
+		authorization := direct.Authorization{RelayPolicy: &copy}
+		if len(brutalRates) == 2 {
+			authorization.BrutalUploadBPS = brutalRates[0]
+			authorization.BrutalDownloadBPS = brutalRates[1]
+		}
+		return authorization, nil
 	})
 	listener, err := direct.Listen(direct.ListenerConfig{
 		ListenAddress: "127.0.0.1:0",
@@ -456,5 +461,101 @@ func TestPublicDirectListenerCloseUnblocksPendingAuthentication(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("listener close waited for authentication timeout")
+	}
+}
+
+func TestPublicDirectNegotiatesDirectionalBrutal(t *testing.T) {
+	// Modern signed tickets must have a matching Server-authorized rate profile.
+	listener, ticket, pinnedTLS := newSignedTestListener(t, 12_500_000, 25_000_000)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	acceptedCh := make(chan *direct.AcceptedSession, 1)
+	errCh := make(chan error, 1)
+	go func() {
+		accepted, err := listener.Accept(ctx)
+		if err != nil {
+			errCh <- err
+			return
+		}
+		acceptedCh <- accepted
+	}()
+
+	config := signedDialConfig(listener, ticket, pinnedTLS)
+	config.BrutalUploadBPS = 12_500_000
+	config.BrutalDownloadBPS = 25_000_000
+	clientSession, err := direct.Dial(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+
+	var accepted *direct.AcceptedSession
+	select {
+	case err := <-errCh:
+		t.Fatal(err)
+	case accepted = <-acceptedCh:
+	}
+	if accepted == nil || accepted.Tunnel == nil {
+		t.Fatal("missing accepted Public Direct session")
+	}
+	defer accepted.Tunnel.Close()
+
+	clientDiag := tunnel.DiagnoseSession(clientSession)
+	exitDiag := tunnel.DiagnoseSession(accepted.Tunnel)
+	if clientDiag == nil || clientDiag.QUIC == nil ||
+		clientDiag.QUIC.CongestionController != "brutal" ||
+		clientDiag.QUIC.CongestionTargetBPS != 12_500_000 {
+		t.Fatalf("client Public Direct congestion = %+v", clientDiag)
+	}
+	if exitDiag == nil || exitDiag.QUIC == nil ||
+		exitDiag.QUIC.CongestionController != "brutal" ||
+		exitDiag.QUIC.CongestionTargetBPS != 25_000_000 {
+		t.Fatalf("exit Public Direct congestion = %+v", exitDiag)
+	}
+}
+
+// A legacy ticket authenticator must not treat authenticated but unapproved
+// performance hints as authorization to bypass the default BBR controller.
+func TestPublicDirectLegacyAuthenticatorIgnoresBrutalHints(t *testing.T) {
+	ticket := []byte("legacy-brutal-test-ticket")
+	listener := newTestListener(t, ticket)
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	accepted := make(chan *direct.AcceptedSession, 1)
+	failure := make(chan error, 1)
+	go func() {
+		item, err := listener.Accept(ctx)
+		if err != nil {
+			failure <- err
+			return
+		}
+		accepted <- item
+	}()
+	config := testDialConfig(listener, ticket)
+	config.BrutalUploadBPS = 12_500_000
+	config.BrutalDownloadBPS = 25_000_000
+	clientSession, err := direct.Dial(ctx, config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer clientSession.Close()
+	var serverSession *direct.AcceptedSession
+	select {
+	case serverSession = <-accepted:
+	case err := <-failure:
+		t.Fatal(err)
+	case <-ctx.Done():
+		t.Fatal(ctx.Err())
+	}
+	defer serverSession.Tunnel.Close()
+	for _, item := range []tunnel.TunnelSession{clientSession, serverSession.Tunnel} {
+		diagnostics := tunnel.DiagnoseSession(item)
+		if diagnostics == nil || diagnostics.QUIC == nil {
+			t.Fatal("missing QUIC diagnostics")
+		}
+		if diagnostics.QUIC.CongestionController == "brutal" || diagnostics.QUIC.CongestionTargetBPS != 0 {
+			t.Fatalf("legacy authenticator activated Brutal: %+v", diagnostics.QUIC)
+		}
 	}
 }

@@ -46,16 +46,19 @@ type Manager struct {
 	local  LocalDescription
 	lease  time.Duration
 
-	endpointFactory      EndpointFactory
-	upnpEnabled          bool
-	punchTimeout         time.Duration
-	keepAlive            time.Duration
-	idleTimeout          time.Duration
-	maxExitSessions      int
-	lowPowerIdleTimeout  time.Duration
-	lowPowerMaxSessions  int
-	networkCheckInterval time.Duration
-	networkSignature     func() string
+	endpointFactory         EndpointFactory
+	upnpEnabled             bool
+	punchTimeout            time.Duration
+	keepAlive               time.Duration
+	idleTimeout             time.Duration
+	maxExitSessions         int
+	lowPowerIdleTimeout     time.Duration
+	lowPowerMaxSessions     int
+	networkCheckInterval    time.Duration
+	networkSignature        func() string
+	brutalUploadBPS         uint64
+	brutalDownloadBPS       uint64
+	disableLossCompensation bool
 
 	mu               sync.Mutex
 	sessions         map[uint64]*Session
@@ -78,17 +81,20 @@ type failureState struct {
 }
 
 type QUICManagerOptions struct {
-	PunchTimeout         time.Duration
-	KeepAlive            time.Duration
-	IdleTimeout          time.Duration
-	MaxExitSessions      int
-	PortStart            int
-	PortEnd              int
-	UPnPEnabled          bool
-	LowPowerIdleTimeout  time.Duration
-	LowPowerMaxSessions  int
-	NetworkCheckInterval time.Duration
-	NetworkSignature     func() string
+	PunchTimeout            time.Duration
+	KeepAlive               time.Duration
+	IdleTimeout             time.Duration
+	MaxExitSessions         int
+	PortStart               int
+	PortEnd                 int
+	UPnPEnabled             bool
+	LowPowerIdleTimeout     time.Duration
+	LowPowerMaxSessions     int
+	NetworkCheckInterval    time.Duration
+	NetworkSignature        func() string
+	BrutalUploadBPS         uint64
+	BrutalDownloadBPS       uint64
+	DisableLossCompensation bool
 }
 
 type Session struct {
@@ -116,6 +122,7 @@ type Session struct {
 	lastRTTMs        int64
 	lastBytesUp      uint64
 	lastBytesDown    uint64
+	brutalTxBPS      uint64
 	lastUsed         atomic.Int64
 	closed           chan struct{}
 	closeOnce        sync.Once
@@ -207,6 +214,9 @@ func NewQUICManagerWithOptions(parent context.Context, send ControlSender, rende
 	if options.NetworkSignature != nil {
 		m.networkSignature = options.NetworkSignature
 	}
+	m.brutalUploadBPS = options.BrutalUploadBPS
+	m.brutalDownloadBPS = options.BrutalDownloadBPS
+	m.disableLossCompensation = options.DisableLossCompensation
 	if m.networkSignature != nil {
 		m.networkSig = m.networkSignature()
 	}
@@ -344,6 +354,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	response, err := m.send(ctx, protocol.P2PControlMessage{
 		Type: protocol.P2PControlConnectRequest, ExitDeviceID: exitDeviceID,
 		Candidates: append([]protocol.P2PCandidate(nil), candidates...), CertFingerprint: fingerprint,
+		BrutalUploadBPS: m.brutalUploadBPS, BrutalDownloadBPS: m.brutalDownloadBPS,
 	})
 	if err != nil {
 		if endpoint != nil {
@@ -375,6 +386,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 	}
 	item.mu.Lock()
 	item.clientRole = true
+	item.brutalTxBPS = response.BrutalUploadBPS
 	item.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
 	item.lastUsed.Store(time.Now().UnixMilli())
 	item.mu.Unlock()
@@ -480,6 +492,7 @@ func (m *Manager) handleOffer(message protocol.P2PControlMessage) {
 	}
 	item.mu.Lock()
 	item.localCandidates = append([]protocol.P2PCandidate(nil), candidates...)
+	item.brutalTxBPS = message.BrutalDownloadBPS
 	item.mu.Unlock()
 	item.setPeer(message.Candidates, message.PeerFingerprint)
 	item.setPeerCapabilities(message.PeerCapabilities)
@@ -936,6 +949,7 @@ func (s *Session) establish(clientRole bool) {
 	endpoint := s.endpoint
 	candidates := append([]protocol.P2PCandidate(nil), s.peerCandidates...)
 	fingerprint := s.peerFingerprint
+	brutalTxBPS := s.brutalTxBPS
 	s.mu.Unlock()
 
 	conn, err := endpoint.UDPConn()
@@ -973,6 +987,9 @@ func (s *Session) establish(clientRole bool) {
 		return
 	}
 	if direct.QUICSession != nil {
+		if brutalTxBPS > 0 {
+			tunnel.UseBrutal(direct.QUICSession, brutalTxBPS, s.manager.disableLossCompensation)
+		}
 		// Native datagrams are a property of the direct QUIC transport itself.
 		// Overlay capabilities are server-authoritative and are added without
 		// clearing the already-negotiated datagram capability.
@@ -999,26 +1016,43 @@ func (s *Session) establish(clientRole bool) {
 		s.manager.enforceClientLimit(s.ID)
 	}
 	s.reportPath(protocol.P2PPathDirectQUIC, "")
-	select {
-	case s.manager.ready <- s:
-	default:
-		s.mu.Lock()
-		if s.direct == direct && s.state != StateClosed {
-			s.direct = nil
-			s.state = StateDegraded
-			s.lastError = "P2P ready queue is full"
-		}
-		endpoint := s.endpoint
-		s.endpoint = nil
-		s.mu.Unlock()
-		_ = direct.Close()
-		if endpoint != nil {
-			_ = endpoint.Close()
-		}
-		s.reportPath("", "ready_queue_full")
+	if !s.enqueueReady(direct) {
 		return
 	}
 	go s.watchDirect(direct)
+}
+
+// enqueueReady must remove the coordinator lease as well as the local direct
+// socket on a full queue. Otherwise a ready path is reported remotely even
+// though no consumer can ever use it.
+func (s *Session) enqueueReady(direct *directp2p.QUICSession) bool {
+	if s == nil || s.manager == nil {
+		if direct != nil {
+			_ = direct.Close()
+		}
+		return false
+	}
+	select {
+	case s.manager.ready <- s:
+		return true
+	default:
+	}
+	s.mu.Lock()
+	shouldRemove := s.direct == direct && s.state != StateClosed
+	if shouldRemove {
+		s.state = StateDegraded
+		s.lastError = "P2P ready queue is full"
+	}
+	s.mu.Unlock()
+	if !shouldRemove {
+		if direct != nil {
+			_ = direct.Close()
+		}
+		return false
+	}
+	s.reportPath("", "ready_queue_full")
+	s.manager.removeFailedSession(s, "ready_queue_full")
+	return false
 }
 
 func (s *Session) failDirect(err error) {
@@ -1121,10 +1155,18 @@ func (s *Session) watchLocalCandidates() {
 }
 
 func (s *Session) watchLocalCandidatesWithRetry(retry time.Duration) {
-	if s == nil || s.endpoint == nil || s.manager == nil {
+	if s == nil || s.manager == nil {
 		return
 	}
-	changes := s.endpoint.CandidateChanges()
+	// failDirect and closeLocal may clear the endpoint at any time. Capture
+	// its reference under the session lock before listening for updates.
+	s.mu.RLock()
+	endpoint := s.endpoint
+	s.mu.RUnlock()
+	if endpoint == nil {
+		return
+	}
+	changes := endpoint.CandidateChanges()
 	if retry <= 0 {
 		retry = 15 * time.Second
 	}

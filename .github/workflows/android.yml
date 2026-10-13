@@ -10,6 +10,7 @@ on:
     branches:
       - main
       - feat/proxy-p2p-direct-path
+      - feat/hysteria-brutal-issue-198
       - feature/wails-react-complete-ui
     paths:
       - "android/**"

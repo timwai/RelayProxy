@@ -9,7 +9,7 @@ test('routing rules save cannot overwrite DNS policies',()=>{
   dns_exit_id:'exit1',doh_blocked_ips:['1.1.1.1']};
  assert.deepEqual(routingPagePatch(r),{mode:'rule',default_action:'PROXY',rules:[{name:'proxy'}],subscriptions:[{name:'gfw',url:'https://example.com/list',enabled:true,action:'PROXY'}]});
  assert.deepEqual(Object.keys(dnsPagePatch(r)).sort(),
-  ['dns_mode','auto_detect_dns','dns_association_enabled','proxy_dns_enabled','fake_ip_enabled','block_doh_endpoints','forward_other_dns','dns_exit_id','doh_blocked_ips'].sort());
+  ['dns_mode','auto_detect_dns','dns_association_enabled','proxy_dns_enabled','fake_ip_enabled','block_doh_endpoints','forward_other_dns','dns_exit_id','dns_upstreams','doh_blocked_ips'].sort());
  assert.equal(dnsPagePatch(r).fake_ip_enabled,true);
 });
 

@@ -12,6 +12,12 @@ import (
 // resolver. Depending on the active policy it returns FakeIP or verified real
 // DoT answers via the selected proxy exit. The caller owns redirection.
 func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
+	return s.serveDNSTCPWithObserver(ctx, conn, nil)
+}
+
+// serveDNSTCPWithObserver records validated real DNS exchanges before the
+// response becomes visible to its client. The observer must not block.
+func (s *Server) serveDNSTCPWithObserver(ctx context.Context, conn net.Conn, observer func(query, answer []byte)) error {
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
@@ -45,6 +51,9 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 		answer := s.interceptedDNSReply(ctx, payload, false)
 		if len(answer) == 0 || len(answer) > 65535 {
 			return fmt.Errorf("fake DNS TCP question cannot be safely answered")
+		}
+		if observer != nil && s.proxyDNSEnabled() {
+			observer(payload, answer)
 		}
 		binary.BigEndian.PutUint16(prefix[:], uint16(len(answer)))
 		buffer := net.Buffers{prefix[:], answer}

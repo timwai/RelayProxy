@@ -130,6 +130,11 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	want := initial.Config
 	want.Admin.TLSEnabled = false
 	want.Tunnel.HeartbeatSec = 30
+	want.Tunnel.BrutalUpMbps = 20
+	want.Tunnel.BrutalDownMbps = 30
+	want.Tunnel.BrutalTotalUpMbps = 60
+	want.Tunnel.BrutalTotalDownMbps = 80
+	want.Tunnel.BrutalDisableLossCompensation = true
 	want.RelayACL.AccessMode = "allow"
 	want.RelayACL.Domains = []string{" example.org ", "example.org"}
 	want.ServerExit.Enabled = true
@@ -164,6 +169,9 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 		t.Fatalf("save failed: %d %s", rec.Code, rec.Body.String())
 	}
 	if saved.Config.Admin.TLSEnabled || !saved.Config.Tunnel.TLSEnabled || !saved.Runtime.Admin.TLSEnabled || !saved.RestartRequired ||
+		saved.Config.Tunnel.BrutalUpMbps != 20 || saved.Config.Tunnel.BrutalDownMbps != 30 ||
+		saved.Config.Tunnel.BrutalTotalUpMbps != 60 || saved.Config.Tunnel.BrutalTotalDownMbps != 80 ||
+		!saved.Config.Tunnel.BrutalDisableLossCompensation || saved.Runtime.Tunnel.BrutalTotalUpMbps != 0 ||
 		len(saved.Config.RelayACL.Domains) != 1 || !saved.Config.ServerExit.Enabled || !saved.Config.ServerExit.AllowPrivateNetwork ||
 		saved.Config.ServerExit.UpstreamMode != "direct" || saved.Config.ServerExit.AccessMode != "deny" ||
 		len(saved.Config.ServerExit.Domains) != 1 || len(saved.Config.ServerExit.CIDRs) != 1 ||
@@ -184,6 +192,11 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	invalid := want
+	invalid.Tunnel.BrutalTotalUpMbps = -1
+	if rec = submit(map[string]any{"revision": saved.Revision, "config": invalid}, ""); rec.Code != http.StatusBadRequest {
+		t.Fatal("negative aggregate Brutal budget was accepted by settings API")
+	}
 	want.Tunnel.MaxConnections = 0
 	if rec = submit(map[string]any{"revision": saved.Revision, "config": want}, ""); rec.Code != http.StatusBadRequest {
 		t.Fatal("zero limit silently normalized to a default")
@@ -199,6 +212,9 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	}
 	loaded, err := config.LoadServerConfig(saved.ConfigPath)
 	if err != nil || loaded.IsAdminTLSEnabled() || !loaded.IsTLSEnabled() || loaded.Tunnel.HeartbeatSec != 30 ||
+		loaded.Tunnel.Bandwidth.UpMbps != 20 || loaded.Tunnel.Bandwidth.DownMbps != 30 ||
+		loaded.Tunnel.Bandwidth.TotalUpMbps != 60 || loaded.Tunnel.Bandwidth.TotalDownMbps != 80 ||
+		!loaded.Tunnel.Bandwidth.DisableLossCompensation ||
 		loaded.Exit.Enabled == nil || !*loaded.Exit.Enabled || loaded.Exit.AllowInternet == nil || !*loaded.Exit.AllowInternet ||
 		!loaded.Exit.AllowPrivateNetwork || loaded.Exit.Upstream.Mode != "direct" || loaded.Exit.Access.Mode != "deny" ||
 		len(loaded.Exit.Access.Domains) != 1 || len(loaded.Exit.Access.CIDRs) != 1 ||

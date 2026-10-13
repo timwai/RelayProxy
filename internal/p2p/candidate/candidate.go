@@ -19,9 +19,11 @@ import (
 )
 
 const (
-	MaxCandidates        = 16
-	ProbeMagic    uint32 = 0x52505633 // "RPV3"
-	ProbeVersion  byte   = 1
+	MaxCandidates            = 16
+	ProbeMagic        uint32 = 0x52505633 // "RPV3"
+	ProbeVersion      byte   = 1
+	ProbeRequestSize         = 16
+	ProbeResponseSize        = 32
 )
 
 var (
@@ -194,6 +196,51 @@ func discoveryPriority(ip netip.Addr, protocolName string) uint32 {
 	return priority
 }
 
+// Probe messages are fixed-size, versioned, network-byte-order structures.
+// Keep client and Server validation in one place; do not infer addresses
+// from partially received or mismatched rendezvous datagrams.
+func EncodeProbeRequest(nonce uint64) [ProbeRequestSize]byte {
+	var request [ProbeRequestSize]byte
+	binary.BigEndian.PutUint32(request[0:4], ProbeMagic)
+	request[4] = ProbeVersion
+	binary.BigEndian.PutUint64(request[8:16], nonce)
+	return request
+}
+
+func DecodeProbeRequest(raw []byte) (uint64, bool) {
+	if len(raw) != ProbeRequestSize || binary.BigEndian.Uint32(raw[0:4]) != ProbeMagic || raw[4] != ProbeVersion {
+		return 0, false
+	}
+	return binary.BigEndian.Uint64(raw[8:16]), true
+}
+
+func EncodeProbeResponse(nonce uint64, observed netip.AddrPort) ([ProbeResponseSize]byte, bool) {
+	var response [ProbeResponseSize]byte
+	if !observed.IsValid() || observed.Port() == 0 || observed.Addr().IsUnspecified() {
+		return response, false
+	}
+	binary.BigEndian.PutUint32(response[0:4], ProbeMagic)
+	response[4] = ProbeVersion
+	binary.BigEndian.PutUint16(response[6:8], observed.Port())
+	binary.BigEndian.PutUint64(response[8:16], nonce)
+	ip := observed.Addr().Unmap().As16()
+	copy(response[16:32], ip[:])
+	return response, true
+}
+
+func DecodeProbeResponse(raw []byte, expectedNonce uint64) (netip.AddrPort, bool) {
+	if len(raw) != ProbeResponseSize || binary.BigEndian.Uint32(raw[0:4]) != ProbeMagic ||
+		raw[4] != ProbeVersion || binary.BigEndian.Uint64(raw[8:16]) != expectedNonce {
+		return netip.AddrPort{}, false
+	}
+	ip, ok := netip.AddrFromSlice(raw[16:32])
+	port := binary.BigEndian.Uint16(raw[6:8])
+	if !ok || port == 0 || ip.IsUnspecified() {
+		return netip.AddrPort{}, false
+	}
+	return netip.AddrPortFrom(ip.Unmap(), port), true
+}
+
 // ProbeReflexive preserves the single-candidate API for existing callers.
 // Use ProbeReflexiveAll to advertise both discovered address families.
 func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, protocolName string) (protocol.P2PCandidate, error) {
@@ -260,10 +307,7 @@ func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn
 		if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
 			return nil, err
 		}
-		var request [16]byte
-		binary.BigEndian.PutUint32(request[0:4], ProbeMagic)
-		request[4] = ProbeVersion
-		binary.BigEndian.PutUint64(request[8:16], nonce)
+		request := EncodeProbeRequest(nonce)
 		if _, err := conn.WriteToUDPAddrPort(request[:], remote); err != nil {
 			lastErr = err
 			continue
@@ -303,7 +347,7 @@ func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn
 			}
 			return nil, readErr
 		}
-		if n != 32 || binary.BigEndian.Uint32(buffer[0:4]) != ProbeMagic || buffer[4] != ProbeVersion {
+		if n != ProbeResponseSize {
 			continue
 		}
 		nonce := binary.BigEndian.Uint64(buffer[8:16])
@@ -311,19 +355,14 @@ func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn
 		if !ok || netip.AddrPortFrom(sender.Addr().Unmap(), sender.Port()) != expected {
 			continue
 		}
+		observed, valid := DecodeProbeResponse(buffer[:n], nonce)
+		if !valid {
+			continue
+		}
 		delete(pending, nonce)
-		ip, ok := netip.AddrFromSlice(buffer[16:32])
-		if !ok {
-			continue
-		}
-		ip = ip.Unmap()
-		reflexivePort := binary.BigEndian.Uint16(buffer[6:8])
-		if !ip.IsValid() || ip.IsUnspecified() || reflexivePort == 0 {
-			continue
-		}
 		results = append(results, protocol.P2PCandidate{
 			Protocol: protocolName, Type: "reflexive",
-			Address: netip.AddrPortFrom(ip, reflexivePort).String(), Priority: 800,
+			Address: observed.String(), Priority: 800,
 		})
 		if firstResponse.IsZero() {
 			firstResponse = time.Now()

@@ -398,6 +398,15 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 			return errors.New("UDP interception queue is full; datagram dropped")
 		}
 	case ActionReject:
+		// In observational (real-IP) DNS mode, a default-block routing
+		// policy must not accidentally blackhole the resolver needed to
+		// populate IP-to-domain associations. Explicit DNS REJECT rules
+		// are still enforced, and strict FakeIP / proxy DNS modes are
+		// intercepted before reaching this branch.
+		if localDNSDefaultRejectPassthrough(packet, route.Decision(), fakeMode, realMode, i.server.dnsAssociationEnabled()) {
+			i.direct.Add(1)
+			return i.sendPacket(packet, meta)
+		}
 		i.reject.Add(1)
 		return nil
 	case ActionProxy:
@@ -417,6 +426,15 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	default:
 		return errors.New("invalid interception action")
 	}
+}
+
+// localDNSDefaultRejectPassthrough intentionally applies only to outbound
+// DNS/53 in observational mode. It must never override an explicit DNS rule,
+// nor silently leak a query in a mode which promises proxy interception.
+func localDNSDefaultRejectPassthrough(p ipPacket, decision Decision, fakeMode, proxyDNSMode, associationEnabled bool) bool {
+	return associationEnabled && !fakeMode && !proxyDNSMode &&
+		(p.Protocol == ProtoUDP || p.Protocol == ProtoTCP) && p.Destination.Port() == 53 &&
+		decision.Action == ActionReject && decision.Rule == "default"
 }
 
 // interceptDNSUDP replies from the original resolver address. Authenticated
@@ -572,6 +590,14 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 		if err != nil {
 			_ = i.rejectTCP(p, meta)
 			return err
+		}
+		// A default-deny rule must not strand DNS/TCP fallback in the
+		// observational real-IP mode. Explicit DNS blocking still wins.
+		// The original socket stays in the Windows TCP stack; later packets
+		// are reinjected through the existing pre-established-flow path.
+		if localDNSDefaultRejectPassthrough(p, route.Decision(), i.server.fakeIPEnabled(), i.server.proxyDNSEnabled(), i.server.dnsAssociationEnabled()) {
+			i.direct.Add(1)
+			return i.sendPacket(p, meta)
 		}
 		i.classified.Add(1)
 		switch route.Decision().Action {
@@ -755,9 +781,12 @@ func (i *packetInterceptor) sendPacket(packet ipPacket, meta packetMetadata) err
 	// Register outgoing DNS questions before forwarding the query: a fast
 	// resolver can answer while injection/acceptance is still in progress.
 	// DNS associations only become trusted after a matching answer is observed.
-	if meta.outbound && packet.Protocol == ProtoUDP {
-		if i.server.dnsAssociationEnabled() {
+	if meta.outbound && i.server.dnsAssociationEnabled() {
+		switch packet.Protocol {
+		case ProtoUDP:
 			i.dns.query(packet.Source, packet.Destination, packet.Payload)
+		case ProtoTCP:
+			i.dns.observeTCPQuery(packet)
 		}
 	}
 	if accepter, ok := i.device.(packetAccepter); ok {
@@ -804,6 +833,17 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 	}
 }
 
+// Observe an authenticated TCP DNS exchange only when the active policy
+// permits domain attribution. The DNS association parser verifies that both
+// the question and its answer match before remembering A/AAAA addresses.
+func (i *packetInterceptor) observeInterceptedDNSTCP(key FlowKey, query, answer []byte) {
+	if !i.server.dnsAssociationEnabled() || !i.server.proxyDNSEnabled() {
+		return
+	}
+	i.dns.queryProtocol(ProtoTCP, key.Source, key.Destination, query)
+	i.dns.responseProtocol(ProtoTCP, key.Destination, key.Source, answer)
+}
+
 func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 	defer i.wg.Done()
 	for {
@@ -833,7 +873,12 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 			defer i.wg.Done()
 			var err error
 			if flow.route.dnsOnly {
-				err = i.server.serveFakeDNSTCP(i.ctx, conn)
+				// TCP DNS answers must populate the same conservative
+				// IP-to-name cache used by intercepted UDP DNS, before the
+				// client is allowed to establish its first connection.
+				err = i.server.serveDNSTCPWithObserver(i.ctx, conn, func(query, answer []byte) {
+					i.observeInterceptedDNSTCP(flow.route.key, query, answer)
+				})
 			} else {
 				err = i.server.ForwardTCP(i.ctx, flow.route, conn)
 			}

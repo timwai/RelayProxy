@@ -38,6 +38,9 @@ func ValidateConfig(cfg Config) error {
 	if cfg.DNSExitID != "" && (strings.TrimSpace(cfg.DNSExitID) != cfg.DNSExitID || strings.ContainsAny(cfg.DNSExitID, " \t\r\n/\\") || len(cfg.DNSExitID) > 128) {
 		return fmt.Errorf("routing.dns_exit_id: invalid proxy exit identifier")
 	}
+	if err := ValidateDNSUpstreams(cfg.DNSUpstreams); err != nil {
+		return err
+	}
 	if len(cfg.DoHBlockedIPs) > 256 {
 		return fmt.Errorf("routing.doh_blocked_ips: maximum 256 IP/CIDR entries")
 	}

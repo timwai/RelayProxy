@@ -30,6 +30,7 @@ func routingConfigView(cfg routing.Config) map[string]any {
 		"block_doh_endpoints":     cfg.BlockDoHEndpoints,
 		"forward_other_dns":       cfg.ForwardOtherDNS,
 		"dns_exit_id":             cfg.DNSExitID,
+		"dns_upstreams":           append([]routing.DNSUpstream{}, cfg.DNSUpstreams...),
 		"doh_blocked_ips":         blockedIPs,
 		"default_action":          cfg.DefaultAction,
 		"rules":                   rules,

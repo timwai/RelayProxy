@@ -24,6 +24,7 @@ import (
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"
 	"relayproxy/internal/config"
+	"relayproxy/internal/congestion"
 	"relayproxy/internal/deviceidentity"
 )
 
@@ -241,19 +242,22 @@ func main() {
 		TCPPort:       cfgFile.Server.TCPPort,
 		// The binary advertises supported capabilities; the server decides which
 		// subset is granted. This is not a client-side authorization choice.
-		Mode:                "BOTH",
-		TransportMode:       cfgFile.Transport.Mode,
-		SOCKS5Enabled:       cfgFile.Proxy.SOCKS5.Enabled,
-		SOCKS5Listen:        socksListen,
-		HTTPEnabled:         cfgFile.Proxy.HTTP.Enabled,
-		HTTPListen:          httpListen,
-		DefaultExitID:       cfgFile.Proxy.DefaultExitID,
-		CustomExits:         cfgFile.Proxy.CustomExits,
-		ExitUpstreamID:      cfgFile.Exit.UpstreamExitID,
-		BrowserNetworkShare: cfgFile.Exit.BrowserNetworkShare,
-		BrowserLocalEnabled: cfgFile.BrowserSync.LocalProxy.Enabled,
-		BrowserLocalListen:  cfgFile.BrowserSync.LocalProxy.Listen,
-		ExitEnabled:         cfgFile.Exit.Enabled,
+		Mode:                    "BOTH",
+		TransportMode:           cfgFile.Transport.Mode,
+		BrutalUploadBPS:         congestion.MbpsToBytesPerSecond(cfgFile.Transport.Bandwidth.UpMbps),
+		BrutalDownloadBPS:       congestion.MbpsToBytesPerSecond(cfgFile.Transport.Bandwidth.DownMbps),
+		DisableLossCompensation: cfgFile.Transport.Bandwidth.DisableLossCompensation,
+		SOCKS5Enabled:           cfgFile.Proxy.SOCKS5.Enabled,
+		SOCKS5Listen:            socksListen,
+		HTTPEnabled:             cfgFile.Proxy.HTTP.Enabled,
+		HTTPListen:              httpListen,
+		DefaultExitID:           cfgFile.Proxy.DefaultExitID,
+		CustomExits:             cfgFile.Proxy.CustomExits,
+		ExitUpstreamID:          cfgFile.Exit.UpstreamExitID,
+		BrowserNetworkShare:     cfgFile.Exit.BrowserNetworkShare,
+		BrowserLocalEnabled:     cfgFile.BrowserSync.LocalProxy.Enabled,
+		BrowserLocalListen:      cfgFile.BrowserSync.LocalProxy.Listen,
+		ExitEnabled:             cfgFile.Exit.Enabled,
 		ExitUpstream: exit.UpstreamConfig{
 			Mode: cfgFile.Exit.Upstream.Mode, Address: cfgFile.Exit.Upstream.Address,
 			Username: cfgFile.Exit.Upstream.Username, Password: cfgFile.Exit.Upstream.Password,

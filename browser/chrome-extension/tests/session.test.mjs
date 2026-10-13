@@ -15,20 +15,22 @@ function createProfile() {
   const jar = new Map();
   const database = {
     createObjectStore() {},
-    transaction() {
-      const tx = {objectStore() {
-        return {
-          get(name) {
-            const result = {};
-            queueMicrotask(() => {result.result=privateKeys.get(name);result.onsuccess?.();});
-            return result;
-          },
-          put(value,name) {
-            privateKeys.set(name,value);
-            queueMicrotask(() => tx.oncomplete?.());
-          }
-        };
-      }};
+    transaction(){
+      let active=0;
+      const tx={objectStore(){return {
+        get(name){return request(()=>privateKeys.get(name));},
+        put(value,name){return request(()=>privateKeys.set(name,value));},
+        delete(name){return request(()=>privateKeys.delete(name));}
+      }}};
+      function request(run){
+        const q={};active++;
+        queueMicrotask(()=>{
+          try{q.result=run();q.onsuccess?.();}
+          catch(error){q.error=error;q.onerror?.();}
+          finally{active--;queueMicrotask(()=>{if(active===0)tx.oncomplete?.()});}
+        });
+        return q;
+      }
       return tx;
     },
     close() {}

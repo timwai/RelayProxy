@@ -396,10 +396,10 @@ async function main(){
   // silently inherit the old browser's approval or encrypted pairing.
   const rotatedB=await restartedB.options.evaluate(async()=>{
     const before=(await chrome.storage.local.get('browserDeviceId')).browserDeviceId;
-    // A committed key-store transaction simulates private-key loss without
-    // racing open handles from Chrome's MV3 alarm or readKey(). Whole-database
-    // deletion can spuriously fail with onblocked even when the keys are safe
-    // to remove and correctly re-enroll.
+    // Simulate losing the authoritative atomic key+ID bundle. Legacy records
+    // must also be absent, otherwise a fresh Profile can legally migrate them.
+    // A background MV3 alarm and the options world may both reinitialize;
+    // the IndexedDB readwrite transaction must give them the SAME new ID.
     const db=await new Promise((resolve,reject)=>{
       const request=indexedDB.open('relayproxy-browser-sync',1);
       request.onsuccess=()=>resolve(request.result);
@@ -408,6 +408,7 @@ async function main(){
     try{
       await new Promise((resolve,reject)=>{
         const tx=db.transaction('keys','readwrite');
+        tx.objectStore('keys').delete('device-identity-v2');
         tx.objectStore('keys').delete('signing');
         tx.objectStore('keys').delete('encryption');
         tx.oncomplete=resolve;
@@ -417,8 +418,14 @@ async function main(){
     }finally{db.close();}
     const {getOrCreateIdentity}=await import(
       chrome.runtime.getURL('src/device-identity.js'));
-    const current=await getOrCreateIdentity();
-    return {before,current};
+    // Launch callers from both independently isolated Chrome worlds at once:
+    // neither should ever be given the old ID with new key material.
+    const [current,worker]=await Promise.all([
+      getOrCreateIdentity(),
+      chrome.runtime.sendMessage({type:'GET_STATUS'})
+    ]);
+    if(!worker?.ok)throw new Error('background identity probe failed');
+    return {before,current,workerIdentity:worker.identity};
   });
   assert.equal(rotatedB.before,identityB.deviceId,
     'test did not preserve device ID before losing its private keys');
@@ -426,6 +433,8 @@ async function main(){
     'missing private keys reused an already-enrolled browser ID');
   assert.notEqual(rotatedB.current.signingPublicKey,identityB.signingPublicKey);
   assert.notEqual(rotatedB.current.encryptionPublicKey,identityB.encryptionPublicKey);
+  assert.deepEqual(rotatedB.workerIdentity,rotatedB.current,
+    'options and MV3 background initialized different key/ID bundles');
   const rotatedEnrollment=await workerCommand(restartedB,{type:'REGISTER_BROWSER'});
   assert.equal(rotatedEnrollment.state,'pending',
     'fresh signing keys silently inherited revoked device approval');

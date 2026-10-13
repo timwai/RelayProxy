@@ -13,10 +13,25 @@ function profile(origin='https://example.com'){
   const state=new Map(),jar=new Map(),secrets=new Map();
   const page={local:new Map(),session:new Map()};
   const idb={createObjectStore(){},transaction(){
+    let outstanding=0;
     const tx={objectStore(){return {
-      get(k){const q={};queueMicrotask(()=>{q.result=secrets.get(k);q.onsuccess?.();});return q;},
-      put(v,k){secrets.set(k,v);queueMicrotask(()=>tx.oncomplete?.());}
+      get(k){return operation(()=>secrets.get(k));},
+      put(v,k){return operation(()=>secrets.set(k,v));},
+      delete(k){return operation(()=>secrets.delete(k));}
     }}};
+    function operation(run){
+      const q={};
+      outstanding++;
+      queueMicrotask(()=>{
+        try{q.result=run();q.onsuccess?.();}
+        catch(error){q.error=error;q.onerror?.();}
+        finally{
+          outstanding--;
+          queueMicrotask(()=>{if(outstanding===0)tx.oncomplete?.();});
+        }
+      });
+      return q;
+    }
     return tx;
   },close(){}};
   const cookieKey=c=>JSON.stringify([c.domain,c.path,c.name,!!c.hostOnly,c.partitionKey?.topLevelSite||'']);

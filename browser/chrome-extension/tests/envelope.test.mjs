@@ -96,21 +96,28 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
     const database = {
       createObjectStore() {},
       transaction() {
-        const tx = {
-          objectStore() {
+        let outstanding=0;
+        const tx={
+          objectStore(){
+            function operation(run){
+              const request={};
+              outstanding++;
+              queueMicrotask(()=>{
+                try{request.result=run();request.onsuccess?.();}
+                catch(error){request.error=error;request.onerror?.();}
+                finally{
+                  outstanding--;
+                  queueMicrotask(()=>{
+                    if(outstanding===0)tx.oncomplete?.();
+                  });
+                }
+              });
+              return request;
+            }
             return {
-              get(name) {
-                const request = {};
-                queueMicrotask(() => {
-                  request.result = keys.get(name);
-                  request.onsuccess?.();
-                });
-                return request;
-              },
-              put(value, name) {
-                keys.set(name, value);
-                queueMicrotask(() => tx.oncomplete?.());
-              }
+              get(name){return operation(()=>keys.get(name));},
+              put(value,name){return operation(()=>keys.set(name,value));},
+              delete(name){return operation(()=>keys.delete(name));}
             };
           }
         };
@@ -167,10 +174,10 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
     targetBrowserDeviceId:target.deviceId, offer};
   const sourcePeer = {id:source.deviceId,signingPublicKey:source.signingPublicKey};
   assert.deepEqual(await decryptEncryptedOffer(rule, sourcePeer), policy);
-  assert.rejects(decryptEncryptedOffer({
+  await assert.rejects(decryptEncryptedOffer({
     ...rule, offer:{...offer,policyDigest:'f'.repeat(64)}
   },sourcePeer), /签名/);
-  assert.rejects(decryptEncryptedOffer({
+  await assert.rejects(decryptEncryptedOffer({
     ...rule, offer:{...offer,ciphertext:(offer.ciphertext[0] === 'A' ? 'B' : 'A') + offer.ciphertext.slice(1)}
   },sourcePeer));
   use(a);

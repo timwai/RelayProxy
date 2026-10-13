@@ -19,6 +19,7 @@ import (
 const dataWireOverhead = 24 + 16
 const punchKeepInterval = 10 * time.Second
 const punchSelectionWindow = 120 * time.Millisecond
+
 // Bound endpoint-dependent NAT address learning even for an authenticated peer.
 const maxLearnedPunchAddresses = 8
 const candidatePriorityRTTWeight = int64(2)

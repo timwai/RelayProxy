@@ -184,8 +184,16 @@ async function connectFreshBrowser() {
           if (!authenticated || !pushHandler) throw new Error('未授权的会话数据消息');
           // A push may independently issue control requests. The WebSocket
           // listener must not await it; responses are resolved above.
-          Promise.resolve().then(() => pushHandler(msg)).catch(() => {
-            // The handler maps safe failures to ACK; never log secrets.
+          Promise.resolve().then(async () => {
+            const current = await getOrCreateIdentity();
+            if (socket !== currentSocket || current.deviceId !== identity.deviceId) {
+              if (socket === currentSocket) disconnect();
+              return;
+            }
+            return pushHandler(msg);
+          }).catch(() => {
+            // Identity storage failure must not allow a stale socket to apply a push.
+            if (socket === currentSocket) disconnect();
           });
           return;
         } else if (msg.requestId && requests.has(msg.requestId)) {

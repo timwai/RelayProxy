@@ -172,7 +172,7 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 	ctx, cancel := context.WithCancel(parent)
 	return &Manager{
 		ctx: ctx, cancel: cancel, send: send, local: local, lease: lease,
-		punchTimeout: 1200 * time.Millisecond, keepAlive: 10 * time.Second, idleTimeout: 120 * time.Second, maxExitSessions: 4,
+		punchTimeout: 5 * time.Second, keepAlive: 10 * time.Second, idleTimeout: 120 * time.Second, maxExitSessions: 4,
 		lowPowerIdleTimeout: 60 * time.Second, lowPowerMaxSessions: 1,
 		networkCheckInterval: 10 * time.Second, networkSignature: CurrentNetworkSignature,
 		sessions: make(map[uint64]*Session), pendingAnswers: make(map[uint64]protocol.P2PControlMessage), starting: make(map[string]uint64), cooldowns: make(map[string]failureState),
@@ -964,7 +964,7 @@ func (s *Session) establish(clientRole bool) {
 	}
 	timeout := s.manager.punchTimeout
 	if timeout <= 0 {
-		timeout = 1200 * time.Millisecond
+		timeout = 5 * time.Second
 	}
 	ctx, cancel := context.WithTimeout(s.manager.ctx, timeout+8*time.Second)
 	defer cancel()

@@ -137,4 +137,22 @@ test('partial legacy key loss and corrupt atomic bundle never inherit old approv
   const newIdentity=await options.getOrCreateIdentity();
   assert.notEqual(newIdentity.deviceId,fresh.deviceId,'corrupt bundle must rotate ID and both keys');
   assert.notEqual(newIdentity.signingPublicKey,fresh.signingPublicKey);
+  // A truthy object is not sufficient: unusable or wrongly scoped key material
+  // must rotate the identity before the old approved ID can be reused.
+  p.keys.set('device-identity-v2',{
+    deviceId:newIdentity.deviceId,
+    signing:{publicKey:{},privateKey:{}},
+    encryption:{publicKey:{},privateKey:{}}
+  });
+  const afterFakeKeys=await options.getOrCreateIdentity();
+  assert.notEqual(afterFakeKeys.deviceId,newIdentity.deviceId);
+  const wrongCurve=await crypto.subtle.generateKey(
+    {name:'ECDSA',namedCurve:'P-384'},false,['sign','verify']);
+  p.keys.set('device-identity-v2',{
+    deviceId:afterFakeKeys.deviceId,
+    signing:wrongCurve,
+    encryption:p.keys.get('device-identity-v2').encryption
+  });
+  const afterWrongCurve=await options.getOrCreateIdentity();
+  assert.notEqual(afterWrongCurve.deviceId,afterFakeKeys.deviceId);
 });

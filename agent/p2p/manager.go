@@ -17,6 +17,7 @@ import (
 
 	"relayproxy/internal/acl"
 	directp2p "relayproxy/internal/p2p"
+	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/punch"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
@@ -968,6 +969,9 @@ func (s *Session) establish(clientRole bool) {
 	}
 	ctx, cancel := context.WithTimeout(s.manager.ctx, timeout+8*time.Second)
 	defer cancel()
+	// Prefer real on-link addresses when both devices share a LAN, while
+	// continuing to race every advertised candidate for reliable WAN fallback.
+	candidates = candidate.PrioritizeSameSubnet(candidates, candidate.LocalInterfaceSubnets())
 	result, err := punch.Punch(ctx, conn, candidates, s.ID, s.Token, timeout)
 	if err != nil {
 		s.failDirect(err)

@@ -48,13 +48,21 @@ async function saveKeys(entries) {
 
 // Keep the legacy readKey / saveKeys helpers for the unrelated Cookie HMAC
 // fingerprint key and for migration of existing pre-v2 Chrome Profiles.
-function validKeyPair(pair) {
-  return !!pair?.publicKey && !!pair?.privateKey;
+function validKeyPair(pair, algorithm, privateUsage, publicUsage) {
+  const pub = pair?.publicKey;
+  const priv = pair?.privateKey;
+  return pub?.type === 'public' && priv?.type === 'private' &&
+    pub.algorithm?.name === algorithm && priv.algorithm?.name === algorithm &&
+    pub.algorithm?.namedCurve === 'P-256' && priv.algorithm?.namedCurve === 'P-256' &&
+    (publicUsage === undefined || pub.usages?.includes(publicUsage)) &&
+    priv.usages?.includes(privateUsage) &&
+    priv.extractable === false;
 }
 function validIdentity(record) {
   return typeof record?.deviceId === 'string' &&
     /^browser_[0-9a-f-]{36}$/.test(record.deviceId) &&
-    validKeyPair(record.signing) && validKeyPair(record.encryption);
+    validKeyPair(record.signing, 'ECDSA', 'sign', 'verify') &&
+    validKeyPair(record.encryption, 'ECDH', 'deriveBits', undefined);
 }
 
 async function generateIdentity() {
@@ -104,7 +112,8 @@ async function commitIdentity(candidate,legacyDeviceId) {
           const encryption=encryptionReq.result;
           if(typeof legacyDeviceId==='string' &&
              /^browser_[0-9a-f-]{36}$/.test(legacyDeviceId) &&
-             validKeyPair(signing) && validKeyPair(encryption))
+             validKeyPair(signing, 'ECDSA', 'sign', 'verify') &&
+             validKeyPair(encryption, 'ECDH', 'deriveBits', undefined))
             commit({deviceId:legacyDeviceId,signing,encryption});
           else commit(candidate);
         };

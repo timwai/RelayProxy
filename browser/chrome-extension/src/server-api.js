@@ -80,11 +80,13 @@ function setConnectionState(next){
 const requests = new Map();
 let keepalive = null;
 let connectingPromise = null;
+let authenticatedIdentityId = null;
 let pushHandler = null;
 export function onServerPush(callback) { pushHandler = callback; }
 
 export function currentConnectionState() { return connectionState; }
 export function disconnect() {
+  authenticatedIdentityId = null;
   if (keepalive) clearInterval(keepalive);
   keepalive = null;
   for (const [id, value] of requests) { clearTimeout(value.timer); value.reject(new Error('WSS 已断开')); requests.delete(id); }
@@ -162,13 +164,19 @@ async function connectFreshBrowser() {
           stage = 'authenticated';
           authenticated = true;
           if (handshakeTimer) clearTimeout(handshakeTimer);
+          authenticatedIdentityId = identity.deviceId;
           setConnectionState('AUTHENTICATED');
           if (!finished) { finished = true; resolve({ state: connectionState }); }
           // A live Chrome 116+ MV3 WebSocket needs periodic control traffic.
           // Reconnecting after worker suspension is handled by the caller.
           if (keepalive) clearInterval(keepalive);
           keepalive = setInterval(() => {
-            if (socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify({ type: 'PING' }));
+            if (socket !== currentSocket || socket.readyState !== WebSocket.OPEN) return;
+            getOrCreateIdentity().then(current => {
+              if (socket !== currentSocket) return;
+              if (current.deviceId !== identity.deviceId) disconnect();
+              else socket.send(JSON.stringify({ type: 'PING' }));
+            }).catch(() => { if (socket === currentSocket) disconnect(); });
           }, 20000);
         } else if (msg.type === 'PONG') {
           return;
@@ -219,10 +227,16 @@ async function connectFreshBrowser() {
 // Coalesce user-triggered connection and MV3 alarm reconnect attempts.
 // A second caller must never close a first in-progress AUTH_PROOF socket.
 export function connectBrowser() {
-  if (connectionState === 'AUTHENTICATED' && currentSocket?.readyState === WebSocket.OPEN)
-    return Promise.resolve({ state: connectionState });
   if (connectingPromise) return connectingPromise;
-  const promise = connectFreshBrowser();
+  const promise = (async () => {
+    if (connectionState === 'AUTHENTICATED' && currentSocket?.readyState === WebSocket.OPEN) {
+      const identity = await getOrCreateIdentity();
+      if (identity.deviceId === authenticatedIdentityId)
+        return { state: connectionState };
+      disconnect();
+    }
+    return connectFreshBrowser();
+  })();
   connectingPromise = promise;
   promise.finally(() => {
     if (connectingPromise === promise) connectingPromise = null;
@@ -231,10 +245,8 @@ export function connectBrowser() {
 }
 
 export async function sendControl(type, payload = {}) {
-  if (currentConnectionState() !== 'AUTHENTICATED' ||
-      !currentSocket || currentSocket.readyState !== WebSocket.OPEN) {
-    await connectBrowser();
-  }
+  // Revalidate the persistent Profile identity even for an open WSS socket.
+  await connectBrowser();
   if (requests.size >= 8) throw new Error('配对请求过多，请稍后重试');
   const requestId = crypto.randomUUID();
   return new Promise((resolve, reject) => {

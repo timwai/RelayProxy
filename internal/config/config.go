@@ -96,6 +96,20 @@ type ServerConfig struct {
 		Access AccessConfig `yaml:"access"`
 	} `yaml:"exit"`
 
+	BrowserSync struct {
+		Enabled      bool     `yaml:"enabled"`
+		ExtensionIDs []string `yaml:"extension_ids"`
+		// Migration shim for old Server YAML. Read the previous explicit
+		// listener fields so KnownFields(true) accepts existing installations,
+		// then clear the retired block during normalization. It never appears
+		// in newly written configurations.
+		LegacyNetworkProxy *struct {
+			Listen         string   `yaml:"listen"`
+			Advertise      string   `yaml:"advertise"`
+			AllowedExitIDs []string `yaml:"allowed_exit_ids"`
+		} `yaml:"network_proxy,omitempty"`
+	} `yaml:"browser_sync"`
+
 	Logging struct {
 		Level string `yaml:"level"`
 	} `yaml:"logging"`
@@ -141,6 +155,13 @@ type AgentConfigFile struct {
 		CustomExits   []routing.CustomExit `yaml:"custom_exits,omitempty"`
 	} `yaml:"proxy"`
 
+	BrowserSync struct {
+		LocalProxy struct {
+			Enabled bool   `yaml:"enabled"`
+			Listen  string `yaml:"listen"`
+		} `yaml:"local_proxy"`
+	} `yaml:"browser_sync"`
+
 	RDP struct {
 		Enabled *bool  `yaml:"enabled"`
 		Address string `yaml:"address"` // target-local RDP service; defaults to 127.0.0.1:3389
@@ -171,6 +192,7 @@ type AgentConfigFile struct {
 		AllowPrivateNetwork bool   `yaml:"allow_private_network"`
 		AllowLoopback       bool   `yaml:"allow_loopback"`
 		UpstreamExitID      string `yaml:"upstream_exit_id,omitempty"`
+		BrowserNetworkShare bool   `yaml:"browser_network_share,omitempty"` // opt-in; false by default
 		Upstream            struct {
 			Mode     string `yaml:"mode"` // direct | socks5 | http | https
 			Address  string `yaml:"address"`
@@ -512,6 +534,9 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	if cfg.GUI.VerificationPopupTimeoutSec == nil {
 		value := 15
 		cfg.GUI.VerificationPopupTimeoutSec = &value
+	}
+	if cfg.BrowserSync.LocalProxy.Listen == "" {
+		cfg.BrowserSync.LocalProxy.Listen = "127.0.0.1:21291"
 	}
 	if cfg.Web.Listen == "" {
 		cfg.Web.Listen = "127.0.0.1"

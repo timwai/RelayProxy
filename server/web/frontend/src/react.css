@@ -633,3 +633,113 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
  #root .device-auth-grant-editor .form-grid{grid-template-columns:minmax(0,1fr)}
  #root .device-auth-grant-editor .form-actions>.btn{width:100%}
 }
+
+/* Browser Sync V2: existing Server visual language, task-first layout. */
+#root .browser-sync-refined .page-head{margin-bottom:17px}
+#root .browser-sync-refined .page-head p{margin:6px 0 0;color:var(--muted)}
+#root .browser-sync-refined .panel{padding:0;overflow:hidden}
+#root .browser-sync-refined .browser-sync-summary{
+  display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:15px}
+#root .browser-sync-refined .browser-sync-stat{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  padding:16px 18px;border-radius:13px;border:1px solid var(--line);
+  background:var(--surface2);color:var(--muted);text-align:left;min-width:0}
+#root .browser-sync-refined .browser-sync-stat strong{font-size:23px;color:var(--text);font-weight:800}
+#root .browser-sync-refined .browser-sync-stat.selected{
+  border-color:color-mix(in srgb,var(--brand) 50%,var(--line));
+  background:color-mix(in srgb,var(--brand) 5%,var(--surface2))}
+#root .browser-sync-refined .browser-sync-toolbar{
+  display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:17px 18px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+#root .browser-sync-refined .browser-sync-views{display:flex;gap:8px}
+#root .browser-sync-refined .browser-sync-search{
+  width:min(270px,100%);min-height:38px;border:1px solid var(--line2);
+  background:var(--surface3);color:var(--text);border-radius:9px;padding:9px 12px}
+#root .browser-sync-refined .browser-sync-filters{
+  padding:12px 18px;display:flex;gap:7px;flex-wrap:wrap}
+#root .browser-sync-refined .browser-sync-filters .btn.active{
+  background:color-mix(in srgb,var(--brand) 11%,var(--surface2));
+  border-color:var(--brand);color:var(--brand)}
+#root .browser-sync-refined .browser-sync-filters .btn span{
+  font-size:11px;opacity:.75;margin-left:3px}
+#root .browser-sync-refined .table-wrap{margin:0}
+#root .browser-sync-refined .table-wrap table{min-width:690px}
+#root .browser-sync-refined .table-wrap th,#root .browser-sync-refined .table-wrap td{
+  padding:14px 16px;vertical-align:middle}
+#root .browser-sync-refined .browser-sync-device-name{font-weight:740;color:var(--text)}
+#root .browser-sync-refined .browser-sync-device-id{
+  display:block;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
+  color:var(--muted);font:11px ui-monospace,SFMono-Regular,Consolas,monospace;margin-top:3px}
+#root .browser-sync-refined .browser-sync-device-extra{
+  display:block;color:var(--subtle);font-size:11px;margin-top:4px}
+#root .browser-sync-refined .browser-sync-permissions{display:flex;gap:15px;margin-top:8px}
+#root .browser-sync-refined .browser-sync-permissions label{
+  display:flex;gap:5px;align-items:center;cursor:pointer}
+#root .browser-sync-refined .browser-sync-permissions input{accent-color:var(--brand)}
+#root .browser-sync-refined .browser-sync-approve-controls{max-width:230px}
+#root .browser-sync-refined .browser-sync-approve-controls select{width:100%;min-height:38px}
+#root .browser-sync-refined .browser-sync-requested-identity{font-weight:600;overflow-wrap:anywhere}
+#root .browser-sync-refined .browser-sync-requested-identity .browser-sync-device-extra{display:block;font-weight:400;margin-top:4px}
+#root .browser-sync-refined .browser-sync-actions{white-space:nowrap;text-align:right}
+#root .browser-sync-refined .browser-sync-no-data{text-align:center;padding:30px!important;color:var(--muted)}
+#root .browser-sync-refined .browser-sync-panel-title{
+  display:flex;align-items:center;justify-content:space-between;gap:10px;
+  flex-wrap:wrap;padding:14px 18px;border-bottom:1px solid var(--line)}
+#root .browser-sync-refined .browser-sync-panel-title h3{margin:0}
+#root .browser-sync-refined .browser-sync-extension-id{
+  word-break:break-all;font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace}
+#root .browser-sync-refined .browser-sync-empty{padding:24px}
+#root .browser-sync-refined .browser-sync-empty p{color:var(--muted);margin:7px 0 14px}
+/* Compact Server configuration without repeating every group name. */
+#root .settings-refined .settings-nav-item{min-height:39px}
+#root .settings-refined .settings-nav-item>span{min-width:0}
+#root .settings-refined .settings-nav-item b{font-weight:650}
+#root .settings-refined .settings-refined-heading{
+  display:flex;align-items:center;justify-content:space-between;gap:14px;
+  margin-bottom:15px;flex-wrap:wrap}
+#root .settings-refined .settings-refined-heading h2{margin:0;font-size:22px}
+#root .settings-refined .settings-refined-heading p{
+  color:var(--muted);margin:5px 0 0;font-size:12px}
+#root .settings-refined .config-card-content{padding:22px}
+#root .settings-refined .settings-inline-warning{
+  margin:0;padding:11px 13px;color:var(--warn);background:var(--surface3);
+  border:1px solid var(--line);border-radius:9px;font-size:12px}
+#root .settings-refined .settings-save small{display:block;overflow:hidden;
+  text-overflow:ellipsis;max-width:420px;white-space:nowrap;margin-top:5px}
+@media(max-width:700px){
+  #root .browser-sync-refined .browser-sync-summary{gap:7px}
+  #root .browser-sync-refined .browser-sync-stat{padding:10px;display:block}
+  #root .browser-sync-refined .browser-sync-stat strong{display:block;font-size:21px;margin-top:3px}
+  #root .browser-sync-refined .browser-sync-toolbar{padding:12px}
+  #root .browser-sync-refined .browser-sync-search{width:100%}
+  #root .settings-refined .config-card-content{padding:15px}
+}
+
+/* Browser Sync management: ordinary navigation, no duplicate approval UI. */
+#root .browser-sync-mode-switch{display:flex;flex-wrap:wrap;gap:8px;margin:15px 0}
+#root .browser-sync-mode-switch .btn{min-height:38px}
+#root .browser-sync-refined .browser-sync-toolbar>.muted{font-size:12px}
+#root .browser-sync-refined .browser-sync-live{display:inline-flex;align-items:center;gap:6px;margin-left:8px;font-size:12px;color:var(--muted)}
+#root .browser-sync-refined .browser-sync-live:before{content:"";width:7px;height:7px;border-radius:50%;background:var(--muted)}
+#root .browser-sync-refined .browser-sync-live.is-online{color:var(--ok)}
+#root .browser-sync-refined .browser-sync-live.is-online:before{background:var(--ok)}
+#root .browser-sync-refined .browser-sync-audit-id{font:11px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;word-break:break-all}
+#root .browser-sync-refined .browser-sync-audit-footer{display:flex;gap:12px;justify-content:space-between;align-items:center;flex-wrap:wrap;padding:14px 18px}
+#root .browser-sync-refined .browser-sync-footnote{padding:11px 18px;color:var(--muted);font-size:12px;margin:0}
+#root .browser-sync-refined .browser-sync-legacy-blocks{border-top:1px solid var(--line)}
+#root .browser-sync-refined .browser-sync-legacy-row{padding:12px 18px;display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+#root .browser-sync-refined .browser-sync-legacy-row+.browser-sync-legacy-row{border-top:1px solid var(--line)}
+@media(max-width:600px){
+ #root .browser-sync-mode-switch .btn{flex:1}
+ #root .browser-sync-refined .browser-sync-search{width:100%}
+ #root .browser-sync-refined .browser-sync-toolbar{align-items:stretch}
+ #root .browser-sync-refined .browser-sync-toolbar>.browser-sync-filters{padding:0}
+ #root .browser-sync-refined .browser-sync-audit-footer .btn{width:100%}
+}
+
+#root .browser-sync-refined .browser-sync-audit-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+#root .browser-sync-refined .browser-sync-audit-actions .btn{min-height:34px;display:inline-flex;align-items:center;justify-content:center;text-decoration:none}
+@media(max-width:600px){
+ #root .browser-sync-refined .browser-sync-audit-actions{width:100%}
+ #root .browser-sync-refined .browser-sync-audit-actions .btn{flex:1;min-width:110px}
+}

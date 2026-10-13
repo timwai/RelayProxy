@@ -578,6 +578,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"socks5": payload.SOCKS5, "http": payload.HTTP, "defaultExitId": payload.DefaultExitID,
 		"customExits": payload.CustomExits, "upstreamExitId": payload.UpstreamExitID,
 		"exitEnabled": payload.ExitEnabled, "allowInternet": payload.AllowInternet,
+		"browserNetworkShare": cfg.Exit.BrowserNetworkShare,
 		"allowPrivateNetwork": payload.AllowPrivate, "allowLoopback": payload.AllowLoopback,
 		"accessMode": payload.AccessMode, "accessDomains": payload.AccessDomains, "accessCidrs": payload.AccessCIDRs,
 		"exitUpstream": payload.ExitUpstream, "rdp": payload.RDP, "p2p": payload.P2P, "direct": payload.Direct, "publicDirectAdvertise": cfg.Direct.Public.Advertise, "insecureTls": cfg.Server.InsecureTLS,

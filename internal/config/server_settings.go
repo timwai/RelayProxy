@@ -59,6 +59,13 @@ func NormalizeServerConfig(c *ServerConfig) error {
 			return fmt.Errorf("p2p.rendezvous_advertise: %w", err)
 		}
 	}
+	// The browser network entry is exclusively the existing TLS/TCP relay.
+	// Obsolete explicit listener/advertise/allowlist keys are read only for
+	// migration and never persisted back into the Server configuration.
+	c.BrowserSync.LegacyNetworkProxy = nil
+	if c.BrowserSync.Enabled && !c.IsTLSEnabled() {
+		return errors.New("browser_sync requires TLS on the TCP relay listener")
+	}
 	c.Exit.Access.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Access.Mode))
 	c.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Upstream.Mode))
 	c.Exit.Upstream.Address = strings.TrimSpace(c.Exit.Upstream.Address)
@@ -138,6 +145,24 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	}
 	if listenAddressesOverlap(c.Server.Admin.Listen, c.Server.TLS.Listen) {
 		return errors.New("管理页面和 TCP 隧道的监听地址与端口冲突，请使用不同端口")
+	}
+	if c.BrowserSync.Enabled {
+		if !c.IsAdminTLSEnabled() {
+			return errors.New("browser_sync requires server.admin.tls_enabled=true")
+		}
+		if len(c.BrowserSync.ExtensionIDs) > 32 {
+			return errors.New("browser_sync.extension_ids accepts up to 32 trusted legacy Chrome extension IDs; new extensions use admin approval")
+		}
+		seen := make(map[string]struct{}, len(c.BrowserSync.ExtensionIDs))
+		for _, id := range c.BrowserSync.ExtensionIDs {
+			if len(id) != 32 || strings.Trim(id, "abcdefghijklmnop") != "" {
+				return errors.New("browser_sync.extension_ids contains invalid Chrome extension ID")
+			}
+			if _, duplicate := seen[id]; duplicate {
+				return errors.New("browser_sync.extension_ids contains duplicate Chrome extension ID")
+			}
+			seen[id] = struct{}{}
+		}
 	}
 	if c.NeedsCertificate() && (c.Server.CertFile == "") != (c.Server.KeyFile == "") {
 		return errors.New("server.cert_file and server.key_file must be configured together")
@@ -254,6 +279,8 @@ func CloneServerConfig(c *ServerConfig) *ServerConfig {
 	if c.Exit.AllowInternet != nil {
 		out.Exit.AllowInternet = BoolPtr(*c.Exit.AllowInternet)
 	}
+	out.BrowserSync.ExtensionIDs = slices.Clone(c.BrowserSync.ExtensionIDs)
+	out.BrowserSync.LegacyNetworkProxy = nil
 	out.Exit.Access.Domains = slices.Clone(c.Exit.Access.Domains)
 	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)
 	out.RDP.Ingress.SourceCIDRs = slices.Clone(c.RDP.Ingress.SourceCIDRs)
@@ -380,17 +407,21 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 		policy := c.RelayPolicy()
 		policy.AccessHosts = append([]string{}, policy.AccessHosts...)
 		policy.AccessCIDRs = append([]string{}, policy.AccessCIDRs...)
+		browserSync := c.BrowserSync
+		// A nil or empty legacy extension allowlist has the same semantics.
+		browserSync.ExtensionIDs = append([]string{}, browserSync.ExtensionIDs...)
 		return map[string]any{
 			"server.admin.listen": c.Server.Admin.Listen, "server.admin.tls_enabled": c.IsAdminTLSEnabled(),
 			"server.tls_enabled": c.IsTLSEnabled(), "server.tls.listen": c.Server.TLS.Listen, "server.quic.listen": c.Server.QUIC.Listen,
 			"server.cert_file": c.Server.CertFile, "server.key_file": c.Server.KeyFile,
 			"tunnel.heartbeat_sec": c.Tunnel.HeartbeatSec, "tunnel.max_connections": c.Tunnel.MaxConnections,
 			"tunnel.max_connections_per_device": c.Tunnel.MaxConnectionsPerDevice, "tunnel.bandwidth": c.Tunnel.Bandwidth, "relay_acl": policy,
-			"rdp":      c.RDP,
-			"p2p":      c.P2P,
-			"direct":   c.Direct,
-			"exit":     c.Exit,
-			"database": c.Database,
+			"rdp":          c.RDP,
+			"p2p":          c.P2P,
+			"direct":       c.Direct,
+			"exit":         c.Exit,
+			"browser_sync": browserSync,
+			"database":     c.Database,
 		}
 	}
 	want, running := values(desired), values(active)

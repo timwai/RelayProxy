@@ -1,0 +1,264 @@
+## Browser Sync 真实 Relay TLS/WSS + Chromium A/B 集成测试
+
+CI 独立运行 `node browser/chrome-extension/tests/chromium-wss-e2e.mjs`。首先编译 `go build -o <临时测试可执行文件> ./browser/chrome-extension/tests/wss-fixture`，由测试程序以一次性随机 Bearer 令牌启动两个仅监听 `127.0.0.1` 的随机端口：真实 `server/browser_sync.NewHandler` HTTPS/WSS 和仅供 CI 调用的 Store 管理员批准/撤销接口。**管理员控制接口从未接入正式 Server 路由，也不能与生产数据一起运行。** CI 使用单独的 throwaway Chromium 141 双 Profile，且仅为自签测试 HTTPS 证书开启 `--ignore-certificate-errors`、仅为 `127.0.0.1` 增加 Host 授权；这两项不属于正式 Chrome 扩展安装包。
+
+A/B 均使用真实 MV3 Service Worker，经生产 HTTP 注册（pending）→ 测试专用 Admin Store 审批 → 正式 WSS 挑战签名认证 → E2EE v3 邀请与双端独立校验码 → 接受和确认 → 来源真实 Cookie/Local/Session/IndexedDB 快照经 Relay Server 密文中继 → 接收端实际网页恢复 → B `APPLIED` ACK、A 接受终态回执。另测试撤销接收设备后重连必须拒绝。该测试与不依赖 Server 的 `npm run test:chromium` 互补。
+
+**仍待实机验收：** Windows/macOS 双设备、生产 Server Web 管理员人工审批、真实公网上证书/反代 WSS、Chrome Worker 熄屏重启、断线恢复、Cookie 冲突和登出连通流程、DNS/QUIC/WebRTC、防止页面 MAIN world 干扰、Chrome 打包/版本升级。进度文档：[`docs/browser-session-sync-progress.md`](../../docs/browser-session-sync-progress.md)。
+
+## 真实 Chromium 双 Profile 自动化验收（开发分支）
+
+`.github/workflows/ui-ci.yml` 的 `browser-sync-chromium` job 使用 Playwright 的 Chromium 和两套独立持久 Profile，加载真实 MV3 扩展，通过仅在 127.0.0.1 监听的自有 HTTP 测试网站验证 HttpOnly Cookie 登录、Local/Session Storage、IndexedDB v3 的 Store/索引/Blob/Date、真实 WebCrypto 设备密钥与签名加密、篡改拒绝及 B 设备独立账号冲突保护。运行：在 `browser/chrome-extension` 目录执行 `npm install`、`npx playwright install --with-deps chromium`、`npm run test:chromium`。测试临时复制扩展并只给自有本机测试站点预授权，**不改变正式 Manifest 的可选权限与用户点击授权要求**。
+
+Chromium 实测修复了 v3 IndexedDB 错误版本门禁、注入脚本错误被 `null` 结果掩盖、跨脚本上下文 JSON 属性顺序导致假冲突的问题。恢复后必须回读核对完整 IndexedDB 快照才能报告成功。为访问网站实际 IndexedDB，IndexedDB 操作采用 `MAIN` world 注入，但仍要求精确授权 Origin、完整数据边界/冲突/归属校验；**主世界中的网站脚本可能干扰内建 API，属于待独立安全审查的边界**，不得将此项测试视为生产安全验收。Cookie 与 Web Storage 的既有 ISOLATED 访问方式不变。
+
+该自动化没有启动 RelayProxy Server WSS、没有进行管理员审批，也不能替代 Windows/macOS 真实双设备与网站设备绑定兼容性测试；相应 P0 状态详见 [开发进度文档](../../docs/browser-session-sync-progress.md)。
+
+## 2026-10-11 新增 IndexedDB 会话同步（配对 v3）
+
+新建的 HTTP/HTTPS 网站双端加密配对从 v2 升级为 **v3**：在已有全量 Cookie、Local Storage 和单标签页 Session Storage 的基础上，额外纳入**当前站点 Origin 下的 IndexedDB**，无需手动配置数据库名、Object Store 或记录 Key。已有 v1/v2 配对不自动扩权；请撤销旧配对并由 A 创建新的 v3 配对，在 B 重新接受和核对配对校验码。**A、B Chrome 扩展都必须升级**，无需额外 Agent，也无需变更 Server 数据库、端口或密文中继协议。
+
+采集在获网站权限的**普通 Chrome 顶层标签页**中，采用 ISOLATED world 的 `chrome.scripting.executeScript` 访问同源 IndexedDB；不会执行网页提供的 JavaScript、不会抓取跨源 iframe 或浏览器私有数据库。使用 `indexedDB.databases()` 自动枚举所有可见同源库，并逐个保存版本、Object Store、主键路径、自增配置、索引（含 unique / multiEntry）和记录。结构化值支持常见的 string/number/boolean/undefined/null、日期、BigInt、二进制 ArrayBuffer/TypedArray/DataView、Blob/File、Map/Set、正则、普通对象和数组；不支持不可安全复制的 CryptoKey、循环引用及未知对象类型，遇到此类记录**整次采集失败，不会静默丢弃或输出部分数据**。
+
+安全与一致性：
+
+- IndexedDB 序列化快照上限 **4 MiB**、记录上限 **4096**、最多 **16** 库 / 每库 **64** Store（整个 Cookie + Storage + IndexedDB 明文组合仍受 **5 MiB** 上限；压缩后的密文单帧仍有 **1 MiB** 限制）。超限时明确失败，不采样、不丢 Key、不自行分批绕过安全上限。
+- 来源端按当前 Origin 读取。接收端严格匹配 Origin、数据库版本、Object Store、索引定义。发现本地不同登录记录或冲突时默认拒绝覆盖；仅接收端显式启用覆盖，或者本规则之前写入的内容仍被 HMAC 标记拥有时，才允许覆盖。
+- 每个 IndexedDB 数据库使用读写事务进行 clear/put，保存键和记录完整值；多数据库及 Cookie/Storage 不是单个浏览器事务，依赖仅保存时间戳的恢复 journal、按整库预期状态校验的回滚与 `PARTIAL_ROLLBACK` 暂停保护。新建 DB 时若同步失败会尝试清理，无法完成则提示人工处理，绝不声称原子成功。
+- 来源缺失的数据库在接收端**不会直接删除**；避免把旧版缺字段或暂时消失的 Origin 数据误判为远程注销指令。跨 Origin iframe、Cache Storage、Service Worker 缓存、OPFS 与不在主站 Origin 的数据库不在此版本的覆盖范围。网站自身可能使用设备绑定或不可导出的密钥，恢复后仍可能需要登录。
+- 所有 IndexedDB 值只在签名、ECDH/AES-GCM 端到端加密后的 `SESSION_SNAPSHOT` 中传输。Server 只转发密文；Chrome 本地配置持久化仅存按规则 HMAC 的所有权指纹和事务状态，不保存 IndexedDB 的 Token/记录明文。现有双端批准、序号防重放、冲突处理及终态 ACK 不变。
+
+**实现状态：** 代码与模拟 IndexedDB 单元测试加入 PR #194 的功能分支。仍需 Chrome A/B 真实站点验收，包括浏览器重启、同时打开数据库、版本升级冲突、覆盖/回滚、网络断线、Blob 与非导出 CryptoKey；不能将模拟测试等同于真实会话恢复成功。
+
+## Browser Sync：直接使用 RelayProxy TLS/TCP 中继端口
+
+启用 `browser_sync.enabled: true` 后，Server **自动**在既有 `server.tls.listen` TCP 中继端口上提供 Browser Sync 设备注册、HTTPS/WSS 会话传输以及经过授权的浏览器 HTTPS CONNECT。**不再存在** `browser_sync.network_proxy` 配置块，不需要 `listen`、`advertise`、`allowed_exit_ids`，也不支持第二个独立监听端口。旧 Server YAML 里的该块由升级兼容层自动丢弃，保存配置后不会再写回。独立 Admin Web 端口仍只用于管理。
+
+Chrome 扩展“RelayProxy HTTPS Server”填公开的中继 HTTPS 地址，例如 `https://relay.example.com:443`（不应填写仅管理用的 Admin 端口以便使用站点网络绑定）。B Chrome 使用该已验证 Server Origin 作为网络出口代理地址；Server 下发的临时网络令牌不再带自定义代理 host/port。Cookie / Local Storage / Session Storage 同步本身**不需要 Agent**。只有选用 A Agent 站点出口才要求 Agent 在线且具备 `proxy.exit`、同 Identity 和 `exit.browser_network_share: true`，并经过 A/B 双端明确配对与站点绑定确认；不允许任何未配对的跨身份转发。
+
+如扩展出现“无法建立安全 WSS 连接”，先运行 `curl -v --http1.1 https://你的中继域名:TCP端口/api/v1/browser-sync/health`。新版 Server 正常且 Browser Sync 已启用时响应 `204`，**仅代表 HTTPS 接口可达**，不代表已完成 WSS Upgrade 或设备认证。`404` 表示错端口、旧服务或 Browser Sync 未启用，TLS 失败可能是证书、DNS 或端口防火墙。可以使用带扩展 `Origin`、`Connection: Upgrade`、`Upgrade: websocket`、`Sec-WebSocket-Version`、`Sec-WebSocket-Key` 的 `curl --http1.1` 请求在相同 TCP 中继端口验证是否返回 `HTTP 101`；见网络绑定设计文档。浏览器已连通但仍被拒绝时检查 Server Web 扩展/设备审批。参见 [网络绑定设计](../../docs/browser-session-network-binding.md)。旧版 Server / Chrome 扩展的网络代理令牌结构与新版不同，使用来源 Agent 网络绑定时应一同升级 Server 和 B Chrome 扩展。
+
+## 完整 Storage 大于 180 KiB：加密前压缩与体积限制
+
+较大网站会在 Local Storage / Session Storage 保存大量设置、缓存和登录状态。此前完整 Storage JSON 超过 **180 KiB** 就停止同步，后续还有 224 KiB 客户端和 256 KiB Server 密文上限，导致即使完整网站授权成功也可能无法同步。
+
+新版将完整 Storage JSON 的采集/验证上限改为 **4 MiB**，包含 Cookie 的明文站点状态上限为 **5 MiB**；超过 180 KiB 的传输优先通过 Chrome 原生 `CompressionStream('gzip')` 压缩，再放入原有 AES-GCM 端到端加密与设备 ECDSA 签名的 `SESSION_SNAPSHOT` 中。Server 看到的仍只有密文，不持有压缩前 Cookie/Storage，也不解压。解压端按流累计读取，上限 5 MiB，拒绝压缩炸弹或其他超限输入。**不采样、不截断、不跳过任何 Key**。
+
+加密后密文仍受到独立 **1 MiB** 硬限制（含 AES-GCM Tag），Server 对应单条 WSS 控制帧限制为 **1.5 MiB**。这不等于保证任意 5 MiB 高熵站点数据都可以单帧发送：若 gzip 压缩后仍超限，扩展会拒绝整次同步并提示清理无关站点缓存，再重试；不发生半包应用。未来如需传输不可压缩的大于 1 MiB 会话，可设计独立分片协议、整包哈希和原子提交，不应直接移除帧/解压上限。
+
+兼容性：`browser.sync.v1` 原有 Envelope 签名与密钥格式未变化。小快照保持原来的 JSON 明文结构（仅在端到端加密内部）；新的 gzip wrapper 也位于经过认证的加密明文中。**A、B 两端都需要更新 Chrome 扩展**，并更新 Server 的 WSS 大帧限制；新发件端配旧接收端不能正确恢复 gzip wrapper，旧 Server 不能转发超出原限制的大帧。Cookie-only、HTTP/HTTPS Host 配对和网络出口管理权限均不变。
+
+# RelayProxy Browser Sync — Chrome 扩展（P3 开发预览）
+
+> **代码状态（2026-10-11）**：独立的 Chrome Profile 本机 Agent 代理、HTTP 正向代理、任意合法 TCP CONNECT 地址/端口及原生 DIRECT/PROXY/REJECT 已在 [`b504837`](https://github.com/timwai/RelayProxy/commit/b504837a113a8e312c44335b9077fe3f2e80691e) 集成，Go/UI/Network CI success，但真实 Chrome、WebRTC/UDP/QUIC/DNS/回环绕过及安全验收尚未完成。Cookie 同步仍无需本机 Agent，只有选择本机网络出口才需要安装 B Agent。发布状态仍为 Draft。详情见 [Living Tracker](../../docs/browser-session-sync-progress.md)。
+
+## HTTP 与 HTTPS 站点授权（开发分支）
+
+Chrome 扩展 **完整设置 → 站点授权** 可以从已打开的标签页中选择 `http://` 或 `https://` 站点（包含带端口号的站点 Origin）。HTTP 站点首次授权需要确认明文风险。仅支持这两种网页协议，不支持 `file://`、内部页、FTP 或跨 Origin 自动授权。配对邀请和接收设备接受 HTTP 网站时同样明确提示风险。
+
+- **HTTP 的 Cookie 限制**：只同步在 HTTP 上可用的非 `Secure` Cookie；即使 Chrome 域名查询返回 HTTPS 的 `Secure` Cookie，也不会导出。HTTP 中无效的分区 Cookie 与 `SameSite=None` 非安全 Cookie 被排除/拒绝。原有 v1 命名 Cookie 规则保持 HTTPS-only，需要 HTTP 网站同步请创建 v2 规则。
+- **Web Storage**：在已授权 HTTP Origin 的单个标签页中采集及恢复全部 Local Storage、Session Storage Key，仍遵守大小限制、冲突保护与事务回滚。`http://host` 与 `https://host` 为不同的 Storage Origin。
+- **网络绑定**：当前按配对网站绑定 Agent 出口的功能仅支持 HTTPS 443；HTTP 配对不显示站点绑定入口。Chrome 全局 Agent 代理仍可独立使用，但不能保证 HTTP 网页加密。
+- **安全警告**：RelayProxy 只保护 **A↔B 会话同步** 的端到端加密；HTTP 网站上的 Cookie、Token、请求本身仍可能被窃听与篡改。**Server Admin** 的连接地址与 WSS 身份认证始终要求 HTTPS/TLS，绝不降级。
+
+## 首次接入：仅审批浏览器设备
+
+1. 更新 Server 与 Chrome 扩展，进入 **完整设置 → 连接与设备**，填写中继 HTTPS 地址、身份 ID 与设备名称，点击 **提交设备授权申请**。
+2. Chrome 直接提交浏览器设备 ID、公开签名/加密公钥与扩展 Origin。Origin 只用于安全绑定，**无需批准扩展**；设备仍为待审批、不能访问会话数据。
+3. 管理员在 **Server Web → 浏览器同步** 审核设备，核对设备名称与申请的身份 ID，选择有效身份及发送/接收能力，点击 **批准**。审批只针对该浏览器设备。
+4. Chrome 点击 **连接 Server**，然后对所需网站单独授权并完成双端配对。新的 Chrome Profile / 设备必须独立申请，设备被撤销后也不会自动恢复权限。
+
+WSS 验证已批准设备的签名与其注册时记录的 Chrome 扩展 Origin 一致；即使使用其他扩展 Origin 发出正确签名也无法登录。保留历史扩展级撤销禁用记录的阻断作用，管理员仅在需要恢复该来源时通过“历史禁用来源”清理；旧版 Server 可能仍要求扩展审批，**需要同时升级 Server 与 Chrome 扩展**。
+
+## Chrome 扩展界面（独立设置页，2026-10-11）
+
+- **快捷弹窗**：扩展图标打开的 390 px 弹窗只显示 Server 连接状态/连接操作、全 Chrome Agent 代理快捷开关、活跃站点的手动发送/请求同步及“同步后打开”，并优先展示当前 HTTPS 标签页匹配的配对。弹窗不再包含 Server 地址、Agent 端口、站点增删、设备配对、Cookie/Storage 覆盖确认或撤销操作。
+- **完整配置页**：点击弹窗右上角设置图标或底部“完整设置”，通过 Chrome `chrome.runtime.openOptionsPage()` 打开独立标签页，也可从 `chrome://extensions` 的扩展“详情 → 扩展选项”进入。包括 **连接与设备、浏览器网络、站点授权、设备配对、会话与出口规则** 五个区块。保持原有审批、核验、恢复与安全限制，不改变后台协议。
+- **兼容性**：适配窄屏、触控、暗色系统主题、键盘焦点、状态可读性，扩展页面均由 CSP 兼容的本地静态 CSS/JS 构成。CHIPS 分区 Cookie 支持要求 Chrome 119+。只有实际获批设备、激活且密钥有效的规则才能出现在弹窗快捷操作中。
+- **状态语义**：`APPLIED` 仅代表 Chrome 写入成功，不保证服务端登录成功；`PARTIAL`/`CONFLICT` 需要在完整设置处理。代理开关会影响整个 Chrome Profile，且不是 VPN。
+
+> 说明：以下部分早期 P3 测试步骤与截图描述仍保留历史背景；现在所有配置、授权、创建配对等操作都在独立配置页进行，不再使用弹窗。
+
+**实时开发进度与发布准入**：[P0 上线前必须完成 / P1 正式版 / P2 后续增强及验证记录](../../docs/browser-session-sync-progress.md)。本 README 描述已经编写的开发功能，不能替代真实 Chrome 验收或安全审查。
+
+
+Chrome 扩展直接连接 RelayProxy Server 的 **TLS/TCP 中继 HTTPS/WSS** 入口，不需要安装或运行本机 Agent，也不需要 Native Messaging、SOCKS5 或透明代理。
+
+> **安全声明：** 同步网站会话 Cookie 相当于向另一台设备授予网站账号访问能力。仅限用户自己拥有或明确授权的账号与设备；生产部署前需完成真实 Chrome 双端验证、安全审计和跨浏览器版本回归。网站设备绑定、DBSC、Passkey、多因素验证等机制不能通过复制 Cookie 绕过。
+
+## 功能进度
+
+| 能力 | 状态 |
+|---|---|
+| 每个 Chrome Profile 独立设备签名/加密密钥 | 已实现 |
+| Server 独立浏览器设备注册、管理员审批、撤销 | 已实现 |
+| Chrome 通过签名挑战认证 Relay WSS | 已实现 |
+| A/B 同一 Identity 双端配对及密钥指纹校验 | 已实现 |
+| 指定站点/ Cookie 名称加密邀请 | 已实现 |
+| A 登出后同步删除的 Cookie 安全恢复 | 已实现，B 只清理该规则之前写入且未被修改的 Cookie |
+| 本地 Cookie 归属识别 | Profile 非导出 HMAC 密钥保护，避免保存普通哈希 |
+| 浏览器端 WebCrypto P-256 ECDH/HKDF/AES-GCM 快照加密及签名 | 已实现 |
+| Server 按 ACTIVE 规则签名验收、递增序号防重放、密文路由 | 已实现 |
+| 精确 HTTPS Host、Host-only、Secure、根路径、非分区 Cookie 采集/恢复 | 已实现 |
+| 目标已有不同登录 Cookie 的冲突保护、明确同意后覆盖 | 已实现 |
+| 手动同步、Cookie 变化后自动尝试发送、启动和定时重连请求 | 已实现 |
+| 同步成功后打开网站、RELAYED/APPLIED/CONFLICT/FAILED 状态 | 已实现 |
+| Server Web 浏览器设备管理可视化页面 | 已接入管理员导航，可审批、关联身份和撤销浏览器设备 |
+| 跨 Chrome 真机双端网站登录兼容性验收、完整安全审计 | **未完成** |
+| LocalStorage、IndexedDB、分区 Cookie、跨子域、设备绑定会话 | 旧版规划，参见上方 v3 新实现 |
+
+Chrome 扩展保留最小 Host 权限；所有 Cookie 值只用于内存中的加密处理和指定站点的 Cookie API 写入，**不写入 Server 数据库、浏览器扩展本地存储或日志**。服务器无会话解密密钥，不保存离线快照。启动时如果 A 离线，B 不能恢复最新状态。
+
+目前 `APPLIED` 仅代表 Chrome Cookie API 成功写入，**不代表目标网站服务器验证了登录**。请使用经授权的测试网站或测试账号验证。
+
+## Server 配置
+
+启用 Browser Sync 后，在既有 TLS/TCP 中继端口自动提供受控 HTTPS/WSS 接口；Admin 端口仍单独处理审批：
+
+```yaml
+server:
+  tls:
+    listen: ":443"
+  admin:
+    listen: ":8443"
+    tls_enabled: true
+
+browser_sync:
+  enabled: true
+  extension_ids:
+    - "abcdefghijklmnopabcdefghijklmnop" # 改成 chrome://extensions 里的真实扩展 ID
+```
+
+默认 **`browser_sync.enabled=false`**。使用浏览器信任的 TLS 证书。Chrome 的 RelayProxy HTTPS Server 填的是 **TLS/TCP 中继 HTTPS Origin**，例如 `https://relay.example.com:443`；管理后台继续使用 Admin 端口。站点网络绑定只复用中继端口，无独立网络代理配置。无 Agent 模式无需 P2P。
+
+Browser Sync 设备审批仍由现有 RelayProxy 管理员登录/CSRF 检查保护：
+
+```text
+GET  /api/v1/browser-sync/admin/devices
+POST /api/v1/browser-sync/admin/devices/{id}/approve
+POST /api/v1/browser-sync/admin/devices/{id}/revoke
+```
+
+审批 JSON 示例：
+
+```json
+{"identityId":"已存在且 active 的身份 ID","send":true,"receive":false}
+```
+
+B 设备应由管理员赋予 `receive:true`；A 赋予 `send:true`。浏览器身份不能继承 Agent 的代理和 RDP 权限。
+
+## 两台 Chrome 的测试流程
+
+1. A/B 在 `chrome://extensions` 开启开发者模式，将本目录作为“已解压扩展”加载。确保两台扩展 ID 与 Server 白名单匹配。
+2. A/B 在扩展独立设置页配置并授权中继 HTTPS 地址，分别点击 **注册浏览器设备**。
+3. 在 Server Admin API 中审批 A（发送）、B（接收），并关联到同一 active Identity。
+4. 两边在扩展独立设置页点击 **连接 Server**。A 点击“请求站点权限”，添加准确的 HTTPS **Origin**，不是带路径/查询参数的 URL。
+5. A 在独立设置页刷新设备、选择 B 和已授权的网站，即可创建全 Cookie / Local Storage / 单标签 Session Storage 的加密配对邀请，无需手填任何 Key 名称或值。
+6. B 刷新邀请，阅读网站和 Cookie 白名单，并通过**独立可信渠道**与 A 比较校验码后接受。A 再最终核对并确认，规则状态为 `active`。
+7. A 使用测试账号在 Chrome 正常登录网站；站点 Cookie 变化时扩展会自动尝试发送，也可按“立即发送加密登录状态”。
+8. B 点击“从来源设备请求同步”或“同步成功后打开网站”。B 没有其他登录状态时，写入符合范围的 Cookie；存在不同账号时默认显示 `CONFLICT`，只有用户明确勾选覆盖后才会重试。
+9. 观察最终状态 `APPLIED`。随后确认网站是否实际上无需再次登录；如需再次认证，属于网站兼容性问题，不宣称绕过。
+10. 在 A 测试账号登出后，再观察 B 是否清除此前由该规则写入的 Cookie；B 自己创建或被网站修改的 Cookie 不会被清除。
+11. 任一设备可撤销配对，Server 随即拒绝后续转发并清理本地同步元数据。撤销 RelayProxy 配对 **不会**撤销网站已经签发的会话令牌。
+
+**Cookie 兼容限制：** P3 仅支持所选择网站准确主机上的 Secure、hostOnly、`path=/`、非分区 Cookie；不自动扩展到父域、子域或 CHIPS。对复杂网站，采集可能明确失败而不是扩大 Cookie 读取/写入权限。
+
+## 测试
+
+```bash
+cd browser/chrome-extension
+npm test
+```
+
+Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api`。GitHub PR 的 Go CI 和 UI CI 也包含扩展 WebCrypto、作用域和冲突测试，以及带 TLS 的真实 WebSocket 测试。
+
+设计文档：[Browser Session Sync v1.1](../../docs/browser-session-sync-design-development.md)。本分支是 Draft PR，未合并 `main`。
+
+## 安全状态与兼容性备注
+
+- **设备批准与撤销**：Server Web 的“设备与身份 → 浏览器同步”现在提供浏览器专用管理页面；新接口仍默认关闭。
+- **登出处理**：快照使用加密的 `removedNames` 字段指示来源 Cookie 不再存在。目标设备仅删除此规则上一次恢复且当前值未改变的 Cookie；目标自行登录的相同名称（即使值相同）也不自动取得规则所有权。
+- **指纹数据**：本地只保存由不可导出 HMAC CryptoKey 计算的规则专属 Cookie 归属标签。老版本开发快照的普通 SHA-256 标签会在扩展初始化时清理，不会被用于判断是否可删除。
+- **身份撤销**：停止 RelayProxy 后续同步不意味着目标网站账号退出；必要时使用目标网站的“全部设备退出”功能。
+- **浏览器兼容性**：Chrome 与不同站点的真实登录保持情况仍需授权测试，`APPLIED` 只说明 Chrome Cookie API 处理成功。
+
+## P3 稳定性与安全加固
+
+- **ACK 防伪与一次性确认**：Server 只接受与已验证、已投递的会话密文消息对应的 `messageId`，同时核对来源设备、目标设备和有效规则。收到终态确认后清除投递记录；任意捏造、重复、过期、其他设备发送的 ACK 均拒绝。
+- **旧结果不能覆盖新结果**：来源 Chrome 只接受当前最近一次快照对应的 ACK，按规则记录最新消息 ID 和时间，不保存 Cookie/Token 内容。
+- **断线恢复限频**：浏览器初始化时尝试补齐在线会话；每分钟唤醒只触发检查，成功对账后的周期性请求最低间隔为五分钟。Chrome MV3 Worker 仍可能在断线时休眠，不保证秒级后台在线。
+- **连接复用**：并发点击连接、定时唤醒和控制请求不会同时打开多个挑战认证 WSS 连接。
+- **Cookie 变化合并**：前一次快照发送期间再次变化时，发送完成后会从浏览器重新读取当前状态并补发，而不是丢弃变化。
+- **验证范围**：Go CI 含投递记录、ACK 伪造/重复/过期/撤销测试，Chrome 扩展 CI 含重连复用、限频和过期 ACK 测试。仍须使用经授权的两台实际 Chrome 进行登录/登出兼容性验收。
+
+## P3.1 故障恢复和上线前验证（开发分支）
+
+本阶段额外提供三项故障恢复保护：
+
+1. **Cookie 多字段恢复的失败补偿**：接收端先完整检查 Cookie 作用域、账号冲突与删除权限，再开始写入。写入发生异常时，逆序尝试恢复操作前状态；若浏览器/网站并发修改导致无法安全回滚，标记为 `PARTIAL`，停止后续自动接收，只有用户检查实际登录状态后才能手动解除。
+2. **MV3 Worker 中断保护**：写入前用 `chrome.storage.local` 记录不含 Cookie 值的恢复意图，完成后与管理标记一同清除。若浏览器在写入期间关闭，下次打开扩展会提示检查和恢复，不能默默继续覆盖旧登录。
+3. **序号与同步结果对账**：经认证的来源设备可使用 `SEQUENCE_CURSOR` 读取自己当前 ACTIVE 规则的已接收序号；WSS 断线时服务端保留短期 `APPLIED/FAILED/CONFLICT` 元数据，A 可以通过 `DELIVERY_STATUS` 查询。查询结果 `UNKNOWN` 并不代表 B 一定没写入，不能自动认定为登录失败。
+
+上述元数据不会包含 Cookie 内容。Server 的结果保留窗口是短期的，不是离线 Cookie 邮箱，A 离线时 B 仍可能缺少最新源会话。
+
+新增回归测试包含：多枚 Cookie 第二次写入失败、写入期间网站更新、未清除的恢复意图、浏览器序号记录丢失、设备越权查询以及真实 TLS/WSS 断线后的 ACK 恢复。**这些测试仍不能替代两台真实 Chrome 对授权网站的兼容性测试。**
+
+## B 端本机 Agent 可选出口（开发预览）
+
+使用 B 本机 Agent 时，浏览器扩展可为已配对的 HTTPS 会话规则指定独立回环接入端口。Agent `browser_sync.local_proxy` 仅需 `enabled: true` 和 `listen: "127.0.0.1:21291"`，不需要 Token、用户名密码或 Agent 域名白名单，也不依赖通用 SOCKS5/HTTP/透明代理开关；实际出站遵循 Agent 的 Relay/P2P/QUIC/自定义出口路由，DIRECT/REJECT 不会静默直连。**此无鉴权回环代理也可以被同机其他进程使用**，须在可信设备上显式启用。来源 A 的远端网络代理仍保留独立认证。详见 [网络绑定设计](../../docs/browser-session-network-binding.md)。
+
+## 独立全 Chrome 网络代理（已集成、待真机验收）
+
+普通浏览器网络代理不依赖 Cookie 配对，不额外限定 HTTPS:443、公共 DNS 域名、IP/IPv6/内网地址或 Agent 的 DIRECT/PROXY/REJECT 规则；Chrome 全局代理开关与 HTTP 正向代理已进入分支并有自动化测试。要使用它，必须在 B Agent 上显式开启 `browser_sync.local_proxy`，并通过扩展勾选全 Chrome 代理。**真实 Windows/macOS Chrome、WebSocket、HTTP POST/大流量、Agent 异常及代理覆盖冲突尚未验收**。Cookie 会话的设备批准、双端加密和 Cookie 安全作用域规则继续独立存在。Chrome 代理 API 不是 VPN，UDP/QUIC/WebRTC/部分 DNS 路径需要实测。
+
+## Linux Server Web 的浏览器同步 HTTP 404 排查
+
+**错误「服务端响应无效（HTTP 404）」来自 Server Web 的 `GET /api/v1/browser-sync/admin/devices`**，不是 Chrome Cookie 解密或 WSS 传输失败。开发分支前端在服务端返回非 JSON 404 时会丢失状态，已补保留 HTTP status 的修复；但真正使端点可用仍需更新 Linux Server 二进制和配置。
+
+1. 确认 Linux 当前运行的 `relay-server` 来自 `feat/browser-session-sync` 或包含该功能的正式发布版，不能只更新 Chrome 扩展或 Server React 静态资源。`BrowserSync` 的路由由 Go Server 注册。
+2. 编辑 **Server 运行时真正加载的** YAML（可与 systemd `ExecStart` 中的 `-config` 路径核对），在 Server 现有的 `server.admin` 中设置 `tls_enabled: true`、准备受 Chrome 信任的服务端 TLS 证书和密钥，然后设置：
+   ```yaml
+   browser_sync:
+     enabled: true
+     extension_ids:
+       - "abcdefghijklmnopabcdefghijklmnop" # 换成真实 Chrome 扩展 ID
+   ```
+3. 重启 Linux `relay-server` 进程，查找日志 `[BrowserSync] Browser session relay enabled; extension allowlist size=...` 以及 `[Admin] Web Console & API starting on https://...`。
+4. 在 Linux Server 本机直测 Admin 端口，例如 `curl -k -i --noproxy '*' https://127.0.0.1:20001/api/v1/browser-sync/admin/devices`（按实际 Admin 端口替换）。**未登录时正常返回 401 JSON**；404 为路由尚未注册/版本错误；若直连 401、经公网域名 404，则检查 Nginx/Caddy 的 `/api/v1/browser-sync/` 反向代理路径及端口转发。浏览器同步必须走 **Admin HTTPS**，不能只由反代代理终止 TLS 后以 HTTP 回源，因为服务端扩展入口要求 `r.TLS != nil`。
+5. 管理页面登录后在「设备与身份 → 浏览器同步」重新刷新。A/B 扩展设备注册仍要求配置真实 extension ID、中继 HTTPS origin、设备审批。
+
+## Browser Sync v2: no manual key / extension-ID entry
+
+Choose an open HTTPS tab's origin in the extension popup, grant Chrome host
+permission, choose a receiving device and confirm the E2EE pairing code on
+both devices. New rules capture **every Cookie reachable to that origin**,
+with their paths/domains, plus all Local Storage keys and all Session Storage
+keys in one ordinary, currently open tab. The extension ID is reported via
+its `chrome-extension://` Origin and approved under Server Web → 浏览器同步.
+Server Web → 服务配置 → 浏览器同步 controls service/network settings.
+Legacy named-Cookie rules remain narrow and must be recreated as v2 to
+include all keys.
+
+Important constraints: Session Storage is per-tab, not per-browser or
+across other tabs; a receiving tab may be created in the background to
+restore it. New v3 pairings include bounded same-origin IndexedDB. Cache Storage, service-worker caches, browser
+profiles, device-bound credentials, or cross-origin third-party sessions are
+exported. Snapshots are AES-GCM encrypted and signed between approved
+devices. The Server never decrypts stored website state. Data larger than
+the per-message limit fails explicitly, never truncates keys. A website
+may invalidate tokens or require device fingerprint, IP or re-login.
+
+Initial target-state conflicts are blocked unless the user explicitly
+allows overriding on B. Source logout deletes only state demonstrably
+owned by that same pairing. Interrupted restores require inspection and
+manual resumption. Chrome real-device end-to-end tests (login persistence,
+logout, conflicting accounts, DNS/QUIC/WebRTC leakage boundaries) remain
+mandatory before merging this draft into main.
+
+### 撤销旧设备后无法重新申请（管理员）
+
+Server Web → **浏览器同步 → 浏览器设备** 可以对已撤销设备点击“删除旧设备”（永久清除该设备的配对和会话转发记录，不会删除网站已经颁发的登录 Cookie）。已批准/待审批设备必须先撤销才能删除。
+
+如果旧版曾将某个 Extension ID 全局禁用，需要先删除其关联的旧浏览器设备，再在列表下方的“历史禁用来源”清理记录。清理来源**不会批准设备**；重新提交设备申请后，管理员仍需核对身份、发送/接收权限并批准。同一已撤销设备 ID 不能自行恢复授权。
+
+设备列表优先显示待审批请求（原最多 500 条记录的限制保留），避免大量历史 revoked 记录挡住新授权。上述删除只能使用管理员登录后的管理 API，无法从未获审批的 Chrome 扩展自行触发。

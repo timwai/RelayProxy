@@ -2,13 +2,13 @@ package gateway
 
 import (
 	"bufio"
-	"bytes"
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
-	"io"
 	"net"
 	"net/http"
+	"sync"
 	"time"
 
 	"relayproxy/internal/tunnel"
@@ -83,75 +83,78 @@ func classifySharedTCP(conn net.Conn, negotiatedProtocol string, timeout time.Du
 	return wrapped, isHTTP, nil
 }
 
-type bufferedResponseWriter struct {
-	header http.Header
-	status int
-	body   bytes.Buffer
+// One already-negotiated TLS connection is passed into net/http. Unlike the
+// previous buffered single-response path, this supports WebSocket Upgrade,
+// authenticated CONNECT hijacking and continuous streams without exposing an
+// independent HTTP listener.
+type sharedHTTPConn struct {
+	net.Conn
+	done chan struct{}
+	once sync.Once
 }
 
-func newBufferedResponseWriter() *bufferedResponseWriter {
-	return &bufferedResponseWriter{header: make(http.Header)}
+func (c *sharedHTTPConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(func() { close(c.done) })
+	return err
 }
 
-func (w *bufferedResponseWriter) Header() http.Header {
-	return w.header
+type singleHTTPListener struct {
+	conn net.Conn
+	once sync.Once
 }
 
-func (w *bufferedResponseWriter) WriteHeader(status int) {
-	if w.status != 0 {
-		return
+func (l *singleHTTPListener) Accept() (net.Conn, error) {
+	var conn net.Conn
+	l.once.Do(func() { conn = l.conn })
+	if conn == nil {
+		return nil, net.ErrClosed
 	}
-	w.status = status
+	return conn, nil
 }
+func (l *singleHTTPListener) Close() error   { return nil }
+func (l *singleHTTPListener) Addr() net.Addr { return l.conn.LocalAddr() }
 
-func (w *bufferedResponseWriter) Write(p []byte) (int, error) {
-	if w.status == 0 {
-		w.status = http.StatusOK
-	}
-	return w.body.Write(p)
-}
-
+// Restore the TLS state (when enabled) after protocol sniffing. The wrapper
+// is not a *tls.Conn; never trust user-supplied X-Forwarded-Proto headers.
+// Only the old public push API may be served over plaintext relay.
 func serveSharedHTTPConnection(ctx context.Context, conn net.Conn, handler HTTPHandler) error {
 	if handler == nil {
 		return fmt.Errorf("public HTTP handler is not configured")
 	}
-	_ = conn.SetDeadline(time.Now().Add(20 * time.Second))
-	reader := bufio.NewReaderSize(conn, 32<<10)
-	req, err := http.ReadRequest(reader)
-	if err != nil {
+	tlsConn := underlyingTLSConn(conn)
+	var state *tls.ConnectionState
+	if tlsConn != nil {
+		verified := tlsConn.ConnectionState()
+		state = &verified
+	}
+	observed := &sharedHTTPConn{Conn: conn, done: make(chan struct{})}
+	server := &http.Server{
+		Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Old plaintext relay installations may still receive public
+			// push requests. Browser Sync and CONNECT themselves require
+			// TLS and reject r.TLS == nil at their own authorization gates.
+			r.TLS = state
+			handler.ServeHTTP(w, r)
+		}),
+		ReadHeaderTimeout: 10 * time.Second,
+		IdleTimeout:       30 * time.Second,
+		MaxHeaderBytes:    16 << 10,
+	}
+	// net/http owns the HTTP framing and the ResponseWriter.Hijack
+	// semantics. This Accept-once listener is not reachable outside the
+	// gateway's authenticated TLS socket.
+	err := server.Serve(&singleHTTPListener{conn: observed})
+	if err != nil && !errors.Is(err, net.ErrClosed) && !errors.Is(err, http.ErrServerClosed) {
+		_ = observed.Close()
 		return err
 	}
-	defer req.Body.Close()
-	req.RemoteAddr = conn.RemoteAddr().String()
-	req = req.WithContext(ctx)
-	if tlsConn := underlyingTLSConn(conn); tlsConn != nil {
-		state := tlsConn.ConnectionState()
-		req.TLS = &state
+	select {
+	case <-observed.done:
+	case <-ctx.Done():
+		_ = observed.Close()
 	}
-
-	writer := newBufferedResponseWriter()
-	req.Body = http.MaxBytesReader(writer, req.Body, 64<<10)
-	handler.ServeHTTP(writer, req)
-
-	status := writer.status
-	if status == 0 {
-		status = http.StatusOK
-	}
-	header := writer.header.Clone()
-	header.Set("Connection", "close")
-	response := &http.Response{
-		Status:        fmt.Sprintf("%d %s", status, http.StatusText(status)),
-		StatusCode:    status,
-		Proto:         "HTTP/1.1",
-		ProtoMajor:    1,
-		ProtoMinor:    1,
-		Header:        header,
-		Body:          io.NopCloser(bytes.NewReader(writer.body.Bytes())),
-		ContentLength: int64(writer.body.Len()),
-		Close:         true,
-		Request:       req,
-	}
-	return response.Write(conn)
+	return nil
 }
 
 func underlyingTLSConn(conn net.Conn) *tls.Conn {

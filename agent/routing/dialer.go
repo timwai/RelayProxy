@@ -161,6 +161,14 @@ func (d *RoutingDialer) DialSubscriptionTCP(ctx context.Context, exitID, hostnam
 	return d.tunnel.DialTCP(ctx, exitID, hostname, port)
 }
 
+// DialBrowserNetworkTCP is an independent Chrome-facing entry into the
+// exact same native routing engine used by SOCKS5, HTTP and transparent capture.
+// It imposes no additional host, address, port or routing-action restrictions;
+// PROXY/DIRECT/REJECT are evaluated by the user's normal Agent configuration.
+func (d *RoutingDialer) DialBrowserNetworkTCP(ctx context.Context, host string, port uint16) (net.Conn, error) {
+	return d.DialTCP(ctx, "", host, port)
+}
+
 // DialTCP implements proxy.TunnelDialer.
 // It evaluates routing rules before deciding how to connect.
 func (d *RoutingDialer) DialTCP(ctx context.Context, exitNodeID string, host string, port uint16) (net.Conn, error) {

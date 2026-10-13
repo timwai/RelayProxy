@@ -1,0 +1,436 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>RelayProxy · Server 与浏览器插件界面原型</title>
+<style>
+:root{color-scheme:light;--ink:#18263e;--muted:#718198;--line:#e7ebf1;--canvas:#f5f7fb;--white:#fff;--nav:#152239;--nav2:#21314c;--brand:#4b67ec;--brandsoft:#ecf0ff;--green:#119878;--orange:#d48b2b;--red:#d95663;--shadow:0 8px 27px rgba(25,42,75,.048);font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:15px}
+*{box-sizing:border-box}html,body{margin:0;min-height:100%;background:var(--canvas);color:var(--ink)}button,input,select{font:inherit}button{cursor:pointer}button:disabled{opacity:.45;cursor:not-allowed}button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid #a0aeff;outline-offset:2px}a{text-decoration:none;color:inherit}h1,h2,h3,h4,p{margin:0}h1{font-size:30px;letter-spacing:-.7px;line-height:1.2;font-weight:750}h2{font-size:20px;line-height:1.3;letter-spacing:-.25px}h3{font-size:16px}small{font-size:12px} .muted{color:var(--muted)}
+.topbar{height:70px;background:rgba(255,255,255,.97);border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 36px;gap:18px;position:sticky;top:0;z-index:50;box-shadow:0 1px 3px #12213908}.top-left,.top-right{display:flex;align-items:center;gap:15px}.brand{display:flex;align-items:center;gap:11px;font-size:19px;font-weight:760;letter-spacing:-.7px;white-space:nowrap}.brand-logo{width:34px;height:34px;display:grid;place-items:center;background:#172842;border-radius:11px;color:white}.brand-name{display:flex;align-items:baseline;gap:7px}.brand-name em{font-style:normal;color:var(--muted);font-size:12px;font-weight:500;letter-spacing:0}.v-sep{width:1px;height:25px;background:var(--line);margin:0 8px}.context{display:flex;align-items:center;gap:4px;padding:5px;background:#f1f4f9;border:1px solid #e9edf3;border-radius:12px}.context button{border:0;background:transparent;border-radius:8px;padding:9px 16px;font-size:13px;font-weight:650;color:#687a91;white-space:nowrap}.context button.active{background:white;color:var(--ink);box-shadow:0 1px 5px #182b4418}.proto-tag{color:#75829c;font-size:12px;white-space:nowrap}.avatar{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:#e8edfb;color:#3b56b2;font-size:12px;font-weight:750}.hamburger{display:none;border:0;background:#f3f5fa;border-radius:8px;width:35px;height:35px}
+.app-layout{display:grid;grid-template-columns:248px minmax(0,1fr);min-height:calc(100vh - 70px)}.sidenav{background:linear-gradient(175deg,#16243c,#121e33);padding:25px 15px 25px;display:flex;flex-direction:column;gap:7px;color:#a4b2c7;min-height:calc(100vh - 70px);box-shadow:inset -1px 0 #192e4a}.nav-group{margin:0 8px 10px;padding:0 0 8px;border-bottom:1px solid #ffffff13}.nav-label{color:#74859d;font-size:11px;font-weight:750;letter-spacing:1.7px;text-transform:uppercase;margin:18px 10px 10px}.nav-item{border:0;width:100%;display:flex;align-items:center;gap:12px;text-align:left;background:transparent;color:#a7b5ca;padding:12px 15px;border-radius:10px;font-weight:550;transition:background .16s,color .16s;min-height:45px}.nav-item:hover{background:#24364f;color:#fff}.nav-item.active{background:#364c79;color:#fff;box-shadow:inset 3px 0 #879bff}.nav-item svg{width:18px;height:18px;stroke-width:1.9}.nav-item .count{margin-left:auto;padding:2px 7px;background:#4d68db;color:#fff;border-radius:20px;font-size:11px;font-weight:750}.nav-bottom{margin-top:auto;padding:16px 12px 0;border-top:1px solid #ffffff17;color:#8598b2;font-size:12px;line-height:1.8}.nav-bottom strong{color:#d8e5f7;font-size:13px;font-weight:650}
+.content{min-width:0;padding:33px 42px 110px;max-width:1560px;width:100%;margin:0 auto}.content-head{display:flex;align-items:flex-start;justify-content:space-between;gap:20px;margin-bottom:26px}.eyebrow{font-size:12px;font-weight:800;color:#8190a6;letter-spacing:1.1px;margin-bottom:10px;text-transform:uppercase}.page-sub{margin-top:10px;color:#78879a;font-size:14px;line-height:1.55}.head-actions,.actions{display:flex;align-items:center;gap:9px;flex-wrap:wrap}.btn{border:1px solid #e1e6ef;background:#fff;color:#344660;padding:9px 16px;min-height:39px;border-radius:9px;font-size:13px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:7px;box-shadow:0 1px 2px #182b4410;white-space:nowrap}.btn:hover{border-color:#c7d2ed;background:#f9fbff}.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff;box-shadow:0 4px 12px #4b67ec29}.btn.primary:hover{background:#3755d8}.btn.danger{color:#c34f5a;border-color:#f2d9dd;background:#fff}.btn.danger:hover{background:#fff4f5}.btn.ghost{border:0;box-shadow:none;background:transparent;color:#566986;padding:8px 10px}.btn.icon-only{width:37px;padding:0}.btn.mini{padding:7px 12px;min-height:32px}.btn svg{width:15px;height:15px}.card{background:var(--white);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow);overflow:hidden;margin-bottom:17px}.card-pad{padding:24px}.card-header{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:21px 24px;border-bottom:1px solid var(--line)}.card-header p{font-size:13px;color:var(--muted);margin-top:5px}.card-header h2{font-size:17px}.panel-body{padding:24px}.soft-panel{background:#f7f9fe;border:1px solid #ebeff8;border-radius:12px;padding:16px}.soft-panel h3{margin-bottom:8px}.statusline{display:flex;align-items:center;gap:10px}.status-dot{width:8px;height:8px;border-radius:50%;background:#119878;box-shadow:0 0 0 4px #dff6ef;flex-shrink:0}.status-dot.orange{background:#e19a3a;box-shadow:0 0 0 4px #fff3df}.badge{display:inline-flex;align-items:center;gap:5px;white-space:nowrap;font-weight:700;font-size:11px;line-height:1;border-radius:7px;padding:7px 9px;background:#eef2f9;color:#66758b}.badge.green{background:#e4f7f0;color:#147d62}.badge.orange{background:#fff3e3;color:#a66b1a}.badge.red{background:#fff0f1;color:#ba4d58}.badge.blue{background:#ecf1ff;color:#5269be}.badge.purple{background:#f1eaff;color:#845cbd}.badge.neutral{background:#f0f2f5;color:#7e8998}.row{display:flex;align-items:center;gap:12px}.between{justify-content:space-between}.grow{flex:1;min-width:0}.mono{font:12px/1.5 ui-monospace,SFMono-Regular,Consolas,monospace;color:#8090a5;word-break:break-all}.subtle{font-size:13px;color:#738298}.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:18px}.stat{padding:21px 23px;background:#fff;border:1px solid var(--line);border-radius:14px;display:flex;align-items:center;justify-content:space-between}.stat strong{font-size:27px;font-weight:770;letter-spacing:-1px}.stat span{display:block;color:#78879a;font-size:12px;margin-top:5px}.stat-icon{height:44px;width:44px;border-radius:13px;background:#eff2ff;color:#586cea;display:grid;place-items:center}.stat-icon.orange{background:#fff3e4;color:#b67a31}.stat-icon.green{background:#eaf9f4;color:#159578}
+.toolbar{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:15px;flex-wrap:wrap}.pill-tabs{display:flex;gap:5px;padding:4px;background:#f1f4f9;border:1px solid #e9edf3;border-radius:11px}.pill-tabs button{padding:9px 14px;border:0;border-radius:8px;background:none;color:#74839a;font-weight:650;font-size:13px;white-space:nowrap}.pill-tabs button.active{background:#fff;box-shadow:0 1px 4px #1a2a4220;color:#314865}.search{height:40px;width:265px;max-width:100%;border:1px solid #e0e6f0;border-radius:9px;background:#fff;outline:0;padding:0 12px 0 36px;color:var(--ink);font-size:13px}.search-wrap{position:relative}.search-wrap svg{position:absolute;left:12px;top:12px;width:16px;height:16px;color:#91a0b3}.table-wrap{width:100%;overflow:auto}.data-table{width:100%;border-collapse:collapse;text-align:left}.data-table th{padding:14px 18px;background:#f9fafd;color:#8592a5;font-weight:700;font-size:12px;white-space:nowrap}.data-table td{padding:17px 18px;border-top:1px solid #edf0f5;font-size:13px;color:#566680;vertical-align:middle}.data-table tr:first-child td{border-top:0}.data-table tr:hover td{background:#fcfdff}.device{display:flex;align-items:center;gap:12px}.device .circle{display:grid;place-items:center;width:36px;height:36px;border-radius:11px;background:#eaf0ff;color:#4461c8;flex-shrink:0}.device .circle.mac{background:#ede8ff;color:#805dc2}.device b{font-size:14px;color:#263a57}.device small{display:block;color:#8d99a8;font-size:11px;margin-top:3px}.tags{display:flex;gap:5px;flex-wrap:wrap;margin-top:4px}.table-footer{padding:14px 20px;border-top:1px solid var(--line);color:#9aa7b7;font-size:12px}.empty{padding:50px 20px;text-align:center;color:#8b9bb0}
+.split{display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:17px}.split .card{margin-bottom:0}.mini-kv{display:flex;align-items:center;justify-content:space-between;padding:13px 0;border-bottom:1px solid #eef0f5;font-size:13px}.mini-kv:last-child{border:0}.mini-kv b{font-weight:650;color:#344b66}.endpoint{background:#f5f7fb;border:1px solid #e9edf4;border-radius:10px;padding:12px 14px;font-family:ui-monospace,Consolas,monospace;font-size:13px;color:#36516e;overflow-wrap:anywhere}.two-col{display:grid;grid-template-columns:1fr 1fr;gap:20px}.field{display:block;min-width:0}.field-label{display:block;color:#3f536e;font-size:13px;font-weight:650;margin-bottom:8px}.field input,.field select,.field textarea{border:1px solid #dfe5ed;background:white;min-height:42px;width:100%;padding:10px 12px;border-radius:9px;font-size:14px;color:var(--ink);outline:0}.field input:focus,.field select:focus,.field textarea:focus{border-color:#8294fb;box-shadow:0 0 0 3px #4b67ec13}.field input:disabled{background:#f5f7fa;color:#8a98a8}.field small{display:block;color:#9aa5b4;margin-top:6px;line-height:1.5}.field.wide{grid-column:1/-1}.field textarea{min-height:90px;resize:vertical;line-height:1.6}.config-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px 24px}.setting-row{display:flex;justify-content:space-between;align-items:center;gap:18px;padding:17px 0;border-bottom:1px solid #eef1f5}.setting-row:last-child{border-bottom:0}.setting-row strong{font-size:14px}.setting-row small{display:block;color:#8995a6;margin-top:5px;font-size:12px}.switch{width:44px;height:26px;border:0;border-radius:40px;background:#ced7e6;padding:3px;display:flex;align-items:center;flex-shrink:0;transition:background .17s}.switch:before{content:"";height:20px;width:20px;border-radius:50%;background:white;box-shadow:0 2px 5px #17253c20;transition:transform .17s}.switch.on{background:#5c75e9}.switch.on:before{transform:translateX(18px)}.notice{padding:14px 15px;border:1px solid #e5eaf6;background:#f4f7fd;color:#6e7e95;border-radius:10px;font-size:13px;line-height:1.65}.notice.warning{background:#fff8ed;border-color:#f5e6c9;color:#a2773b}.savebar{position:sticky;bottom:20px;z-index:20;display:flex;align-items:center;justify-content:space-between;gap:20px;background:#152842;color:white;border-radius:13px;padding:15px 19px;box-shadow:0 10px 35px #11253b38;margin-top:22px}.savebar small{color:#aebcd0;display:block;margin-top:3px}.savebar .btn{box-shadow:none}
+.site-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:14px}.site-tile{border:1px solid var(--line);padding:16px;border-radius:12px;display:flex;align-items:center;gap:12px}.site-icon{width:39px;height:39px;display:grid;place-items:center;border:1px solid #e7ebf4;background:#f7f9fc;border-radius:10px;color:#5b72d1;font-weight:800}.site-name{font-size:14px;font-weight:690;color:#334967}.site-meta{color:#9ca8b7;font-size:12px;margin-top:3px}.site-tile .btn{margin-left:auto}.pair-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}.pair-tile{border:1px solid var(--line);border-radius:14px;padding:18px;min-width:0}.pair-head{display:flex;gap:11px;align-items:flex-start;justify-content:space-between}.pair-head h3{font-size:15px;margin:0 0 4px}.pair-meta{font-size:12px;color:#8998a9}.route{display:flex;gap:9px;align-items:center;margin:17px 0;padding:12px 13px;background:#f7f9fc;border-radius:10px;color:#72829a;font-size:12px}.route b{font-size:12px;color:#395270}.route svg{color:#6c81ab}.rule-actions{display:flex;gap:7px;flex-wrap:wrap;align-items:center}.rule-actions .btn{font-size:12px;padding:7px 11px;min-height:34px}.scope{display:flex;gap:6px;flex-wrap:wrap;margin:11px 0 2px}.scope span{font-size:11px;background:#edf1fb;padding:6px 8px;color:#536da6;border-radius:6px;font-weight:650}.flow-steps{display:flex;align-items:center;gap:9px;margin:15px 0}.step{display:flex;align-items:center;gap:7px;font-size:12px;color:#71839a}.step>span{height:22px;width:22px;border-radius:100%;background:#ebf2ff;color:#486bd2;font-size:12px;font-weight:800;display:grid;place-items:center}.step-divider{width:28px;height:1px;background:#d5deee}
+.dialog-overlay{position:fixed;inset:0;z-index:100;background:rgba(13,24,42,.45);display:none;align-items:center;justify-content:center;padding:20px;backdrop-filter:blur(3px)}.dialog-overlay.show{display:flex}.dialog{width:min(100%,550px);max-height:calc(100vh - 40px);overflow:auto;background:white;border-radius:17px;box-shadow:0 25px 85px #101a2a40}.dialog-header{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:20px 24px;border-bottom:1px solid var(--line)}.dialog-header h2{font-size:18px}.dialog-body{padding:23px 24px}.dialog-footer{padding:14px 24px 19px;display:flex;justify-content:flex-end;gap:10px;border-top:1px solid var(--line)}.checkrow{display:flex;gap:12px;align-items:center;border:1px solid #e8ecf4;border-radius:10px;padding:13px;margin-top:9px}.checkrow input{height:16px;width:16px;accent-color:#5573ef}.checkrow strong{font-size:13px}.checkrow small{display:block;color:#94a0b1;margin-top:3px}.toast{position:fixed;z-index:200;bottom:25px;left:50%;transform:translate(-50%,30px);display:flex;gap:10px;align-items:center;max-width:min(490px,calc(100% - 30px));background:#1c314f;color:#fff;border-radius:11px;box-shadow:0 8px 35px #17315244;padding:13px 17px;font-size:13px;opacity:0;pointer-events:none;transition:all .2s}.toast.show{transform:translate(-50%,0);opacity:1}.toast.error{background:#9c3445}
+.prototype-note{border:1px dashed #ccd5e5;border-radius:10px;background:#f9fbff;padding:11px 15px;color:#8695a8;font-size:12px;margin-bottom:17px;display:flex;align-items:center;gap:8px}.help-button{border:0;background:none;color:#536ed3;font-size:12px;font-weight:700;padding:5px}.help-expanded{margin-top:12px;padding:12px 14px;border-radius:10px;background:#f7f9fd;font-size:13px;color:#677a93;line-height:1.8}
+.popup-stage{display:flex;align-items:flex-start;justify-content:center;padding:27px 0 0}.popup-shell{width:400px;max-width:100%;background:#fff;border:1px solid #e4e9f3;box-shadow:0 25px 90px #1428461c;border-radius:19px;overflow:hidden}.popup-header{padding:19px 22px;border-bottom:1px solid var(--line)}.popup-content{padding:18px 21px 20px}.popup-list{display:flex;flex-direction:column;gap:12px;margin-top:15px}.popup-item{border:1px solid var(--line);border-radius:12px;padding:14px}.popup-foot{padding:13px 20px;background:#f8fafd;border-top:1px solid var(--line);display:flex;justify-content:space-between;align-items:center}.popup-foot span{font-size:12px;color:#91a0b0}.popup-shell .btn{font-size:12px}.mobile-only{display:none}
+@media(max-width:1080px){.content{padding:28px 24px 90px}.app-layout{grid-template-columns:216px minmax(0,1fr)}.stats{gap:9px}.stat{padding:17px}.split{grid-template-columns:1fr}.table-wrap{overflow-x:auto}.data-table{min-width:730px}.topbar{padding:0 23px}}
+@media(max-width:760px){.topbar{padding:0 14px;height:63px}.brand-name em,.proto-tag,.top-right .v-sep{display:none}.brand{font-size:17px}.context{max-width:calc(100vw - 120px);overflow:auto}.context button{padding:8px 10px;font-size:12px}.avatar{display:none}.hamburger{display:grid;place-items:center}.app-layout{display:block;min-height:calc(100vh - 63px)}.sidenav{position:fixed;top:63px;bottom:0;left:0;width:245px;z-index:49;transform:translateX(-103%);transition:transform .2s;min-height:0;overflow-y:auto}.sidenav.mobile-open{transform:translateX(0)}.content{padding:22px 15px 90px}.content-head{align-items:flex-start}.head-actions{justify-content:flex-end}.content-head .btn{min-height:35px;padding:7px 11px}.stats{grid-template-columns:repeat(3,1fr)}.stat{padding:12px;flex-direction:column;align-items:flex-start}.stat strong{font-size:22px}.stat-icon{display:none}.card-header,.panel-body,.card-pad{padding:17px}.pair-grid,.site-grid,.two-col,.config-grid{grid-template-columns:1fr}.field.wide{grid-column:auto}.stats .stat span{font-size:11px}.toolbar{flex-direction:column;align-items:stretch}.search{width:100%}.search-wrap{flex:1}.savebar{bottom:8px;margin:16px -3px 0}.popup-stage{padding:5px 0 0}.popup-shell{width:100%}h1{font-size:26px}.prototype-note{font-size:11px}}
+/* --- Style alignment v2: values and components follow the existing RelayProxy web UIs. --- */
+:root{--ink:#111827;--muted:#6b7280;--line:rgba(15,23,42,.09);--canvas:#f4f7fb;--white:#fff;--brand:#1677ff;--brandsoft:#eaf3ff;--green:#16a36a;--orange:#d98b00;--red:#e5484d;--shadow:0 7px 25px rgba(24,49,95,.045);font-size:13px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI Variable","Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+html,body{background:radial-gradient(circle at 8% 0%,rgba(111,111,255,.08),transparent 32%),radial-gradient(circle at 94% 0%,rgba(22,119,255,.07),transparent 28%),var(--canvas);color:var(--ink);font-size:13px}
+.review-heading{display:flex;align-items:center;gap:9px;white-space:nowrap;font-size:13px}.review-heading strong{font-weight:800;color:#294a82}.review-heading span{font-size:12px;color:#8995a8}
+.topbar{height:52px;padding:0 22px;border-bottom:1px solid #e3e8f2;box-shadow:none;background:#fff;gap:15px}
+.topbar .context{padding:3px;gap:2px;background:#f1f5fc;border-color:#e6eaf2;border-radius:9px}
+.context button{font-size:12px;padding:7px 12px;font-weight:700;border-radius:7px}
+.context button.active{color:var(--brand);background:#fff;box-shadow:0 1px 5px #1f467b15}
+.proto-tag{font-size:11px}.avatar{display:none}
+.app-layout{grid-template-columns:242px minmax(0,1fr);height:calc(100vh - 52px);min-height:0;overflow:hidden}
+.sidenav{background:rgba(246,248,252,.96);border-right:1px solid var(--line);padding:17px 12px 13px;box-shadow:none;color:var(--muted);min-height:0;height:100%;overflow:hidden}
+.sidenav .nav-scroll{overflow:auto;min-height:0;flex:1;padding-right:2px}.sidenav .sidebar-brand{display:flex;gap:11px;padding:8px 10px 18px;align-items:center}
+.sidebar-mark{display:flex;width:40px;height:40px;align-items:center;justify-content:center;flex:none;background:transparent;border:0}
+.sidebar-word{display:flex;flex-direction:column;gap:2px}.sidebar-word b{font-size:17px;letter-spacing:-.5px;color:#111827}.sidebar-word small{font-size:9px;letter-spacing:1.35px;font-weight:750;color:#94a3b8}
+.sidenav .nav-group{margin:0 0 8px;padding:0;border:0}.nav-label{color:#94a3b8;font-size:11px;letter-spacing:.7px;font-weight:800;margin:9px 9px 5px}
+.sidenav .nav-item{padding:9px 11px;min-height:41px;color:#6b7280;border-radius:9px;font-weight:650;font-size:12px;gap:10px}
+.sidenav .nav-item svg{height:16px;width:16px;flex:none;color:inherit}
+.sidenav .nav-item:hover{color:var(--ink);background:#edf3fa}
+.sidenav .nav-item.active{background:linear-gradient(90deg,#e5f1ff,#f2f4ff);color:#1677ff;box-shadow:inset 3px 0 #1677ff}
+.sidenav .nav-item.nav-disabled{opacity:.77}.sidenav .nav-item.nav-disabled:hover{background:transparent;color:#6b7280;cursor:default}
+.nav-item .count{background:#e5484d;color:white;font-size:10px;padding:1px 6px;margin-left:auto}
+.nav-bottom{padding:12px 9px;border-top:1px solid #e7ebf1;margin:5px 2px 0;display:flex;gap:10px;align-items:center;color:#374151;font-size:12px;line-height:1.3}
+.nav-bottom span{font-weight:700}.nav-bottom small{display:block;color:#8997a9;font-weight:500;margin-top:4px}
+.server-state-dot{width:8px;height:8px;box-shadow:0 0 0 4px #e6f8f0;border-radius:100%;background:#16a36a;flex:none}
+.content{overflow:auto;padding:28px 30px 90px;max-width:none;height:100%;margin:0;min-height:0}
+.content>*{max-width:1360px;margin-left:auto;margin-right:auto}
+.content-head{margin-bottom:21px;align-items:center}.content-head h1{font-size:26px;letter-spacing:-.6px;font-weight:800;color:#111827}
+.eyebrow{font-size:10px;color:#8fa0b5;margin:0 0 5px;letter-spacing:1.2px;font-weight:800}
+.page-sub{font-size:13px;margin-top:4px;color:#6b7280;line-height:1.4}
+.btn{border:1px solid #e0e6ee;color:#34445d;background:#fff;min-height:35px;padding:8px 12px;border-radius:9px;font-size:12px;font-weight:730;box-shadow:none}
+.btn.primary{background:linear-gradient(115deg,#1677ff,#625df4);border-color:transparent;box-shadow:0 4px 12px #1677ff24}.btn.primary:hover{background:#0769ef}
+.btn.danger{color:#de4155;border-color:#f3d4dc;background:#fff}.btn.mini{padding:6px 10px;min-height:32px;font-size:11.5px}
+.btn:hover{background:#f7faff}
+.card{border:1px solid #e5eaf2;background:#fff;border-radius:14px;box-shadow:var(--shadow);margin-bottom:15px}
+.card-header{padding:18px 20px;background:linear-gradient(100deg,#f7faff,#fff 62%);border-color:#eff1f6}
+.card-header h2{font-size:15px;font-weight:800;color:#202b40;letter-spacing:-.15px}
+.card-header p{font-size:11.5px;margin-top:4px}
+.panel-body{padding:19px 20px}.card-pad{padding:19px}
+.stats{gap:13px;margin-bottom:15px}.stat{border-radius:13px;padding:16px 20px;background:#fff;border:1px solid #e6ebf3}.stat strong{font-size:26px;color:#111827}.stat span{font-size:12px}.stat-icon{background:#edf3ff;color:#4779e8;border-radius:11px}
+.stat-icon.orange{background:#fff3e8;color:#d48b2b}.stat-icon.green{background:#e8f8ef;color:#159d73}
+.badge{border-radius:7px;padding:6px 8px;font-size:11px;background:#eff3f8;color:#5b6b7f}
+.badge.green{background:#e6f7ef;color:#108360}.badge.orange{background:#fff3e4;color:#a76c19}.badge.blue{background:#e8f2ff;color:#2453b2}.badge.red{background:#fff0f0;color:#ce4256}.badge.purple{background:#f0ecff;color:#7554c4}
+.pill-tabs{border:1px solid #e9edf5;border-radius:9px;background:#f4f6fa;padding:3px}
+.pill-tabs button{font-size:12px;padding:8px 12px}.pill-tabs button.active{color:#1677ff}
+.search,.field input,.field select,.field textarea{border-color:#e1e7f0;border-radius:9px;font-size:13px;background:#f9fbfe;color:#111827}
+.search{height:38px}.field input,.field select{min-height:39px}.field-label{color:#34435b;font-size:12px}
+.data-table th{background:#f7f9fd;color:#6f819b;font-size:11.5px;padding:12px 15px}
+.data-table td{border-color:#edf0f5;padding:14px 15px;font-size:12px}.data-table td .device b{font-size:12px}
+.device .circle{width:34px;height:34px;border-radius:9px;background:#e6efff;color:#2475db}.device .circle.mac{background:#eaeaff;color:#7562d8}
+.device small{font-size:11px}.table-footer{font-size:11px;padding:12px 16px}
+.endpoint{background:#f7f9fc;border:1px solid #ebeff4;color:#42556d;border-radius:9px;font-size:12px}
+.soft-panel{background:#f7f9fc;border-color:#e5e9f3;border-radius:11px}
+.setting-row{border-radius:10px}.config-grid{gap:17px 20px}.config-grid .setting-row{background:#f8fbff}
+.savebar{background:#fff;border:1px solid #e5eaf2;color:#15243b;box-shadow:0 8px 30px #172c4d12;border-radius:12px;bottom:12px;padding:12px 16px}
+.savebar small{color:#8290a4}.savebar .btn.primary{color:#fff}
+.dialog{background:#fff;border-radius:16px}.dialog-header{padding:17px 21px}.dialog-header h2{font-size:16px}.dialog-body{padding:20px}.dialog-footer{padding:12px 20px}
+.toast{background:#23324a}.toast.error{background:#b63c4b}
+.prototype-note{display:none}
+/* Chrome extension full settings: retain the existing light top bar + left navigation. */
+.view-extension{--canvas:#f3f6fc;--ink:#15243b;--muted:#67768c;--brand:#3267df;--brandsoft:#edf3ff;--line:#e2e8f2;--shadow:0 6px 20px rgba(23,46,86,.055)}
+.view-extension .app-layout{display:grid;grid-template-columns:218px minmax(0,1fr);padding:24px 34px 60px;gap:30px;height:calc(100vh - 52px);max-width:1460px;margin:auto;overflow:visible}
+.view-extension .sidenav{background:transparent;border:0;padding:9px 0 0;height:auto;min-height:0;position:sticky;top:24px;box-shadow:none}
+.view-extension .nav-group{padding:0}
+.view-extension .nav-label{font-size:11px;letter-spacing:1.25px;padding:0 10px;margin:0 0 13px}
+.view-extension .nav-item{padding:12px 13px;min-height:43px;border-radius:12px;font-size:13px;gap:13px}
+.view-extension .nav-item svg{width:18px;height:18px;color:#3267df}
+.view-extension .nav-item.active{box-shadow:none;background:#edf3ff;color:#2453b2}
+.view-extension .content{padding:0 0 70px;overflow:visible;height:auto;margin:0}
+.view-extension .content>*{max-width:940px;margin-left:0;margin-right:0}
+.view-extension .content-head{margin:7px 0 27px}.view-extension .content-head h1{font-size:29px;letter-spacing:-.85px;color:#15243b}
+.view-extension .page-sub{font-size:13px;color:#67768c}
+.view-extension .card{border:1px solid #e2e8f2;border-radius:17px;box-shadow:0 6px 20px #172e5610}
+.view-extension .card-header{background:#fff;padding:20px 23px}.view-extension .card-header h2{font-size:16px}
+.view-extension .panel-body{padding:21px 23px}.view-extension .card-header p{display:none}
+.view-extension .btn.primary{background:#3267df;border-color:#3267df;box-shadow:none}.view-extension .btn.primary:hover{background:#2453b2}
+.view-extension .btn{font-size:12px;min-height:37px}
+.view-extension .eyebrow{letter-spacing:1.6px;color:#2453b2}
+.view-extension .stat-icon{background:#edf3ff}
+.view-extension .savebar{background:#fff}
+/* Mini popup mimics the browser action popup, not a third full web application. */
+.view-popup .app-layout{display:block;height:calc(100vh - 52px);overflow:auto}
+.view-popup .content{padding:23px 22px 80px;height:auto;overflow:visible}.view-popup .content>*{max-width:820px}
+.view-popup .popup-stage{padding:10px 0 0}
+.view-popup .popup-shell{width:390px;border:1px solid #e2e8f2;border-radius:15px;box-shadow:0 12px 45px #17305715}
+.view-popup .popup-header{height:74px;padding:17px 20px}.view-popup .popup-content{padding:18px 18px 20px}
+.view-popup .popup-shell .brand-logo{background:linear-gradient(135deg,#305de8,#14a5cc);border-radius:10px}
+.view-popup .popup-shell .soft-panel{background:linear-gradient(115deg,#edf3ff,#fff 85%);border:1px solid #e2e8f2}
+.view-popup .popup-item{border:1px solid #e2e8f2;border-radius:15px;padding:12px}
+.view-popup .popup-foot{background:#fff;border-color:#e2e8f2}
+@media(max-width:1070px){.view-server .content{padding:23px 18px 80px}.view-extension .app-layout{gap:18px;padding:20px 18px 60px}}
+@media(max-width:760px){
+ .topbar{height:56px;padding:0 12px;gap:6px}.review-heading span,.proto-tag{display:none}
+ .review-heading strong{font-size:12px}.context{gap:1px}.context button{font-size:11px;padding:7px 7px}
+ .hamburger{display:grid;place-items:center;background:#f3f6fb}
+ .app-layout{display:block;height:calc(100vh - 56px);overflow:auto}
+ .sidenav{position:fixed;top:56px;bottom:0;left:0;width:250px;height:auto;min-height:0;z-index:49;background:#f7f9fd;border-right:1px solid var(--line);overflow:auto;transform:translateX(-104%)}
+ .sidenav.mobile-open{transform:translateX(0)}
+ .content{height:auto;min-height:calc(100vh - 56px);overflow:visible;padding:19px 14px 85px}
+ .content-head{margin-bottom:16px}.content-head h1{font-size:23px}
+ .stats{grid-template-columns:repeat(3,1fr)}.stat{padding:12px}.stat strong{font-size:23px}
+ .pair-grid,.site-grid,.two-col,.config-grid{grid-template-columns:1fr}
+ .view-extension .app-layout{display:block;padding:0;height:calc(100vh - 56px)}
+ .view-extension .sidenav{position:fixed;top:56px;left:0;width:250px;height:calc(100vh - 56px);transform:translateX(-104%);background:#f7f9fd;overflow-y:auto;padding:17px 13px;z-index:49;box-shadow:10px 0 30px #13243d18}
+ .view-extension .sidenav.mobile-open{transform:translateX(0)}
+ .view-extension .content{padding:20px 15px 60px;overflow:visible}
+ .view-extension .content-head h1{font-size:25px}
+ .view-popup .content{padding:14px 12px 60px}.view-popup .popup-stage{padding-top:0}
+ .view-popup .popup-shell{width:390px;max-width:100%}
+}
+
+
+/* Server settings uses the existing two-level configuration navigation. */
+.view-server .config-layout{display:grid;grid-template-columns:224px minmax(0,1fr);align-items:start;gap:19px}
+.view-server .config-left{position:sticky;top:8px;border:1px solid #e2e8f2;border-radius:13px;background:#fff;padding:12px 8px;max-height:calc(100vh - 100px);overflow:auto}
+.view-server .config-nav-group{margin-bottom:11px}
+.view-server .config-nav-label{font-size:10px;font-weight:800;color:#94a3b8;padding:9px 12px 6px;letter-spacing:.7px}
+.view-server .config-nav-item{display:flex;gap:9px;align-items:center;text-align:left;width:100%;min-height:40px;border:0;background:transparent;border-radius:8px;padding:9px 12px;color:#69778e;font-size:12px;font-weight:650}
+.view-server .config-nav-item svg{color:#7285a5;flex:none}
+.view-server .config-nav-item.active{background:#eaf3ff;color:#1677ff}
+.view-server .config-nav-item.active svg{color:#1677ff}
+.view-server .config-nav-item:hover:not(.active){background:#f3f7fc}
+.view-server .config-main{min-width:0}
+.view-server .config-section-title{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:2px 1px 14px}
+.view-server .config-section-title h2{font-size:19px;letter-spacing:-.3px;color:#172235}
+.view-server .config-section-title p{font-size:12px;color:#79879b;margin-top:5px}
+.view-server .config-risk{padding:10px 13px;border:1px solid #fae0b2;border-radius:9px;background:#fff9ed;color:#986424;font-size:12px}
+@media(max-width:1000px){.view-server .config-layout{grid-template-columns:184px minmax(0,1fr);gap:13px}}
+@media(max-width:760px){.view-server .config-layout{display:block}.view-server .config-left{position:static;max-height:none;display:flex;gap:6px;padding:7px;overflow-x:auto;margin-bottom:17px}.view-server .config-nav-group{display:flex;gap:4px;margin:0}.view-server .config-nav-label{display:none}.view-server .config-nav-item{white-space:nowrap;min-width:max-content;padding:8px 10px}.view-server .config-nav-item svg{display:none}}
+
+.extension-product-head{display:none}
+.view-extension .app-layout{grid-template-rows:70px minmax(0,1fr);grid-template-columns:218px minmax(0,1fr);column-gap:30px;row-gap:0;padding:0 34px 60px;max-width:1460px}
+.view-extension .extension-product-head{display:flex;grid-column:1 / -1;grid-row:1;align-items:center;gap:12px;background:#fff;border-bottom:1px solid #e2e8f2;padding:0 24px;margin:0 -34px 0}
+.extension-mark{height:36px;width:36px;border-radius:11px;background:linear-gradient(135deg,#305de8,#14a5cc);display:grid;place-items:center;color:white;font-size:19px;font-weight:850}
+.extension-word{display:flex;flex-direction:column;gap:1px}.extension-word b{font-size:15px}.extension-word span{font-size:11px;color:#67768c}
+.extension-product-sep{width:1px;height:23px;background:#e2e8f2;margin:0 10px}
+.extension-product-head>strong{font-size:13px}.extension-pre-label{margin-left:auto;color:#2453b2;background:#edf3ff;border-radius:7px;padding:5px 9px;font-size:11px;font-weight:750}
+.view-extension .sidenav{grid-row:2;grid-column:1;padding-top:31px}
+.view-extension .content{grid-row:2;grid-column:2;padding:30px 0 70px;min-width:0}
+@media(max-width:760px){.view-extension .app-layout{display:block;padding:0;height:calc(100vh - 56px)}.view-extension .extension-product-head{margin:0;height:62px;padding:0 15px}.extension-product-head>strong,.extension-product-sep{display:none}.view-extension .sidenav{top:56px}.view-extension .content{padding:20px 15px 60px}}
+</style>
+</head>
+<body>
+<div class="topbar">
+ <div class="top-left">
+  <button class="hamburger" id="toggle-menu" aria-label="展开菜单">☰</button>
+  <div class="review-heading"><strong>RelayProxy</strong><span>页面优化原型</span></div>
+ </div>
+ <div class="context" role="tablist" aria-label="原型视图"><button data-context="server" class="active">Server Web</button><button data-context="extension">Chrome 扩展设置</button><button data-context="popup">扩展弹窗</button></div>
+ <div class="top-right"><span class="proto-tag">视觉沿用现有项目 · 演示数据</span></div>
+</div>
+<div class="app-layout">
+ <div class="extension-product-head" aria-label="Chrome 浏览器扩展页眉"><div class="extension-mark">R</div><div class="extension-word"><b>RelayProxy</b><span>Browser Sync</span></div><div class="extension-product-sep"></div><strong>浏览器设置</strong><span class="extension-pre-label">开发预览</span></div>
+ <aside class="sidenav" id="sidebar"></aside>
+ <main class="content" id="page" role="main"></main>
+</div>
+<div class="dialog-overlay" id="modal" role="presentation"><div class="dialog" role="dialog" aria-modal="true" aria-labelledby="modal-title"><div class="dialog-header"><h2 id="modal-title"></h2><button class="btn ghost icon-only" data-close="1" aria-label="关闭弹窗">✕</button></div><div class="dialog-body" id="modal-body"></div><div class="dialog-footer" id="modal-actions"></div></div></div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script>
+(function(){
+ const $=id=>document.getElementById(id);
+ const icon=(name,size=18)=>{
+  const data={
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1.4"/><rect x="14" y="3" width="7" height="7" rx="1.4"/><rect x="3" y="14" width="7" height="7" rx="1.4"/><rect x="14" y="14" width="7" height="7" rx="1.4"/>',
+    laptop:'<rect x="3" y="4" width="18" height="14" rx="2"/><path d="M2 21h20"/>',
+    sliders:'<path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2" fill="currentColor" stroke="white"/><circle cx="16" cy="17" r="2" fill="currentColor" stroke="white"/>',
+    shield:'<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
+    users:'<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87M16 3.13a4 4 0 0 1 0 7.75"/>',
+    plug:'<path d="M7 2v5m10-5v5M5 7h14v4a7 7 0 0 1-7 7v4M5 7v4a7 7 0 0 0 7 7"/>',
+    globe:'<circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>',
+    link:'<path d="M10 13a5 5 0 0 0 7 .3l3-3a5 5 0 1 0-7.1-7.1l-1.7 1.7M14 11a5 5 0 0 0-7-.3l-3 3a5 5 0 1 0 7.1 7.1l1.7-1.7"/>',
+    network:'<rect x="2" y="8" width="5" height="5" rx="1"/><rect x="17" y="2" width="5" height="5" rx="1"/><rect x="17" y="16" width="5" height="5" rx="1"/><path d="M7 10.5h6V4.5h4M13 10.5v8h4"/>',
+    database:'<ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M3 5v14c0 2 4 3 9 3s9-1 9-3V5M3 12c0 2 4 3 9 3s9-1 9-3"/>',
+    lock:'<rect x="4" y="11" width="16" height="11" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>',
+    wifi:'<path d="M2 8c6-6 14-6 20 0M5 12c4-4 10-4 14 0M9 16c2-2 4-2 6 0"/><circle cx="12" cy="20" r="1" fill="currentColor"/>',
+    refresh:'<path d="M20 11a8 8 0 0 0-14-5l-2 2M4 3v5h5M4 13a8 8 0 0 0 14 5l2-2M20 21v-5h-5"/>',
+    check:'<path d="m4 12 5 5L20 6"/>',search:'<circle cx="11" cy="11" r="7"/><path d="m16 16 5 5"/>',
+    plus:'<path d="M12 5v14M5 12h14"/>',chevron:'<path d="m9 18 6-6-6-6"/>',
+    info:'<circle cx="12" cy="12" r="10"/><path d="M12 11v6M12 7h.01"/>',
+    arrow:'<path d="M4 12h16m-6-6 6 6-6 6"/>',copy:'<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/>',
+    settings:'<circle cx="12" cy="12" r="3"/><path d="m19 13 2 1-2 4-2-1-2 2-1 2h-4l-1-2-2-2-2 1-2-4 2-1v-2l-2-1 2-4 2 1 2-2 1-2h4l1 2 2 2 2-1 2 4-2 1Z"/>'
+  };
+  return '<svg width="'+size+'" height="'+size+'" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-linecap="round" stroke-linejoin="round" stroke-width="1.75" aria-hidden="true">'+(data[name]||data.grid)+'</svg>';
+ };
+ const escapeHTML=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+ const state={context:'server',serverPage:'browser',serverGroup:'browserSync',serverFilter:'all',serverSearch:'',extensionPage:'connection',dirty:false,configSearch:'',mobile:false,help:false,extensionOnline:true,fullProxy:false,port:21291,serverURL:'https://www.tingjusting.fun:21000',extensionFilter:'all'};
+ const devices=[
+  {id:'browser_f3ad1f8c-21ba-4d7c',name:'MacBook Pro · Chrome',os:'mac',identity:'个人设备',state:'pending',time:'刚刚',cap:'发送 · 接收',ext:'ikdmja…bjhnd'},
+  {id:'browser_4a8f88c9-70ba-4dd9',name:'Windows 11 · Chrome',os:'win',identity:'个人设备',state:'approved',time:'10 分钟前',cap:'接收',ext:'ikdmja…bjhnd'},
+  {id:'browser_62da6610-29bb-42fa',name:'Mac mini · Chrome',os:'mac',identity:'办公设备',state:'approved',time:'昨天',cap:'发送',ext:'ikdmja…bjhnd'},
+  {id:'browser_78abb191-0fbc-4fe5',name:'旧版 Chrome',os:'win',identity:'个人设备',state:'revoked',time:'10 月 8 日',cap:'—',ext:'oabjml…acmpk'}
+ ];
+ const extensions=[
+  {id:'ikdmjapinejdhcmglnjcjgkfbcgbjhnd',name:'RelayProxy Browser Sync',state:'approved',devices:3},
+  {id:'oabjmlnahbhpgcnpbfplphnafhgacmpk',name:'旧版扩展',state:'revoked',devices:1}
+ ];
+ const sites=[{host:'github.com',full:'https://github.com',icon:'GH',color:'#29354b'},{host:'www.tingjusting.fun',full:'https://www.tingjusting.fun',icon:'TJ',color:'#754bd2'},{host:'accounts.google.com',full:'https://accounts.google.com',icon:'G',color:'#e77d37'}];
+ const rules=[
+  {id:1,host:'github.com',url:'https://github.com',source:'Mac mini',target:'当前设备',mode:'接收',status:'active',statusLabel:'已连接',network:'来源设备出口',code:'482-916',v:3},
+  {id:2,host:'www.tingjusting.fun',url:'https://www.tingjusting.fun',source:'当前设备',target:'Windows 11',mode:'发送',status:'active',statusLabel:'已连接',network:'本机直连',code:'137-508',v:3},
+  {id:3,host:'accounts.google.com',url:'https://accounts.google.com',source:'Windows 11',target:'当前设备',mode:'接收',status:'offered',statusLabel:'待确认',network:'未设置',code:'290-117',v:3}
+ ];
+ const configGroups=[
+  {id:'admin',name:'管理访问',type:'基础服务',icon:'lock',fields:[['listen','监听地址','text',':21080'],['tlsEnabled','访问协议','select','HTTPS',['HTTPS','HTTP']]]},
+  {id:'tunnel',name:'隧道连接',type:'基础服务',icon:'network',fields:[['tcpListen','TCP 监听地址','text',':21000'],['quicListen','QUIC 监听地址','text',':21000'],['tlsEnabled','TLS','toggle',true],['heartbeatSec','心跳间隔（秒）','number',30],['maxConnections','设备连接上限','number',1024],['maxStreamsPerDevice','每设备并发流','number',256]]},
+  {id:'direct',name:'公网直连',type:'网络能力',icon:'globe',fields:[['enabled','开启公网直连','toggle',true],['portStart','UDP 起始端口','number',20900],['portEnd','UDP 结束端口','number',20999]]},
+  {id:'p2p',name:'P2P 直连',type:'网络能力',icon:'link',fields:[['upnpEnabled','启用 UPnP','toggle',true],['rendezvousListen','UDP 探测监听','text',':3479'],['rendezvousAdvertise','UDP 公网地址','text','relay.example.com:3479'],['portStart','UDP 起始端口','number',20900],['portEnd','UDP 结束端口','number',20999]]},
+  {id:'exit',name:'Server 网络出口',type:'网络能力',icon:'globe',fields:[['enabled','启用 Server 出口','toggle',true],['allowInternet','允许互联网','toggle',true],['allowPrivateNetwork','允许私有网络','toggle',false],['allowLoopback','允许回环地址','toggle',false],['upstreamMode','上游连接方式','select','Server 本机直连',['Server 本机直连','SOCKS5','HTTP CONNECT','HTTPS CONNECT']]]},
+  {id:'rdp',name:'RDP 公网入口',type:'安全与访问',icon:'lock',fields:[['enabled','启用 RDP 公网入口','toggle',false],['listen','监听地址','text','0.0.0.0'],['portStart','起始端口','number',40000],['portEnd','结束端口','number',40100],['rateLimit','每 IP 每分钟上限','number',120]]},
+  {id:'browserSync',name:'浏览器同步',type:'安全与访问',icon:'plug',fields:[['enabled','启用浏览器同步','toggle',true]]},
+  {id:'certificate',name:'证书管理',type:'安全与访问',icon:'shield',fields:[['certFile','证书链路径','text','/etc/relayproxy/fullchain.pem'],['keyFile','私钥路径','text','/etc/relayproxy/privkey.pem']]},
+  {id:'acl',name:'目标访问权限',type:'安全与访问',icon:'shield',fields:[['allowInternet','允许互联网','toggle',true],['allowPrivateNetwork','允许私有网络','toggle',false],['allowLoopback','允许回环地址','toggle',false],['accessMode','匹配模式','select','拒绝列表',['不附加筛选','允许列表','拒绝列表']]]}
+ ];
+ const configDefaults=JSON.stringify(configGroups);
+ const statusBadge=s=>s==='pending'?'<span class="badge orange">待审批</span>':s==='approved'||s==='active'?'<span class="badge green">已批准</span>':s==='revoked'?'<span class="badge red">已撤销</span>':'<span class="badge orange">待确认</span>';
+ const button=(name,action,cls='')=>'<button class="btn '+cls+'" data-action="'+action+'">'+name+'</button>';
+ const contexts={server:[['浏览器同步','browser','plug','3'],['服务配置','settings','sliders','']],extension:[['连接与设备','connection','laptop',''],['浏览器网络','network','network',''],['站点授权','sites','globe',''],['设备配对与同步','pairings','link','3']],popup:[]};
+ const currentLogo='<svg viewBox="0 0 64 64" width="39" height="39" aria-label="RelayProxy"><defs><linearGradient id="rpLogoMark" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#238CFD"/><stop offset="52%" stop-color="#316AF4"/><stop offset="100%" stop-color="#7454EA"/></linearGradient></defs><path d="M8 32H19L26 18L36 46L44 28H56" fill="none" stroke="url(#rpLogoMark)" stroke-width="4.3" stroke-linecap="round" stroke-linejoin="round"/><circle cx="8" cy="32" r="2" fill="#316AF4"/><circle cx="56" cy="28" r="2" fill="#316AF4"/></svg>';
+ const serverStructure=[
+  ['概览',[['运行总览','grid']]],
+  ['设备与身份',[['设备管理','laptop'],['身份管理','users'],['浏览器同步','plug'],['出口节点','globe']]],
+  ['连接',[['实时连接','network'],['P2P 路径','link'],['RDP 公网入口','lock'],['连接审计','shield'],['IP 安全策略','shield']]],
+  ['消息',[['消息历史','grid'],['推送渠道','network']]],
+  ['系统',[['服务配置','sliders']]]
+ ];
+ function nav(){
+  const type=state.context,items=contexts[type];
+  const app=document.querySelector('.app-layout');
+  document.body.classList.toggle('view-server',type==='server');
+  document.body.classList.toggle('view-extension',type==='extension');
+  document.body.classList.toggle('view-popup',type==='popup');
+  app.classList.toggle('popup-view',type==='popup');
+  if(type==='popup'){
+    $('sidebar').style.display='none';$('page').style.maxWidth='820px';return;
+  }
+  $('sidebar').style.display='flex';$('page').style.maxWidth='none';
+  const pg=type==='server'?state.serverPage:state.extensionPage;
+  if(type==='server'){
+    $('sidebar').innerHTML='<div class="sidebar-brand"><span class="sidebar-mark">'+currentLogo+'</span><span class="sidebar-word"><b>RelayProxy</b><small>MANAGEMENT CONSOLE</small></span></div><div class="nav-scroll">'+
+      serverStructure.map(([group,entries])=>'<div class="nav-group"><div class="nav-label">'+group+'</div>'+
+        entries.map(([title,ic])=>{
+          const id=title==='浏览器同步'?'browser':title==='服务配置'?'settings':null;
+          return '<button class="nav-item '+(id===pg?'active':'')+' '+(!id?'nav-disabled':'')+'" '+
+            (id?'data-page="'+id+'"':'data-inactive="1" title="本次只演示配置与浏览器同步页面"')+'>'+icon(ic)+'<span>'+title+'</span>'+
+            (id==='browser'?'<span class="count">1</span>':'')+'</button>';
+        }).join('')+'</div>').join('')+'</div>'+
+       '<div class="nav-bottom"><div class="server-state-dot"></div><span>Relay Server <small>服务运行中</small></span></div>';
+  }else{
+    $('sidebar').innerHTML='<div class="nav-group"><div class="nav-label">管理中心</div>'+items.map(([title,id,ic,cnt])=>
+      '<button class="nav-item '+(id===pg?'active':'')+'" data-page="'+id+'">'+icon(ic)+'<span>'+title+'</span>'+(cnt?'<span class="count">'+cnt+'</span>':'')+'</button>').join('')+'</div>';
+  }
+  $('sidebar').classList.toggle('mobile-open',state.mobile);
+ }
+ function header(title,sub,actions='',crumb=''){return '<div class="content-head"><div><div class="eyebrow">'+(state.context==='server'?'控制台 / '+(state.serverPage==='browser'?'浏览器同步':'服务配置'):state.context==='popup'?'扩展快捷入口':'浏览器设置')+'</div><h1>'+title+'</h1>'+(sub?'<p class="page-sub">'+sub+'</p>':'')+'</div><div class="head-actions">'+actions+'</div></div>';}
+ function demo(){return ''}
+ function render(){
+  document.querySelectorAll('[data-context]').forEach(b=>b.classList.toggle('active',b.dataset.context===state.context));
+  nav();
+  const pg=$('page');
+  if(state.context==='server') pg.innerHTML=state.serverPage==='browser'?renderServerBrowser():renderServerSettings();
+  else if(state.context==='extension')pg.innerHTML=renderExtension();
+  else pg.innerHTML=renderPopup();
+  attachPageEvents();
+ }
+ function renderServerBrowser(){
+  const pending=devices.filter(x=>x.state==='pending').length,approved=devices.filter(x=>x.state==='approved').length,revoked=devices.filter(x=>x.state==='revoked').length;
+  const sub='设备授权与扩展来源';
+  return demo()+header('浏览器同步',sub,button(icon('refresh')+' 刷新','refresh-devices')+button('服务配置 '+icon('chevron'),'open-browser-config'),'SERVER / BROWSER SYNC')+
+  '<div class="stats"><div class="stat"><div><strong>'+pending+'</strong><span>待审批</span></div><div class="stat-icon orange">'+icon('users',22)+'</div></div><div class="stat"><div><strong>'+approved+'</strong><span>已批准设备</span></div><div class="stat-icon green">'+icon('check',23)+'</div></div><div class="stat"><div><strong>'+revoked+'</strong><span>已撤销</span></div><div class="stat-icon">'+icon('shield',22)+'</div></div></div>'+
+  '<section class="card"><div class="card-header"><div><h2>浏览器设备</h2><p>设备申请及访问权限</p></div><span class="badge green">'+icon('check',13)+' 服务已启用</span></div><div class="panel-body" style="padding-bottom:8px"><div class="toolbar"><div class="pill-tabs">'+[['all','全部'],['pending','待审批'],['approved','已批准'],['revoked','已撤销']].map(([k,l])=>'<button class="'+(k===state.serverFilter?'active':'')+'" data-sfilter="'+k+'">'+l+'</button>').join('')+'</div><label class="search-wrap">'+icon('search')+'<input id="server-device-search" class="search" placeholder="搜索设备名称或 ID" value="'+escapeHTML(state.serverSearch)+'" /></label></div></div><div class="table-wrap"><table class="data-table"><thead><tr><th>设备</th><th>所属身份</th><th>权限</th><th>状态</th><th>申请时间</th><th style="text-align:right">操作</th></tr></thead><tbody id="device-rows">'+deviceRows()+'</tbody></table></div><div class="table-footer">共 '+devices.length+' 台设备 · 已撤销设备支持永久删除</div></section>'+
+  '<div class="split"><section class="card"><div class="card-header"><div><h2>扩展来源</h2><p>已登记的 Chrome 扩展</p></div>'+button('查看全部','all-extensions','mini')+'</div><div class="panel-body">'+extensions.map(e=>'<div class="mini-kv"><div class="row" style="min-width:0"><div class="site-icon">'+icon('plug')+'</div><div class="grow"><b>'+escapeHTML(e.name)+'</b><div class="mono">'+e.id.slice(0,15)+'…'+e.id.slice(-5)+'</div></div></div><div class="row">'+statusBadge(e.state)+(e.state==='revoked'?button('删除','delete-extension:'+e.id,'mini danger'):button('管理','manage-extension:'+e.id,'mini'))+'</div></div>').join('')+'</div></section>'+
+  '<section class="card"><div class="card-header"><div><h2>服务入口</h2><p>复用 TLS / TCP 中继</p></div><span class="badge blue">HTTPS</span></div><div class="panel-body"><div class="endpoint">'+escapeHTML(state.serverURL)+'</div><div class="mini-kv"><span>浏览器同步</span><strong style="color:#139474">已启用</strong></div><div class="mini-kv"><span>设备审批</span><strong>管理员控制</strong></div><div class="mini-kv"><span>会话传输</span><strong>端到端加密</strong></div></div></section></div>';
+ }
+ function deviceRows(){
+  const subset=devices.filter(d=>(state.serverFilter==='all'||d.state===state.serverFilter)&&[d.name,d.id,d.identity].join(' ').toLowerCase().includes(state.serverSearch.toLowerCase()));
+  return subset.length?subset.map(d=>'<tr><td><div class="device"><span class="circle '+(d.os==='mac'?'mac':'')+'">'+icon('laptop',19)+'</span><div><b>'+escapeHTML(d.name)+'</b><small>'+escapeHTML(d.id)+'</small></div></div></td><td>'+escapeHTML(d.identity)+'</td><td>'+escapeHTML(d.cap)+'</td><td>'+statusBadge(d.state)+'</td><td class="muted">'+escapeHTML(d.time)+'</td><td style="text-align:right">'+(d.state==='pending'?button('审批','approve:'+d.id,'mini primary'):d.state==='approved'?button('管理','manage:'+d.id,'mini'):button('删除','delete:'+d.id,'mini danger'))+'</td></tr>').join(''):'<tr><td colspan="6"><div class="empty">没有匹配的设备</div></td></tr>';
+ }
+ function renderServerSettings(){
+  const group=configGroups.find(g=>g.id===state.serverGroup)||configGroups[0];
+  const subtitles={admin:'管理后台地址与访问方式',tunnel:'TCP、QUIC 与连接容量',direct:'公网直连端口范围',p2p:'打洞与 UDP 端口映射',exit:'Server 自身出口能力',rdp:'公网入口与访问限制',browserSync:'使用已有 TLS/TCP 中继端口',certificate:'TLS 证书文件',acl:'统一目标访问范围'};
+  const side=[...new Set(configGroups.map(g=>g.type))].map(section=>
+    '<div class="config-nav-group"><div class="config-nav-label">'+section+'</div>'+configGroups.filter(g=>g.type===section).map(g=>
+      '<button class="config-nav-item '+(g.id===group.id?'active':'')+'" data-group="'+g.id+'">'+icon(g.icon,16)+'<span>'+g.name+'</span></button>'
+    ).join('')+'</div>').join('');
+  return demo()+header('服务配置','',button('放弃修改','discard-config')+button('保存配置','save-config','primary'),'SERVER / CONFIGURATION')+
+    '<div class="config-layout"><aside class="config-left" aria-label="配置分类">'+side+'</aside><div class="config-main">'+
+    '<div class="config-section-title"><div><h2>'+group.name+'</h2><p>'+subtitles[group.id]+'</p></div><span class="badge '+(state.dirty?'orange':'neutral')+'">'+(state.dirty?'待保存':'已同步')+'</span></div>'+
+    '<section class="card"><div class="card-header"><div><h2>'+group.name+'参数</h2></div></div><div class="panel-body">'+
+      (group.id==='browserSync'?'<div class="setting-row"><div><strong>启用浏览器同步</strong></div><button class="switch '+(group.fields[0][3]?'on':'')+'" data-config-switch="enabled" aria-label="启用浏览器同步" role="switch" aria-checked="'+group.fields[0][3]+'"></button></div><div class="two-col" style="margin:22px 0 18px"><div><div class="field-label">HTTPS 中继入口</div><div class="endpoint">'+escapeHTML(state.serverURL)+'</div></div><div><div class="field-label">设备授权</div><div class="endpoint">扩展来源和浏览器设备统一审批</div></div></div><button class="btn" data-action="go-devices">管理浏览器设备 '+icon('arrow')+'</button>':'<div class="config-grid">'+group.fields.map(f=>configField(f)).join('')+'</div>')+
+    (group.id==='exit'?'<div class="soft-panel" style="margin-top:20px"><div class="row between"><b>身份授权</b>'+button('+ 授权身份','grant-identity','mini')+'</div><div class="mini-kv"><span>个人设备</span><span class="badge green">允许使用出口</span></div><div class="mini-kv"><span>办公设备</span><span class="badge neutral">未授权</span></div></div>':'')+
+    '</div></section>'+
+    (state.dirty?'<div class="savebar"><div><strong>有未保存的修改</strong></div><div class="actions">'+button('放弃修改','discard-config')+button('保存修改','save-config','primary')+'</div></div>':'')+
+    (group.id==='rdp'||group.id==='acl'?'<div class="config-risk">'+(group.id==='rdp'?'还需在 RDP 公网入口页配置目标设备。':'允许列表为空时可能拒绝全部目标。')+'</div>':'')+
+    '</div></div>';
+ }
+ function configField(f){const [id,label,type,value,options]=f;
+  if(type==='toggle')return '<div class="setting-row"><div><strong>'+label+'</strong></div><button class="switch '+(value?'on':'')+'" data-config-switch="'+id+'" role="switch" aria-checked="'+value+'" aria-label="'+label+'"></button></div>';
+  return '<label class="field"><span class="field-label">'+label+'</span>'+(type==='select'?'<select data-config-input="'+id+'">'+options.map(v=>'<option '+(v===value?'selected':'')+'>'+v+'</option>').join('')+'</select>':'<input data-config-input="'+id+'" type="'+type+'" value="'+escapeHTML(value)+'" /></label>');
+ }
+ function renderExtension(){
+  switch(state.extensionPage){case 'connection':return extConnection();case 'sites':return extSites();case 'pairings':return extPairings();case 'network':return extNetwork();default:return extConnection();}
+ }
+ function extConnection(){return demo()+header('连接与设备','',button('连接 Server','connect-server','primary'),'CHROME / CONNECTION')+
+  '<div class="split"><section class="card"><div class="card-header"><div><h2>Server 连接</h2><p>浏览器同步服务</p></div><span class="badge '+(state.extensionOnline?'green':'orange')+'">'+(state.extensionOnline?'已连接':'未连接')+'</span></div><div class="panel-body"><label class="field"><span class="field-label">Server 地址</span><input id="ext-url" type="url" value="'+escapeHTML(state.serverURL)+'" /></label><div class="actions" style="margin-top:17px">'+button('保存地址','save-server-url')+button(state.extensionOnline?'断开连接':'连接','toggle-connection',state.extensionOnline?'':'primary')+'</div><div class="mini-kv" style="margin-top:18px"><span>访问协议</span><b>WSS / HTTPS</b></div><div class="mini-kv"><span>同步服务</span><b>可用</b></div></div></section>'+
+  '<section class="card"><div class="card-header"><div><h2>当前设备</h2><p>本 Chrome Profile</p></div><span class="badge green">已批准</span></div><div class="panel-body"><div class="device" style="margin-bottom:17px"><span class="circle mac">'+icon('laptop',21)+'</span><div><b>MacBook Pro · Chrome</b><small>个人设备</small></div></div><div class="endpoint" style="font-size:12px">browser_f3ad1f8c-21ba-4d7c</div><div class="actions" style="margin-top:15px">'+button('复制设备 ID','copy-device')+button('重新申请授权','request-auth')+'</div></div></section></div>'+
+  '<section class="card" style="margin-top:18px"><div class="card-header"><h2>访问状态</h2></div><div class="panel-body"><div class="mini-kv"><span>设备身份</span><span class="badge green">已审批</span></div><div class="mini-kv"><span>允许发送</span><span class="badge green">已开启</span></div><div class="mini-kv"><span>允许接收</span><span class="badge green">已开启</span></div><div class="mini-kv"><span>站点授权</span><strong>'+sites.length+' 个网站</strong></div></div></section>';
+ }
+ function extSites(){return demo()+header('站点授权','',button('+ 授权网站','add-site','primary'),'CHROME / SITES')+
+  '<section class="card"><div class="card-header"><div><h2>已授权网站</h2><p>当前 Chrome Profile</p></div><span class="badge blue">'+sites.length+' 个站点</span></div><div class="panel-body"><div class="site-grid">'+sites.map(site=>'<div class="site-tile"><span class="site-icon" style="background:'+site.color+'12;color:'+site.color+'">'+site.icon+'</span><div class="grow"><div class="site-name">'+escapeHTML(site.host)+'</div><div class="site-meta">'+escapeHTML(site.full)+'</div></div>'+button('移除','remove-site:'+site.host,'mini')+'</div>').join('')+'</div></div></section>'+
+  '<section class="card"><div class="card-header"><h2>从当前标签页添加</h2></div><div class="panel-body"><div class="two-col"><label class="field"><span class="field-label">可授权站点</span><select id="site-target"><option value="https://notion.so">notion.so</option><option value="https://openai.com">openai.com</option><option value="https://example.org">example.org</option></select></label><div style="display:flex;align-items:end">'+button('授权选定网站','add-selected-site','primary')+'</div></div></div></section>';
+ }
+ function extPairings(){return demo()+header('配对与同步','',button(icon('refresh')+' 刷新','refresh-rules')+button('+ 新建配对','create-pairing','primary'),'CHROME / SESSIONS')+
+  '<div class="toolbar"><div class="pill-tabs">'+[['all','全部'],['active','已启用'],['offered','待确认']].map(([v,l])=>'<button data-efilter="'+v+'" class="'+(state.extensionFilter===v?'active':'')+'">'+l+'</button>').join('')+'</div><span class="subtle">'+rules.length+' 条配对</span></div>'+
+  '<div class="pair-grid">'+(rules.filter(x=>state.extensionFilter==='all'||x.status===state.extensionFilter).map(r=>'<section class="pair-tile card" style="margin-bottom:0"><div class="pair-head"><div><h3>'+escapeHTML(r.host)+'</h3><div class="pair-meta">'+escapeHTML(r.url)+'</div></div>'+ (r.status==='active'?'<span class="badge green">已启用</span>':'<span class="badge orange">待确认</span>')+'</div><div class="route"><span>来源设备</span><b>'+escapeHTML(r.source)+'</b>'+icon('arrow',15)+'<span>接收设备</span><b>'+escapeHTML(r.target)+'</b></div><div class="row between"><div class="subtle">当前设备：'+r.mode+'</div><span class="badge purple">'+(r.v===3?'完整会话 · IndexedDB':'Cookie + Storage')+'</span></div><div class="scope"><span>Cookie</span><span>Local Storage</span><span>Session Storage</span>'+(r.v===3?'<span>IndexedDB</span>':'')+'</div>'+(r.status==='offered'?'<div class="soft-panel" style="margin:14px 0"><div class="row between"><span class="subtle">配对校验码</span><b class="mono" style="color:#273e68">'+r.code+'</b></div></div>':'<div class="mini-kv" style="margin:11px 0"><span>网络出口</span><b>'+escapeHTML(r.network)+'</b></div>')+'<div class="rule-actions">'+(r.status==='offered'?button('查看并确认','accept-rule:'+r.id,'primary'):button(r.mode==='发送'?'立即同步':'请求同步','sync-rule:'+r.id,'primary')+button('同步后打开','sync-open:'+r.id))+button('管理','manage-rule:'+r.id)+'</div></section>').join(''))+'</div>';
+ }
+ function extNetwork(){return demo()+header('浏览器网络','',button('应用设置','apply-network','primary'),'CHROME / NETWORK')+
+  '<div class="split"><section class="card"><div class="card-header"><div><h2>浏览器代理</h2></div></div><div class="panel-body"><div class="setting-row"><div><strong>使用本机 RelayProxy Agent</strong><small>接管当前 Chrome 的浏览器流量</small></div><button class="switch '+(state.fullProxy?'on':'')+'" data-fullproxy="1" role="switch" aria-checked="'+state.fullProxy+'"></button></div>'+(state.fullProxy?'<label class="field" style="margin-top:20px;max-width:275px"><span class="field-label">本机 Agent 端口</span><input type="number" id="network-port" value="'+state.port+'" /></label>':'')+'</div></section>'+
+  '<section class="card"><div class="card-header"><h2>站点专用出口</h2></div><div class="panel-body"><div class="mini-kv"><span>github.com</span><b>来源设备出口</b></div><div class="mini-kv"><span>www.tingjusting.fun</span><b>本机直连</b></div><div class="mini-kv"><span>accounts.google.com</span><b>未设置</b></div>'+button('在配对中配置','goto-pairings')+'</div></section></div>';
+ }
+ function renderPopup(){return demo()+header('插件弹窗','','','CHROME / POPUP')+
+  '<div class="popup-stage"><div class="popup-shell"><div class="popup-header row between"><div class="row"><div class="brand-logo" style="width:31px;height:31px;font-weight:800">R</div><div><b style="font-size:15px">RelayProxy</b><div class="subtle" style="font-size:11px;margin-top:3px">Chrome 会话同步</div></div></div><button class="btn ghost icon-only" data-action="goto-ext" aria-label="完整设置">'+icon('settings',18)+'</button></div><div class="popup-content"><div class="soft-panel"><div class="row between"><div class="statusline"><i class="status-dot"></i><strong style="font-size:14px">Server 已连接</strong></div><span class="badge green">已授权</span></div><div class="mono" style="margin-top:7px">'+escapeHTML(state.serverURL)+'</div></div><div class="mini-kv"><span>浏览器代理</span><button class="switch '+(state.fullProxy?'on':'')+'" data-fullproxy="1" role="switch" aria-label="浏览器代理" aria-checked="'+state.fullProxy+'"></button></div><div class="row between" style="margin-top:20px"><b>会话快捷操作</b><button class="help-button" data-action="refresh-rules">刷新</button></div><div class="popup-list">'+rules.filter(x=>x.status==='active').map(r=>'<div class="popup-item"><div class="row between"><b>'+r.host+'</b><span class="badge '+(r.mode==='发送'?'blue':'purple')+'">'+r.mode+'</span></div><div class="subtle" style="margin:7px 0 12px">'+r.source+' → '+r.target+'</div><div class="actions">'+button(r.mode==='发送'?'立即发送':'请求同步','sync-rule:'+r.id,'mini primary')+button('同步后打开','sync-open:'+r.id,'mini')+'</div></div>').join('')+'</div></div><div class="popup-foot"><span>会话端到端加密</span><button class="btn ghost" data-action="goto-ext">完整设置 '+icon('arrow',15)+'</button></div></div></div>';
+ }
+ let toastTimer;
+ function toast(text,bad=false){const n=$('toast');n.textContent=(bad?'⚠ ':'✓ ')+text;n.className='toast'+(bad?' error':'')+' show';clearTimeout(toastTimer);toastTimer=setTimeout(()=>n.classList.remove('show'),2900);}
+ function closeModal(){ $('modal').classList.remove('show');$('modal-body').innerHTML='';$('modal-actions').innerHTML='';}
+ function modal(title,body,actions){$('modal-title').textContent=title;$('modal-body').innerHTML=body;$('modal-actions').innerHTML=actions||button('关闭','modal-close');$('modal').classList.add('show');}
+ const currentDevice=id=>devices.find(d=>d.id===id);
+ function modalDeviceApprove(id){const d=currentDevice(id);if(!d)return;modal('审批浏览器设备','<div class="device" style="margin-bottom:20px"><span class="circle mac">'+icon('laptop')+'</span><div><b>'+escapeHTML(d.name)+'</b><small>'+escapeHTML(d.id)+'</small></div></div><label class="field"><span class="field-label">所属身份</span><select id="approve-identity"><option value="个人设备">个人设备</option><option value="办公设备">办公设备</option></select></label><div class="field-label" style="margin-top:20px">允许的操作</div><label class="checkrow"><input type="checkbox" id="cap-send" checked /><div><strong>发送登录状态</strong><small>可以向已配对设备发送网站会话</small></div></label><label class="checkrow"><input type="checkbox" id="cap-receive" checked /><div><strong>接收登录状态</strong><small>可以接收已配对设备的会话</small></div></label>',button('取消','modal-close')+button('批准设备','confirm-approve:'+id,'primary'));
+ }
+ function modalDeviceManage(id){const d=currentDevice(id);if(!d)return;modal('管理浏览器设备','<div class="device"><span class="circle">'+icon('laptop')+'</span><div><b>'+escapeHTML(d.name)+'</b><small>'+escapeHTML(d.id)+'</small></div></div><div class="mini-kv"><span>所属身份</span><b>'+d.identity+'</b></div><div class="mini-kv"><span>授权操作</span><b>'+d.cap+'</b></div><div class="mini-kv"><span>状态</span>'+statusBadge(d.state)+'</div>',button('关闭','modal-close')+button('撤销授权','revoke:'+id,'danger'));
+ }
+ function manageRule(id){const r=rules.find(x=>x.id===id);if(!r)return;modal('配对设置','<div class="mini-kv"><span>网站</span><b>'+r.host+'</b></div><div class="mini-kv"><span>来源设备</span><b>'+r.source+'</b></div><div class="mini-kv"><span>接收设备</span><b>'+r.target+'</b></div><div class="mini-kv"><span>会话范围</span><b>Cookie、Storage、IndexedDB</b></div><div style="margin-top:21px"><label class="field"><span class="field-label">网站访问使用的网络出口</span><select id="rule-network"><option>本机直连</option><option '+(r.network==='来源设备出口'?'selected':'')+'>来源设备出口</option><option>本机 Agent</option></select></label></div><label class="checkrow" style="margin-top:19px"><input type="checkbox" id="allow-overwrite" /><div><strong>允许覆盖接收端登录数据</strong><small>包括 IndexedDB，可能切换网站账号</small></div></label><div class="actions" style="margin-top:20px">'+button('撤销配对','revoke-rule:'+id,'danger')+'</div>',button('取消','modal-close')+button('保存设置','save-rule:'+id,'primary'));
+ }
+ function addSaveBar(){
+   const bar=document.createElement('div');bar.className='savebar';
+   bar.innerHTML='<div><strong>有未保存的修改</strong><small>配置会在保存后按运行要求生效</small></div><div class="actions">'+button('取消','discard-config')+button('保存修改','save-config','primary')+'</div>';
+   $('page').append(bar);
+ }
+ function attachPageEvents(){
+   $('server-device-search')?.addEventListener('input',e=>{state.serverSearch=e.target.value;$('device-rows').innerHTML=deviceRows();});
+   document.querySelectorAll('[data-config-input]').forEach(x=>x.addEventListener('input',()=>{
+     const g=configGroups.find(g=>g.id===state.serverGroup);
+     const f=g?.fields.find(f=>f[0]===x.dataset.configInput);
+     if(f){f[3]=x.type==='number'?Number(x.value):x.value;}
+     state.dirty=true;
+     if(!document.querySelector('.savebar'))addSaveBar();
+   }));
+ }
+ function handleAction(action){
+  if(action==='modal-close'){closeModal();return}
+  if(action==='refresh-devices'||action==='refresh-rules'){toast('列表已刷新');return}
+  if(action==='open-browser-config'){state.serverPage='settings';state.serverGroup='browserSync';render();return}
+  if(action==='go-devices'){state.serverPage='browser';render();return}
+  if(action==='reset-config'){modal('恢复配置','要放弃当前页面的修改吗？',button('取消','modal-close')+button('确定恢复','discard-config','primary'));return}
+  if(action==='discard-config'){const defaults=JSON.parse(configDefaults);configGroups.forEach((g,i)=>{g.fields=defaults[i].fields});state.dirty=false;closeModal();render();toast('已放弃未保存修改');return}
+  if(action==='save-config'){state.dirty=false;render();toast('配置已保存（模拟）');return}
+  if(action==='grant-identity'){modal('授权身份','<label class="field"><span class="field-label">身份</span><select><option>个人设备</option><option>办公设备</option></select></label><label class="field" style="margin-top:16px"><span class="field-label">授权范围</span><input value="允许使用 Server 出口" disabled /></label>',button('取消','modal-close')+button('授权','mock-grant','primary'));return}
+  if(action==='mock-grant'){closeModal();toast('身份授权已添加（模拟）');return}
+  if(action==='all-extensions'){modal('扩展来源',extensions.map(x=>'<div class="mini-kv"><div><strong>'+x.name+'</strong><div class="mono">'+x.id+'</div></div>'+statusBadge(x.state)+'</div>').join(''),button('关闭','modal-close'));return}
+  if(action.startsWith('approve:')){modalDeviceApprove(action.slice(8));return}
+  if(action.startsWith('confirm-approve:')){const id=action.slice(16),d=currentDevice(id);if(d){d.state='approved';d.identity=$('approve-identity').value;d.cap=[$('cap-send').checked?'发送':'',$('cap-receive').checked?'接收':''].filter(Boolean).join(' · ')||'无';}closeModal();render();toast('设备已批准');return}
+  if(action.startsWith('manage:')){modalDeviceManage(action.slice(7));return}
+  if(action.startsWith('revoke:')){const id=action.slice(7);modal('撤销设备授权','撤销后，这台设备无法继续同步。确认撤销？',button('取消','modal-close')+button('确认撤销','confirm-revoke:'+id,'danger'));return}
+  if(action.startsWith('confirm-revoke:')){const d=currentDevice(action.slice(15));if(d){d.state='revoked';d.cap='—'}closeModal();render();toast('授权已撤销');return}
+  if(action.startsWith('delete:')){const id=action.slice(7);modal('删除旧设备','将永久删除已撤销设备及其关联的配对记录，且无法恢复。',button('取消','modal-close')+button('永久删除','confirm-delete:'+id,'danger'));return}
+  if(action.startsWith('confirm-delete:')){const i=devices.findIndex(d=>d.id===action.slice(15));if(i>=0)devices.splice(i,1);closeModal();render();toast('旧设备已删除');return}
+  if(action.startsWith('manage-extension:')){const e=extensions.find(x=>x.id===action.slice(17));if(!e)return;modal('管理扩展来源','<div class="mono">'+e.id+'</div><div style="margin-top:15px">'+statusBadge(e.state)+'</div>',button('取消','modal-close')+button('撤销扩展','revoke-extension:'+e.id,'danger'));return}
+  if(action.startsWith('revoke-extension:')){const e=extensions.find(x=>x.id===action.slice(17));if(e)e.state='revoked';closeModal();render();toast('扩展来源已撤销');return}
+  if(action.startsWith('delete-extension:')){const id=action.slice(17);const attached=devices.some(d=>d.ext===id.slice(0,6)+'…'+id.slice(-5));modal('删除旧扩展','已撤销的扩展来源可永久清除。关联设备仍存在时，需先清理设备。',button('取消','modal-close')+button('确认删除','confirm-delete-extension:'+id,'danger'));return}
+  if(action.startsWith('confirm-delete-extension:')){const id=action.slice(25);const e=extensions.find(x=>x.id===id);if(e && devices.some(d=>d.ext===id.slice(0,6)+'…'+id.slice(-5))){toast('仍有关联设备，请先删除旧设备',true);return}const i=extensions.findIndex(x=>x.id===id);if(i>=0)extensions.splice(i,1);closeModal();render();toast('旧扩展已删除');return}
+  if(action==='save-server-url'){const v=$('ext-url').value.trim();try{const u=new URL(v);if(u.protocol!=='https:'||u.pathname!=='/'||u.username||u.password||u.search||u.hash)throw Error('invalid');state.serverURL=u.origin;render();toast('Server 地址已保存');}catch{toast('请输入有效的 HTTPS Server 根地址',true)}return}
+  if(action==='connect-server'){state.extensionOnline=true;render();toast('设备认证已连接（模拟）');return}
+  if(action==='toggle-connection'){state.extensionOnline=!state.extensionOnline;render();toast(state.extensionOnline?'Server 已连接':'已断开连接');return}
+  if(action==='request-auth'){modal('重新申请设备授权','将向 Server 提交当前浏览器设备的身份公钥。',button('取消','modal-close')+button('提交申请','confirm-auth','primary'));return}
+  if(action==='confirm-auth'){closeModal();toast('授权申请已提交');return}
+  if(action==='copy-device'){try{navigator.clipboard?.writeText('browser_f3ad1f8c-21ba-4d7c')}catch{}toast('已复制设备 ID');return}
+  if(action==='add-site'){modal('授权网站','<label class="field"><span class="field-label">从当前标签页选择</span><select id="new-site"><option value="https://notion.so">notion.so</option><option value="https://openai.com">openai.com</option><option value="https://example.org">example.org</option></select></label>',button('取消','modal-close')+button('授权网站','confirm-add-site','primary'));return}
+  if(action==='add-selected-site'||action==='confirm-add-site'){const v=$(action==='confirm-add-site'?'new-site':'site-target')?.value;if(v && !sites.some(x=>x.full===v)){const host=new URL(v).hostname;sites.push({host,full:v,icon:host.slice(0,2).toUpperCase(),color:'#5576b9'})}closeModal();render();toast('网站已授权');return}
+  if(action.startsWith('remove-site:')){const host=action.slice(12);modal('移除站点授权','移除后，将无法继续对这个站点进行会话同步。',button('取消','modal-close')+button('移除授权','confirm-remove-site:'+host,'danger'));return}
+  if(action.startsWith('confirm-remove-site:')){const host=action.slice(20),i=sites.findIndex(x=>x.host===host);if(i>=0)sites.splice(i,1);closeModal();render();toast('站点授权已移除');return}
+  if(action==='create-pairing'){modal('创建会话配对','<div class="two-col"><label class="field"><span class="field-label">接收设备</span><select id="pair-device"><option>Windows 11 · Chrome</option><option>Mac mini · Chrome</option></select></label><label class="field"><span class="field-label">网站</span><select id="pair-website">'+sites.map(x=>'<option value="'+x.full+'">'+x.host+'</option>').join('')+'</select></label></div><div class="soft-panel" style="margin-top:18px"><strong style="font-size:13px">同步范围</strong><div class="scope"><span>Cookie</span><span>Local Storage</span><span>Session Storage</span><span>IndexedDB</span></div></div>',button('取消','modal-close')+button('创建邀请','confirm-create-pair','primary'));return}
+  if(action==='confirm-create-pair'){const url=$('pair-website').value,host=new URL(url).hostname,target=$('pair-device').value;rules.unshift({id:Date.now(),host,url,source:'当前设备',target,mode:'发送',status:'offered',network:'未设置',code:'481-627',v:3});closeModal();state.extensionPage='pairings';render();toast('邀请已创建，等待对方确认');return}
+  if(action.startsWith('accept-rule:')){const r=rules.find(x=>x.id==action.slice(12));if(!r)return;modal('确认配对邀请','<div class="mini-kv"><span>网站</span><b>'+r.host+'</b></div><div class="mini-kv"><span>来源设备</span><b>'+r.source+'</b></div><div class="mini-kv"><span>配对校验码</span><b style="font-size:18px;letter-spacing:2px">'+r.code+'</b></div><label class="checkrow"><input type="checkbox" id="code-checked" /><div><strong>已与对方核对校验码</strong></div></label>',button('取消','modal-close')+button('确认配对','confirm-accept:'+r.id,'primary'));return}
+  if(action.startsWith('confirm-accept:')){if(!$('code-checked')?.checked){toast('请先确认已核对校验码',true);return}const r=rules.find(x=>x.id==action.slice(15));if(r)r.status='active';closeModal();render();toast('配对已启用');return}
+  if(action.startsWith('sync-rule:')||action.startsWith('sync-open:')){toast(action.startsWith('sync-open:')?'已请求同步，完成后打开网站':'同步请求已发送');return}
+  if(action.startsWith('manage-rule:')){manageRule(Number(action.slice(12)));return}
+  if(action.startsWith('save-rule:')){const r=rules.find(x=>x.id==action.slice(10));if(r)r.network=$('rule-network')?.value||r.network;closeModal();render();toast('配对设置已保存');return}
+  if(action.startsWith('revoke-rule:')){const id=Number(action.slice(12));modal('撤销配对','撤销后，不再同步此站点会话。',button('取消','modal-close')+button('确认撤销','confirm-revoke-rule:'+id,'danger'));return}
+  if(action.startsWith('confirm-revoke-rule:')){const i=rules.findIndex(x=>x.id==action.slice(20));if(i>=0)rules.splice(i,1);closeModal();render();toast('配对已撤销');return}
+  if(action==='apply-network'){const n=$('network-port');if(n)state.port=Number(n.value);toast('浏览器网络设置已应用（模拟）');return}
+  if(action==='goto-pairings'){state.extensionPage='pairings';render();return}
+  if(action==='goto-ext'){state.context='extension';state.extensionPage='connection';render();return}
+ }
+ document.addEventListener('click',e=>{
+  const context=e.target.closest('[data-context]');if(context){state.context=context.dataset.context;state.mobile=false;render();return}
+  const page=e.target.closest('[data-page]');if(page){if(state.context==='server')state.serverPage=page.dataset.page;else state.extensionPage=page.dataset.page;state.mobile=false;render();return}
+  const group=e.target.closest('[data-group]');if(group){state.serverGroup=group.dataset.group;state.mobile=false;render();return}
+  const sfilter=e.target.closest('[data-sfilter]');if(sfilter){state.serverFilter=sfilter.dataset.sfilter;render();return}
+  const efilter=e.target.closest('[data-efilter]');if(efilter){state.extensionFilter=efilter.dataset.efilter;render();return}
+  const sw=e.target.closest('[data-config-switch]');if(sw){
+    const g=configGroups.find(g=>g.id===state.serverGroup);
+    const f=g?.fields.find(f=>f[0]===sw.dataset.configSwitch);
+    if(f)f[3]=!f[3];
+    state.dirty=true;render();return
+  }
+  const proxy=e.target.closest('[data-fullproxy]');if(proxy){state.fullProxy=!state.fullProxy;render();return}
+  const action=e.target.closest('[data-action]');if(action){handleAction(action.dataset.action);return}
+  const close=e.target.closest('[data-close]');if(close){closeModal();return}
+ });
+ $('modal').addEventListener('click',e=>{if(e.target===$('modal'))closeModal()});
+ document.addEventListener('keydown',e=>{if(e.key==='Escape')closeModal()});
+ $('toggle-menu').addEventListener('click',()=>{state.mobile=!state.mobile;$('sidebar').classList.toggle('mobile-open',state.mobile)});
+ render();
+})();
+</script>
+</body>
+</html>

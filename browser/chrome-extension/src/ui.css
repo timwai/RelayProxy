@@ -1,0 +1,17 @@
+:root{font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI",system-ui,sans-serif;color-scheme:light;--bg:#f3f6fc;--surface:#fff;--text:#15243b;--muted:#67768c;--primary:#3267df;--primary-ink:#2453b2;--soft:#edf3ff;--border:#e2e8f2;--danger:#ba3450;--danger-soft:#fff0f4;--focus:#79a5ff}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font-size:14px;line-height:1.5}
+button,input,select{font:inherit}
+button{cursor:pointer;transition:background .15s,opacity .15s}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,a:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--focus);outline-offset:2px}
+.small-button,.secondary-button,.primary-button,.outline-button{border-radius:9px;border:1px solid var(--border);padding:8px 12px;background:var(--surface);color:var(--text);font-size:12px;font-weight:750}
+.primary-button,.small-button.primary-button{background:var(--primary);color:#fff;border-color:var(--primary)}
+.small-button:hover:not(:disabled),.secondary-button:hover:not(:disabled),.outline-button:hover:not(:disabled){background:var(--soft)}
+.primary-button:hover:not(:disabled),.small-button.primary-button:hover:not(:disabled){background:var(--primary-ink)}
+.icon-button{border:0;background:var(--soft);color:var(--primary-ink);width:34px;height:34px;border-radius:10px;font-size:19px}
+.text-button{border:0;background:transparent;color:var(--primary-ink);font-size:12px;font-weight:700;padding:5px 0}
+.text-button:hover:not(:disabled){text-decoration:underline}
+button[hidden],[hidden]{display:none!important}
+@media(prefers-color-scheme:dark){:root{color-scheme:dark;--bg:#0c1423;--surface:#172337;--text:#eef3ff;--muted:#a0b2ca;--primary:#79a2ff;--primary-ink:#9dbbff;--soft:#203555;--border:#304158;--danger:#ff8da4;--danger-soft:#3a2437;--focus:#c4d6ff}.brand-mark{color:#08182c}.primary-button,.small-button.primary-button{color:#071b36}}
+@media(prefers-reduced-motion:reduce){button{transition:none}}

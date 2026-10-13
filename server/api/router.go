@@ -17,6 +17,7 @@ import (
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/internal/webui"
+	browsersync "relayproxy/server/browser_sync"
 	"relayproxy/server/repository"
 	"relayproxy/server/service"
 	"relayproxy/server/session"
@@ -34,6 +35,8 @@ type Router struct {
 	sessions                       *session.Manager
 	db                             *repository.DB
 	mux                            *http.ServeMux
+	browserSync                    *browsersync.Handler
+	live                           *liveUpdates
 	settings                       *config.ServerSettings
 	onDeviceRevoked                func(string)
 	onDeviceAuthorizationChanged   func(string)
@@ -54,6 +57,12 @@ type Router struct {
 }
 
 type RouterOption func(*Router)
+
+// WithBrowserSync enables a separate, TLS-only extension HTTP/WSS endpoint.
+// It is nil unless browser_sync.enabled is explicitly enabled.
+func WithBrowserSync(handler *browsersync.Handler) RouterOption {
+	return func(r *Router) { r.browserSync = handler }
+}
 
 // RDPIngressRuntimeStatus describes the sockets currently owned by the
 // process. It is deliberately separate from the persisted allocation record:
@@ -109,11 +118,22 @@ func NewRouter(authService *service.AuthService, deviceService *service.DeviceSe
 		sessions:            sessions,
 		db:                  db,
 		mux:                 http.NewServeMux(),
+		live:                newLiveUpdates(),
 		rdpIngressPortStart: 33900,
 		rdpIngressPortEnd:   34000,
 	}
 	for _, option := range options {
 		option(r)
+	}
+	if sessions != nil {
+		// Agent tunnel arrivals/departures share the same invalidation path
+		// as Server Web mutations; each UI re-reads its scoped snapshot.
+		sessions.SetPresenceNotifier(r.live.publish)
+	}
+	if r.browserSync != nil {
+		// Browser online status is admin-only; WSS connections never gain
+		// access to the admin event stream or receive user identity metadata.
+		r.browserSync.SetPresenceNotifier(func() { r.live.publish("") })
 	}
 	r.registerRoutes()
 	return r
@@ -218,10 +238,34 @@ func (r *Router) ServeHTTP(w http.ResponseWriter, req *http.Request) {
 	w.Header().Set("X-Frame-Options", "DENY")
 	if strings.HasPrefix(req.URL.Path, "/api/") {
 		w.Header().Set("Cache-Control", "no-store")
-		if req.Method != http.MethodGet && req.Method != http.MethodHead && req.Method != http.MethodOptions && !validMutationOrigin(req) {
-			writeError(w, http.StatusForbidden, "请从当前管理页面提交操作")
-			return
+	}
+	// Chrome extension APIs have their own strict TLS + extension Origin
+	// allowlist and signed device identity. The Admin console's same-origin
+	// CSRF guard cannot accept chrome-extension:// POST requests.
+	if r.browserSync != nil &&
+		(req.URL.Path == "/api/v1/browser-sync/devices/register" ||
+			req.URL.Path == "/api/v1/browser-sync/ws" ||
+			req.URL.Path == "/api/v1/browser-sync/extensions/register") {
+		// Pending browser registration is intentionally unauthenticated.
+		// Only a successful validated enrollment triggers an admin-only
+		// invalidation; the extension never gains an admin SSE subscription.
+		if req.URL.Path == "/api/v1/browser-sync/devices/register" &&
+			req.Method == http.MethodPost {
+			tracked := &mutationStatusWriter{ResponseWriter: w}
+			r.browserSync.ServeHTTP(tracked, req)
+			if tracked.succeeded() {
+				r.live.publish("")
+			}
+		} else {
+			r.browserSync.ServeHTTP(w, req)
 		}
+		return
+	}
+	if strings.HasPrefix(req.URL.Path, "/api/") &&
+		req.Method != http.MethodGet && req.Method != http.MethodHead &&
+		req.Method != http.MethodOptions && !validMutationOrigin(req) {
+		writeError(w, http.StatusForbidden, "请从当前管理页面提交操作")
+		return
 	}
 	r.mux.ServeHTTP(w, req)
 }
@@ -260,6 +304,7 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/auth/login", r.handleLogin)
 	r.mux.HandleFunc("POST /api/v1/auth/logout", r.handleLogout)
 	r.mux.HandleFunc("GET /api/v1/auth/me", r.requireAuth(r.handleMe))
+	r.mux.HandleFunc("GET /api/v1/live/events", r.requireAuth(r.handleLiveEvents))
 	r.mux.HandleFunc("PUT /api/v1/auth/password", r.requireAuth(r.handleChangePassword))
 
 	// Message channels are configured from the authenticated Server console.
@@ -329,6 +374,24 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/v1/p2p/sessions", r.requireAuth(r.handleP2PSessions))
 	r.mux.HandleFunc("GET /api/v1/server/config", r.requireAuth(r.requireAdmin(r.handleGetServerConfig)))
 	r.mux.HandleFunc("PUT /api/v1/server/config", r.requireAuth(r.requireAdmin(r.handleSaveServerConfig)))
+
+	if r.browserSync != nil {
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/extensions", r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensions)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/extensions/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensionRevoke)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/devices", r.requireAuth(r.requireAdmin(r.handleBrowserSyncDevices)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/devices/{id}/approve", r.requireAuth(r.requireAdmin(r.handleBrowserSyncApprove)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/devices/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRevoke)))
+		r.mux.HandleFunc("DELETE /api/v1/browser-sync/admin/devices/{id}", r.requireAuth(r.requireAdmin(r.handleBrowserSyncDelete)))
+		r.mux.HandleFunc("DELETE /api/v1/browser-sync/admin/extensions/{id}", r.requireAuth(r.requireAdmin(r.handleBrowserSyncExtensionDelete)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/status", r.requireAuth(r.requireAdmin(r.handleBrowserSyncStatus)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/rules", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRules)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/rules/{id}/pause", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRuleAction)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/rules/{id}/resume", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRuleAction)))
+		r.mux.HandleFunc("POST /api/v1/browser-sync/admin/rules/{id}/revoke", r.requireAuth(r.requireAdmin(r.handleBrowserSyncRuleAction)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/audit", r.requireAuth(r.requireAdmin(r.handleBrowserSyncAudit)))
+		r.mux.HandleFunc("GET /api/v1/browser-sync/admin/audit/export", r.requireAuth(r.requireAdmin(r.handleBrowserSyncAuditExport)))
+		r.mux.HandleFunc("DELETE /api/v1/browser-sync/admin/audit", r.requireAuth(r.requireAdmin(r.handleBrowserSyncAuditClear)))
+	}
 
 	// Static Web UI Handler
 	webHandler := web.Handler()
@@ -940,7 +1003,22 @@ func (r *Router) requireAuth(next http.HandlerFunc) http.HandlerFunc {
 		}
 		ctx := context.WithValue(req.Context(), userContextKey, userID)
 		ctx = context.WithValue(ctx, principalContextKey, user)
-		next(w, req.WithContext(ctx))
+		authorized := req.WithContext(ctx)
+		if req.Method == http.MethodGet || req.Method == http.MethodHead {
+			next(w, authorized)
+			return
+		}
+		tracked := &mutationStatusWriter{ResponseWriter: w}
+		next(tracked, authorized)
+		if tracked.succeeded() {
+			// A successful authenticated state mutation invalidates the scoped
+			// client's read model. Never ship the mutated resource in the event.
+			if user.Role == "admin" {
+				r.live.publish("")
+			} else {
+				r.live.publish(user.IdentityID)
+			}
+		}
 	}
 }
 

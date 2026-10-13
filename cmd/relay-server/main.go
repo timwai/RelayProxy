@@ -24,6 +24,7 @@ import (
 	"relayproxy/internal/congestion"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/api"
+	browsersync "relayproxy/server/browser_sync"
 	serverdirect "relayproxy/server/direct"
 	"relayproxy/server/gateway"
 	serverp2p "relayproxy/server/p2p"
@@ -327,7 +328,27 @@ func main() {
 		router.SetPublicDirectControlHandler(publicDirectController.HandleControl)
 	}
 
+	// These handlers become active before Gateway.Start. The public relay
+	// handler deliberately exposes only Browser Sync enrollment/WSS, CONNECT
+	// and existing push endpoints; the Admin router is never mounted here.
+	var browserSyncHandler *browsersync.Handler
+	var browserNetworkProxy *browsersync.NetworkProxy
 	publicPushHandler := api.NewPublicPushHandler(sessionMgr, db)
+	publicRelayHandler := api.PublicRelayHandler(publicPushHandler,
+		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if browserSyncHandler == nil {
+				http.NotFound(w, req)
+				return
+			}
+			browserSyncHandler.ServeHTTP(w, req)
+		}),
+		http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			if browserNetworkProxy == nil {
+				http.Error(w, "browser network proxy disabled", http.StatusForbidden)
+				return
+			}
+			browserNetworkProxy.ServeHTTP(w, req)
+		}))
 
 	// 5. Start Tunnel Gateway (QUIC + TLS; QUIC requires TLS)
 	quicAddr := cfg.Server.QUIC.Listen
@@ -343,7 +364,7 @@ func main() {
 		TCPAddr:           cfg.Server.TLS.Listen,
 		QUICAddr:          quicAddr,
 		TLSConfig:         tunnelTLSConfig(cfg, tlsConfig),
-		PublicHTTPHandler: publicPushHandler,
+		PublicHTTPHandler: publicRelayHandler,
 		ServerInstanceID:  serverInstanceID,
 		AuthorizeDevice: func(fingerprint string, hello protocol.DeviceHello) (gateway.DeviceAuthorization, error) {
 			decision, err := db.ObserveDeviceIdentity(repository.DeviceIdentityObservation{
@@ -500,11 +521,6 @@ func main() {
 		P2PUPnPEnabled:           cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
 	}, sessionMgr, router)
 
-	if err := gw.Start(); err != nil {
-		log.Fatalf("[Gateway] Failed to start tunnel gateway: %v", err)
-	}
-	defer gw.Close()
-
 	rdpSecurity, err := serverrdp.NewSecurityManager(db)
 	if err != nil {
 		log.Fatalf("[RDP Security] Failed to load security policy: %v", err)
@@ -537,8 +553,26 @@ func main() {
 	if err != nil {
 		log.Fatalf("[Admin] Failed to initialize settings: %v", err)
 	}
+	if cfg.BrowserSync.Enabled {
+		store, storeErr := browsersync.NewStore(db.DB)
+		if storeErr != nil {
+			log.Fatalf("[BrowserSync] Failed to initialize browser database: %v", storeErr)
+		}
+		browserSyncHandler = browsersync.NewHandler(store, cfg.BrowserSync.ExtensionIDs)
+		// Browser network CONNECT always shares the authenticated TLS/TCP
+		// relay. Device identity, A/B binding and Agent's signed local opt-in
+		// remain mandatory; no second listener or Server exit allowlist.
+		browserNetworkProxy = browsersync.NewNetworkProxy(store, sessionMgr)
+		browserNetworkProxy.SetRelayPolicy(relayACL.Policy())
+		browserSyncHandler.ConfigureNetworkProxy(browserNetworkProxy)
+		defer browserNetworkProxy.Close(context.Background())
+		log.Printf("[BrowserSync] Browser HTTPS CONNECT bound to TLS/TCP relay %s", cfg.Server.TLS.Listen)
+		log.Printf("[BrowserSync] Browser session relay enabled; extension allowlist size=%d", len(cfg.BrowserSync.ExtensionIDs))
+	}
+
 	apiRouter := api.NewRouter(authService, deviceService, sessionMgr, db,
 		api.WithServerSettings(settings, tlsConfig),
+		api.WithBrowserSync(browserSyncHandler),
 		api.WithServerExitStatus(func() api.ServerExitRuntimeStatus {
 			if serverExit == nil {
 				return api.ServerExitRuntimeStatus{}
@@ -629,6 +663,14 @@ func main() {
 			return api.RDPIngressRuntimeStatus{TCPListening: status.TCPListening, UDPListening: status.UDPListening, ActiveUDP: status.ActiveUDP}
 		}),
 		api.WithRDPIngressPortRange(cfg.RDP.Ingress.PortStart, cfg.RDP.Ingress.PortEnd))
+	// Start the shared public gateway only after the Browser Sync router
+	// and optional CONNECT proxy are fully initialized. Neither handler is
+	// mutated while incoming gateway connections are being accepted.
+	if err := gw.Start(); err != nil {
+		log.Fatalf("[Gateway] Failed to start tunnel gateway: %v", err)
+	}
+	defer gw.Close()
+
 	adminServer := &http.Server{
 		Addr:         cfg.Server.Admin.Listen,
 		Handler:      apiRouter,

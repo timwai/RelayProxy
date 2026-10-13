@@ -8,12 +8,14 @@ import {groups,getGroup,normalizeForSave,configEqual} from './settings.js';
 import {summarizeSession,summarizePathReport} from './diagnostics.js';
 import {OverviewRealtime} from './OverviewCharts.jsx';
 import {allCapabilities,visibleCapabilityGroups,toggleDeviceCapability} from './capability-ui.js';
+import {BrowserSyncAdmin} from './BrowserSync.jsx';
+import {subscribeLiveUpdates} from './live-updates.js';
 
-const pages={overview:'运行总览',devices:'设备管理',identities:'身份管理',exits:'出口节点',sessions:'活跃会话',p2p:'P2P 直连',messages:'消息历史',channels:'推送渠道',rdp:'RDP 公网入口',audit:'RDP 连接审计',security:'RDP 安全策略',settings:'服务配置'};
-const nav=[['概览',[['overview','运行总览']]],['设备与身份',[['devices','设备管理'],['identities','身份管理'],['exits','出口节点']]],['连接',[['sessions','实时连接'],['p2p','P2P 路径'],['rdp','RDP 公网入口'],['audit','连接审计'],['security','IP 安全策略']]],['消息',[['messages','消息历史'],['channels','推送渠道']]],['系统',[['settings','服务配置']]]];
-const navIcons={overview:'dashboard',devices:'devices',identities:'users',exits:'globe',sessions:'activity',p2p:'route',rdp:'monitor',audit:'terminal',security:'shield',messages:'bell',channels:'share',settings:'settings'};
+const pages={overview:'运行总览',devices:'设备管理',identities:'身份管理',browserSync:'浏览器同步',exits:'出口节点',sessions:'活跃会话',p2p:'P2P 直连',messages:'消息历史',channels:'推送渠道',rdp:'RDP 公网入口',audit:'RDP 连接审计',security:'RDP 安全策略',settings:'服务配置'};
+const nav=[['概览',[['overview','运行总览']]],['设备与身份',[['devices','设备管理'],['identities','身份管理'],['browserSync','浏览器同步'],['exits','出口节点']]],['连接',[['sessions','实时连接'],['p2p','P2P 路径'],['rdp','RDP 公网入口'],['audit','连接审计'],['security','IP 安全策略']]],['消息',[['messages','消息历史'],['channels','推送渠道']]],['系统',[['settings','服务配置']]]];
+const navIcons={overview:'dashboard',devices:'devices',identities:'users',browserSync:'shield',exits:'globe',sessions:'activity',p2p:'route',rdp:'monitor',audit:'terminal',security:'shield',messages:'bell',channels:'share',settings:'settings'};
 function BrandMark({login=false}){return <div className={'brand '+(login?'login-brand':'')}><span className="brand-icon brand-image"><img src="/img/logo.svg" alt="" width="44" height="44" decoding="async"/></span><div className="brand-wordmark"><strong>RelayProxy</strong><small>{login?'SECURE ADMIN ACCESS':'SERVER CONSOLE'}</small></div></div>}
-const adminPages=new Set(['identities','rdp','audit','security','settings']);
+const adminPages=new Set(['browserSync','identities','rdp','audit','security','settings']);
 const blank={dashboard:{},devices:[],enrollments:[],identities:[],exits:[],sessions:[],p2p:[],channels:[],messages:[],pushInfo:null,ingress:[],bans:[],rules:[],systemGrants:[],settings:null};
 const queryFromHash=()=>{const [p,t]=location.hash.slice(1).split('/');return {page:pages[p]?p:'overview',settingTab:getGroup(t||'admin').id};};
 function Banner({children,type=''}) {return <div className={'config-help '+type}>{children}</div>}
@@ -124,6 +126,7 @@ export function App(){
  },[user]);
  useEffect(()=>{let cancelled=false;api('/auth/me').then(u=>{if(cancelled)return;const principal=u.user||u;setUser(principal)}).catch(e=>{if(!cancelled&&e.status!==401)setAuthError(e.message)}).finally(()=>{if(!cancelled)setAuthReady(true)});return()=>{cancelled=true}},[]);
  useEffect(()=>{if(user)refresh(user);},[user,refreshCounter]);
+ useEffect(()=>{if(!user)return;return subscribeLiveUpdates(()=>{refresh(user,true).catch(()=>{})});},[user,refresh]);
  useEffect(()=>{const update=()=>{const next=queryFromHash();setRoute(next);setSettingsTab(next.settingTab)};window.addEventListener('hashchange',update);return()=>window.removeEventListener('hashchange',update)},[]);
  useEffect(()=>{const dark=theme==='dark'||theme==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.dataset.theme=dark?'dark':'light';localStorage.setItem('relayproxy-theme',theme);const mq=window.matchMedia('(prefers-color-scheme: dark)');const fn=()=>{if(theme==='system')document.documentElement.dataset.theme=mq.matches?'dark':'light'};mq.addEventListener('change',fn);return()=>mq.removeEventListener('change',fn)},[theme]);
  useEffect(()=>{const fn=e=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',fn);return()=>window.removeEventListener('beforeunload',fn)},[dirty]);
@@ -133,7 +136,7 @@ export function App(){
  if(!authReady)return <div className="login-screen login-loading">正在检查登录状态…</div>;
  if(!user)return <Login error={authError} onLogin={async (username,password)=>{await api('/auth/login',json('POST',{username,password}));const result=await api('/auth/me');setUser(result.user||result);setAuthError('')}}/>;
  let page=route.page;if(!admin&&adminPages.has(page))page='overview';
- return <div id="app" className={mobileNavOpen?'mobile-nav-open':''}><button type="button" className="mobile-nav-overlay" aria-label="关闭导航菜单" tabIndex={mobileNavOpen?0:-1} onClick={()=>setMobileNavOpen(false)}/><aside className="sidebar" id="server-navigation"><BrandMark/><div className="nav-scroll">{nav.map(([title,items])=><section className="nav-group" key={title}><div className="group-name">{title}</div>{items.filter(([p])=>admin||!adminPages.has(p)).map(([p,label])=><button type="button" key={p} onClick={()=>go(p)} className={'nav-item '+(page===p?'active':'')}><span className="nav-icon"><Icon name={navIcons[p]} size={17}/></span><span>{label}</span>{p==='devices'&&data.enrollments.length>0&&<span className="nav-count">{data.enrollments.length}</span>}</button>)}</section>)}</div><div className="sidebar-footer"><div className="side-status"><i className="status-dot"/><div><strong>Server · {error?'DEGRADED':'ONLINE'}</strong><small>Relay 控制台</small></div></div><button className="user-chip" onClick={()=>setDialog({title:'账户管理',body:<Account user={user} onPasswordChanged={()=>{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null);setAuthError('密码已修改，请重新登录')}} logout={async()=>{try{await api('/auth/logout',{method:'POST'})}finally{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null)}}}/>})}><span className="avatar">{user.username?.slice(0,1).toUpperCase()||'A'}</span><span className="grow"><strong>{user.username}</strong><small>{admin?'全局管理员':'身份管理员'}</small></span></button></div></aside><div className="workspace"><header className="topbar"><button type="button" className="mobile-menu-toggle" aria-label={mobileNavOpen?'关闭导航菜单':'打开导航菜单'} aria-controls="server-navigation" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(o=>!o)}><span/><span/><span/></button><div className="crumb"><span>RelayProxy</span><span style={{opacity:.5}}>/</span><b>{pages[page]}</b></div><div className="topbar-right"><div className="theme-seg">{[['system','自动'],['light','浅色'],['dark','深色']].map(([v,t])=><button key={v} onClick={()=>setTheme(v)} className={theme===v?'active':''}>{t}</button>)}</div><Action disabled={loading} onClick={()=>ctx.refresh()}>{loading?'刷新中':'刷新'}</Action></div></header><main className="main-scroll"><div className="main-inner">{error&&<div className="err-notice" role="alert">{error}</div>}{data.settings?.restartRequired&&<Banner type="warn"><b>配置已保存，等待服务重启。</b> {list(data.settings.restartFields).join('、')}</Banner>}{page==='overview'?<Overview ctx={ctx}/>:page==='devices'?<Devices ctx={ctx}/>:page==='identities'?<Identities ctx={ctx}/>:page==='exits'?<Exits ctx={ctx}/>:page==='sessions'||page==='p2p'?<Connections ctx={ctx} p2pOnly={page==='p2p'}/>:page==='messages'?<Messages ctx={ctx}/>:page==='channels'?<Channels ctx={ctx}/>:page==='rdp'?<Ingress ctx={ctx}/>:page==='audit'?<Audit ctx={ctx}/>:page==='security'?<Security ctx={ctx}/>:<Settings ctx={ctx}/>}</div></main></div><Dialog dialog={dialog} close={close}/>{notice&&<div className="toast-live" role="status">{notice}</div>}</div>;
+ return <div id="app" className={mobileNavOpen?'mobile-nav-open':''}><button type="button" className="mobile-nav-overlay" aria-label="关闭导航菜单" tabIndex={mobileNavOpen?0:-1} onClick={()=>setMobileNavOpen(false)}/><aside className="sidebar" id="server-navigation"><BrandMark/><div className="nav-scroll">{nav.map(([title,items])=><section className="nav-group" key={title}><div className="group-name">{title}</div>{items.filter(([p])=>admin||!adminPages.has(p)).map(([p,label])=><button type="button" key={p} onClick={()=>go(p)} className={'nav-item '+(page===p?'active':'')}><span className="nav-icon"><Icon name={navIcons[p]} size={17}/></span><span>{label}</span>{p==='devices'&&data.enrollments.length>0&&<span className="nav-count">{data.enrollments.length}</span>}</button>)}</section>)}</div><div className="sidebar-footer"><div className="side-status"><i className="status-dot"/><div><strong>Server · {error?'DEGRADED':'ONLINE'}</strong><small>Relay 控制台</small></div></div><button className="user-chip" onClick={()=>setDialog({title:'账户管理',body:<Account user={user} onPasswordChanged={()=>{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null);setAuthError('密码已修改，请重新登录')}} logout={async()=>{try{await api('/auth/logout',{method:'POST'})}finally{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null)}}}/>})}><span className="avatar">{user.username?.slice(0,1).toUpperCase()||'A'}</span><span className="grow"><strong>{user.username}</strong><small>{admin?'全局管理员':'身份管理员'}</small></span></button></div></aside><div className="workspace"><header className="topbar"><button type="button" className="mobile-menu-toggle" aria-label={mobileNavOpen?'关闭导航菜单':'打开导航菜单'} aria-controls="server-navigation" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(o=>!o)}><span/><span/><span/></button><div className="crumb"><span>RelayProxy</span><span style={{opacity:.5}}>/</span><b>{pages[page]}</b></div><div className="topbar-right"><div className="theme-seg">{[['system','自动'],['light','浅色'],['dark','深色']].map(([v,t])=><button key={v} onClick={()=>setTheme(v)} className={theme===v?'active':''}>{t}</button>)}</div><Action disabled={loading} onClick={()=>ctx.refresh()}>{loading?'刷新中':'刷新'}</Action></div></header><main className="main-scroll"><div className="main-inner">{error&&<div className="err-notice" role="alert">{error}</div>}{data.settings?.restartRequired&&<Banner type="warn"><b>配置已保存，等待服务重启。</b> {list(data.settings.restartFields).join('、')}</Banner>}{page==='overview'?<Overview ctx={ctx}/>:page==='devices'?<Devices ctx={ctx}/>:page==='identities'?<Identities ctx={ctx}/>:page==='browserSync'?<BrowserSyncAdmin identities={ctx.data.identities} onOpenSettings={()=>ctx.go("settings","browserSync")}/>:page==='exits'?<Exits ctx={ctx}/>:page==='sessions'||page==='p2p'?<Connections ctx={ctx} p2pOnly={page==='p2p'}/>:page==='messages'?<Messages ctx={ctx}/>:page==='channels'?<Channels ctx={ctx}/>:page==='rdp'?<Ingress ctx={ctx}/>:page==='audit'?<Audit ctx={ctx}/>:page==='security'?<Security ctx={ctx}/>:<Settings ctx={ctx}/>}</div></main></div><Dialog dialog={dialog} close={close}/>{notice&&<div className="toast-live" role="status">{notice}</div>}</div>;
 }
 function Account({user,onPasswordChanged,logout}){
  const [old,setOld]=useState(''),[pw,setPw]=useState(''),[confirmPw,setConfirmPw]=useState('');
@@ -297,7 +300,63 @@ function Settings({ctx}){
  const clean=!!saved?.config&&!!draft&&configEqual(draft,saved.config);
  if(!admin)return null;
  if(!draft||!saved?.config)return <div className="empty-state">服务配置正在读取。<Action onClick={ctx.refresh}>重试</Action></div>;
- return <><Head title="服务配置" desc="集中管理管理端、隧道、直连、出口及安全策略。保存前可以切换配置分类。"/><div className="settings-layout"><aside className="settings-sidebar">{[...new Set(groups.map(g=>g.section))].map(section=><div className="settings-nav-group" key={section}><div className="settings-nav-label">{section}</div>{groups.filter(g=>g.section===section).map(g=><button type="button" key={g.id} className={'settings-nav-item '+(g.id===settingsTab?'active':'')} onClick={()=>{setSettingsTab(g.id);history.replaceState(null,'','#settings/'+g.id)}}><span className="settings-nav-icon">⚙</span><span><b>{g.title}</b><small>{g.subtitle}</small></span></button>)}</div>)}</aside><div className="settings-main"><div className="settings-heading"><div className="settings-kicker">SERVER SETTINGS / {group.section}</div><h2>{group.title}</h2><p>{group.subtitle}</p></div><div className="config-card"><div className="config-card-head"><span className="config-card-icon">⚙</span><div className="config-card-heading"><h3>{group.title}参数</h3><p>配置项保存后根据运行时要求生效</p></div><Badge tone={clean?'ok':''}>{clean?'已同步':'待保存'}</Badge></div><div className="config-card-content"><div className="config-form-grid">{group.fields.map(([field,label,type,placeholder,opts])=>{const isEnable=type==='checkbox'&&field==='enabled';const disabled=(group.id==='direct'||group.id==='exit'||group.id==='rdp')&&!draft[key]?.enabled&&field!=='enabled';const proxy=(key==='serverExit'&&['upstreamAddress','upstreamUsername','upstreamPassword'].includes(field)&&draft.serverExit?.upstreamMode==='direct');return <div key={field} className={type==='lines'?'wide':''}><Field label={label} type={type} value={draft[key]?.[field]} placeholder={placeholder} options={opts} disabled={disabled||proxy||saving} onChange={v=>change(field,v)} wide={type==='lines'}/></div>})}</div>{group.id==='admin'&&<Banner>管理台访问地址变化后需使用新的端口和协议重新访问。隧道监听地址不受此设置影响。</Banner>}{group.id==='tunnel'&&<Banner>拥塞控制策略可在此选择 BBR Aggressive 或允许 Brutal：BBR 会强制忽略所有客户端 Brutal 请求；Brutal 选项仅允许已授权、主动请求非零带宽的 QUIC 客户端协商，未请求或旧客户端仍使用 BBR，并非强制切换。服务端总预算按最高 125% 丢包补偿预留额度，只控制 Relay QUIC 的 Brutal 目标速率，不限制 BBR、P2P 或公网直连；更改需重启 Server。</Banner>}{group.id==='p2p'&&<Banner>UPnP 在 Agent 所在路由器上尝试映射。Rendezvous 是服务端 UDP 反射地址；端口设置为 0 / 0 时使用随机端口。</Banner>}{group.id==='direct'&&<Banner>Public Direct 对公网端点进行验证，验证成功后才会向获授权客户端下发短期连接 Ticket。</Banner>}{group.id==='rdp'&&<Banner>启用公网 RDP 入口后仍需创建目标入口并显式授权设备能力。连接记录和封禁策略在 RDP 页面管理。</Banner>}{group.id==='exit'&&<SystemGrants ctx={ctx}/ >}{group.id==='acl'&&<Banner>allow 模式下空列表可能拒绝全部目标；出口设备本地限制仍生效。</Banner>}{group.id==='certificate'&&<Banner>路径均是 Server 运行环境内的文件路径，证书更改需要重启。</Banner>}</div></div><div className="settings-save"><div><strong>{saving?'保存中…':clean?'没有未保存的修改':'有未保存的修改'}</strong><small className="muted"> · 版本 {saved.revision} · {saved.configPath||'Server config'}</small></div><div className="actions"><Action disabled={clean||saving} onClick={()=>setDraft(structuredClone(saved.config))}>放弃修改</Action><Action tone="primary" disabled={clean||saving} onClick={save}>保存配置</Action></div></div></div></div></>;
+ return <>
+  <Head title="服务配置" desc="管理 Server 连接、出口与安全设置"/>
+  <div className="settings-layout settings-refined">
+    <aside className="settings-sidebar" aria-label="服务配置分类">
+      {[...new Set(groups.map(g=>g.section))].map(section=>
+        <div className="settings-nav-group" key={section}>
+          <div className="settings-nav-label">{section}</div>
+          {groups.filter(g=>g.section===section).map(g=>
+            <button type="button" key={g.id}
+              className={'settings-nav-item '+(g.id===settingsTab?'active':'')}
+              aria-current={g.id===settingsTab?'page':undefined}
+              onClick={()=>{setSettingsTab(g.id);history.replaceState(null,'','#settings/'+g.id)}}>
+              <span><b>{g.title}</b></span>
+            </button>)}
+        </div>)}
+    </aside>
+    <div className="settings-main">
+      <div className="settings-heading settings-refined-heading">
+        <div><h2>{group.title}</h2><p>{group.subtitle}</p></div>
+        <Badge tone={clean?'ok':''}>{clean?'已保存':'有修改'}</Badge>
+      </div>
+      <div className="config-card">
+        <div className="config-card-content">
+          <div className="config-form-grid">
+            {group.fields.map(([field,label,type,placeholder,opts])=>{
+              const disabled=(group.id==='direct'||group.id==='exit'||group.id==='rdp')&&
+                !draft[key]?.enabled&&field!=='enabled';
+              const proxy=key==='serverExit'&&
+                ['upstreamAddress','upstreamUsername','upstreamPassword'].includes(field)&&
+                draft.serverExit?.upstreamMode==='direct';
+              return <div key={field} className={type==='lines'?'wide':''}>
+                <Field label={label} type={type} value={draft[key]?.[field]}
+                  placeholder={placeholder} options={opts}
+                  disabled={disabled||proxy||saving} onChange={v=>change(field,v)} wide={type==='lines'}/>
+              </div>;
+            })}
+          </div>
+          {group.id==='admin'&&<p className="settings-inline-warning">更改管理端口或协议后，需要使用新地址访问。</p>}
+          {group.id==='tunnel'&&<p className="settings-inline-warning">拥塞控制可选择 BBR Aggressive 或 Brutal。BBR 会拒绝客户端 Brutal 请求；Brutal 只对已获授权、明确申报非零带宽的 QUIC 设备生效，其余继续 BBR。Server 预算考虑最高 125% 丢包补偿；更改需重启 Server。</p>}
+          {group.id==='rdp'&&draft.rdpIngress?.enabled&&<p className="settings-inline-warning">开启服务后还需在 RDP 公网入口页面授权目标设备。</p>}
+          {group.id==='acl'&&draft.relayACL?.accessMode==='allow'&&
+            !draft.relayACL?.domains?.length&&!draft.relayACL?.cidrs?.length&&
+            <p className="settings-inline-warning">允许列表为空，可能拒绝所有目标。</p>}
+          {group.id==='exit'&&<SystemGrants ctx={ctx}/>}
+        </div>
+      </div>
+      <div className="settings-save" role="group" aria-label="保存服务配置">
+        <div><strong>{saving?'保存中…':clean?'配置未修改':'配置有未保存的修改'}</strong>
+          <small className="muted">{saved.configPath||'Server config'}</small></div>
+        <div className="actions">
+          <Action disabled={clean||saving} onClick={()=>setDraft(structuredClone(saved.config))}>撤销修改</Action>
+          <Action tone="primary" disabled={clean||saving} onClick={save}>保存配置</Action>
+        </div>
+      </div>
+    </div>
+  </div>
+ </>;
 }
 function SystemGrants({ctx}){
  const {data,run}=ctx;

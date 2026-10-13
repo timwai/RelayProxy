@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RelayProxy · 浏览器设置</title>
+  <link rel="stylesheet" href="./ui.css">
+  <link rel="stylesheet" href="./options.css">
+</head>
+<body class="settings-page">
+  <header class="settings-topbar">
+    <div class="topbar-inner"><div class="brand-mark" aria-hidden="true">R</div><div class="brand-copy"><strong>RelayProxy</strong><span>Browser Sync</span></div>
+      <div class="topbar-divider"></div><span class="topbar-page">浏览器设置</span>
+      
+    </div>
+  </header>
+  <div class="settings-layout">
+    <aside class="settings-sidebar" aria-label="设置导航">
+      <div class="sidebar-label">管理中心</div>
+      <nav class="settings-nav">
+        <a href="#server-section"><span aria-hidden="true">◉</span> 连接与设备</a>
+        <a href="#proxy-section"><span aria-hidden="true">⇄</span> 浏览器网络</a>
+        <a href="#sites-section"><span aria-hidden="true">◎</span> 站点授权</a>
+        <a href="#pairing-section"><span aria-hidden="true">◇</span> 设备配对</a>
+        <a href="#rules-section"><span aria-hidden="true">▤</span> 会话与出口规则</a>
+      </nav>
+      
+    </aside>
+    <main class="settings-main">
+      <div class="page-heading"><div class="eyebrow">BROWSER SYNC</div>
+        <h1>浏览器设置</h1>
+        
+      </div>
+
+      <section id="server-section" class="settings-section" aria-labelledby="server-heading">
+        <div class="section-heading"><div class="section-index">01</div><div><h2 id="server-heading">连接与设备</h2></div></div>
+        <div class="settings-card">
+          <div class="card-heading"><div><h3>服务端连接</h3></div><span class="status-pill" id="server-stage">检查中</span></div>
+          <div class="field-group"><label for="server">RelayProxy HTTPS Server</label>
+            <input id="server" type="url" required aria-required="true" spellcheck="false" placeholder="https://relay.example.com:443" autocomplete="url">
+            <p class="field-hint">填写 Server 的 HTTPS / TLS 中继地址。</p>
+          </div>
+          <div class="form-grid"><div class="field-group"><label for="identity-id">身份 ID <span aria-hidden="true">*</span>（由管理员审批绑定）</label><input id="identity-id" type="text" required aria-required="true" maxlength="128" autocomplete="off" placeholder="输入所属身份 ID"></div><div class="field-group"><label for="device-name">设备名称 <span aria-hidden="true">*</span></label><input id="device-name" type="text" required aria-required="true" maxlength="100" autocomplete="off" placeholder="例如：办公电脑 Chrome"></div></div>
+          <div class="button-row"><button id="connect" class="primary-button" type="button">连接服务端</button></div>
+          <p class="field-hint">身份 ID 和设备名称必填。首次连接提交授权申请，管理员批准后扩展自动连接，无须再次点击。</p>
+          <div class="divider-line"></div>
+          <div class="device-identity"><div><strong>本浏览器设备</strong></div>
+            <div id="device" class="device-code" title="本设备 ID">正在初始化…</div></div>
+          
+        </div>
+      </section>
+
+      <section id="proxy-section" class="settings-section" aria-labelledby="proxy-heading">
+        <div class="section-heading"><div class="section-index">02</div><div><h2 id="proxy-heading">浏览器网络</h2></div></div>
+        <div class="settings-card">
+          <label for="local-agent-all" class="setting-toggle-row"><div><strong>使用本机 RelayProxy Agent 分流</strong>
+            </div>
+            <input type="checkbox" id="local-agent-all" aria-label="启用全 Chrome Agent 代理"></label>
+          <div class="field-group port-field"><label for="local-agent-port">本机 Agent 监听端口</label>
+            <input id="local-agent-port" type="number" min="1024" max="65535" value="21291" inputmode="numeric">
+            </div>
+          <button id="local-agent-apply" class="primary-button" type="button">应用网络设置</button>
+          
+        </div>
+      </section>
+
+      <section id="sites-section" class="settings-section" aria-labelledby="sites-heading">
+        <div class="section-heading"><div class="section-index">03</div><div><h2 id="sites-heading">站点授权</h2></div></div>
+        <div class="settings-card">
+          <div class="field-group"><label for="site">选择 HTTP / HTTPS 站点</label>
+            <div class="selection-row"><select id="site"><option value="">请选择标签页</option></select>
+              <button id="refresh-sites" class="secondary-button" type="button">刷新标签页</button>
+              <button id="add-site" class="primary-button" type="button">授权网站</button></div>
+            
+          </div>
+          <h3 class="subheading">已授权网站</h3>
+          <ul id="sites" class="site-list"></ul>
+        </div>
+      </section>
+
+      <section id="pairing-section" class="settings-section" aria-labelledby="pairing-heading">
+        <div class="section-heading"><div class="section-index">04</div><div><h2 id="pairing-heading">设备配对</h2></div></div>
+        <div class="settings-card">
+          <div class="card-heading"><div><h3>创建加密邀请</h3><p>A、B 必须均已获得 Server 审批，并归属同一身份。</p></div>
+            <button id="refresh-pairing" class="secondary-button" type="button">刷新设备与邀请</button></div>
+          <div class="form-grid">
+            <div class="field-group"><label for="target">接收设备</label><select id="target"><option value="">请先连接并刷新设备</option></select></div>
+            <div class="field-group"><label for="pair-site">授权的网站</label><select id="pair-site"><option value="">请先添加允许的网站</option></select></div>
+          </div>
+          <fieldset class="sync-scope"><legend>同步数据类型</legend>
+            <label><input id="sync-cookies" type="checkbox" checked> Cookie</label>
+            <label><input id="sync-local" type="checkbox" checked> Local Storage</label>
+            <label><input id="sync-session" type="checkbox" checked> Session Storage</label>
+            <label><input id="sync-indexeddb" type="checkbox" checked> IndexedDB</label>
+          </fieldset>
+          <p class="field-hint">默认全部勾选，仅影响新创建的配对；至少选择一项。已有配对不会自动改变范围。</p>
+          <button id="offer-rule" class="primary-button" type="button">创建加密配对邀请</button>
+        </div>
+      </section>
+
+      <section id="rules-section" class="settings-section" aria-labelledby="rules-heading">
+        <div class="section-heading"><div class="section-index">05</div><div><h2 id="rules-heading">会话与出口规则</h2></div></div>
+        
+        <div id="pairing-rules" class="pairing-rules" aria-live="polite"></div>
+      </section>
+      <div id="message" role="status" aria-live="polite"></div>
+      <footer class="settings-footer">RelayProxy Browser Sync · 开发预览 · 修改只影响当前 Chrome Profile</footer>
+    </main>
+  </div>
+  <script type="module" src="./options.js"></script>
+</body>
+</html>

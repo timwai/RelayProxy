@@ -369,6 +369,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.P2P.UPnPAllowed = c.P2PUPnPAllowed
 	res.Direct.Public.Advertise = c.PublicDirectAdvertise
 	res.Exit.AllowInternet = c.AllowInternet
+	res.Exit.BrowserNetworkShare = c.BrowserNetworkShare
 	res.Exit.AllowPrivateNetwork = c.AllowPrivateNet
 	res.Exit.AllowLoopback = c.AllowLoopback
 	res.Exit.UpstreamExitID = c.ExitUpstreamID
@@ -433,6 +434,7 @@ type ConfigUpdate struct {
 	Exit struct {
 		Enabled             *bool   `json:"enabled"`
 		AllowInternet       *bool   `json:"allowInternet"`
+		BrowserNetworkShare *bool   `json:"browserNetworkShare"`
 		AllowPrivateNetwork *bool   `json:"allowPrivateNetwork"`
 		AllowLoopback       *bool   `json:"allowLoopback"`
 		UpstreamExitID      *string `json:"upstreamExitId"`
@@ -441,6 +443,10 @@ type ConfigUpdate struct {
 			Address  *string `json:"address"`
 			Username *string `json:"username"`
 			Password *string `json:"password"`
+			// Read-only status flag returned by older Agent Web snapshots.
+			// Accept it for compatibility, but never treat it as a request
+			// to change a stored password.
+			HasPassword bool `json:"hasPassword,omitempty"`
 		} `json:"upstream"`
 		Access struct {
 			Mode    *string   `json:"mode"`    // "" (off) | "allow" | "deny"
@@ -472,6 +478,9 @@ type CustomExitUpdate struct {
 	Address  string  `json:"address"`
 	Username string  `json:"username"`
 	Password *string `json:"password,omitempty"`
+	// Legacy GUI config snapshots included this read-only indicator.
+	// It is intentionally ignored; omitted Password preserves the secret.
+	HasPassword bool `json:"hasPassword,omitempty"`
 }
 
 type RoutingConfigUpdate struct {
@@ -667,6 +676,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.Exit.AllowInternet != nil {
 		cfg.Exit.AllowInternet = *in.Exit.AllowInternet
 	}
+	if in.Exit.BrowserNetworkShare != nil {
+		cfg.Exit.BrowserNetworkShare = *in.Exit.BrowserNetworkShare
+	}
 	if in.Exit.AllowPrivateNetwork != nil {
 		cfg.Exit.AllowPrivateNetwork = *in.Exit.AllowPrivateNetwork
 	}
@@ -683,7 +695,13 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		cfg.Exit.Upstream.Username = strings.TrimSpace(*in.Exit.Upstream.Username)
 	}
 	if in.Exit.Upstream.Password != nil {
-		cfg.Exit.Upstream.Password = *in.Exit.Upstream.Password
+		// Old React clients echoed the redacted default password="" and
+		// hasPassword=true when saving unrelated Exit settings. Preserve the
+		// existing secret in that case. An explicit password="" WITHOUT the
+		// legacy read-only indicator still clears it.
+		if !in.Exit.Upstream.HasPassword || *in.Exit.Upstream.Password != "" {
+			cfg.Exit.Upstream.Password = *in.Exit.Upstream.Password
+		}
 	}
 	if in.Exit.Access.Mode != nil {
 		mode := strings.ToLower(strings.TrimSpace(*in.Exit.Access.Mode))
@@ -901,7 +919,8 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"SOCKS5 端口": c.Proxy.SOCKS5.Port, "HTTP 开关": enabled(c.Proxy.HTTP.Enabled),
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
 		"出口开关": enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
-		"私网访问": c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
+		"浏览器网络共享": c.Exit.BrowserNetworkShare,
+		"私网访问":    c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
 		"共享上游出口": c.Exit.UpstreamExitID,
 		"出口上游模式": upstreamMode, "出口上游地址": upstreamAddress,
 		"出口上游用户名": upstreamUser, "出口上游密码": upstreamPassword,

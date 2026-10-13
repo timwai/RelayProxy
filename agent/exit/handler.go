@@ -28,13 +28,14 @@ var udpPipeBufferPool = sync.Pool{
 }
 
 type HandlerConfig struct {
-	ACLChecker        *acl.Checker
-	ConnectTimeout    time.Duration
-	Upstream          UpstreamConfig
-	ResumeEnabled     bool
-	ResumeGrace       time.Duration
-	ResumeMaxSessions int
-	ResumeReplayLimit int
+	ACLChecker          *acl.Checker
+	ConnectTimeout      time.Duration
+	AllowBrowserNetwork bool // explicit local opt-in, separate from ordinary proxy.exit
+	Upstream            UpstreamConfig
+	ResumeEnabled       bool
+	ResumeGrace         time.Duration
+	ResumeMaxSessions   int
+	ResumeReplayLimit   int
 }
 
 type Handler struct {
@@ -99,6 +100,12 @@ func (h *Handler) HandleStreamWithHeader(ctx context.Context, stream tunnel.Tunn
 
 	switch header.Type {
 	case protocol.FrameTypeOpenTCP:
+		h.handleOpenTCP(ctx, stream)
+	case protocol.FrameTypeBrowserNetworkTCP:
+		if !h.cfg.AllowBrowserNetwork {
+			log.Printf("[ExitHandler] Browser network sharing not enabled by this Agent")
+			return
+		}
 		h.handleOpenTCP(ctx, stream)
 	case protocol.FrameTypeOpenUDP:
 		h.handleOpenUDP(ctx, stream)

@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>RelayProxy · 快捷面板</title>
+  <link rel="stylesheet" href="./ui.css">
+  <link rel="stylesheet" href="./popup.css">
+</head>
+<body class="popup-page">
+  <main class="popup-shell">
+    <header class="popup-header">
+      <div class="brand-mark" aria-hidden="true">R</div>
+      <div class="popup-heading"><strong>RelayProxy</strong><span>浏览器快捷面板</span></div>
+      <button class="icon-button" id="open-options" title="打开完整设置" aria-label="打开完整设置">⚙</button>
+    </header>
+    <div class="popup-body">
+      <section class="connection-card" aria-label="服务端连接">
+        <div class="section-top">
+          <div><span class="eyebrow">服务端连接</span><div class="connection-line"><span id="connection-dot" class="status-dot"></span><strong id="connection-text">正在检查</strong></div></div>
+          <button id="connect" class="small-button" type="button">连接</button>
+        </div>
+        <div id="server-summary" class="muted truncate">正在读取 Server 配置…</div>
+      </section>
+      <section class="proxy-card" aria-label="Chrome 全局代理">
+        <div class="proxy-info"><div class="row-title">全局浏览器代理</div><p>使用本机 RelayProxy Agent 分流</p><span id="proxy-port" class="subtle">本机端口 · 21291</span></div>
+        <label class="switch" for="quick-proxy" title="切换整个 Chrome Profile 的 Agent 代理">
+          <input id="quick-proxy" type="checkbox" role="switch" aria-label="全局浏览器代理">
+          <span class="switch-track"></span>
+        </label>
+      </section>
+      <section class="rules-section" aria-label="快捷会话操作">
+        <div class="section-title"><div><h2>会话快捷操作</h2><p id="rule-count">已配对的网站</p></div><button id="refresh" type="button" class="text-button">刷新</button></div>
+        <div id="current-site" class="current-site" hidden></div>
+        <div id="quick-rules" class="quick-rules"></div>
+        <div id="empty-state" class="empty-state" hidden>
+          <span class="empty-symbol" aria-hidden="true">↗</span>
+          <strong id="empty-title">尚无可操作的会话</strong>
+          <p id="empty-description">请先连接 Server，在完整设置中完成站点授权和配对。</p>
+          <button id="empty-options" type="button" class="secondary-button">前往设置</button>
+        </div>
+      </section>
+      <div id="message" class="feedback" role="status" aria-live="polite" hidden></div>
+    </div>
+    <footer class="popup-footer"><span>会话同步端到端加密</span><button class="text-button" id="footer-options" type="button">完整设置 <span aria-hidden="true">↗</span></button></footer>
+  </main>
+  <script type="module" src="./popup.js"></script>
+</body>
+</html>

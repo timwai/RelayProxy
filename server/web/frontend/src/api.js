@@ -6,7 +6,14 @@ export async function api(path, options={}) {
   });
   let body;
   try { body = await result.json(); }
-  catch { throw new Error(`服务端响应无效（HTTP ${result.status}）`); }
+  catch {
+    // A disabled/old Server or a reverse proxy may return an HTML/plain-text
+    // 404. Preserve the status so feature pages can show actionable setup
+    // instructions instead of a misleading JSON parse error.
+    const error = new Error(`服务端响应无效（HTTP ${result.status}）`);
+    error.status = result.status;
+    throw error;
+  }
   if (!result.ok) {
     const error = new Error(body?.error || `请求失败（HTTP ${result.status}）`);
     error.status = result.status;

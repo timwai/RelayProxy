@@ -140,6 +140,9 @@ type AgentConfig struct {
 	DefaultExitID           string
 	CustomExits             []routing.CustomExit
 	ExitUpstreamID          string
+	BrowserNetworkShare     bool // signed Agent-local opt-in; default false
+	BrowserLocalEnabled     bool
+	BrowserLocalListen      string
 	ExitEnabled             *bool
 	ExitUpstream            exit.UpstreamConfig
 	RDPEnabled              *bool
@@ -291,6 +294,7 @@ type Agent struct {
 	exitHandler          *exit.Handler
 	socksServer          *socks5.Server
 	httpServer           *httpproxy.Server
+	browserLocalServer   *browserLocalProxy
 	divertSrv            *divert.Server
 	divertStage          atomic.Pointer[string]
 	divertError          atomic.Pointer[string]
@@ -476,8 +480,9 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
 		a.exitHandler = exit.NewHandler(exit.HandlerConfig{
 			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
-			ResumeEnabled: cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
-			ResumeGrace:   15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: 512 << 10,
+			AllowBrowserNetwork: cfg.BrowserNetworkShare,
+			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
+			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: 512 << 10,
 		})
 	}
 	var tunnelTLS *tls.Config
@@ -664,6 +669,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if handler != nil {
 		requested = append(requested, protocol.CapabilityProxyExit)
 		transportCaps = append(transportCaps, protocol.CapabilityTargetACL)
+		if cfg.BrowserNetworkShare {
+			transportCaps = append(transportCaps, protocol.CapabilityBrowserNetworkExit)
+		}
 	}
 	if cfg.IsRDPEnabled() {
 		requested = append(requested, protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic)
@@ -1258,7 +1266,9 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 		}
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 		header, err := protocol.ReadStreamHeader(stream)
-		if err != nil || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest) {
+		if err != nil || (header.Type != protocol.FrameTypeOpenTCP &&
+			header.Type != protocol.FrameTypeBrowserNetworkTCP &&
+			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest) {
 			<-sem
 			_ = stream.Close()
 			continue
@@ -1334,6 +1344,15 @@ func (a *Agent) Start() (err error) {
 			}
 			a.mu.Lock()
 			a.httpServer = srv
+			a.mu.Unlock()
+		}
+		if cfg.BrowserLocalEnabled {
+			srv := newBrowserLocalProxy(cfg.BrowserLocalListen, a.dialer)
+			if err := srv.Start(); err != nil {
+				return fmt.Errorf("Browser Sync local bridge: %w", err)
+			}
+			a.mu.Lock()
+			a.browserLocalServer = srv
 			a.mu.Unlock()
 		}
 	}
@@ -1948,9 +1967,11 @@ func (a *Agent) closeRuntime() error {
 		a.handshakeOK.Store(false)
 		a.readySession = nil
 		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
+		browserLocalSrv := a.browserLocalServer
 		rdpSession, rdpP2P, proxyP2P := a.rdpSession, a.rdpP2P, a.proxyP2P
 		exitHandler := a.exitHandler
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
+		a.browserLocalServer = nil
 		a.rdpSession, a.rdpP2P, a.proxyP2P, a.exitHandler = nil, nil, nil, nil
 		a.rdpTargets = nil
 		a.cancel()
@@ -1967,6 +1988,9 @@ func (a *Agent) closeRuntime() error {
 		}
 		if divertSrv != nil {
 			errs = append(errs, divertSrv.Close())
+		}
+		if browserLocalSrv != nil {
+			errs = append(errs, browserLocalSrv.Close())
 		}
 		if ctrl != nil {
 			errs = append(errs, ctrl.Close())

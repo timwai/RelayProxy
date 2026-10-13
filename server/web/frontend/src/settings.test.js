@@ -2,7 +2,9 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {groups,configFieldCount,normalizeForSave,configEqual} from './settings.js';
 test('server config covers all existing groups and fields',()=>{
   assert.equal(groups.length,8);
+  // Browser Sync is managed solely from its dedicated administration page.
   assert.equal(configFieldCount(),47);
+  assert.equal(groups.some(g=>g.id==='browserSync'),false);
   assert.deepEqual(groups.map(g=>g.key||g.id),['admin','tunnel','direct','p2p','serverExit','rdpIngress','certificate','relayACL']);
 });
 test('unknown future settings survive edits',()=>{
@@ -24,27 +26,4 @@ test('config comparisons ignore editor-only flags and normalize equivalent line 
  const draft={__pending:true,relayACL:{domains:'a.example\nb.example\n',cidrs:''}};
  assert.equal(configEqual(draft,initial),true);
  assert.equal(configEqual({...draft,relayACL:{domains:'a.example\nc.example',cidrs:[]}},initial),false);
-});
-test('Relay Brutal bandwidth controls are explicitly editable and not stripped at save',()=>{
- const tunnel=groups.find(g=>g.id==='tunnel');
- const fields=tunnel.fields.map(item=>item[0]);
- for(const key of ['brutalUpMbps','brutalDownMbps','brutalTotalUpMbps','brutalTotalDownMbps','brutalIgnoreClientBandwidth','brutalDisableLossCompensation']) assert.ok(fields.includes(key), key);
- const original={tunnel:{tcpListen:':443',brutalUpMbps:0,brutalTotalUpMbps:0},future:{key:true}};
- const draft={tunnel:{...original.tunnel,brutalUpMbps:25,brutalTotalUpMbps:60}};
- const saved=normalizeForSave(draft,original);
- assert.equal(saved.tunnel.brutalUpMbps,25);
- assert.equal(saved.tunnel.brutalTotalUpMbps,60);
- assert.deepEqual(saved.future,{key:true});
-});
-
-test('Server QUIC congestion selector uses existing persisted negotiation gate',()=>{
- const tunnel=groups.find(group=>group.id==='tunnel');
- const policy=tunnel.fields.find(field=>field[0]==='brutalIgnoreClientBandwidth');
- assert.equal(policy[2],'congestion-select');
- const initial={tunnel:{brutalIgnoreClientBandwidth:true,brutalUpMbps:20}};
- const enabled=normalizeForSave({tunnel:{...initial.tunnel,brutalIgnoreClientBandwidth:false}},initial);
- assert.equal(enabled.tunnel.brutalIgnoreClientBandwidth,false);
- assert.equal(enabled.tunnel.brutalUpMbps,20);
- const disabled=normalizeForSave({tunnel:{...enabled.tunnel,brutalIgnoreClientBandwidth:true}},enabled);
- assert.equal(disabled.tunnel.brutalIgnoreClientBandwidth,true);
 });

@@ -129,6 +129,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Proxy.SOCKS5.Listen = strings.TrimSpace(c.Proxy.SOCKS5.Listen)
 	c.Proxy.HTTP.Listen = strings.TrimSpace(c.Proxy.HTTP.Listen)
 	c.Web.Listen = strings.TrimSpace(c.Web.Listen)
+	c.BrowserSync.LocalProxy.Listen = strings.TrimSpace(c.BrowserSync.LocalProxy.Listen)
 	applyAgentDefaults(c)
 	// QUIC requires TLS. Keep the persisted/desired transport aligned with what
 	// relay-agent can actually run, otherwise tls_enabled=false + auto/quic_only
@@ -149,6 +150,9 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	}
 	if c.Mode != "CLIENT" {
 		return fmt.Errorf("客户端角色由服务端授权，配置文件不再接受 mode")
+	}
+	if err := validateBrowserLocalConfig(c); err != nil {
+		return err
 	}
 	if c.Device.IdentityID != "" && !validIdentityID(c.Device.IdentityID) {
 		return fmt.Errorf("device.identity_id 必须是服务端生成的 16 位小写字母数字组合")
@@ -373,4 +377,20 @@ func isLoopbackHost(host string) bool {
 	}
 	addr, err := netip.ParseAddr(strings.Trim(strings.TrimSpace(host), "[]"))
 	return err == nil && addr.IsLoopback()
+}
+
+func validateBrowserLocalConfig(c *AgentConfigFile) error {
+	x := c.BrowserSync.LocalProxy
+	if !x.Enabled {
+		return nil
+	}
+	host, port, err := net.SplitHostPort(x.Listen)
+	if err != nil || host != "127.0.0.1" {
+		return fmt.Errorf("browser_sync.local_proxy.listen must bind 127.0.0.1")
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1024 || n > 65535 {
+		return fmt.Errorf("browser_sync.local_proxy.listen requires port 1024-65535")
+	}
+	return nil
 }

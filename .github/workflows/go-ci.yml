@@ -1,5 +1,9 @@
 name: Go CI
 
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 on:
   push:
     branches:
@@ -7,6 +11,7 @@ on:
       - "perf/**"
       - "feat/hysteria-brutal-issue-198"
       - "fix/**"
+      - "feat/**"
       - "feature/wails-react-complete-ui"
   pull_request:
 
@@ -47,6 +52,10 @@ jobs:
         run: go test ./... -count=1
       - name: Race core data path
         run: go test -race ./internal/tunnel ./internal/p2p/resume ./internal/p2p/punch ./agent/client ./agent/direct ./agent/exit ./agent/rdp ./agent/rdp/p2p ./server/direct ./server/session ./server/gateway -count=1
+      - name: Race Browser Sync authorization and WSS
+        run: go test -race ./server/browser_sync ./server/api -count=1
+      - name: Repeated Browser Sync concurrency quota checks
+        run: go test -race ./server/browser_sync -run '^TestBrowserSyncConcurrent' -count=5 -timeout=4m
       - name: Benchmark smoke
         run: |
           go test ./internal/tunnel ./internal/protocol ./internal/traffic ./internal/acl ./server/gateway ./server/repository ./server/direct ./agent/exit ./agent/client ./agent/direct ./agent/rdp/p2p \

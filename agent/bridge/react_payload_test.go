@@ -56,6 +56,7 @@ func TestReactConfigPayloadRoundTripsThroughBridge(t *testing.T) {
 		"exit": map[string]any{
 			"enabled":             true,
 			"allowInternet":       true,
+			"browserNetworkShare": true,
 			"allowPrivateNetwork": false,
 			"allowLoopback":       false,
 			"upstream": map[string]any{
@@ -113,6 +114,9 @@ func TestReactConfigPayloadRoundTripsThroughBridge(t *testing.T) {
 	}
 	if cfg.Proxy.SOCKS5.Port != 1088 || cfg.Proxy.HTTP.Port != 8088 || cfg.Proxy.HTTP.Enabled == nil || *cfg.Proxy.HTTP.Enabled || cfg.Proxy.DefaultExitID != "exit-react" {
 		t.Fatalf("proxy payload mismatch: %+v", cfg.Proxy)
+	}
+	if !cfg.Exit.BrowserNetworkShare {
+		t.Fatal("React Agent UI did not persist browser-network-share opt-in")
 	}
 	if cfg.Exit.Upstream.Mode != "direct" || cfg.Exit.Access.Mode != "deny" || len(cfg.Exit.Access.Domains) != 1 || len(cfg.Exit.Access.CIDRs) != 1 {
 		t.Fatalf("exit payload mismatch: %+v", cfg.Exit)

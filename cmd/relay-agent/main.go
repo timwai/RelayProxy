@@ -254,6 +254,9 @@ func main() {
 		DefaultExitID:           cfgFile.Proxy.DefaultExitID,
 		CustomExits:             cfgFile.Proxy.CustomExits,
 		ExitUpstreamID:          cfgFile.Exit.UpstreamExitID,
+		BrowserNetworkShare:     cfgFile.Exit.BrowserNetworkShare,
+		BrowserLocalEnabled:     cfgFile.BrowserSync.LocalProxy.Enabled,
+		BrowserLocalListen:      cfgFile.BrowserSync.LocalProxy.Listen,
 		ExitEnabled:             cfgFile.Exit.Enabled,
 		ExitUpstream: exit.UpstreamConfig{
 			Mode: cfgFile.Exit.Upstream.Mode, Address: cfgFile.Exit.Upstream.Address,

@@ -96,21 +96,28 @@ test('encrypted rule proposal decrypts only for the intended browser and rejects
     const database = {
       createObjectStore() {},
       transaction() {
-        const tx = {
-          objectStore() {
+        let outstanding=0;
+        const tx={
+          objectStore(){
+            function operation(run){
+              const request={};
+              outstanding++;
+              queueMicrotask(()=>{
+                try{request.result=run();request.onsuccess?.();}
+                catch(error){request.error=error;request.onerror?.();}
+                finally{
+                  outstanding--;
+                  queueMicrotask(()=>{
+                    if(outstanding===0)tx.oncomplete?.();
+                  });
+                }
+              });
+              return request;
+            }
             return {
-              get(name) {
-                const request = {};
-                queueMicrotask(() => {
-                  request.result = keys.get(name);
-                  request.onsuccess?.();
-                });
-                return request;
-              },
-              put(value, name) {
-                keys.set(name, value);
-                queueMicrotask(() => tx.oncomplete?.());
-              }
+              get(name){return operation(()=>keys.get(name));},
+              put(value,name){return operation(()=>keys.set(name,value));},
+              delete(name){return operation(()=>keys.delete(name));}
             };
           }
         };

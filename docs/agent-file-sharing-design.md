@@ -1,6 +1,6 @@
 # RelayProxy Agent 文件共享：原型与可开发设计
 
-> 状态：设计方案 / 交互原型，**尚未实现真实文件传输或修改仓库代码**。
+> 状态：**P0 开发中**。交互原型已提交；本机共享目录配置、设备 ACL、本地 Web 与 Wails 管理桥接已进入首批实现。跨设备浏览、上传下载和传输进度尚未实现。
 >
 > 参考当前 `main`：`agent/gui/frontend/src/App.jsx`、`agent/gui/frontend/src/styles.css`、`agent/gui/frontend/src/bridge.js`（后者仅按 App.jsx 的调用方式推断）；以及 README 中的设备身份、Server 审批、P2P / 公网直连 / Relay 路径。设计中的接口和配置名称均为**新增建议**，不是已存在的 API。
 
@@ -232,3 +232,23 @@ flowchart LR
 ## 9. 与原型的差异声明
 
 随附 `relayproxy-file-sharing-prototype.html` 是单文件、无外部依赖、无真实网络和磁盘读写的**功能交互原型**。共享文件夹、设备、目录和进度都是演示数据；新增共享和权限配置只在当前浏览器页面内生效，刷新即重置。原型中的“浏览器目录选择器”按钮不会直接获得 Agent 机器的文件系统访问权限，该能力需在 Go/Wails 本地服务实现后才能工作。
+## 10. 当前开发进度（2026-10-14）
+
+| 功能 | 状态 | 代码 |
+| --- | --- | --- |
+| 原型、技术设计 | 已提交 | `docs/agent-file-sharing-prototype.html` |
+| 本机多目录注册 / 启停 / 删除共享配置 | 首轮完成，待 CI 实测 | `agent/fileshare/store.go` |
+| 按设备 read / read_write ACL、默认拒绝、版本冲突保护 | 首轮完成，待集成实测 | `agent/fileshare/store.go` |
+| 本机侧车 JSON 持久化 | 首轮完成，待 Windows / macOS 验证 | `<agent配置文件>.file-shares.json` |
+| Agent React 配置页面与权限编辑 | 首轮完成，待 GUI 验证 | `agent/gui/frontend/src/FileSharingPage.jsx` |
+| 本地 Web API / Windows Wails 桥接 | 首轮完成，待编译与回归 | `agent/gui/fileshare_web.go` |
+| Server files.client / files.host 能力和认证设备发现 | 未开始 | P0 下一阶段 |
+| Agent ↔ Agent 远程目录浏览 / 下载 / 上传 | 未开始 | P0 下一阶段 |
+| 传输速率 / 进度 / 取消 / 路径回退 | 未开始 | P0 下一阶段 |
+
+### 首轮实现和设计的暂时差异
+
+- 当前共享配置先使用**独立 sidecar JSON**，而不是修改 Agent 主 YAML。原因是复用现有 Web + Wails 管理入口时不应破坏配置热更新；正式上线前需评审配置迁移、并发写与备份策略。
+- 在获得 Server 已审批设备目录接口之前，首轮权限编辑先接受设备 ID。**不能把手工输入设备 ID 当作设备身份认证**；仅在后续远端连接由 Server 验证身份后，主机 Agent 以认证设备 ID 检查 ACL。当前没有对外文件浏览或下载的数据接口。
+- 共享文件真实读写、浏览器上传下载和传输进度尚未接通，React 对应视图明确说明未实现，不以模拟数据伪装为完成。
+- 文件共享功能默认关闭，新增目录没有任何设备权限；相关全链路安全测试未完成，不能视为已可正式上线。

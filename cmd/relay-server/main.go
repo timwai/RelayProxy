@@ -320,6 +320,7 @@ func main() {
 	router.SetRDPChecker(func(controllerDeviceID, targetDeviceID string) (bool, error) {
 		return db.AuthorizeRDP(controllerDeviceID, targetDeviceID)
 	})
+	router.SetFileShareChecker(db.AuthorizeFileShare)
 	router.SetRDPControlHandler(rdpCoordinator.HandleControl)
 	if proxyP2PCoordinator != nil {
 		router.SetP2PControlHandler(proxyP2PCoordinator.HandleControl)

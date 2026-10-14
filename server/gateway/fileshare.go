@@ -82,6 +82,30 @@ func (r *StreamRouter) handleFileShare(
 	}
 	_ = clientStream.SetDeadline(time.Time{})
 	_ = hostStream.SetDeadline(time.Time{})
+	// Revoked grants and replaced authenticated sessions must terminate an
+	// active download too, not just block the next opened stream.
+	monitorCtx, stopMonitor := context.WithCancel(ctx)
+	defer stopMonitor()
+	go func() {
+		ticker := time.NewTicker(2 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-monitorCtx.Done():
+				return
+			case <-ticker.C:
+				currentClient, clientOK := r.sessions.Get(client.DeviceID)
+				currentHost, hostOK := r.sessions.Get(host.DeviceID)
+				stillAllowed, checkErr := r.fileShareChecker(client.DeviceID, host.DeviceID)
+				if checkErr != nil || !stillAllowed || !clientOK || !hostOK ||
+					currentClient != client || currentHost != host {
+					_ = clientStream.Close()
+					_ = hostStream.Close()
+					return
+				}
+			}
+		}
+	}()
 	client.ActiveStreams.Add(1)
 	host.ActiveStreams.Add(1)
 	defer client.ActiveStreams.Add(-1)

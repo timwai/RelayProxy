@@ -1,0 +1,92 @@
+package app
+
+import (
+	"context"
+	"crypto/tls"
+	"crypto/x509"
+	"errors"
+	"fmt"
+	"net"
+	"time"
+
+	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
+)
+
+// tryFileDirect negotiates fresh file-scoped credentials over the already
+// authenticated Relay session. TLS pinning + one-time tickets authenticate
+// the destination independently of proxy, RDP or Browser Sync privileges.
+func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.FileShareRequest) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
+	session, _, err := a.fileSharingSession()
+	if err!=nil{return nil,protocol.FileShareResponse{},err}
+	offerCtx,cancel:=context.WithTimeout(ctx,3*time.Second)
+	defer cancel()
+	control,err:=session.OpenStream(offerCtx)
+	if err!=nil{return nil,protocol.FileShareResponse{},err}
+	defer control.Close()
+	_ = control.SetDeadline(time.Now().Add(3*time.Second))
+	if err:=protocol.WriteStreamHeader(control,&protocol.StreamHeader{
+		Type:protocol.FrameTypeFileDirectPrepare,ExitDeviceID:hostID,
+	});err!=nil{return nil,protocol.FileShareResponse{},err}
+	var offer protocol.FileDirectOffer
+	if err:=protocol.ReadJSON(control,&offer);err!=nil{return nil,protocol.FileShareResponse{},err}
+	if offer.Error!=""{return nil,protocol.FileShareResponse{},errors.New(offer.Error)}
+	if len(offer.Token)!=64 || len(offer.Fingerprint)!=64 ||
+		len(offer.Endpoints)==0 || len(offer.Endpoints)>16 ||
+		offer.ExpiresAt<=time.Now().UnixMilli(){
+		return nil,protocol.FileShareResponse{},errors.New("invalid file direct offer")
+	}
+	var lastErr error
+	for _,endpoint:=range offer.Endpoints {
+		if ctx.Err()!=nil{return nil,protocol.FileShareResponse{},ctx.Err()}
+		dialCtx,stop:=context.WithTimeout(ctx,800*time.Millisecond)
+		tcpConn,err:=(&net.Dialer{}).DialContext(dialCtx,"tcp",endpoint)
+		if err!=nil{lastErr=err;stop();continue}
+		tlsCfg:=&tls.Config{
+			ServerName:"relayproxy-file-direct",
+			MinVersion:tls.VersionTLS13,
+			NextProtos:[]string{fileDirectALPN},
+			InsecureSkipVerify:true, // the Server-attested SHA-256 fingerprint is checked below
+			VerifyConnection:func(cs tls.ConnectionState)error{
+				if len(cs.PeerCertificates)!=1 ||
+					!validateFileDirectFingerprint(cs.PeerCertificates[0],offer.Fingerprint) ||
+					cs.NegotiatedProtocol!=fileDirectALPN {
+					return errors.New("untrusted file direct TLS certificate")
+				}
+				return nil
+			},
+		}
+		conn:=tls.Client(tcpConn,tlsCfg)
+		err=conn.HandshakeContext(dialCtx)
+		stop()
+		if err!=nil{lastErr=err;_ = conn.Close();continue}
+		_ = conn.SetDeadline(time.Now().Add(12*time.Second))
+		auth:=protocol.FileDirectAuth{Token:offer.Token}
+		if err=protocol.WriteJSON(conn,auth);err!=nil{lastErr=err;_ = conn.Close();continue}
+		var approved protocol.FileDirectAuthResult
+		if err=protocol.ReadJSON(conn,&approved);err!=nil || !approved.Allowed {
+			if err==nil{err=errors.New("file direct host denied authorization")}
+			lastErr=err
+			_ = conn.Close()
+			continue
+		}
+		if req.Path==""{req.Path="."}
+		if err=protocol.WriteJSON(conn,req);err!=nil{lastErr=err;_ = conn.Close();continue}
+		var response protocol.FileShareResponse
+		if err=protocol.ReadJSON(conn,&response);err!=nil || !response.Success{
+			if err==nil{err=fmt.Errorf("file direct request rejected: %s",response.Error)}
+			lastErr=err
+			_ = conn.Close()
+			continue
+		}
+		_ = conn.SetDeadline(time.Time{})
+		return &fileDirectStream{conn},response,nil
+	}
+	if lastErr==nil{lastErr=errors.New("no file direct candidate reachable")}
+	return nil,protocol.FileShareResponse{},lastErr
+}
+
+// Compile-time assurance: no unrestricted net.Conn can be used without an
+// authenticated TLS session and file-scoped direct protocol adapter.
+var _ tunnel.TunnelStream = (*fileDirectStream)(nil)
+var _ *x509.Certificate

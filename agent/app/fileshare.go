@@ -2,6 +2,8 @@ package app
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -155,10 +157,28 @@ func (a *Agent) DownloadRemoteFile(ctx context.Context, deviceID, shareID, relat
 	if progress != nil {
 		progress(0, result.Size)
 	}
-	writer := &fileProgressWriter{w: dst, size: result.Size, progress: progress}
+	digest := sha256.New()
+	writer := &fileProgressWriter{w: io.MultiWriter(dst, digest), size: result.Size, progress: progress}
 	n, err := io.CopyN(writer, stream, result.Size)
 	if err != nil {
 		return n, err
+	}
+	if err := ctx.Err(); err != nil {
+		return n, err
+	}
+	var receipt protocol.FileShareResponse
+	if err := protocol.ReadJSON(stream, &receipt); err != nil {
+		return n, fmt.Errorf("missing download completion receipt: %w", err)
+	}
+	if !receipt.Success {
+		if receipt.Error == "" {
+			receipt.Error = "remote file download failed"
+		}
+		return n, errors.New(receipt.Error)
+	}
+	if receipt.Size != result.Size || receipt.SHA256 == "" ||
+		receipt.SHA256 != hex.EncodeToString(digest.Sum(nil)) {
+		return n, errors.New("remote file download failed integrity verification")
 	}
 	if err := ctx.Err(); err != nil {
 		return n, err

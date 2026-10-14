@@ -47,3 +47,7 @@ func (s *WailsService) CommitFileUpload(id string) (bridge.FileTransfer, error) 
 func (s *WailsService) DiscardFileUpload(id string) error {
 	return s.owner.bridge.DiscardFileUpload(id)
 }
+
+func (s *WailsService) GetFileShareCandidates() ([]protocol.FileShareCandidate, error) {
+	return s.owner.bridge.GetFileShareCandidates()
+}

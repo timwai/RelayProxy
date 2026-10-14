@@ -99,9 +99,10 @@ func (m *fileTransferManager) start(deviceID, shareID, relativePath string) (Fil
 		}
 		m.order = m.order[:100]
 	}
+	snapshot := record.FileTransfer
 	m.mu.Unlock()
 	go m.download(ctx, record)
-	return record.FileTransfer, nil
+	return snapshot, nil
 }
 
 func (m *fileTransferManager) download(ctx context.Context, record *fileTransferRecord) {

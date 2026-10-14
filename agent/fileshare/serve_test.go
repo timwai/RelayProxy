@@ -2,6 +2,8 @@ package fileshare
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"net"
 	"os"
@@ -36,10 +38,21 @@ func fileShareTestRequest(t *testing.T, store *FileStore, deviceID string, req p
 	}
 	var data []byte
 	if req.Action == protocol.FileShareDownload && response.Success {
-		var err error
-		data, err = io.ReadAll(client)
-		if err != nil {
+		if response.Size < 0 || response.Size > 1<<20 {
+			t.Fatalf("invalid test download size: %d", response.Size)
+		}
+		data = make([]byte, int(response.Size))
+		if _, err := io.ReadFull(client, data); err != nil {
 			t.Fatal(err)
+		}
+		var receipt protocol.FileShareResponse
+		if err := protocol.ReadJSON(client, &receipt); err != nil {
+			t.Fatalf("final download receipt missing: %v", err)
+		}
+		hash := sha256.Sum256(data)
+		if !receipt.Success || receipt.Size != response.Size ||
+			receipt.SHA256 != hex.EncodeToString(hash[:]) {
+			t.Fatalf("invalid download integrity receipt: %+v", receipt)
 		}
 	}
 	<-done

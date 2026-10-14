@@ -106,6 +106,12 @@ func (s *FileStore) serveUpload(ctx context.Context, stream tunnel.TunnelStream,
 		fail("unable to finalize uploaded data")
 		return
 	}
+	// Recheck immediately before publishing; a permission change during
+	// fsync must not turn an incomplete authorization into a visible file.
+	if err := src.authorize(); err != nil {
+		fail("file sharing permission revoked")
+		return
+	}
 	// Root.Link has NO overwrite semantics; it fails with os.ErrExist when
 	// another file appears at the same destination concurrently.
 	if err := root.Link(tempLocal, targetLocal); err != nil {

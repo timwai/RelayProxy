@@ -50,8 +50,8 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			})
 			server := gateway.NewGateway(gateway.GatewayConfig{
 				TCPAddr: "127.0.0.1:0", QUICAddr: "127.0.0.1:0",
-				TLSConfig:        &tls.Config{Certificates: []tls.Certificate{certificate}},
-				ServerInstanceID: "fileshare-integration",
+				TLSConfig:            &tls.Config{Certificates: []tls.Certificate{certificate}},
+				ServerInstanceID:     "fileshare-integration",
 				P2PRendezvousAddress: rendezvousAddress,
 				ResolveIdentity: func(shortID string) (gateway.IdentityAuthorization, error) {
 					return gateway.IdentityAuthorization{IdentityID: "file-test-identity", IdentityName: shortID}, nil

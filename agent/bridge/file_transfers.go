@@ -22,6 +22,7 @@ type FileTransfer struct {
 	ShareID      string  `json:"shareId"`
 	RelativePath string  `json:"relativePath"`
 	FileName     string  `json:"fileName"`
+	Direction    string  `json:"direction"`
 	Destination  string  `json:"destination,omitempty"`
 	State        string  `json:"state"`
 	Total        int64   `json:"total"`
@@ -42,11 +43,12 @@ type fileTransferManager struct {
 	mu      sync.Mutex
 	agent   *app.Agent
 	records map[string]*fileTransferRecord
+	stages  map[string]*fileUploadSession
 	order   []string
 }
 
 func newFileTransferManager(agent *app.Agent) *fileTransferManager {
-	return &fileTransferManager{agent: agent, records: map[string]*fileTransferRecord{}}
+	return &fileTransferManager{agent: agent, records: map[string]*fileTransferRecord{}, stages: map[string]*fileUploadSession{}}
 }
 
 func transferID() (string, error) {
@@ -77,7 +79,7 @@ func (m *fileTransferManager) start(deviceID, shareID, relativePath string) (Fil
 	ctx, cancel := context.WithCancel(context.Background())
 	record := &fileTransferRecord{FileTransfer: FileTransfer{
 		ID: id, DeviceID: deviceID, ShareID: shareID, RelativePath: relativePath,
-		FileName: name, State: "running", StartedAt: time.Now().UnixMilli(),
+		FileName: name, Direction: "download", State: "running", StartedAt: time.Now().UnixMilli(),
 	}, cancel: cancel, lastSample: time.Now()}
 	m.mu.Lock()
 	running := 0

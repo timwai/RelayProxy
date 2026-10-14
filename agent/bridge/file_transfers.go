@@ -44,12 +44,13 @@ type fileTransferRecord struct {
 }
 
 type fileTransferManager struct {
-	mu      sync.Mutex
-	agent   *app.Agent
-	records map[string]*fileTransferRecord
-	stages  map[string]*fileUploadSession
-	order   []string
+	mu            sync.Mutex
+	agent         *app.Agent
+	records       map[string]*fileTransferRecord
+	stages        map[string]*fileUploadSession
+	order         []string
 	taskStorePath string
+	taskScope     string
 }
 
 func newFileTransferManager(agent *app.Agent) *fileTransferManager {

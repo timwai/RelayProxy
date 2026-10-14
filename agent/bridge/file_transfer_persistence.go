@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -13,11 +14,12 @@ import (
 	"strings"
 )
 
-const fileTransferTaskVersion = 1
+const fileTransferTaskVersion = 2
 const maxFileTransferTaskBytes = 256 << 10
 
 type fileTransferTaskSnapshot struct {
 	Version int            `json:"version"`
+	Scope   string         `json:"scope"`
 	Records []FileTransfer `json:"records"`
 }
 
@@ -31,7 +33,21 @@ func (m *fileTransferManager) initTaskPersistence(configPath string) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.taskStorePath = configPath + ".file-transfer-tasks.json"
+	m.taskScope = fileTransferScope(m.agent)
 	return m.restoreTasksLocked()
+}
+
+// Bind local metadata to this Agent installation and Relay identity. A device
+// or identity rotation must not restore another identity's transfer paths.
+func fileTransferScope(agent *app.Agent) string {
+	if agent == nil {
+		return ""
+	}
+	cfg := agent.Config()
+	raw := fmt.Sprintf("%s\x00%s\x00%s\x00%d\x00%d",
+		cfg.IdentityID, cfg.DeviceID, cfg.ServerAddress, cfg.TCPPort, cfg.QUICPort)
+	sum := sha256.Sum256([]byte(raw))
+	return hex.EncodeToString(sum[:])
 }
 
 func validDownloadTaskID(value string) bool {
@@ -82,6 +98,9 @@ func (m *fileTransferManager) restoreTasksLocked() error {
 	if err := decoder.Decode(&snapshot); err != nil {
 		return fmt.Errorf("read file transfer tasks: %w", err)
 	}
+	if snapshot.Scope != m.taskScope {
+	\treturn nil
+	}
 	if snapshot.Version != fileTransferTaskVersion || len(snapshot.Records) > 100 {
 		return errors.New("file transfer task index version or length invalid")
 	}
@@ -121,7 +140,7 @@ func (m *fileTransferManager) persistTasksLocked() error {
 	if m == nil || m.taskStorePath == "" {
 		return nil
 	}
-	snapshot := fileTransferTaskSnapshot{Version: fileTransferTaskVersion}
+	snapshot := fileTransferTaskSnapshot{Version: fileTransferTaskVersion, Scope: m.taskScope}
 	for _, id := range m.order {
 		record := m.records[id]
 		if record == nil || record.Direction != "download" ||

@@ -176,6 +176,18 @@ func (r *fileDirectRuntime) serveQUICConnection(conn *quic.Conn) {
 		return
 	}
 	store.Serve(r.a.ctx, stream, clientID)
+	// store.Serve closes the file stream after its final receipt is queued.
+	// Do not immediately close the entire QUIC connection: that would
+	// discard the queued file bytes/receipt before the remote reader has
+	// consumed them. Wait for the client to close its session after receipt,
+	// while bounding abandoned connections to 30 seconds.
+	wait := time.NewTimer(30 * time.Second)
+	defer wait.Stop()
+	select {
+	case <-conn.Context().Done():
+	case <-r.a.ctx.Done():
+	case <-wait.C:
+	}
 }
 
 // tryFileQUIC consumes the same short-lived, Server-scoped ticket as direct

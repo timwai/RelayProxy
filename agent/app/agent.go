@@ -21,6 +21,7 @@ import (
 	"relayproxy/agent/client"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
+	"relayproxy/agent/fileshare"
 	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/agent/rdp"
 	rdpp2p "relayproxy/agent/rdp/p2p"
@@ -327,6 +328,7 @@ type Agent struct {
 	lifecycleMu          sync.Mutex
 	closeOnce            sync.Once
 	closeErr             error
+	fileShareStore       *fileshare.FileStore
 	rdpConnectMu         sync.Mutex
 }
 
@@ -1118,6 +1120,24 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 		if err != nil {
 			admitted.Add(-1)
 			_ = stream.Close()
+			continue
+		}
+		if header.Type == protocol.FrameTypeFileShare {
+			a.mu.RLock()
+			store := a.fileShareStore
+			granted := slices.Contains(a.approvedCapabilities, protocol.CapabilityFilesHost)
+			a.mu.RUnlock()
+			if store == nil || !granted || header.ClientDeviceID == "" {
+				admitted.Add(-1)
+				_ = stream.Close()
+				continue
+			}
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				store.Serve(ctx, stream, header.ClientDeviceID)
+			}()
 			continue
 		}
 		if header.Type == protocol.FrameTypePushMessage {

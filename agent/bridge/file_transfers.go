@@ -115,7 +115,7 @@ func (m *fileTransferManager) download(ctx context.Context, record *fileTransfer
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	if ctx.Err() != nil {
-		record.State = "cancelled"
+		record.State = "paused"
 	} else if err != nil {
 		record.State, record.Error = "failed", err.Error()
 	} else {
@@ -133,12 +133,27 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	if err := os.MkdirAll(dir, 0700); err != nil {
 		return err
 	}
-	file, err := os.CreateTemp(dir, ".relayproxy-download-*")
+	// Stable, unguessable partial name permits a paused/failed download to
+	// reuse its verified prefix without ever exposing incomplete data as a
+	// normal download. The root confines all file operations to the download
+	// folder even when an existing partial path is a symlink.
+	root, err := os.OpenRoot(dir)
 	if err != nil {
 		return err
 	}
-	tempPath := file.Name()
-	defer os.Remove(tempPath)
+	defer root.Close()
+	tempName := ".relayproxy-download-" + record.ID + ".partial"
+	if info, statErr := root.Lstat(tempName); statErr == nil {
+		if !info.Mode().IsRegular() {
+			return errors.New("download partial file must be a regular file")
+		}
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		return statErr
+	}
+	file, err := root.OpenFile(tempName, os.O_RDWR|os.O_CREATE, 0600)
+	if err != nil {
+		return err
+	}
 	defer file.Close()
 	if err := file.Chmod(0600); err != nil {
 		return err
@@ -168,6 +183,7 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 			return ctx.Err()
 		}
 		if strings.Contains(err.Error(), "resume prefix mismatch") ||
+			strings.Contains(err.Error(), "invalid resume offset") ||
 			strings.Contains(err.Error(), "invalid remote resume response") {
 			// The remote file changed. Do not splice mismatched versions;
 			// discard the local partial and attempt a fresh snapshot.
@@ -202,20 +218,63 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	}
 	ext := filepath.Ext(record.FileName)
 	base := strings.TrimSuffix(record.FileName, ext)
-	// Randomized suffix avoids overwriting a pre-existing download.
-	destination := filepath.Join(dir, fmt.Sprintf("%s-%s%s", base, record.ID[:8], ext))
+	// Full random task ID avoids collisions with another prior download.
+	destinationName := fmt.Sprintf("%s-%s%s", base, record.ID, ext)
+	destination := filepath.Join(dir, destinationName)
 	// Publish with no-replace semantics. Rename on Windows/Unix can overwrite
 	// a destination that appeared while another download was running.
 	if err := ctx.Err(); err != nil {
 		return err
 	}
-	if err := os.Link(tempPath, destination); err != nil {
+	if err := root.Link(tempName, destinationName); err != nil {
 		return fmt.Errorf("publish download without overwriting: %w", err)
 	}
-	_ = os.Remove(tempPath)
+	_ = root.Remove(tempName)
 	m.mu.Lock()
 	record.Destination = destination
 	m.mu.Unlock()
+	return nil
+}
+
+// resumeTransfer deliberately supports downloads only. Upload source files
+// are deleted once their background task exits, so a cancelled upload must
+// be selected again instead of pretending its source remains available.
+func (m *fileTransferManager) resumeTransfer(id string) error {
+	if m == nil || m.agent == nil {
+		return errors.New("file transfer manager unavailable")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	item := m.records[id]
+	if item == nil || item.Direction != "download" ||
+		(item.State != "paused" && item.State != "failed") {
+		return errors.New("download task cannot be resumed")
+	}
+	active := 0
+	for _, record := range m.records {
+		if record.State == "running" {
+			active++
+		}
+	}
+	if active >= 3 {
+		return errors.New("最多同时进行 3 个文件传输任务")
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return err
+	}
+	partial := filepath.Join(home, "Downloads", "RelayProxy", ".relayproxy-download-"+id+".partial")
+	info, err := os.Lstat(partial)
+	if err != nil {
+		return fmt.Errorf("cannot resume without local partial file: %w", err)
+	}
+	if !info.Mode().IsRegular() {
+		return errors.New("download partial file is not a regular file")
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	item.cancel = cancel
+	item.State, item.Error, item.Speed = "running", "", 0
+	go m.download(ctx, item)
 	return nil
 }
 
@@ -261,6 +320,10 @@ func (b *UIBridge) GetFileTransfers() []FileTransfer {
 
 func (b *UIBridge) CancelFileDownload(id string) error {
 	return b.fileTransfers.cancelTransfer(id)
+}
+
+func (b *UIBridge) ResumeFileDownload(id string) error {
+	return b.fileTransfers.resumeTransfer(id)
 }
 
 func isRetryableFileDownloadError(err error) bool {

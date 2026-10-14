@@ -86,6 +86,15 @@ func (w *WebServer) listFileDownloads(rw http.ResponseWriter, _ *http.Request) {
 	writeWebJSON(rw, w.bridge.GetFileTransfers())
 }
 
+func (w *WebServer) resumeFileDownload(rw http.ResponseWriter, r *http.Request) {
+	if !w.fileShareRemoteAccessAllowed(rw) { return }
+	if err := w.bridge.ResumeFileDownload(r.PathValue("id")); err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeWebJSON(rw, map[string]bool{"ok": true})
+}
+
 func (w *WebServer) cancelFileDownload(rw http.ResponseWriter, r *http.Request) {
 	if !w.fileShareRemoteAccessAllowed(rw) {
 		return

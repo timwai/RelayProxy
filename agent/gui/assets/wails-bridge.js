@@ -23,6 +23,7 @@
   window.goStartFileDownload = (deviceID, shareID, relativePath) => invoke('StartFileDownload', deviceID, shareID, relativePath);
   window.goGetFileTransfers = () => invoke('GetFileTransfers');
   window.goCancelFileDownload = id => invoke('CancelFileDownload', id);
+  window.goResumeFileDownload = id => invoke('ResumeFileDownload', id);
   window.goSaveFileShares = state => invoke('SaveFileShares', state);
   window.goGetStatus = () => invoke('GetStatus');
   window.goGetDiagnostics = () => invoke('GetDiagnostics');

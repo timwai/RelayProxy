@@ -127,6 +127,10 @@ export default function FileSharingPage({toast}) {
   try{await callJSON('goCancelFileDownload',null,id);await refreshTransfers()}
   catch(e){setTransferError(e.message||String(e))}
  }
+ async function resumeDownload(id){
+  try{await callJSON('goResumeFileDownload',null,id);await refreshTransfers()}
+  catch(e){setTransferError(e.message||String(e))}
+ }
 
  const refresh=useCallback(async()=>{
   try{
@@ -241,11 +245,12 @@ export default function FileSharingPage({toast}) {
    <div className="mini">下载保存至本机 Downloads/RelayProxy；上传到共享端当前目录。优先尝试文件专用 TLS 直连，无法建立时自动回退 Relay；不要求授予代理或 RDP 权限。</div>
    {transfers.length===0?<div className="empty">暂无传输任务。在“其他设备”中选择文件下载，或在读写目录内上传文件。</div>:
     transfers.map(item=><div className="file-share-task" key={item.id}>
-     <div className="file-share-task-title"><div className="grow"><b>{item.direction==='upload'?'上传 · ':'下载 · '}{item.fileName}</b><div className="mini mono">{item.deviceId} · {item.direction==='upload'?'远程共享文件夹':item.destination||'下载中'}</div></div><span className={'badge '+(item.state==='completed'?'ok':item.state==='failed'?'danger':'neutral')}>{({'running':item.direction==='upload'?'上传中':'下载中','completed':'已完成','failed':'失败','cancelled':'已取消'})[item.state]||item.state}</span></div>
+     <div className="file-share-task-title"><div className="grow"><b>{item.direction==='upload'?'上传 · ':'下载 · '}{item.fileName}</b><div className="mini mono">{item.deviceId} · {item.direction==='upload'?'远程共享文件夹':item.destination||'下载中'}</div></div><span className={'badge '+(item.state==='completed'?'ok':item.state==='failed'?'danger':'neutral')}>{({'running':item.direction==='upload'?'上传中':'下载中','completed':'已完成','failed':'失败','cancelled':'已取消','paused':'已暂停'})[item.state]||item.state}</span></div>
      <div className="file-share-task-track"><div style={{width:(item.total>0?Math.min(100,item.done/item.total*100):0)+'%'}}/></div>
      <div className="file-share-task-meta"><span>{formatFileBytes(item.done)} / {item.total>0?formatFileBytes(item.total):'计算中'} · {item.total>0?Math.floor(item.done/item.total*100):0}%</span><span>{item.state==='running'?formatFileBytes(item.speed)+'/s':'加密文件通道'}</span></div>
      {item.error&&<div className="notice danger">{item.error}</div>}
-     {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>取消传输</button>}
+     {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>{item.direction==='download'?'暂停下载':'取消上传'}</button>}
+     {item.direction==='download'&&(item.state==='paused'||item.state==='failed')&&<button className="btn primary" onClick={()=>resumeDownload(item.id)}>继续下载</button>
     </div>)}
   </section>}
   {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>

@@ -51,3 +51,7 @@ func (s *WailsService) DiscardFileUpload(id string) error {
 func (s *WailsService) GetFileShareCandidates() ([]protocol.FileShareCandidate, error) {
 	return s.owner.bridge.GetFileShareCandidates()
 }
+
+func (s *WailsService) ResumeFileDownload(id string) error {
+	return s.owner.bridge.ResumeFileDownload(id)
+}

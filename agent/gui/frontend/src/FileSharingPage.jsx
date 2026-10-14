@@ -1,4 +1,4 @@
-import React, {useCallback,useEffect,useState} from 'react';
+import React, {useCallback,useEffect,useRef,useState} from 'react';
 import {callJSON} from './bridge.js';
 import './fileSharing.css';
 
@@ -29,6 +29,7 @@ export default function FileSharingPage({toast}) {
  const [remoteError,setRemoteError]=useState('');
  const [transfers,setTransfers]=useState([]);
  const [transferError,setTransferError]=useState('');
+ const uploadCancelRef=useRef(false);
  const [uploading,setUploading]=useState(false);
  const [uploadStaged,setUploadStaged]=useState(0);
  const [uploadTotal,setUploadTotal]=useState(0);
@@ -39,6 +40,7 @@ export default function FileSharingPage({toast}) {
   if(!file||!remoteDevice||!remoteShare||uploading)return;
   if(!canUpload){setRemoteError('共享目录没有写入权限');return}
   if(file.size>20*1024**3){setRemoteError('单文件上传不能超过 20 GiB');return}
+  uploadCancelRef.current=false;
   setUploading(true);setUploadStaged(0);setUploadTotal(file.size);setRemoteError('');
   let sessionId='';
   try{
@@ -48,6 +50,7 @@ export default function FileSharingPage({toast}) {
    sessionId=stage.id;
    const chunkSize=128*1024;
    for(let offset=0;offset<file.size;offset+=chunkSize){
+    if(uploadCancelRef.current)throw new Error('已取消上传准备');
     const slice=file.slice(offset,Math.min(offset+chunkSize,file.size));
     const encoded=await new Promise((resolve,reject)=>{
      const reader=new FileReader();
@@ -58,7 +61,9 @@ export default function FileSharingPage({toast}) {
     const result=await callJSON('goAppendFileUploadChunk',null,sessionId,encoded);
     if(!result||typeof result.done!=='number')throw new Error('上传暂存失败');
     setUploadStaged(result.done);
+    if(uploadCancelRef.current)throw new Error('已取消上传准备');
    }
+   if(uploadCancelRef.current)throw new Error('已取消上传准备');
    const task=await callJSON('goCommitFileUpload',null,sessionId);
    if(!task?.id)throw new Error('未能开始远程上传');
    sessionId='';
@@ -67,7 +72,7 @@ export default function FileSharingPage({toast}) {
   }catch(e){
    setRemoteError(e.message||String(e));
    if(sessionId)try{await callJSON('goDiscardFileUpload',null,sessionId)}catch{}
-  }finally{setUploading(false)}
+  }finally{setUploading(false);uploadCancelRef.current=false}
  }
 
  const refreshPeers=useCallback(async()=>{
@@ -224,7 +229,7 @@ export default function FileSharingPage({toast}) {
    </section>}
    {remoteShare&&<section className="card">
     <div className="card-head"><div><div className="eyebrow">REMOTE FILES · RELAY</div><h2>远程文件</h2></div><div className="file-share-upload-actions">{canUpload&&<label className={'btn primary '+(uploading?'disabled':'')} title="上传文件到当前目录">＋ 上传文件<input aria-label="选择要上传的文件" type="file" disabled={uploading||remoteLoading} onChange={uploadSelectedFile} style={{display:'none'}}/></label>}<button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath)} disabled={remoteLoading||uploading}>刷新目录</button></div></div>
-    {uploading&&<div className="file-share-upload-staging" role="status">正在准备本地文件：{formatFileBytes(uploadStaged)} / {formatFileBytes(uploadTotal)} · {uploadTotal?Math.floor(100*uploadStaged/uploadTotal):100}%<div className="file-share-task-track"><div style={{width:(uploadTotal?Math.min(100,100*uploadStaged/uploadTotal):100)+'%'}}/></div></div>}
+    {uploading&&<div className="file-share-upload-staging" role="status"><div className="file-share-upload-staging-title"><span>正在准备本地文件：{formatFileBytes(uploadStaged)} / {formatFileBytes(uploadTotal)} · {uploadTotal?Math.floor(100*uploadStaged/uploadTotal):100}%</span><button type="button" className="btn danger" disabled={uploadCancelRef.current} onClick={()=>{uploadCancelRef.current=true;setRemoteError('正在取消上传准备…')}}>取消</button></div><div className="file-share-task-track"><div style={{width:(uploadTotal?Math.min(100,100*uploadStaged/uploadTotal):100)+'%'}}/></div></div>}
     <div className="file-share-breadcrumb"><button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,'.')} disabled={remoteLoading}>根目录</button><span className="mono">{remotePath==='.'?'/':'/'+remotePath}</span>{remotePath!=='.'&&<button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath.split('/').slice(0,-1).join('/')||'.')} disabled={remoteLoading}>返回上级</button>}</div>
     {remoteEntries.length===0?<div className="empty">{remoteLoading?'读取中…':'文件夹为空'}</div>:
      remoteEntries.map(entry=><div className="file-share-entry" key={entry.name}><div className="grow"><b>{entry.isDir?'▱':'▤'} {entry.name}</b><small>{entry.isDir?'文件夹':formatFileBytes(entry.size)}</small></div>{entry.isDir?<button className="btn" disabled={remoteLoading} onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name)}>打开</button>:<button className="btn primary" disabled={remoteLoading} onClick={()=>beginDownload(entry)}>下载</button>}</div>)}

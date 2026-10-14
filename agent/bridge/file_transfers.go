@@ -49,6 +49,7 @@ type fileTransferManager struct {
 	records map[string]*fileTransferRecord
 	stages  map[string]*fileUploadSession
 	order   []string
+	taskStorePath string
 }
 
 func newFileTransferManager(agent *app.Agent) *fileTransferManager {
@@ -105,6 +106,7 @@ func (m *fileTransferManager) start(deviceID, shareID, relativePath string) (Fil
 		}
 		m.order = m.order[:100]
 	}
+	_ = m.persistTasksLocked()
 	snapshot := record.FileTransfer
 	m.mu.Unlock()
 	go m.download(ctx, record)
@@ -123,6 +125,7 @@ func (m *fileTransferManager) download(ctx context.Context, record *fileTransfer
 		record.State, record.Speed = "completed", 0
 	}
 	record.cancel()
+	_ = m.persistTasksLocked()
 }
 
 func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTransferRecord) error {
@@ -279,6 +282,7 @@ func (m *fileTransferManager) resumeTransfer(id string) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	item.cancel = cancel
 	item.State, item.Error, item.Speed = "running", "", 0
+	_ = m.persistTasksLocked()
 	go m.download(ctx, item)
 	return nil
 }

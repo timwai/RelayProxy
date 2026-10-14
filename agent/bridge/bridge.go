@@ -64,6 +64,9 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 			return startup.SetAutoStart(autoStartName, executable, path, enabled, requireAdmin)
 		},
 	}
+	if err := b.fileTransfers.initTaskPersistence(configPath); err != nil {
+		fmt.Printf("[Files] 恢复下载任务记录失败: %v\n", err)
+	}
 	b.loadMessageHistory()
 	agent.SetMessageTap(func(message app.Message) {
 		if err := b.persistMessageHistory(); err != nil {

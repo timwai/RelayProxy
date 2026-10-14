@@ -201,6 +201,9 @@ func (r *fileDirectRuntime) serveQUICConnection(conn *quic.Conn) {
 func (a *Agent) tryFileQUIC(ctx context.Context, offer protocol.FileDirectOffer, req protocol.FileShareRequest) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
 	var lastErr error = errors.New("no direct QUIC candidate reachable")
 	for _, endpoint := range prioritizeFileDirectEndpoints(offer.UDPEndpoints, candidate.LocalInterfaceSubnets()) {
+		if err := ctx.Err(); err != nil {
+			return nil, protocol.FileShareResponse{}, err
+		}
 		addr, err := netip.ParseAddrPort(endpoint)
 		if err != nil || addr.Port() == 0 || addr.Addr().IsUnspecified() ||
 			addr.Addr().IsMulticast() || addr.Addr().IsLinkLocalUnicast() {
@@ -235,7 +238,7 @@ func (a *Agent) tryFileQUIC(ctx context.Context, offer protocol.FileDirectOffer,
 			_ = session.Close()
 			continue
 		}
-		_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
+		_ = stream.SetDeadline(fileDirectHandshakeDeadline(ctx, 5*time.Second))
 		if err := protocol.WriteJSON(stream, protocol.FileDirectAuth{Token: offer.Token}); err != nil {
 			lastErr = err
 			_ = stream.Close()

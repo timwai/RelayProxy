@@ -47,21 +47,26 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 		offer.ExpiresAt <= time.Now().UnixMilli() {
 		return nil, protocol.FileShareResponse{}, errors.New("invalid file direct offer")
 	}
-	// Attempt a file-only QUIC session first. Its certificate is pinned to
-	// the same Server-attested host fingerprint and consumes the same ticket.
-	// A failed QUIC attempt must never disable the authenticated TCP/Relay
-	// fallback, especially when UDP is blocked on the user's network.
+	// A single 20-second Server ticket must cover QUIC, TCP and fallback.
+	// Sequentially trying up to 16 unreachable UDP candidates could otherwise
+	// consume the entire ticket before the TCP path gets a chance.
+	// Independent, short stage budgets keep the Relay path responsive.
 	if len(offer.UDPEndpoints) > 0 {
-		if stream, response, err := a.tryFileQUIC(ctx, offer, req); err == nil {
+		quicCtx, cancelQUIC := fileDirectStageContext(ctx, offer.ExpiresAt, 4*time.Second)
+		stream, response, quicErr := a.tryFileQUIC(quicCtx, offer, req)
+		cancelQUIC()
+		if quicErr == nil {
 			return stream, response, nil
 		}
 	}
+	tcpCtx, cancelTCP := fileDirectStageContext(ctx, offer.ExpiresAt, 4*time.Second)
+	defer cancelTCP()
 	var lastErr error
 	for _, endpoint := range prioritizeFileDirectEndpoints(offer.Endpoints, candidate.LocalInterfaceSubnets()) {
-		if ctx.Err() != nil {
-			return nil, protocol.FileShareResponse{}, ctx.Err()
+		if err := tcpCtx.Err(); err != nil {
+			return nil, protocol.FileShareResponse{}, err
 		}
-		dialCtx, stop := context.WithTimeout(ctx, 800*time.Millisecond)
+		dialCtx, stop := context.WithTimeout(tcpCtx, 800*time.Millisecond)
 		tcpConn, err := (&net.Dialer{}).DialContext(dialCtx, "tcp", endpoint)
 		if err != nil {
 			lastErr = err
@@ -90,7 +95,7 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 			_ = conn.Close()
 			continue
 		}
-		_ = conn.SetDeadline(time.Now().Add(12 * time.Second))
+		_ = conn.SetDeadline(fileDirectHandshakeDeadline(tcpCtx, 4*time.Second))
 		auth := protocol.FileDirectAuth{Token: offer.Token}
 		if err = protocol.WriteJSON(conn, auth); err != nil {
 			lastErr = err

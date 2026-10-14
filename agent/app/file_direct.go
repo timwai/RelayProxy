@@ -14,12 +14,14 @@ import (
 	"fmt"
 	"math/big"
 	"net"
+	"net/netip"
 	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"relayproxy/internal/p2p/candidate"
+	"relayproxy/internal/p2p/upnp"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -36,6 +38,9 @@ type fileDirectRuntime struct {
 	fingerprint string
 	mu          sync.Mutex
 	tickets     map[string]fileDirectTicket
+	upnpCancel  context.CancelFunc
+	upnpRunning bool
+	upnpAddress netip.AddrPort
 	closed      bool
 	accepted    atomic.Int64
 	wg          sync.WaitGroup
@@ -109,9 +114,95 @@ func (r *fileDirectRuntime) close() {
 	}
 	r.closed = true
 	r.tickets = map[string]fileDirectTicket{}
+	if r.upnpCancel != nil {
+		r.upnpCancel()
+	}
 	_ = r.listener.Close()
 	r.mu.Unlock()
 	r.wg.Wait()
+}
+
+// syncUPnP never opens a router port without an explicit local option. A
+// failed discovery or private CGNAT WAN leaves the existing Relay/LAN paths
+// unchanged. Disabling the option withdraws an advertised address immediately.
+func (r *fileDirectRuntime) syncUPnP() {
+	r.a.mu.RLock()
+	store := r.a.fileShareStore
+	r.a.mu.RUnlock()
+	enabled := false
+	if store != nil {
+		if state, err := store.Load(); err == nil {
+			enabled = state.Enabled && state.DirectUPnPEnabled
+		}
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.closed {
+		return
+	}
+	if !enabled {
+		r.upnpAddress = netip.AddrPort{}
+		if r.upnpCancel != nil {
+			r.upnpCancel()
+		}
+		return
+	}
+	if r.upnpRunning {
+		return
+	}
+	parent := r.a.ctx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithCancel(parent)
+	r.upnpCancel = cancel
+	r.upnpRunning = true
+	r.wg.Add(1)
+	go r.runUPnP(ctx)
+}
+
+func (r *fileDirectRuntime) runUPnP(ctx context.Context) {
+	defer r.wg.Done()
+	defer func() {
+		r.mu.Lock()
+		r.upnpRunning = false
+		r.upnpCancel = nil
+		r.upnpAddress = netip.AddrPort{}
+		r.mu.Unlock()
+	}()
+	port := r.listener.Addr().(*net.TCPAddr).Port
+	discoveryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	mapping, address, err := upnp.MapTCP(discoveryCtx, port)
+	cancel()
+	if err != nil {
+		return
+	}
+	defer mapping.Close()
+	// UPnP can succeed on a private WAN or CGNAT. Publishing such a
+	// candidate would both leak local network topology and waste retries.
+	if !upnp.IsPublicWANIPv4(address.Addr()) {
+		return
+	}
+	r.mu.Lock()
+	if !r.closed && ctx.Err() == nil {
+		r.upnpAddress = address
+	}
+	r.mu.Unlock()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case state := <-mapping.Updates():
+			r.mu.Lock()
+			if !r.closed && ctx.Err() == nil && state.Healthy &&
+				upnp.IsPublicWANIPv4(state.Address.Addr()) {
+				r.upnpAddress = state.Address
+			} else {
+				r.upnpAddress = netip.AddrPort{}
+			}
+			r.mu.Unlock()
+		}
+	}
 }
 
 func (r *fileDirectRuntime) offer(clientID string, grant protocol.FileDirectGrant) protocol.FileDirectOffer {
@@ -140,6 +231,9 @@ func (r *fileDirectRuntime) offer(clientID string, grant protocol.FileDirectGran
 	r.tickets[grant.Token] = fileDirectTicket{deviceID: clientID, expiresAt: grant.ExpiresAt}
 	port := r.listener.Addr().(*net.TCPAddr).Port
 	endpoints := []string{}
+	if r.upnpAddress.IsValid() && upnp.IsPublicWANIPv4(r.upnpAddress.Addr()) {
+		endpoints = append(endpoints, r.upnpAddress.String())
+	}
 	for _, c := range candidate.Discover(0, port) {
 		if c.Protocol == "tcp" {
 			endpoints = append(endpoints, c.Address)
@@ -269,6 +363,7 @@ func (a *Agent) serveFileDirectGrant(ctx context.Context, stream tunnel.TunnelSt
 		_ = protocol.WriteJSON(stream, protocol.FileDirectOffer{Error: "file host unavailable"})
 		return
 	}
+	runtime.syncUPnP()
 	_ = protocol.WriteJSON(stream, runtime.offer(clientID, grant))
 }
 

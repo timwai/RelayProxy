@@ -34,9 +34,10 @@ type Share struct {
 }
 
 type State struct {
-	Revision uint64  `json:"revision"`
-	Enabled  bool    `json:"enabled"`
-	Shares   []Share `json:"shares"`
+	Revision          uint64  `json:"revision"`
+	Enabled           bool    `json:"enabled"`
+	DirectUPnPEnabled bool    `json:"directUpnpEnabled"`
+	Shares            []Share `json:"shares"`
 }
 
 type Descriptor struct {

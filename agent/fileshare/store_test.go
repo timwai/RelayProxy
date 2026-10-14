@@ -179,3 +179,38 @@ func TestHostedStreamLimit(t *testing.T) {
 		t.Fatalf("active stream accounting leak: %d", count)
 	}
 }
+
+func TestFileDirectUPnPRequiresExplicitLocalOptIn(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "config.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if state.DirectUPnPEnabled {
+		t.Fatal("router TCP mapping must be disabled by default")
+	}
+	state.Enabled = true
+	state.DirectUPnPEnabled = true
+	state, err = store.Save(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reloaded.DirectUPnPEnabled {
+		t.Fatal("explicit TCP UPnP consent was not persisted")
+	}
+	reloaded.DirectUPnPEnabled = false
+	if _, err := store.Save(reloaded); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err = store.Load()
+	if err != nil || reloaded.DirectUPnPEnabled {
+		t.Fatalf("failed to revoke TCP UPnP consent: %+v, %v", reloaded, err)
+	}
+}

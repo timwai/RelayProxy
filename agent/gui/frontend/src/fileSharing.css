@@ -53,3 +53,6 @@
 .file-share-grantee small{display:block;overflow-wrap:anywhere;color:var(--muted)}
 .file-share-permission select.control:first-child{flex:1;min-width:190px;width:auto}
 @media(max-width:640px){.file-share-permission select.control:first-child{min-width:100%;width:100%}.file-share-grantee{min-width:100%}}
+
+.file-share-upload-staging-title{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.file-share-upload-staging-title .btn{flex:0 0 auto}

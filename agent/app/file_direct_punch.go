@@ -151,9 +151,9 @@ func (a *Agent) tryPunchedFileQUIC(ctx context.Context, socket *net.UDPConn, off
 		return nil, protocol.FileShareResponse{}, err
 	}
 	tlsCfg := &tls.Config{
-		MinVersion: tls.VersionTLS13,
-		ServerName: "relayproxy-file-direct",
-		NextProtos: []string{fileDirectQUICALPN},
+		MinVersion:         tls.VersionTLS13,
+		ServerName:         "relayproxy-file-direct",
+		NextProtos:         []string{fileDirectQUICALPN},
 		InsecureSkipVerify: true, // leaf SHA-256 is pinned below
 		VerifyConnection: func(cs tls.ConnectionState) error {
 			if len(cs.PeerCertificates) != 1 ||
@@ -210,6 +210,6 @@ func (a *Agent) tryPunchedFileQUIC(ctx context.Context, socket *net.UDPConn, off
 	_ = stream.SetDeadline(time.Time{})
 	return &filePunchedQUICStream{
 		fileQUICStream: &fileQUICStream{TunnelStream: stream, session: session},
-		transport: transport,
+		transport:      transport,
 	}, response, nil
 }

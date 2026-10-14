@@ -17,6 +17,10 @@ import (
 // authenticated Relay session. TLS pinning + one-time tickets authenticate
 // the destination independently of proxy, RDP or Browser Sync privileges.
 func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.FileShareRequest) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
+	return a.tryFileDirectMode(ctx, hostID, req, true)
+}
+
+func (a *Agent) tryFileDirectMode(ctx context.Context, hostID string, req protocol.FileShareRequest, allowPunch bool) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
 	session, _, err := a.fileSharingSession()
 	if err != nil {
 		return nil, protocol.FileShareResponse{}, err
@@ -29,7 +33,11 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 	}
 	defer control.Close()
 	_ = control.SetDeadline(time.Now().Add(3 * time.Second))
-	punchConn, punchCandidates := a.prepareFilePunch(offerCtx)
+	var punchConn *net.UDPConn
+	var punchCandidates []protocol.P2PCandidate
+	if allowPunch {
+		punchConn, punchCandidates = a.prepareFilePunch(offerCtx)
+	}
 	defer func() {
 		if punchConn != nil {
 			_ = punchConn.Close()
@@ -51,9 +59,17 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 	}
 	var offer protocol.FileDirectOffer
 	if err := protocol.ReadJSON(control, &offer); err != nil {
+		// Mixed-version Servers do not recognize the new punch prepare frame.
+		// Retry the established file-only direct protocol once, never proxy P2P.
+		if len(punchCandidates) > 0 {
+			return a.tryFileDirectMode(ctx, hostID, req, false)
+		}
 		return nil, protocol.FileShareResponse{}, err
 	}
 	if offer.Error != "" {
+		if len(punchCandidates) > 0 {
+			return a.tryFileDirectMode(ctx, hostID, req, false)
+		}
 		return nil, protocol.FileShareResponse{}, errors.New(offer.Error)
 	}
 	if len(offer.Token) != 64 || len(offer.Fingerprint) != 64 ||

@@ -40,7 +40,7 @@ type fileDirectRuntime struct {
 	fingerprint    string
 	tlsConfig      *tls.Config
 	punchCancel    map[string]context.CancelFunc
-	punchAccepted atomic.Int64
+	punchAccepted  atomic.Int64
 	mu             sync.Mutex
 	tickets        map[string]fileDirectTicket
 	upnpCancel     context.CancelFunc

@@ -14,6 +14,7 @@ import (
 	"relayproxy/internal/cert"
 	"relayproxy/internal/protocol"
 	"relayproxy/server/gateway"
+	serverp2p "relayproxy/server/p2p"
 	"relayproxy/server/session"
 )
 
@@ -21,11 +22,25 @@ import (
 // not mock direct pipes. The two devices run on one CI host; this is NOT a
 // public Internet / distinct physical hardware acceptance result.
 func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
-	for _, transportMode := range []string{"quic_only", "tcp_only"} {
+	for _, transportMode := range []string{"quic_only", "tcp_only", "punch_quic"} {
 		t.Run(transportMode, func(t *testing.T) {
 			certificate, err := cert.EnsureCertificate("", "", "localhost")
 			if err != nil {
 				t.Fatal(err)
+			}
+			punchEnabled := transportMode == "punch_quic"
+			agentTransportMode := transportMode
+			if punchEnabled {
+				agentTransportMode = "quic_only"
+			}
+			var rendezvousAddress string
+			if punchEnabled {
+				rendezvous, err := serverp2p.StartRendezvous(context.Background(), "127.0.0.1:0", 120)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer rendezvous.Close()
+				rendezvousAddress = rendezvous.Addr().String()
 			}
 			sessions := session.NewManager()
 			router := gateway.NewStreamRouter(sessions, nil, nil, nil)
@@ -37,6 +52,7 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 				TCPAddr: "127.0.0.1:0", QUICAddr: "127.0.0.1:0",
 				TLSConfig:        &tls.Config{Certificates: []tls.Certificate{certificate}},
 				ServerInstanceID: "fileshare-integration",
+				P2PRendezvousAddress: rendezvousAddress,
 				ResolveIdentity: func(shortID string) (gateway.IdentityAuthorization, error) {
 					return gateway.IdentityAuthorization{IdentityID: "file-test-identity", IdentityName: shortID}, nil
 				},
@@ -73,7 +89,7 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			}
 			hostCfg := base
 			hostCfg.Mode = "EXIT"
-			hostCfg.TransportMode = transportMode
+			hostCfg.TransportMode = agentTransportMode
 			hostCfg.AllowInternet, hostCfg.AllowPrivateNet, hostCfg.AllowLoopback = true, true, true
 			host, err := NewAgent(hostCfg)
 			if err != nil {
@@ -103,7 +119,7 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			}
 			clientCfg := base
 			clientCfg.Mode = "CLIENT"
-			clientCfg.TransportMode = transportMode
+			clientCfg.TransportMode = agentTransportMode
 			client, err := NewAgent(clientCfg)
 			if err != nil {
 				t.Fatal(err)
@@ -136,8 +152,28 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			host.mu.RLock()
 			directRuntime := host.fileDirect
 			host.mu.RUnlock()
-			if directRuntime == nil || directRuntime.quicAccepted.Load() == 0 {
-				t.Fatal("file direct QUIC stream was not authenticated")
+			if directRuntime == nil {
+				t.Fatal("file direct QUIC runtime did not start")
+			}
+			if punchEnabled {
+				// The first transfer must traverse the actual file-only HMAC
+				// punched UDP socket and pinned QUIC, not the older direct listener.
+				punched, err := os.CreateTemp(t.TempDir(), "punch-*")
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer punched.Close()
+				var path string
+				if _, err := client.DownloadRemoteFileResumingWithPath(ctx, "files-host", shares[0].ID, "source.bin", punched, nil, func(p string) {
+					path = p
+				}); err != nil || path != "p2p_quic" || directRuntime.punchAccepted.Load() == 0 {
+					t.Fatalf("file-only HMAC punched QUIC path not authenticated: path=%q err=%v", path, err)
+				}
+				// Continue exercising legacy direct TLS/QUIC and Relay fallback
+				// separately. This disables only the new P2P candidate exchange.
+				client.mu.Lock()
+				client.fileP2PRendezvous = ""
+				client.mu.Unlock()
 			}
 			// Exercise the actual transfer-path reporter on the authenticated
 			// TLS direct stream rather than assuming a preferred path was used.

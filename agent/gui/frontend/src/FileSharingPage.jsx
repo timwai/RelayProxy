@@ -26,6 +26,47 @@ export default function FileSharingPage({toast}) {
  const [remoteError,setRemoteError]=useState('');
  const [transfers,setTransfers]=useState([]);
  const [transferError,setTransferError]=useState('');
+ const [uploading,setUploading]=useState(false);
+ const [uploadStaged,setUploadStaged]=useState(0);
+ const [uploadTotal,setUploadTotal]=useState(0);
+ const canUpload=remoteShares.some(s=>s.id===remoteShare&&s.permission==='read_write');
+ async function uploadSelectedFile(event){
+  const file=event.target.files?.[0];
+  event.target.value='';
+  if(!file||!remoteDevice||!remoteShare||uploading)return;
+  if(!canUpload){setRemoteError('共享目录没有写入权限');return}
+  if(file.size>20*1024**3){setRemoteError('单文件上传不能超过 20 GiB');return}
+  setUploading(true);setUploadStaged(0);setUploadTotal(file.size);setRemoteError('');
+  let sessionId='';
+  try{
+   const destination=remotePath==='.'?file.name:remotePath+'/'+file.name;
+   const stage=await callJSON('goBeginFileUpload',null,remoteDevice,remoteShare,destination,file.size);
+   if(!stage?.id)throw new Error('未能建立文件上传任务');
+   sessionId=stage.id;
+   const chunkSize=128*1024;
+   for(let offset=0;offset<file.size;offset+=chunkSize){
+    const slice=file.slice(offset,Math.min(offset+chunkSize,file.size));
+    const encoded=await new Promise((resolve,reject)=>{
+     const reader=new FileReader();
+     reader.onerror=()=>reject(reader.error||new Error('读取本地文件失败'));
+     reader.onload=()=>resolve(String(reader.result||'').split(',')[1]||'');
+     reader.readAsDataURL(slice);
+    });
+    const result=await callJSON('goAppendFileUploadChunk',null,sessionId,encoded);
+    if(!result||typeof result.done!=='number')throw new Error('上传暂存失败');
+    setUploadStaged(result.done);
+   }
+   const task=await callJSON('goCommitFileUpload',null,sessionId);
+   if(!task?.id)throw new Error('未能开始远程上传');
+   sessionId='';
+   toast?.('上传任务已提交，正在将文件传输到远程设备');
+   setTab('transfers');
+  }catch(e){
+   setRemoteError(e.message||String(e));
+   if(sessionId)try{await callJSON('goDiscardFileUpload',null,sessionId)}catch{}
+  }finally{setUploading(false)}
+ }
+
  const refreshPeers=useCallback(async()=>{
   try{
    const result=await callJSON('goGetFileSharePeers',[]);
@@ -169,23 +210,24 @@ export default function FileSharingPage({toast}) {
      <div className="file-share-peer-list">{remoteShares.map(share=><button type="button" key={share.id} className={'file-share-peer '+(remoteShare===share.id?'selected':'')} onClick={()=>openRemoteDir(remoteDevice,share.id,'.')}><b>▱ {share.name}</b><span className="badge">{share.permission==='read_write'?'读写':'只读'}</span></button>)}</div>}
    </section>}
    {remoteShare&&<section className="card">
-    <div className="card-head"><div><div className="eyebrow">REMOTE FILES · RELAY</div><h2>远程文件</h2></div><button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath)} disabled={remoteLoading}>刷新目录</button></div>
+    <div className="card-head"><div><div className="eyebrow">REMOTE FILES · RELAY</div><h2>远程文件</h2></div><div className="file-share-upload-actions">{canUpload&&<label className={'btn primary '+(uploading?'disabled':'')} title="上传文件到当前目录">＋ 上传文件<input aria-label="选择要上传的文件" type="file" disabled={uploading||remoteLoading} onChange={uploadSelectedFile} style={{display:'none'}}/></label>}<button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath)} disabled={remoteLoading||uploading}>刷新目录</button></div></div>
+    {uploading&&<div className="file-share-upload-staging" role="status">正在准备本地文件：{formatFileBytes(uploadStaged)} / {formatFileBytes(uploadTotal)} · {uploadTotal?Math.floor(100*uploadStaged/uploadTotal):100}%<div className="file-share-task-track"><div style={{width:(uploadTotal?Math.min(100,100*uploadStaged/uploadTotal):100)+'%'}}/></div></div>}
     <div className="file-share-breadcrumb"><button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,'.')} disabled={remoteLoading}>根目录</button><span className="mono">{remotePath==='.'?'/':'/'+remotePath}</span>{remotePath!=='.'&&<button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath.split('/').slice(0,-1).join('/')||'.')} disabled={remoteLoading}>返回上级</button>}</div>
     {remoteEntries.length===0?<div className="empty">{remoteLoading?'读取中…':'文件夹为空'}</div>:
      remoteEntries.map(entry=><div className="file-share-entry" key={entry.name}><div className="grow"><b>{entry.isDir?'▱':'▤'} {entry.name}</b><small>{entry.isDir?'文件夹':formatFileBytes(entry.size)}</small></div>{entry.isDir?<button className="btn" disabled={remoteLoading} onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name)}>打开</button>:<button className="btn primary" disabled={remoteLoading} onClick={()=>beginDownload(entry)}>下载</button>}</div>)}
    </section>}
   </>}
   {tab==='transfers'&&<section className="card">
-   <div className="card-head"><div><div className="eyebrow">DOWNLOADS</div><h2>下载任务</h2></div><button className="btn" onClick={refreshTransfers}>刷新</button></div>
+   <div className="card-head"><div><div className="eyebrow">TRANSFERS</div><h2>传输任务</h2></div><button className="btn" onClick={refreshTransfers}>刷新</button></div>
    {transferError&&<div className="notice danger" role="alert">{transferError}</div>}
-   <div className="mini">下载保存至本机 Downloads/RelayProxy。当前使用 Relay 加密通道；公网直连与 P2P 文件通道尚未接入。</div>
-   {transfers.length===0?<div className="empty">暂无传输任务。在“其他设备”中选择文件开始下载。</div>:
+   <div className="mini">下载保存至本机 Downloads/RelayProxy；上传到共享端当前目录。传输使用 Relay 加密通道，文件专用直连尚未接入。</div>
+   {transfers.length===0?<div className="empty">暂无传输任务。在“其他设备”中选择文件下载，或在读写目录内上传文件。</div>:
     transfers.map(item=><div className="file-share-task" key={item.id}>
-     <div className="file-share-task-title"><div className="grow"><b>{item.fileName}</b><div className="mini mono">{item.deviceId} · {item.destination||'下载中'}</div></div><span className={'badge '+(item.state==='completed'?'ok':item.state==='failed'?'danger':'neutral')}>{({'running':'下载中','completed':'已完成','failed':'失败','cancelled':'已取消'})[item.state]||item.state}</span></div>
+     <div className="file-share-task-title"><div className="grow"><b>{item.direction==='upload'?'上传 · ':'下载 · '}{item.fileName}</b><div className="mini mono">{item.deviceId} · {item.direction==='upload'?'远程共享文件夹':item.destination||'下载中'}</div></div><span className={'badge '+(item.state==='completed'?'ok':item.state==='failed'?'danger':'neutral')}>{({'running':item.direction==='upload'?'上传中':'下载中','completed':'已完成','failed':'失败','cancelled':'已取消'})[item.state]||item.state}</span></div>
      <div className="file-share-task-track"><div style={{width:(item.total>0?Math.min(100,item.done/item.total*100):0)+'%'}}/></div>
      <div className="file-share-task-meta"><span>{formatFileBytes(item.done)} / {item.total>0?formatFileBytes(item.total):'计算中'} · {item.total>0?Math.floor(item.done/item.total*100):0}%</span><span>{item.state==='running'?formatFileBytes(item.speed)+'/s':'Relay QUIC / TLS'}</span></div>
      {item.error&&<div className="notice danger">{item.error}</div>}
-     {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>取消下载</button>}
+     {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>取消传输</button>}
     </div>)}
   </section>}
   {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>

@@ -154,17 +154,38 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		fail("not a regular file")
 		return
 	}
-	if err := protocol.WriteJSON(stream, protocol.FileShareResponse{Success: true, Size: info.Size()}); err != nil {
+	if req.Offset < 0 || req.Offset > info.Size() ||
+		(req.Offset == 0 && req.PrefixSHA256 != "") ||
+		(req.Offset > 0 && len(req.PrefixSHA256) != 64) {
+		fail("invalid resume offset or prefix")
+		return
+	}
+	digest := sha256.New()
+	if req.Offset > 0 {
+		if _, err := io.CopyN(digest, file, req.Offset); err != nil {
+			fail("unable to verify resume prefix")
+			return
+		}
+		if hex.EncodeToString(digest.Sum(nil)) != req.PrefixSHA256 {
+			fail("resume prefix mismatch: remote file changed")
+			return
+		}
+	}
+	if ctx.Err() != nil {
+		return
+	}
+	if err := protocol.WriteJSON(stream, protocol.FileShareResponse{
+		Success: true, Size: info.Size(), Offset: req.Offset,
+	}); err != nil {
 		return
 	}
 	_ = stream.SetDeadline(time.Time{})
-	digest := sha256.New()
 	writer := &sharePermissionWriter{
 		stream: io.MultiWriter(stream, digest), store: s, shareID: selected.ID,
 		rootPath: selected.RootPath, deviceID: authenticatedDeviceID,
 	}
-	downloaded, copyErr := io.CopyN(writer, file, info.Size())
-	if copyErr != nil || downloaded != info.Size() || ctx.Err() != nil {
+	downloaded, copyErr := io.CopyN(writer, file, info.Size()-req.Offset)
+	if copyErr != nil || downloaded != info.Size()-req.Offset || ctx.Err() != nil {
 		// A failed stream must never receive a successful final receipt.
 		if ctx.Err() == nil {
 			fail("download incomplete or permission revoked")
@@ -182,7 +203,7 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 	// After the exact byte count, a framed final receipt proves the host
 	// completed the source read and retained authorization until completion.
 	_ = protocol.WriteJSON(stream, protocol.FileShareResponse{
-		Success: true, Size: downloaded, SHA256: hex.EncodeToString(digest.Sum(nil)),
+		Success: true, Size: info.Size(), SHA256: hex.EncodeToString(digest.Sum(nil)),
 	})
 }
 

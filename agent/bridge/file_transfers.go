@@ -6,6 +6,8 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io"
+	"net"
 	"io/fs"
 	"os"
 	"path"
@@ -143,7 +145,8 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	}
 	lastTime := time.Now()
 	lastDone := int64(0)
-	_, err = m.agent.DownloadRemoteFile(ctx, record.DeviceID, record.ShareID, record.RelativePath, file, func(done, total int64) {
+	for attempt := 0; attempt < 4; attempt++ {
+		_, err = m.agent.DownloadRemoteFileResuming(ctx, record.DeviceID, record.ShareID, record.RelativePath, file, func(done, total int64) {
 		m.mu.Lock()
 		record.Done, record.Total = done, total
 		elapsed := time.Since(lastTime)
@@ -157,7 +160,37 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 			lastDone, lastTime = done, time.Now()
 		}
 		m.mu.Unlock()
-	})
+		})
+		if err == nil {
+			break
+		}
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if strings.Contains(err.Error(), "resume prefix mismatch") ||
+			strings.Contains(err.Error(), "invalid remote resume response") {
+			// The remote file changed. Do not splice mismatched versions;
+			// discard the local partial and attempt a fresh snapshot.
+			if truncateErr := file.Truncate(0); truncateErr != nil {
+				return truncateErr
+			}
+			if _, seekErr := file.Seek(0, 0); seekErr != nil {
+				return seekErr
+			}
+		} else if !isRetryableFileDownloadError(err) {
+			break
+		}
+		if attempt == 3 {
+			break
+		}
+		timer := time.NewTimer(time.Duration(attempt+1) * 350 * time.Millisecond)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
 	if err != nil {
 		return err
 	}
@@ -228,4 +261,21 @@ func (b *UIBridge) GetFileTransfers() []FileTransfer {
 
 func (b *UIBridge) CancelFileDownload(id string) error {
 	return b.fileTransfers.cancelTransfer(id)
+}
+
+func isRetryableFileDownloadError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	var netErr net.Error
+	if errors.As(err, &netErr) && netErr.Timeout() {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection reset") || strings.Contains(msg, "stream reset") ||
+		strings.Contains(msg, "transport closed") || strings.Contains(msg, "connection closed") ||
+		strings.Contains(msg, "connection lost")
 }

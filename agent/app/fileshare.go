@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"slices"
 	"strings"
@@ -138,12 +139,47 @@ func (a *Agent) RemoteFileList(ctx context.Context, deviceID, shareID, relativeP
 	return result.Entries, nil
 }
 
-// DownloadRemoteFile streams raw file bytes into dst. The caller owns the
-// destination and supplies a bounded context. No untrusted path ever becomes
-// a local filesystem path in the Agent transport code.
+// DownloadRemoteFile preserves the original, zero-offset streaming API.
 func (a *Agent) DownloadRemoteFile(ctx context.Context, deviceID, shareID, relativePath string, dst io.Writer, progress func(int64, int64)) (int64, error) {
+	return a.downloadRemoteFileAt(ctx, deviceID, shareID, relativePath, dst, 0, "", sha256.New(), progress)
+}
+
+// DownloadRemoteFileResuming authenticates the whole local prefix before asking
+// the host for the remaining bytes. A resumed response is accepted only if the
+// host verifies the prefix against its current scoped file. No bytes are
+// appended if the remote file changed before resuming.
+func (a *Agent) DownloadRemoteFileResuming(ctx context.Context, deviceID, shareID, relativePath string, dst io.ReadWriteSeeker, progress func(int64, int64)) (int64, error) {
+	offset, err := dst.Seek(0, io.SeekEnd)
+	if err != nil {
+		return 0, err
+	}
+	if offset < 0 {
+		return 0, errors.New("invalid local partial file length")
+	}
+	digest := sha256.New()
+	if offset > 0 {
+		if _, err := dst.Seek(0, io.SeekStart); err != nil {
+			return 0, err
+		}
+		if _, err := io.CopyN(digest, dst, offset); err != nil {
+			return 0, fmt.Errorf("unable to hash local download prefix: %w", err)
+		}
+	}
+	if _, err := dst.Seek(offset, io.SeekStart); err != nil {
+		return 0, err
+	}
+	prefix := ""
+	if offset > 0 {
+		prefix = hex.EncodeToString(digest.Sum(nil))
+	}
+	return a.downloadRemoteFileAt(ctx, deviceID, shareID, relativePath, dst, offset, prefix, digest, progress)
+}
+
+func (a *Agent) downloadRemoteFileAt(ctx context.Context, deviceID, shareID, relativePath string,
+	dst io.Writer, offset int64, prefix string, digest hash.Hash, progress func(int64, int64)) (int64, error) {
 	stream, result, err := a.openRemoteFile(ctx, deviceID, protocol.FileShareRequest{
 		Action: protocol.FileShareDownload, ShareID: shareID, Path: relativePath,
+		Offset: offset, PrefixSHA256: prefix,
 	})
 	if err != nil {
 		return 0, err
@@ -151,15 +187,14 @@ func (a *Agent) DownloadRemoteFile(ctx context.Context, deviceID, shareID, relat
 	defer stream.Close()
 	stop := tunnel.InterruptOnCancel(ctx, stream)
 	defer stop()
-	if result.Size < 0 {
-		return 0, errors.New("invalid remote file size")
+	if result.Size < offset || result.Offset != offset {
+		return 0, errors.New("invalid remote resume response")
 	}
 	if progress != nil {
-		progress(0, result.Size)
+		progress(offset, result.Size)
 	}
-	digest := sha256.New()
-	writer := &fileProgressWriter{w: io.MultiWriter(dst, digest), size: result.Size, progress: progress}
-	n, err := io.CopyN(writer, stream, result.Size)
+	writer := &fileProgressWriter{w: io.MultiWriter(dst, digest), n: offset, size: result.Size, progress: progress}
+	n, err := io.CopyN(writer, stream, result.Size-offset)
 	if err != nil {
 		return n, err
 	}

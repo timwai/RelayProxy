@@ -24,7 +24,9 @@ type FileShareRequest struct {
 	Action  string `json:"action"`
 	ShareID string `json:"shareId,omitempty"`
 	Path    string `json:"path,omitempty"`
-	Size    int64  `json:"size,omitempty"`
+	Size         int64  `json:"size,omitempty"`
+	Offset       int64  `json:"offset,omitempty"`
+	PrefixSHA256 string `json:"prefixSha256,omitempty"`
 }
 
 type FileShareDescriptor struct {
@@ -47,6 +49,7 @@ type FileShareResponse struct {
 	Entries []FileShareEntry      `json:"entries,omitempty"`
 	Size    int64                 `json:"size,omitempty"`
 	SHA256  string                `json:"sha256,omitempty"`
+	Offset  int64                 `json:"offset,omitempty"`
 }
 
 type FileShareCandidate struct {

@@ -131,3 +131,28 @@ func TestMissingAndRelativeRoots(t *testing.T) {
 		}
 	}
 }
+
+func TestChangingRootRequiresRevokingAccess(t *testing.T) {
+	dir := t.TempDir()
+	a, b := filepath.Join(dir, "a"), filepath.Join(dir, "b")
+	for _, p := range []string{a, b} {
+		if err := os.Mkdir(p, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, _ := New(filepath.Join(dir, "agent.yaml"))
+	state, _ := store.Load()
+	state.Shares = []Share{{Name: "files", RootPath: a, Enabled: true, Permissions: map[string]Permission{"dev": PermissionRead}}}
+	state, err := store.Save(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Shares[0].RootPath = b
+	if _, err := store.Save(state); err == nil {
+		t.Fatal("root changed while keeping existing device ACL")
+	}
+	state.Shares[0].Permissions = map[string]Permission{}
+	if _, err := store.Save(state); err != nil {
+		t.Fatalf("root change after ACL revocation failed: %v", err)
+	}
+}

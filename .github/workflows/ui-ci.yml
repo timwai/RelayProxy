@@ -98,6 +98,10 @@ jobs:
           node --check src/envelope.js
           node --check src/popup.js
           npm test
+      - name: Check real-device file sharing smoke harness syntax and offline fixture
+        run: |
+          python3 -m py_compile scripts/fileshare-real-device-smoke.py
+          python3 -m unittest discover -s scripts -p test_fileshare_smoke.py -v
       - name: Check Go formatting
         shell: bash
         run: |

@@ -380,3 +380,24 @@ flowchart LR
 - 现在为 QUIC 和 TCP 分别设置最多 4 秒的阶段预算，同时保留票据过期前 2 秒安全余量；TLS/TCP 和 QUIC 的文件认证请求与服务响应也遵守各自阶段的截止时间。高延迟、失联或较多候选下应尽快进入安全 Relay 回退，不扩大文件权限。
 - 对候选优先级、票据过期、父请求超时与认证阶段上限添加单测。文件传输一旦成功协商，取消短握手截止时间，继续由原始任务的生命周期与 ACL 复核管理。
 - **未完成**：UDP 对称 HMAC 打洞、反射地址协商及两物理设备异网验收；此迭代只修复已有路径选择延迟，PR 保持 Draft。
+
+## 23. 真实双设备下载验收脚本（2026-10-14）
+
+- 新增 \`scripts/fileshare-real-device-smoke.py\`，**必须在真实访问端设备**运行；访问端和共享端分别连接到同一个真实 Server，且双方由 Server 按 \`files.client/files.host\` 审批，共享端对访问端设置只读或读写目录权限。
+- 共享端在共享根目录放置一个不为 0 的测试文件（测试暂停/续传宜 64 MiB 或 1 GiB），共享端本人先计算 **SHA-256** 并提供预期摘要。脚本通过访问端本机 Agent Web API 查询已授权主机/共享/目录，创建真实下载任务并读取真实传输路径、速率、进度，最后检查本机 \`Downloads/RelayProxy\` 中已发布文件的大小及完整 SHA-256，任何不一致则退出非零。
+- 示例（在访问端的终端执行）：
+  \`\`\`bash
+  export RELAYPROXY_WEB_TOKEN='<本机 Web Token，未配置时可不设置>'
+  python3 scripts/fileshare-real-device-smoke.py \
+    --agent-url http://127.0.0.1:21290 \
+    --host-device-id '<共享端设备 ID>' \
+    --share-id '<共享目录 ID>' \
+    --remote-file test-1g.bin \
+    --expected-sha256 '<在共享端计算的 64 位小写 SHA-256>' \
+    --require-path direct_quic \
+    --pause-after-bytes 8388608 \
+    --report file-transfer-result.json
+  \`\`\`
+- 若需要验证 UDP 不可达自动降级，改用网络防火墙阻断共享端文件专用 UDP 端口，再要求 \`direct_tls\`；继续阻断文件 TCP 直连时应按实际 Relay 协议要求 \`relay_quic\` 或 \`relay_tls\`。脚本不自行修改防火墙或路由器。优先对 Windows ↔ macOS、跨 NAT、公网 IPv4/IPv6、弱网/断线恢复分别执行并保留报告。
+- 安全界限：默认仅访问本机 loopback 的 Web API；远程 Web API 必须使用 HTTPS，避免泄漏 Bearer Token；不跟随 Web API 重定向，不将 Token 写入报告，不修改共享端文件。脚本仅测下载，不等价于已完成上传/双向验收。
+- **重要：本轮只提交验收工具，尚未实际访问两台独立物理设备，更不能声称异网 P2P/NAT 打洞通过。** \`direct_quic\` 表示实际 QUIC 文件通道成功，不证明这是 UDP NAT 打洞（也可能是 UPnP 或公网可路由地址）。PR 保持 Draft。

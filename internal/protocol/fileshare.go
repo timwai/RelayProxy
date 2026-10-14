@@ -47,3 +47,14 @@ type FileShareResponse struct {
 	Entries []FileShareEntry      `json:"entries,omitempty"`
 	Size    int64                 `json:"size,omitempty"`
 }
+
+type FileShareCandidate struct {
+	DeviceID string `json:"deviceId"`
+	Name     string `json:"name"`
+	Online   bool   `json:"online"`
+}
+
+type FileShareCandidatesResponse struct {
+	Devices []FileShareCandidate `json:"devices"`
+	Error   string `json:"error,omitempty"`
+}

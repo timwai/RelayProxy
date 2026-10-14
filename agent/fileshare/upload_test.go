@@ -115,7 +115,16 @@ func TestUploadsAreAtomicAndOnlyAllowAuthorizedWriters(t *testing.T) {
 	}
 	// A second upload cannot replace any pre-existing file.
 	ready, final = fileUploadRequest(t, store, "writer", req, []byte("other"), false)
-	if !ready.Success || final.Success || !strings.Contains(final.Error, "exists") {
+	// The host may reject an existing destination before accepting any
+	// bytes, or reject a competing publish after receiving the bytes.
+	rejection := ready.Error
+	if ready.Success {
+		if final.Success {
+			t.Fatalf("existing file was overwritten: %+v", final)
+		}
+		rejection = final.Error
+	}
+	if !strings.Contains(rejection, "exists") {
 		t.Fatalf("expected no-overwrite, got: %+v %+v", ready, final)
 	}
 	data, err = os.ReadFile(filepath.Join(dir, "report.txt"))

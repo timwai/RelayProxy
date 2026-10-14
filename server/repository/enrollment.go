@@ -789,6 +789,7 @@ func filterApprovedCapabilities(selected, requested []string) []string {
 	allowed := map[string]bool{
 		"proxy.client": true, "proxy.exit": true, "rdp.controller": true,
 		"rdp.host": true, "rdp.public": true,
+		"files.client": true, "files.host": true,
 	}
 	out := make([]string, 0, len(selected))
 	for _, capability := range normalizeCapabilities(selected) {

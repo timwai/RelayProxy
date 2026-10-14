@@ -90,7 +90,7 @@ func (a *Agent) openRemoteFile(ctx context.Context, targetDeviceID string, req p
 	// authenticated Relay data path without exposing file contents to a
 	// partially authenticated peer.
 	if direct, response, directErr := a.tryFileDirect(ctx, targetDeviceID, req); directErr == nil {
-		return &fileTransportStream{TunnelStream: direct, path: "direct_tls"}, response, nil
+		return &fileTransportStream{TunnelStream: direct, path: fileTransferPath(direct)}, response, nil
 	}
 	sess, _, err := a.fileSharingSession()
 	if err != nil {

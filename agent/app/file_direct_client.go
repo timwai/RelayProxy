@@ -42,8 +42,18 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 	}
 	if len(offer.Token) != 64 || len(offer.Fingerprint) != 64 ||
 		len(offer.Endpoints) == 0 || len(offer.Endpoints) > 16 ||
+		len(offer.UDPEndpoints) > 16 ||
 		offer.ExpiresAt <= time.Now().UnixMilli() {
 		return nil, protocol.FileShareResponse{}, errors.New("invalid file direct offer")
+	}
+	// Attempt a file-only QUIC session first. Its certificate is pinned to
+	// the same Server-attested host fingerprint and consumes the same ticket.
+	// A failed QUIC attempt must never disable the authenticated TCP/Relay
+	// fallback, especially when UDP is blocked on the user's network.
+	if len(offer.UDPEndpoints) > 0 {
+		if stream, response, err := a.tryFileQUIC(ctx, offer, req); err == nil {
+			return stream, response, nil
+		}
 	}
 	var lastErr error
 	for _, endpoint := range offer.Endpoints {

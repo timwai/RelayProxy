@@ -347,3 +347,12 @@ flowchart LR
 - 在用户关闭开关后，Agent 本地桥接立即通知文件直连运行时撤销公网候选并关闭 UPnP 映射，无须等待另一台设备再次发起连接。开关初始默认关闭，不会自动创建外部路由器端口。
 - **诊断语义**：UPnP 映射成功仅说明路由器确认了其本机配置，绝不是来自另一运营商的公网 TCP 端口真实可达性证明。真实可达和传输路径必须依据另一台设备建立的独立 TLS 直连及任务实际 `direct_tls` 路径验证。
 - 文件专用 UDP/QUIC NAT 打洞和跨物理设备公网验收仍待实施。
+
+## 19. 文件专用 QUIC 数据通道：受控可路由直连（2026-10-14）
+
+- 文件共享端新增独立的 UDP/QUIC 监听器。TLS 1.3 自签名证书与文件 TCP 监听端共享**同一 Server 证明的证书指纹**，但采用独立 ALPN `relayproxy-file-direct-quic-v1`，不承载 Proxy、RDP、Browser Sync 流。
+- 每次 Server 批准 `files.client/files.host` 后，控制通道转发一个 20 秒有效、一次性文件票据，同时分别返回 TCP 与 UDP 监听端的可路由地址候选；客户端优先 QUIC，然后 TLS/TCP，最后使用既有 Relay QUIC/TLS。无论 QUIC 或 TCP，文件内容均需主机本机共享 ACL 认证及持续的 Server 权限复核。
+- QUIC 服务端每连接仅接受一个双向文件流，并限定最多 16 条并行直接 QUIC 连接；通过一次性票据消费限制重放。客户端验证 Server 证明的 leaf SHA-256 和专用 ALPN，不接受无验证的 QUIC TLS；传输任务记录实际 `direct_quic` / `direct_tls` / Relay 路径。
+- 双 Agent 自动化进一步断言一次成功的 QUIC 直连，在关闭 QUIC 监听器后回退到文件 TCP 直连，再关闭文件 TCP 监听器后回退 Relay。上传、下载、前缀续传与 SHA-256 完整性沿用同一文件协议。
+- **当前不声称完成 NAT 打洞**：QUIC 候选仅从本地真实监听接口取得，LAN 和可路由公网地址可能直连；双方经由 NAT/CGNAT 或对称 NAT 时，仍缺少与 Server 协调的每会话 UDP 反射候选交换、双向 HMAC 打洞和稳定 socket 复用，遇不可达 UDP 将安全回退 TCP/Relay。不能把 QUIC 直连或现有 UPnP TCP 映射冒充完整 P2P 穿透。
+- PR #204 的 QUIC 增强仍需最新 Go/UI/Windows/macOS CI 全部通过，异网双物理设备验收独立待办。

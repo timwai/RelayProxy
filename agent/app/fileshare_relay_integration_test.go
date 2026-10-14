@@ -136,8 +136,8 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			host.mu.RLock()
 			directRuntime := host.fileDirect
 			host.mu.RUnlock()
-			if directRuntime == nil || directRuntime.accepted.Load() == 0 {
-				t.Fatal("file direct TLS stream was not authenticated")
+			if directRuntime == nil || directRuntime.quicAccepted.Load() == 0 {
+				t.Fatal("file direct QUIC stream was not authenticated")
 			}
 			// Exercise the actual transfer-path reporter on the authenticated
 			// TLS direct stream rather than assuming a preferred path was used.
@@ -149,8 +149,26 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			var directPath string
 			if _, err := client.DownloadRemoteFileResumingWithPath(ctx, "files-host", shares[0].ID, "source.bin", directOutput, nil, func(p string) {
 				directPath = p
-			}); err != nil || directPath != "direct_tls" {
-				t.Fatalf("expected real TLS direct file transport; path=%q err=%v", directPath, err)
+			}); err != nil || directPath != "direct_quic" {
+				t.Fatalf("expected authenticated QUIC direct file transport; path=%q err=%v", directPath, err)
+			}
+			// Disable only the QUIC listener to confirm an unavailable UDP
+			// path still works over the independent TLS/TCP direct listener.
+			// This is not a simulated NAT punching success.
+			if directRuntime.quicListener == nil {
+				t.Fatal("test requires a file-only QUIC listener")
+			}
+			_ = directRuntime.quicListener.Close()
+			tcpFile, err := os.CreateTemp(t.TempDir(), "tcp-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer tcpFile.Close()
+			var tcpPath string
+			if _, err := client.DownloadRemoteFileResumingWithPath(ctx, "files-host", shares[0].ID, "source.bin", tcpFile, nil, func(p string) {
+				tcpPath = p
+			}); err != nil || tcpPath != "direct_tls" {
+				t.Fatalf("expected TLS/TCP fallback after QUIC failure; path=%q err=%v", tcpPath, err)
 			}
 			// A direct listener outage must not break existing Relay
 			// downloads: force direct negotiation to fail, then verify that

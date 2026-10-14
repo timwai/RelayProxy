@@ -75,6 +75,7 @@ func (r *StreamRouter) handleFileDirectPrepare(ctx context.Context, header *prot
 		return
 	}
 	if len(response.Endpoints) == 0 || len(response.Endpoints) > 16 ||
+		len(response.UDPEndpoints) > 16 ||
 		len(response.Fingerprint) != 64 {
 		fail("invalid file host endpoints")
 		return
@@ -84,6 +85,14 @@ func (r *StreamRouter) handleFileDirectPrepare(ctx context.Context, header *prot
 		if err != nil || addr.Port() == 0 || addr.Addr().IsUnspecified() ||
 			addr.Addr().IsMulticast() || addr.Addr().IsLinkLocalUnicast() {
 			fail("invalid direct address")
+			return
+		}
+	}
+	for _, ep := range response.UDPEndpoints {
+		addr, err := netip.ParseAddrPort(ep)
+		if err != nil || addr.Port() == 0 || addr.Addr().IsUnspecified() ||
+			addr.Addr().IsMulticast() || addr.Addr().IsLinkLocalUnicast() {
+			fail("invalid direct UDP address")
 			return
 		}
 	}

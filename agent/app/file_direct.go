@@ -20,6 +20,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/apernet/quic-go"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/upnp"
 	"relayproxy/internal/protocol"
@@ -35,6 +36,7 @@ type fileDirectTicket struct {
 type fileDirectRuntime struct {
 	a           *Agent
 	listener    net.Listener
+	quicListener *quic.Listener
 	fingerprint string
 	mu          sync.Mutex
 	tickets     map[string]fileDirectTicket
@@ -45,12 +47,14 @@ type fileDirectRuntime struct {
 	upnpReason  string
 	closed      bool
 	accepted    atomic.Int64
+	quicAccepted atomic.Int64
 	wg          sync.WaitGroup
 }
 
 type fileDirectStream struct{ *tls.Conn }
 
 func (s *fileDirectStream) CloseWrite() error { return s.Conn.CloseWrite() }
+func (s *fileDirectStream) FileTransferPath() string { return "direct_tls" }
 
 func makeFileDirectTLS() (*tls.Config, string, error) {
 	_, private, err := ed25519.GenerateKey(rand.Reader)
@@ -99,9 +103,19 @@ func (a *Agent) getFileDirectRuntime() (*fileDirectRuntime, error) {
 		return nil, err
 	}
 	rt := &fileDirectRuntime{a: a, listener: tls.NewListener(listener, cfg), fingerprint: fingerprint, tickets: map[string]fileDirectTicket{}}
+	// QUIC is an independent, bounded file transport. Failure to bind UDP
+	// cannot disrupt the already-established TLS/TCP and Relay fallback.
+	udp, quicErr := quic.ListenAddr(":0", fileDirectQUICServerTLS(cfg), fileDirectQUICConfig())
+	if quicErr == nil {
+		rt.quicListener = udp
+	}
 	a.fileDirect = rt
 	rt.wg.Add(1)
 	go rt.accept()
+	if rt.quicListener != nil {
+		rt.wg.Add(1)
+		go rt.acceptQUIC()
+	}
 	return rt, nil
 }
 
@@ -120,6 +134,9 @@ func (r *fileDirectRuntime) close() {
 		r.upnpCancel()
 	}
 	_ = r.listener.Close()
+	if r.quicListener != nil {
+		_ = r.quicListener.Close()
+	}
 	r.mu.Unlock()
 	r.wg.Wait()
 }
@@ -129,6 +146,7 @@ func (r *fileDirectRuntime) close() {
 type FileDirectStatus struct {
 	UPnPEnabled   bool   `json:"upnpEnabled"`
 	ListenerReady bool   `json:"listenerReady"`
+	QUICReady     bool   `json:"quicReady"`
 	MappingState  string `json:"mappingState"`
 	PublicAddress string `json:"publicAddress,omitempty"`
 	Reason        string `json:"reason,omitempty"`
@@ -168,6 +186,7 @@ func (a *Agent) FileDirectStatus() FileDirectStatus {
 	runtime.mu.Lock()
 	defer runtime.mu.Unlock()
 	result.ListenerReady = !runtime.closed && runtime.listener != nil
+	result.QUICReady = !runtime.closed && runtime.quicListener != nil
 	result.MappingState = runtime.upnpState
 	if result.MappingState == "" {
 		result.MappingState = "awaiting_request"
@@ -347,6 +366,7 @@ func (r *fileDirectRuntime) offer(clientID string, grant protocol.FileDirectGran
 	}
 	endpoints = append(endpoints, net.JoinHostPort("127.0.0.1", fmt.Sprint(port)))
 	result.Endpoints = endpoints
+	result.UDPEndpoints = r.quicCandidates()
 	result.Fingerprint = r.fingerprint
 	return result
 }
@@ -361,7 +381,11 @@ func (r *fileDirectRuntime) accept() {
 		}
 		select {
 		case quota <- struct{}{}:
-			r.wg.Add(1)
+			if !r.beginDirectHandler() {
+				<-quota
+				_ = conn.Close()
+				return
+			}
 			go func() {
 				defer r.wg.Done()
 				defer func() { <-quota }()

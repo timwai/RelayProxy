@@ -231,6 +231,10 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/file-transfers", w.listFileDownloads)
 	mux.HandleFunc("POST /api/file-transfers", w.startFileDownload)
 	mux.HandleFunc("POST /api/file-transfers/{id}/cancel", w.cancelFileDownload)
+	mux.HandleFunc("POST /api/file-uploads", w.beginFileUpload)
+	mux.HandleFunc("POST /api/file-uploads/{id}/chunks", w.appendFileUpload)
+	mux.HandleFunc("POST /api/file-uploads/{id}/commit", w.commitFileUpload)
+	mux.HandleFunc("POST /api/file-uploads/{id}/discard", w.discardFileUpload)
 	mux.HandleFunc("PUT /api/file-shares", w.fileShares)
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
 	mux.HandleFunc("GET /api/network-capabilities", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.PlatformCapabilities()) })
@@ -619,6 +623,10 @@ const webBridgeJS = `(function () {
   window.goGetFileSharePeers = function () { return request('/api/file-shares/peers'); };
   window.goGetRemoteFileShares = function (deviceId) { return request('/api/file-shares/remote?deviceId=' + encodeURIComponent(deviceId)); };
   window.goGetRemoteFileEntries = function (deviceId, shareId, relativePath) { return request('/api/file-shares/entries?deviceId=' + encodeURIComponent(deviceId) + '&shareId=' + encodeURIComponent(shareId) + '&path=' + encodeURIComponent(relativePath)); };
+  window.goBeginFileUpload = function (deviceID, shareID, relativePath, size) { return json('/api/file-uploads', 'POST', {deviceId:deviceID, shareId:shareID, path:relativePath, size:size}); };
+  window.goAppendFileUploadChunk = function (id, chunk) { return json('/api/file-uploads/' + encodeURIComponent(id) + '/chunks', 'POST', {chunk:chunk}); };
+  window.goCommitFileUpload = function (id) { return json('/api/file-uploads/' + encodeURIComponent(id) + '/commit', 'POST', {}); };
+  window.goDiscardFileUpload = function (id) { return json('/api/file-uploads/' + encodeURIComponent(id) + '/discard', 'POST', {}); };
   window.goStartFileDownload = function (deviceId, shareId, relativePath) { return json('/api/file-transfers', 'POST', {deviceId:deviceId, shareId:shareId, path:relativePath}); };
   window.goGetFileTransfers = function () { return request('/api/file-transfers'); };
   window.goCancelFileDownload = function (id) { return json('/api/file-transfers/' + encodeURIComponent(id) + '/cancel', 'POST', {}); };

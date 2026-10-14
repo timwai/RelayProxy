@@ -87,7 +87,9 @@ func (w *WebServer) listFileDownloads(rw http.ResponseWriter, _ *http.Request) {
 }
 
 func (w *WebServer) resumeFileDownload(rw http.ResponseWriter, r *http.Request) {
-	if !w.fileShareRemoteAccessAllowed(rw) { return }
+	if !w.fileShareRemoteAccessAllowed(rw) {
+		return
+	}
 	if err := w.bridge.ResumeFileDownload(r.PathValue("id")); err != nil {
 		http.Error(rw, err.Error(), http.StatusBadRequest)
 		return

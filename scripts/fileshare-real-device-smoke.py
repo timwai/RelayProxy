@@ -20,7 +20,7 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode, urlsplit
 from urllib.request import HTTPRedirectHandler, Request, build_opener
 
-PATHS = ("direct_quic", "direct_tls", "relay_quic", "relay_tls")
+PATHS = ("p2p_quic", "direct_quic", "direct_tls", "relay_quic", "relay_tls")
 
 
 class RejectRedirect(HTTPRedirectHandler):

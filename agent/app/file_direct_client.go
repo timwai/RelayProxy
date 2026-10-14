@@ -29,10 +29,25 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 	}
 	defer control.Close()
 	_ = control.SetDeadline(time.Now().Add(3 * time.Second))
+	punchConn, punchCandidates := a.prepareFilePunch(offerCtx)
+	defer func() {
+		if punchConn != nil {
+			_ = punchConn.Close()
+		}
+	}()
+	frameType := protocol.FrameTypeFileDirectPrepare
+	if len(punchCandidates) > 0 {
+		frameType = protocol.FrameTypeFileDirectPunchPrepare
+	}
 	if err := protocol.WriteStreamHeader(control, &protocol.StreamHeader{
-		Type: protocol.FrameTypeFileDirectPrepare, ExitDeviceID: hostID,
+		Type: frameType, ExitDeviceID: hostID,
 	}); err != nil {
 		return nil, protocol.FileShareResponse{}, err
+	}
+	if frameType == protocol.FrameTypeFileDirectPunchPrepare {
+		if err := protocol.WriteJSON(control, protocol.FileDirectPunchPrepare{Candidates: punchCandidates}); err != nil {
+			return nil, protocol.FileShareResponse{}, err
+		}
 	}
 	var offer protocol.FileDirectOffer
 	if err := protocol.ReadJSON(control, &offer); err != nil {
@@ -46,6 +61,17 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 		len(offer.UDPEndpoints) > 16 ||
 		offer.ExpiresAt <= time.Now().UnixMilli() {
 		return nil, protocol.FileShareResponse{}, errors.New("invalid file direct offer")
+	}
+	if punchConn != nil && len(offer.PunchCandidates) > 0 && offer.PunchSessionID != 0 &&
+		len(offer.PunchKey) == 32 {
+		punchCtx, stopPunch := fileDirectStageContext(ctx, offer.ExpiresAt, 4*time.Second)
+		stream, response, punchErr := a.tryPunchedFileQUIC(punchCtx, punchConn, offer, req)
+		stopPunch()
+		if punchErr == nil {
+			// The authenticated file P2P QUIC transport now owns this socket.
+			punchConn = nil
+			return stream, response, nil
+		}
 	}
 	// A single 20-second Server ticket must cover QUIC, TCP and fallback.
 	// Sequentially trying up to 16 unreachable UDP candidates could otherwise

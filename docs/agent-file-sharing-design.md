@@ -401,3 +401,11 @@ flowchart LR
 - 若需要验证 UDP 不可达自动降级，改用网络防火墙阻断共享端文件专用 UDP 端口，再要求 `direct_tls`；继续阻断文件 TCP 直连时应按实际 Relay 协议要求 `relay_quic` 或 `relay_tls`。脚本不自行修改防火墙或路由器。优先对 Windows ↔ macOS、跨 NAT、公网 IPv4/IPv6、弱网/断线恢复分别执行并保留报告。
 - 安全界限：默认仅访问本机 loopback 的 Web API；远程 Web API 必须使用 HTTPS，避免泄漏 Bearer Token；不跟随 Web API 重定向，不将 Token 写入报告，不修改共享端文件。脚本仅测下载，不等价于已完成上传/双向验收。
 - **重要：本轮只提交验收工具，尚未实际访问两台独立物理设备，更不能声称异网 P2P/NAT 打洞通过。** `direct_quic` 表示实际 QUIC 文件通道成功，不证明这是 UDP NAT 打洞（也可能是 UPnP 或公网可路由地址）。PR 保持 Draft。
+
+## 24. 文件独立 P2P QUIC 穿透（2026-10-14）
+
+- 新增单独的 `FileDirectPunchPrepare` 控制帧，旧 `FileDirectPrepare` 不变。Server 验证同身份与两端 `files.client/files.host` 的真实数据库审批后，为每次文件操作签发随机 64 位 P2P 会话 ID、32 字节 HMAC key，以及原有 20 秒一次性文件访问令牌，分别通过已认证 Relay 流下发。
+- 双 Agent 使用独立于代理 P2P 的单次 UDP socket；同一 socket 先向既有 Server rendezvous 反射服务探测公网端点、再执行双向 HMAC/nonce UDP 打洞、最后交给文件专用 `quic.Transport` 握手与数据流，不允许从代理 P2P 授权继承文件权限。仅 `p2p_quic` 标记真正完成 HMAC 打洞后建立的 QUIC 传输。
+- 若 Server 未提供 rendezvous 地址，保留既有文件 QUIC/TLS/Relay 协商。P2P 限制同时 4 个候选会话、20 秒票据有效期和 4 秒打洞窗口；失败按 `direct_quic → direct_tls → relay_quic/relay_tls` 回退。
+- 不信任客户端提交的 IP 列表，Server 与共享端分别验证地址数量、协议与地址合法性；文件 QUIC 仍验证主机证书 leaf SHA-256、单次票据和实时 Server 文件审批，并由主机本地目录 ACL 判定读取或写入。
+- **限制**：UDP NAT 打洞是尽力而为，不保证对称 NAT 或双侧 CGNAT 一定成功；尚须本机双 Agent 集成自动化与跨运营商双实体机实测。PR 保持 Draft。

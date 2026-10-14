@@ -330,6 +330,7 @@ type Agent struct {
 	closeErr             error
 	fileShareStore       *fileshare.FileStore
 	fileDirect           *fileDirectRuntime
+	fileP2PRendezvous    string
 	rdpConnectMu         sync.Mutex
 }
 
@@ -737,6 +738,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
 	a.approvedCapabilities = append([]string(nil), accepted.ApprovedCapabilities...)
+	a.fileP2PRendezvous = accepted.P2PRendezvousAddress
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
 	if accepted.ProxyExitRevision != 0 {
 		a.proxyExitRevision = accepted.ProxyExitRevision

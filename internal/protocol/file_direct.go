@@ -9,11 +9,17 @@ type FileDirectOffer struct {
 	Fingerprint  string   `json:"fingerprint,omitempty"`
 	ExpiresAt    int64    `json:"expiresAt,omitempty"`
 	Error        string   `json:"error,omitempty"`
+	PunchSessionID uint64 `json:"punchSessionId,omitempty"`
+	PunchKey []byte `json:"punchKey,omitempty"`
+	PunchCandidates []P2PCandidate `json:"punchCandidates,omitempty"`
 }
 
 type FileDirectGrant struct {
 	Token     string `json:"token"`
 	ExpiresAt int64  `json:"expiresAt"`
+	PunchSessionID uint64 `json:"punchSessionId,omitempty"`
+	PunchKey []byte `json:"punchKey,omitempty"`
+	PeerCandidates []P2PCandidate `json:"peerCandidates,omitempty"`
 }
 
 type FileDirectAuth struct {
@@ -23,4 +29,9 @@ type FileDirectAuth struct {
 type FileDirectAuthResult struct {
 	Allowed bool   `json:"allowed"`
 	Error   string `json:"error,omitempty"`
+}
+
+// FileDirectPunchPrepare is a separate frame, preserving old Agent handshakes.
+type FileDirectPunchPrepare struct {
+	Candidates []P2PCandidate `json:"candidates"`
 }

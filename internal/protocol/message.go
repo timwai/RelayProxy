@@ -36,6 +36,7 @@ const (
 	FrameTypeFileDirectPrepare   FrameType = 0x16
 	FrameTypeFileDirectGrant     FrameType = 0x17
 	FrameTypeFileDirectCheck     FrameType = 0x18
+	FrameTypeFileDirectPunchPrepare FrameType = 0x19
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

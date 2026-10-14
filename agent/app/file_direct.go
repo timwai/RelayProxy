@@ -38,6 +38,9 @@ type fileDirectRuntime struct {
 	listener       net.Listener
 	quicListener   *quic.Listener
 	fingerprint    string
+	tlsConfig      *tls.Config
+	punchCancel    map[string]context.CancelFunc
+	punchAccepted atomic.Int64
 	mu             sync.Mutex
 	tickets        map[string]fileDirectTicket
 	upnpCancel     context.CancelFunc
@@ -107,7 +110,7 @@ func (a *Agent) getFileDirectRuntime() (*fileDirectRuntime, error) {
 	if err != nil {
 		return nil, err
 	}
-	rt := &fileDirectRuntime{a: a, listener: tls.NewListener(listener, cfg), fingerprint: fingerprint, tickets: map[string]fileDirectTicket{}}
+	rt := &fileDirectRuntime{a: a, listener: tls.NewListener(listener, cfg), tlsConfig: cfg, fingerprint: fingerprint, tickets: map[string]fileDirectTicket{}, punchCancel: map[string]context.CancelFunc{}}
 	// QUIC is an independent, bounded file transport. Failure to bind UDP
 	// cannot disrupt the already-established TLS/TCP and Relay fallback.
 	udp, quicErr := quic.ListenAddr(":0", fileDirectQUICServerTLS(cfg), fileDirectQUICConfig())
@@ -135,6 +138,9 @@ func (r *fileDirectRuntime) close() {
 	}
 	r.closed = true
 	r.tickets = map[string]fileDirectTicket{}
+	for _, cancel := range r.punchCancel {
+		cancel()
+	}
 	if r.upnpCancel != nil {
 		r.upnpCancel()
 	}
@@ -550,7 +556,14 @@ func (a *Agent) serveFileDirectGrant(ctx context.Context, stream tunnel.TunnelSt
 		return
 	}
 	runtime.syncUPnP()
-	_ = protocol.WriteJSON(stream, runtime.offer(clientID, grant))
+	offer := runtime.offer(clientID, grant)
+	if offer.Error == "" && grant.PunchSessionID != 0 && len(grant.PunchKey) == 32 &&
+		len(grant.PeerCandidates) > 0 {
+		if candidates, err := runtime.startFilePunch(grant); err == nil {
+			offer.PunchCandidates = candidates
+		}
+	}
+	_ = protocol.WriteJSON(stream, offer)
 }
 
 func (a *Agent) checkFileDirectGrant(ctx context.Context, clientID string) bool {

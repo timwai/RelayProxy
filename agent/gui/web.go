@@ -224,7 +224,8 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /"+name, func(rw http.ResponseWriter, _ *http.Request) { serveEmbeddedAsset(rw, name) })
 	}
 
-	mux.HandleFunc("/api/file-shares", w.fileShares)
+	mux.HandleFunc("GET /api/file-shares", w.fileShares)
+	mux.HandleFunc("PUT /api/file-shares", w.fileShares)
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
 	mux.HandleFunc("GET /api/network-capabilities", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.PlatformCapabilities()) })
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })

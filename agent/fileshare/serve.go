@@ -67,7 +67,7 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		fail("device has no access to this shared folder")
 		return
 	}
-	if !fs.ValidPath(req.Path) || !filepath.IsLocal(filepath.FromSlash(req.Path)) {
+	if !fs.ValidPath(req.Path) || !filepath.IsLocal(filepath.FromSlash(req.Path)) || strings.Contains(req.Path, "\\") {
 		fail("invalid relative path")
 		return
 	}

@@ -23,7 +23,11 @@ func (b *UIBridge) SaveFileShares(next fileshare.State) (fileshare.State, error)
 	if err != nil {
 		return fileshare.State{}, err
 	}
-	return store.Save(next)
+	saved, err := store.Save(next)
+	if err == nil && b.agent != nil {
+		b.agent.RefreshFileDirectUPnP()
+	}
+	return saved, err
 }
 
 func (b *UIBridge) GetFileSharePeers() ([]protocol.FileSharePeer, error) {

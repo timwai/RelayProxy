@@ -34,14 +34,14 @@ func TestTCPFileMappingUsesSeparateProtocolForLeaseAndOwnedCleanup(t *testing.T)
 		}
 	}))
 	defer router.Close()
-	control, err := url.Parse(router.URL+"/igdupnp/control")
+	control, err := url.Parse(router.URL + "/igdupnp/control")
 	if err != nil {
 		t.Fatal(err)
 	}
 	svc := service{
 		serviceType: "urn:schemas-upnp-org:service:WANIPConnection:2",
-		controlURL: control,
-		localIP: netip.MustParseAddr("192.168.1.10"),
+		controlURL:  control,
+		localIP:     netip.MustParseAddr("192.168.1.10"),
 	}
 	ctx := context.Background()
 	mapping, address, err := mapPortOnService(ctx, svc, 32450, 0, 0, "TCP")

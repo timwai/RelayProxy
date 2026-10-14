@@ -125,6 +125,21 @@ func (r *fileDirectRuntime) close() {
 // syncUPnP never opens a router port without an explicit local option. A
 // failed discovery or private CGNAT WAN leaves the existing Relay/LAN paths
 // unchanged. Disabling the option withdraws an advertised address immediately.
+// RefreshFileDirectUPnP responds to an authorized local preference change.
+// Disabling the option withdraws the public candidate immediately and
+// cancels the finite-lease mapping even when no remote device is connected.
+func (a *Agent) RefreshFileDirectUPnP() {
+	if a == nil {
+		return
+	}
+	a.mu.RLock()
+	runtime := a.fileDirect
+	a.mu.RUnlock()
+	if runtime != nil {
+		runtime.syncUPnP()
+	}
+}
+
 func (r *fileDirectRuntime) syncUPnP() {
 	r.a.mu.RLock()
 	store := r.a.fileShareStore

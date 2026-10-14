@@ -2,7 +2,6 @@ package fileshare
 
 import (
 	"bytes"
-	"strings"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -10,6 +9,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -148,16 +148,22 @@ func TestFileShareDownloadResumeValidatesPrefix(t *testing.T) {
 		t.Fatal(err)
 	}
 	store, err := New(filepath.Join(t.TempDir(), "agent.yaml"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	state, err := store.Load()
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	state.Enabled = true
 	state.Shares = []Share{{
 		Name: "test", RootPath: dir, Enabled: true,
 		Permissions: map[string]Permission{"client-1": PermissionRead},
 	}}
 	state, err = store.Save(state)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	const offset = 17
 	h := sha256.Sum256(data[:offset])
 	issue := func(from string, resumeHash string) (protocol.FileShareResponse, []byte, protocol.FileShareResponse) {
@@ -173,15 +179,23 @@ func TestFileShareDownloadResumeValidatesPrefix(t *testing.T) {
 		if err := protocol.WriteJSON(client, protocol.FileShareRequest{
 			Action: protocol.FileShareDownload, ShareID: state.Shares[0].ID,
 			Path: "data.txt", Offset: offset, PrefixSHA256: resumeHash,
-		}); err != nil { t.Fatal(err) }
+		}); err != nil {
+			t.Fatal(err)
+		}
 		var initial protocol.FileShareResponse
-		if err := protocol.ReadJSON(client, &initial); err != nil { t.Fatal(err) }
+		if err := protocol.ReadJSON(client, &initial); err != nil {
+			t.Fatal(err)
+		}
 		var suffix []byte
 		var receipt protocol.FileShareResponse
 		if initial.Success {
 			suffix = make([]byte, len(data)-offset)
-			if _, err := io.ReadFull(client, suffix); err != nil { t.Fatal(err) }
-			if err := protocol.ReadJSON(client, &receipt); err != nil { t.Fatal(err) }
+			if _, err := io.ReadFull(client, suffix); err != nil {
+				t.Fatal(err)
+			}
+			if err := protocol.ReadJSON(client, &receipt); err != nil {
+				t.Fatal(err)
+			}
 		}
 		<-done
 		return initial, suffix, receipt

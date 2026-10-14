@@ -7,8 +7,8 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"io/fs"
+	"net"
 	"os"
 	"path"
 	"path/filepath"
@@ -147,19 +147,19 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	lastDone := int64(0)
 	for attempt := 0; attempt < 4; attempt++ {
 		_, err = m.agent.DownloadRemoteFileResuming(ctx, record.DeviceID, record.ShareID, record.RelativePath, file, func(done, total int64) {
-		m.mu.Lock()
-		record.Done, record.Total = done, total
-		elapsed := time.Since(lastTime)
-		if elapsed >= 250*time.Millisecond {
-			rate := float64(done-lastDone) / elapsed.Seconds()
-			if record.Speed > 0 {
-				record.Speed = 0.6*record.Speed + 0.4*rate
-			} else {
-				record.Speed = rate
+			m.mu.Lock()
+			record.Done, record.Total = done, total
+			elapsed := time.Since(lastTime)
+			if elapsed >= 250*time.Millisecond {
+				rate := float64(done-lastDone) / elapsed.Seconds()
+				if record.Speed > 0 {
+					record.Speed = 0.6*record.Speed + 0.4*rate
+				} else {
+					record.Speed = rate
+				}
+				lastDone, lastTime = done, time.Now()
 			}
-			lastDone, lastTime = done, time.Now()
-		}
-		m.mu.Unlock()
+			m.mu.Unlock()
 		})
 		if err == nil {
 			break

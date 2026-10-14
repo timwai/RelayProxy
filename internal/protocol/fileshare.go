@@ -21,14 +21,14 @@ type FileSharePeersResponse struct {
 }
 
 type FileShareRequest struct {
-	Action  string `json:"action"`
-	ShareID string `json:"shareId,omitempty"`
-	Path    string `json:"path,omitempty"`
+	Action       string `json:"action"`
+	ShareID      string `json:"shareId,omitempty"`
+	Path         string `json:"path,omitempty"`
 	Size         int64  `json:"size,omitempty"`
 	Offset       int64  `json:"offset,omitempty"`
 	PrefixSHA256 string `json:"prefixSha256,omitempty"`
-	Resume        bool   `json:"resume,omitempty"`
-	UploadID      string `json:"uploadId,omitempty"`
+	Resume       bool   `json:"resume,omitempty"`
+	UploadID     string `json:"uploadId,omitempty"`
 }
 
 type FileShareDescriptor struct {
@@ -45,15 +45,15 @@ type FileShareEntry struct {
 }
 
 type FileShareResponse struct {
-	Success bool                  `json:"success"`
-	Error   string                `json:"error,omitempty"`
-	Shares  []FileShareDescriptor `json:"shares,omitempty"`
-	Entries []FileShareEntry      `json:"entries,omitempty"`
-	Size    int64                 `json:"size,omitempty"`
-	SHA256  string                `json:"sha256,omitempty"`
-	Offset  int64                 `json:"offset,omitempty"`
-	UploadID string               `json:"uploadId,omitempty"`
-	PrefixSHA256 string           `json:"prefixSha256,omitempty"`
+	Success      bool                  `json:"success"`
+	Error        string                `json:"error,omitempty"`
+	Shares       []FileShareDescriptor `json:"shares,omitempty"`
+	Entries      []FileShareEntry      `json:"entries,omitempty"`
+	Size         int64                 `json:"size,omitempty"`
+	SHA256       string                `json:"sha256,omitempty"`
+	Offset       int64                 `json:"offset,omitempty"`
+	UploadID     string                `json:"uploadId,omitempty"`
+	PrefixSHA256 string                `json:"prefixSha256,omitempty"`
 }
 
 type FileShareCandidate struct {

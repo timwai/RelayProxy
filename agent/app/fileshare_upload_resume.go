@@ -27,7 +27,9 @@ func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID,
 	var uploadID string
 	var lastErr error
 	for attempt := 0; attempt < 4; attempt++ {
-		if err := ctx.Err(); err != nil { return 0, err }
+		if err := ctx.Err(); err != nil {
+			return 0, err
+		}
 		stream, ready, err := a.openRemoteFile(ctx, deviceID, protocol.FileShareRequest{
 			Action: protocol.FileShareUpload, ShareID: shareID, Path: relativePath,
 			Size: size, Resume: true, UploadID: uploadID,
@@ -36,7 +38,9 @@ func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID,
 			lastErr = err
 			// A missing host state on retry cannot be silently replaced with a
 			// new upload; this preserves explicit revocation semantics.
-			if uploadID != "" && strings.Contains(err.Error(), "resume token") { return 0, err }
+			if uploadID != "" && strings.Contains(err.Error(), "resume token") {
+				return 0, err
+			}
 		} else {
 			if ready.UploadID == "" || len(ready.UploadID) != 48 ||
 				(uploadID != "" && ready.UploadID != uploadID) ||
@@ -62,7 +66,9 @@ func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID,
 				_ = stream.Close()
 				return 0, err
 			}
-			if progress != nil { progress(ready.Offset, size) }
+			if progress != nil {
+				progress(ready.Offset, size)
+			}
 			stop := tunnel.InterruptOnCancel(ctx, stream)
 			writer := &fileProgressWriter{w: io.MultiWriter(stream, hash), n: ready.Offset, size: size, progress: progress}
 			n, copyErr := io.CopyN(writer, src, size-ready.Offset)
@@ -73,7 +79,9 @@ func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID,
 				var final protocol.FileShareResponse
 				copyErr = protocol.ReadJSON(stream, &final)
 				if copyErr == nil && !final.Success {
-					if final.Error == "" { final.Error = "remote upload rejected" }
+					if final.Error == "" {
+						final.Error = "remote upload rejected"
+					}
 					copyErr = errors.New(final.Error)
 				}
 				if copyErr == nil && (final.Size != size || final.SHA256 != hex.EncodeToString(hash.Sum(nil))) {
@@ -83,16 +91,24 @@ func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID,
 			stop()
 			_ = stream.Close()
 			if copyErr == nil {
-				if err := ctx.Err(); err != nil { return 0, err }
+				if err := ctx.Err(); err != nil {
+					return 0, err
+				}
 				return size, nil
 			}
 			lastErr = copyErr
 		}
-		if ctx.Err() != nil { return 0, ctx.Err() }
-		if !isRetryableFileUploadError(lastErr) || attempt == 3 { break }
-		delay := time.NewTimer(time.Duration(attempt+1)*350*time.Millisecond)
+		if ctx.Err() != nil {
+			return 0, ctx.Err()
+		}
+		if !isRetryableFileUploadError(lastErr) || attempt == 3 {
+			break
+		}
+		delay := time.NewTimer(time.Duration(attempt+1) * 350 * time.Millisecond)
 		select {
-		case <-ctx.Done(): delay.Stop(); return 0, ctx.Err()
+		case <-ctx.Done():
+			delay.Stop()
+			return 0, ctx.Err()
 		case <-delay.C:
 		}
 	}
@@ -100,12 +116,16 @@ func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID,
 }
 
 func isRetryableFileUploadError(err error) bool {
-	if err == nil {return false}
-	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {return true}
-	msg:=strings.ToLower(err.Error())
-	return strings.Contains(msg,"connection reset") ||
-		strings.Contains(msg,"stream reset") ||
-		strings.Contains(msg,"transport closed") ||
-		strings.Contains(msg,"connection lost") ||
-		strings.Contains(msg,"timeout")
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+		return true
+	}
+	msg := strings.ToLower(err.Error())
+	return strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "stream reset") ||
+		strings.Contains(msg, "transport closed") ||
+		strings.Contains(msg, "connection lost") ||
+		strings.Contains(msg, "timeout")
 }

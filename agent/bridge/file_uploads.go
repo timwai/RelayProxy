@@ -107,6 +107,7 @@ func (m *fileTransferManager) appendUpload(id, base64Chunk string) (FileUploadPr
 	}
 	n, err := stage.file.Write(payload)
 	stage.done += int64(n)
+	stage.created = time.Now()
 	if err != nil || n != len(payload) {
 		return FileUploadProgress{}, fmt.Errorf("write upload staging data: %w", io.ErrShortWrite)
 	}

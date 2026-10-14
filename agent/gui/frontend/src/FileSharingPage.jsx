@@ -250,7 +250,7 @@ export default function FileSharingPage({toast}) {
      <div className="file-share-task-meta"><span>{formatFileBytes(item.done)} / {item.total>0?formatFileBytes(item.total):'计算中'} · {item.total>0?Math.floor(item.done/item.total*100):0}%</span><span>{item.transportPath=== 'direct_tls'?'直连 TLS':item.transportPath==='relay_quic'?'Relay QUIC':item.transportPath==='relay_tls'?'Relay TLS':'协商中'}{item.state==='running'?' · '+formatFileBytes(item.speed)+'/s':''}</span></div>
      {item.error&&<div className="notice danger">{item.error}</div>}
      {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>{item.direction==='download'?'暂停下载':'取消上传'}</button>}
-     {item.direction==='download'&&(item.state==='paused'||item.state==='failed')&&<button className="btn primary" onClick={()=>resumeDownload(item.id)}>继续下载</button>
+     {item.direction==='download'&&(item.state==='paused'||item.state==='failed')&&<button className="btn primary" onClick={()=>resumeDownload(item.id)}>继续下载</button>}
     </div>)}
   </section>}
   {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>

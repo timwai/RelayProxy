@@ -208,6 +208,34 @@ jobs:
           }
       - name: Test desktop packages
         run: go test ./agent/divert ./agent/gui ./cmd/relay-agent -count=1
+      - name: Two-Agent file sharing over authenticated Relay and file direct
+        run: go test ./agent/app ./agent/fileshare -run 'Test(FileSharingOverTwoAuthenticatedAgentSessions|UploadResumeAfterBrokenStream|FileShareDownloadResumeValidatesPrefix)
+      - name: Build macOS desktop shell and Network Extension
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          go build -o "$RUNNER_TEMP/relay-agent" ./cmd/relay-agent
+          brew install xcodegen
+          (
+            cd macos
+            xcodegen generate
+          )
+          swiftc -swift-version 5 -O \
+            -sdk "$(xcrun --sdk macosx --show-sdk-path)" \
+            -target "$(uname -m)-apple-macos11.0" \
+            -framework AppKit -framework WebKit \
+            macos/RelayProxyDesktop/AppDelegate.swift \
+            macos/RelayProxyDesktop/main.swift \
+            -o "$RUNNER_TEMP/RelayProxyDesktop"
+          xcodebuild \
+            -project macos/RelayProxyMac.xcodeproj \
+            -scheme RelayProxyMacHost \
+            -configuration Debug \
+            -derivedDataPath "$RUNNER_TEMP/RelayProxyDerivedData" \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            build
+ -count=1 -timeout=5m
       - name: Build macOS desktop shell and Network Extension
         if: runner.os == 'macOS'
         shell: bash

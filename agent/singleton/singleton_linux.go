@@ -5,8 +5,8 @@ package singleton
 import (
 	"fmt"
 	"os"
-	"runtime"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"unicode"
 

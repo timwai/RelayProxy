@@ -209,7 +209,8 @@ jobs:
       - name: Test desktop packages
         run: go test ./agent/divert ./agent/gui ./cmd/relay-agent -count=1
       - name: Two-Agent file sharing over authenticated Relay and file direct
-        run: go test ./agent/app ./agent/fileshare -run 'Test(FileSharingOverTwoAuthenticatedAgentSessions|UploadResumeAfterBrokenStream|FileShareDownloadResumeValidatesPrefix)
+        run: |
+          go test ./agent/app ./agent/fileshare -run "Test(FileSharingOverTwoAuthenticatedAgentSessions|UploadResumeAfterBrokenStream|FileShareDownloadResumeValidatesPrefix)" -count=1 -timeout=5m
       - name: Build macOS desktop shell and Network Extension
         if: runner.os == 'macOS'
         shell: bash

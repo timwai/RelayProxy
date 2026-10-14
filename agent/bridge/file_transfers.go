@@ -26,6 +26,7 @@ type FileTransfer struct {
 	RelativePath string  `json:"relativePath"`
 	FileName     string  `json:"fileName"`
 	Direction    string  `json:"direction"`
+	TransportPath string `json:"transportPath,omitempty"`
 	Destination  string  `json:"destination,omitempty"`
 	State        string  `json:"state"`
 	Total        int64   `json:"total"`
@@ -161,7 +162,7 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	lastTime := time.Now()
 	lastDone := int64(0)
 	for attempt := 0; attempt < 4; attempt++ {
-		_, err = m.agent.DownloadRemoteFileResuming(ctx, record.DeviceID, record.ShareID, record.RelativePath, file, func(done, total int64) {
+		_, err = m.agent.DownloadRemoteFileResumingWithPath(ctx, record.DeviceID, record.ShareID, record.RelativePath, file, func(done, total int64) {
 			m.mu.Lock()
 			record.Done, record.Total = done, total
 			elapsed := time.Since(lastTime)
@@ -174,6 +175,10 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 				}
 				lastDone, lastTime = done, time.Now()
 			}
+			m.mu.Unlock()
+		}, func(path string) {
+			m.mu.Lock()
+			record.TransportPath = path
 			m.mu.Unlock()
 		})
 		if err == nil {

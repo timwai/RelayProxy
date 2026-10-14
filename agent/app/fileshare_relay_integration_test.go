@@ -139,13 +139,44 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			if directRuntime == nil || directRuntime.accepted.Load() == 0 {
 				t.Fatal("file direct TLS stream was not authenticated")
 			}
+			// Exercise the actual transfer-path reporter on the authenticated
+			// TLS direct stream rather than assuming a preferred path was used.
+			directOutput, err := os.CreateTemp(t.TempDir(), "direct-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer directOutput.Close()
+			var directPath string
+			if _, err := client.DownloadRemoteFileResumingWithPath(ctx, "files-host", shares[0].ID, "source.bin", directOutput, nil, func(p string) {
+				directPath = p
+			}); err != nil || directPath != "direct_tls" {
+				t.Fatalf("expected real TLS direct file transport; path=%q err=%v", directPath, err)
+			}
 			// A direct listener outage must not break existing Relay
 			// downloads: force direct negotiation to fail, then verify that
 			// Server-checked Relay forwarding succeeds without data loss.
 			directRuntime.close()
-			var fallback bytes.Buffer
-			if _, err := client.DownloadRemoteFile(ctx, "files-host", shares[0].ID, "source.bin", &fallback, nil); err != nil || !bytes.Equal(fallback.Bytes(), data) {
+			fallbackFile, err := os.CreateTemp(t.TempDir(), "fallback-*")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer fallbackFile.Close()
+			var fallbackPath string
+			if _, err := client.DownloadRemoteFileResumingWithPath(ctx, "files-host", shares[0].ID, "source.bin", fallbackFile, nil, func(p string) {
+				fallbackPath = p
+			}); err != nil {
 				t.Fatalf("Relay fallback after direct outage: %v", err)
+			}
+			fallback, err := os.ReadFile(fallbackFile.Name())
+			if err != nil || !bytes.Equal(fallback, data) {
+				t.Fatalf("Relay fallback data mismatch: %v", err)
+			}
+			expectedPath := "relay_quic"
+			if transportMode == "tcp_only" {
+				expectedPath = "relay_tls"
+			}
+			if fallbackPath != expectedPath {
+				t.Fatalf("unexpected fallback transport path %q (want %q)", fallbackPath, expectedPath)
 			}
 			// Resume after a simulated local connection failure: half a file
 			// already on disk is verified byte-for-byte against the host.

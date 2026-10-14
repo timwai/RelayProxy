@@ -21,6 +21,13 @@ import (
 // file before sending the suffix; the final digest covers the whole file.
 func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID, relativePath string,
 	src io.ReadSeeker, size int64, progress func(int64, int64)) (int64, error) {
+	return a.UploadRemoteFileResumingWithPath(ctx, deviceID, shareID, relativePath, src, size, progress, nil)
+}
+
+// UploadRemoteFileResumingWithPath supplies the live transport for this upload
+// attempt, including Relay fallback after a failed direct handshake.
+func (a *Agent) UploadRemoteFileResumingWithPath(ctx context.Context, deviceID, shareID, relativePath string,
+	src io.ReadSeeker, size int64, progress func(int64, int64), pathChanged func(string)) (int64, error) {
 	if src == nil || size < 0 || size > fileshare.MaxUploadSize {
 		return 0, errors.New("invalid resumable upload source or size")
 	}
@@ -42,6 +49,9 @@ func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID,
 				return 0, err
 			}
 		} else {
+			if pathChanged != nil {
+				pathChanged(fileTransferPath(stream))
+			}
 			if ready.UploadID == "" || len(ready.UploadID) != 48 ||
 				(uploadID != "" && ready.UploadID != uploadID) ||
 				ready.Size != size || ready.Offset < 0 || ready.Offset > size {

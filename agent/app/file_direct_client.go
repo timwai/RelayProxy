@@ -3,7 +3,6 @@ package app
 import (
 	"context"
 	"crypto/tls"
-	"crypto/x509"
 	"errors"
 	"fmt"
 	"net"
@@ -89,4 +88,3 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 // Compile-time assurance: no unrestricted net.Conn can be used without an
 // authenticated TLS session and file-scoped direct protocol adapter.
 var _ tunnel.TunnelStream = (*fileDirectStream)(nil)
-var _ *x509.Certificate

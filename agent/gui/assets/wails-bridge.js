@@ -11,6 +11,8 @@
   window.goOpenConnections = () => invoke('OpenConnections');
   window.goGetConnections = () => invoke('GetConnections');
   window.goClearConnections = () => invoke('ClearConnections');
+  window.goGetFileShares = () => invoke('GetFileShares');
+  window.goSaveFileShares = state => invoke('SaveFileShares', state);
   window.goGetStatus = () => invoke('GetStatus');
   window.goGetDiagnostics = () => invoke('GetDiagnostics');
   window.goRunSpeedTest = (exitID, durationSeconds) => invoke('RunSpeedTest', exitID, durationSeconds);

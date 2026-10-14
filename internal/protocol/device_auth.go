@@ -18,6 +18,8 @@ const (
 
 	CapabilityProxyClient = "proxy.client"
 	CapabilityProxyExit   = "proxy.exit"
+	CapabilityFilesClient = "files.client"
+	CapabilityFilesHost   = "files.host"
 	// Signed, per-connection Agent opt-in for sharing its egress with Chrome-only
 	// Browser Sync recipients. This is a transport declaration, never a grant.
 	CapabilityBrowserNetworkExit = "browser.network.exit.v1"

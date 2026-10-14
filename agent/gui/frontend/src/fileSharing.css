@@ -1,0 +1,62 @@
+.file-share-tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);padding:0 2px 9px;margin-bottom:17px}
+.file-share-tabs button{border:0;background:transparent;color:var(--muted);padding:9px 15px;border-radius:9px;font-weight:700}
+.file-share-tabs button.selected{background:color-mix(in srgb,var(--brand) 12%,var(--surface2));color:var(--brand)}
+.file-share-item{display:flex;align-items:center;gap:12px;border-top:1px solid var(--line);padding:14px 0;min-width:0;flex-wrap:wrap}
+.file-share-item:first-of-type{border-top:0}
+.file-share-folder{width:42px;height:42px;border:1px solid var(--line);border-radius:12px;background:var(--surface3);display:grid;place-items:center;font-size:22px;color:var(--brand);flex:0 0 auto}
+.file-share-detail{flex:1 1 180px;min-width:0}
+.file-share-detail b{display:block;font-size:13px}
+.file-share-detail .mono{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+.file-share-ops{display:flex;gap:6px;flex-wrap:wrap}
+.file-share-ops .btn{white-space:nowrap}
+.file-share-permissions{border-top:1px solid var(--line);margin-top:20px;padding-top:14px}
+.file-share-permissions h3{margin:0;font-size:14px}
+.file-share-permissions p{margin:4px 0 10px}
+.file-share-permission{display:flex;align-items:center;gap:8px;margin:8px 0}
+.file-share-permission .control:first-child{min-width:0;flex:1}
+.file-share-permission select.control{width:118px;flex:0 0 auto}
+.file-share-permission .btn{white-space:nowrap;flex:0 0 auto}
+.file-share-error{margin-bottom:12px}
+.file-share-unavailable{min-height:160px;padding:23px}
+.file-share-unavailable h2{font-size:15px;margin:0 0 7px}
+.file-share-unavailable p{color:var(--muted);line-height:1.75;max-width:720px;margin:0}
+@media(max-width:800px){.file-share-item{align-items:flex-start}.file-share-ops{width:100%;justify-content:flex-end}.file-share-permission{flex-wrap:wrap}.file-share-permission .mono{overflow-wrap:anywhere}}
+
+
+.file-share-peer-list{display:flex;flex-direction:column;gap:8px;margin-top:10px}
+.file-share-peer{width:100%;display:flex;align-items:center;gap:10px;text-align:left;border:1px solid var(--line);background:var(--surface3);border-radius:11px;padding:12px;color:var(--text);cursor:pointer}
+.file-share-peer:hover,.file-share-peer.selected{border-color:var(--brand)}
+.file-share-peer b{font-size:13px}
+.file-share-peer small{color:var(--muted);font-size:11px;min-width:0;overflow:hidden;text-overflow:ellipsis}
+.file-share-peer .badge{margin-left:auto}
+.file-share-breadcrumb{display:flex;align-items:center;gap:8px;margin:6px 0 12px;flex-wrap:wrap}
+.file-share-breadcrumb .mono{color:var(--muted);word-break:break-word;flex:1}
+.file-share-entry{display:flex;align-items:center;gap:12px;border-top:1px solid var(--line);padding:12px 0}
+.file-share-entry .grow{display:flex;flex-direction:column;gap:3px;min-width:0;overflow-wrap:anywhere}
+.file-share-entry small{font-size:11px;color:var(--muted)}
+.file-share-task{border-top:1px solid var(--line);padding:15px 0;display:flex;flex-direction:column;gap:8px}
+.file-share-task-title,.file-share-task-meta{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.file-share-task-title .grow{min-width:0;overflow-wrap:anywhere}
+.file-share-task-track{height:7px;background:var(--surface3);border-radius:10px;overflow:hidden}
+.file-share-task-track>div{height:100%;background:var(--brand);transition:width .3s}
+.file-share-task-meta{color:var(--muted);font-size:11px}
+.file-share-task .btn{align-self:flex-end}
+
+
+.file-share-upload-actions{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.file-share-upload-actions label.btn{display:inline-flex;align-items:center;cursor:pointer}
+.file-share-upload-actions label.disabled{opacity:.55;pointer-events:none}
+.file-share-upload-staging{margin:9px 0 14px;color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:8px}
+
+.file-share-grantee{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.file-share-grantee b{font-size:12px;font-weight:600}
+.file-share-grantee small{display:block;overflow-wrap:anywhere;color:var(--muted)}
+.file-share-permission select.control:first-child{flex:1;min-width:190px;width:auto}
+@media(max-width:640px){.file-share-permission select.control:first-child{min-width:100%;width:100%}.file-share-grantee{min-width:100%}}
+
+.file-share-upload-staging-title{display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap}
+.file-share-upload-staging-title .btn{flex:0 0 auto}
+
+.file-share-upnp-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:12px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface3);font-size:12px}
+.file-share-upnp-status .mono{overflow-wrap:anywhere;font-size:11px}
+.file-share-upnp-status .mini{width:100%;overflow-wrap:anywhere}

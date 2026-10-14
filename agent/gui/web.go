@@ -224,6 +224,21 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /"+name, func(rw http.ResponseWriter, _ *http.Request) { serveEmbeddedAsset(rw, name) })
 	}
 
+	mux.HandleFunc("GET /api/file-shares", w.fileShares)
+	mux.HandleFunc("GET /api/file-shares/peers", w.fileSharePeers)
+	mux.HandleFunc("GET /api/file-shares/candidates", w.fileShareCandidates)
+	mux.HandleFunc("GET /api/file-shares/direct-status", w.fileDirectStatus)
+	mux.HandleFunc("GET /api/file-shares/remote", w.fileShareRemoteShares)
+	mux.HandleFunc("GET /api/file-shares/entries", w.fileShareRemoteEntries)
+	mux.HandleFunc("GET /api/file-transfers", w.listFileDownloads)
+	mux.HandleFunc("POST /api/file-transfers", w.startFileDownload)
+	mux.HandleFunc("POST /api/file-transfers/{id}/cancel", w.cancelFileDownload)
+	mux.HandleFunc("POST /api/file-transfers/{id}/resume", w.resumeFileDownload)
+	mux.HandleFunc("POST /api/file-uploads", w.beginFileUpload)
+	mux.HandleFunc("POST /api/file-uploads/{id}/chunks", w.appendFileUpload)
+	mux.HandleFunc("POST /api/file-uploads/{id}/commit", w.commitFileUpload)
+	mux.HandleFunc("POST /api/file-uploads/{id}/discard", w.discardFileUpload)
+	mux.HandleFunc("PUT /api/file-shares", w.fileShares)
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
 	mux.HandleFunc("GET /api/network-capabilities", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.PlatformCapabilities()) })
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
@@ -608,6 +623,21 @@ const webBridgeJS = `(function () {
   function json(path, method, value) {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
+  window.goGetFileShareCandidates = function () { return request('/api/file-shares/candidates'); };
+  window.goGetFileDirectStatus = function () { return request('/api/file-shares/direct-status'); };
+  window.goGetFileSharePeers = function () { return request('/api/file-shares/peers'); };
+  window.goGetRemoteFileShares = function (deviceId) { return request('/api/file-shares/remote?deviceId=' + encodeURIComponent(deviceId)); };
+  window.goGetRemoteFileEntries = function (deviceId, shareId, relativePath) { return request('/api/file-shares/entries?deviceId=' + encodeURIComponent(deviceId) + '&shareId=' + encodeURIComponent(shareId) + '&path=' + encodeURIComponent(relativePath)); };
+  window.goBeginFileUpload = function (deviceID, shareID, relativePath, size) { return json('/api/file-uploads', 'POST', {deviceId:deviceID, shareId:shareID, path:relativePath, size:size}); };
+  window.goAppendFileUploadChunk = function (id, chunk) { return json('/api/file-uploads/' + encodeURIComponent(id) + '/chunks', 'POST', {chunk:chunk}); };
+  window.goCommitFileUpload = function (id) { return json('/api/file-uploads/' + encodeURIComponent(id) + '/commit', 'POST', {}); };
+  window.goDiscardFileUpload = function (id) { return json('/api/file-uploads/' + encodeURIComponent(id) + '/discard', 'POST', {}); };
+  window.goStartFileDownload = function (deviceId, shareId, relativePath) { return json('/api/file-transfers', 'POST', {deviceId:deviceId, shareId:shareId, path:relativePath}); };
+  window.goGetFileTransfers = function () { return request('/api/file-transfers'); };
+  window.goCancelFileDownload = function (id) { return json('/api/file-transfers/' + encodeURIComponent(id) + '/cancel', 'POST', {}); };
+  window.goResumeFileDownload = function (id) { return json('/api/file-transfers/' + encodeURIComponent(id) + '/resume', 'POST', {}); };
+  window.goGetFileShares = function () { return request('/api/file-shares'); };
+  window.goSaveFileShares = function (state) { return json('/api/file-shares', 'PUT', state); };
   window.goGetStatus = function () { return request('/api/status'); };
   window.goGetNetworkCapabilities = function () { return request('/api/network-capabilities'); };
   window.goGetDiagnostics = function () { return request('/api/diagnostics'); };

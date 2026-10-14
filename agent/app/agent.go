@@ -21,6 +21,7 @@ import (
 	"relayproxy/agent/client"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
+	"relayproxy/agent/fileshare"
 	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/agent/rdp"
 	rdpp2p "relayproxy/agent/rdp/p2p"
@@ -327,6 +328,9 @@ type Agent struct {
 	lifecycleMu          sync.Mutex
 	closeOnce            sync.Once
 	closeErr             error
+	fileShareStore       *fileshare.FileStore
+	fileDirect           *fileDirectRuntime
+	fileP2PRendezvous    string
 	rdpConnectMu         sync.Mutex
 }
 
@@ -676,6 +680,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if cfg.IsRDPEnabled() {
 		requested = append(requested, protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic)
 	}
+	requested = append(requested, protocol.CapabilityFilesClient, protocol.CapabilityFilesHost)
 	clientNonce := make([]byte, 32)
 	if _, err := rand.Read(clientNonce); err != nil {
 		return fmt.Errorf("generate client nonce: %w", err)
@@ -733,6 +738,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
 	a.approvedCapabilities = append([]string(nil), accepted.ApprovedCapabilities...)
+	a.fileP2PRendezvous = accepted.P2PRendezvousAddress
 	a.rdpTargets = rdpTargetsFromProtocol(accepted.RDPTargets)
 	if accepted.ProxyExitRevision != 0 {
 		a.proxyExitRevision = accepted.ProxyExitRevision
@@ -1117,6 +1123,33 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 		if err != nil {
 			admitted.Add(-1)
 			_ = stream.Close()
+			continue
+		}
+		if header.Type == protocol.FrameTypeFileDirectGrant {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				a.serveFileDirectGrant(ctx, stream, header.ClientDeviceID)
+			}()
+			continue
+		}
+		if header.Type == protocol.FrameTypeFileShare {
+			a.mu.RLock()
+			store := a.fileShareStore
+			granted := slices.Contains(a.approvedCapabilities, protocol.CapabilityFilesHost)
+			a.mu.RUnlock()
+			if store == nil || !granted || header.ClientDeviceID == "" {
+				admitted.Add(-1)
+				_ = stream.Close()
+				continue
+			}
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				store.Serve(ctx, stream, header.ClientDeviceID)
+			}()
 			continue
 		}
 		if header.Type == protocol.FrameTypePushMessage {
@@ -1968,6 +2001,8 @@ func (a *Agent) closeRuntime() error {
 		a.readySession = nil
 		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
 		browserLocalSrv := a.browserLocalServer
+		fileDirect := a.fileDirect
+		a.fileDirect = nil
 		rdpSession, rdpP2P, proxyP2P := a.rdpSession, a.rdpP2P, a.proxyP2P
 		exitHandler := a.exitHandler
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
@@ -2006,6 +2041,9 @@ func (a *Agent) closeRuntime() error {
 		}
 		if proxyP2P != nil {
 			errs = append(errs, proxyP2P.Close())
+		}
+		if fileDirect != nil {
+			fileDirect.close()
 		}
 		errs = append(errs, a.closePublicDirectClient())
 		if exitHandler != nil {

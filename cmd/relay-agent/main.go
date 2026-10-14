@@ -21,6 +21,7 @@ import (
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
+	"relayproxy/agent/fileshare"
 	"relayproxy/agent/gui"
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"
@@ -327,6 +328,13 @@ func main() {
 	if err != nil {
 		startupFatal(wantGUI, "[Agent] Invalid startup settings: %v", err)
 	}
+	// Register the local share root before connecting so headless agents can
+	// host files without requiring the desktop/Web console to be opened.
+	fileStore, err := fileshare.New(*configPath)
+	if err != nil {
+		startupFatal(wantGUI, "[Files] Failed to prepare share storage: %v", err)
+	}
+	agent.SetFileShareStore(fileStore)
 	if err := agent.Start(); err != nil {
 		startupFatal(wantGUI, "[Agent] Failed to start agent: %v", err)
 	}

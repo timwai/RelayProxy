@@ -3,6 +3,7 @@ import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} fro
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
 import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolChoice,protocolsFromChoice,ruleListText,splitRuleList} from './ruleLines.js';
 import {Icon} from './icons.jsx';
+import FileSharingPage from './FileSharingPage.jsx';
 import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
 import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
@@ -12,7 +13,7 @@ import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCali
 const NAV=[
  {group:'概览',items:[['overview','dashboard','运行概览'],['devices','devices','身份与设备']]},
  {group:'连接',items:[['connection','route','连接与路径'],['exits','globe','出口选择']]},
- {group:'本机',items:[['proxy','swap','本机代理'],['routing','split','分流规则'],['dns','shield','DNS 与防泄漏'],['exitshare','share','本机出口共享'],['rdp','monitor','远程桌面']]},
+ {group:'本机',items:[['proxy','swap','本机代理'],['routing','split','分流规则'],['dns','shield','DNS 与防泄漏'],['exitshare','share','本机出口共享'],['rdp','monitor','远程桌面'],['files','folder','文件共享']]},
  {group:'观察',items:[['messages','bell','消息'],['monitor','activity','实时监控'],['diagnostics','terminal','诊断与日志']]}
 ];
 
@@ -642,6 +643,7 @@ export default function App(){
  else if(page==='exitshare')content=<ExitShare {...p}/>;
  else if(page==='routing')content=<RoutingPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;
  else if(page==='dns')content=<DNSPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃 DNS 设置草稿')}}/>;
+ else if(page==='files')content=<FileSharingPage toast={toast}/>;
  else if(page==='rdp')content=<RDPPage status={status} config={config} setv={setv} save={save} dirty={dirty} targets={targets} refreshTargets={refreshTargets} refreshStatus={refreshStatus} toast={toast}/>;
  else if(page==='messages')content=<MessagesPage messages={messages} refresh={refreshMessages} clear={clearMessages} toast={toast} config={config} setv={setv} save={save}/>;
  else if(page==='monitor')content=<MonitorPage connections={connections} history={history} refresh={refreshConnections} clear={clearConnections} openNative={()=>call('goOpenConnections')}/>;

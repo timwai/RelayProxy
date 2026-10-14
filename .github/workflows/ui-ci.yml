@@ -98,6 +98,10 @@ jobs:
           node --check src/envelope.js
           node --check src/popup.js
           npm test
+      - name: Check real-device file sharing smoke harness syntax and offline fixture
+        run: |
+          python3 -m py_compile scripts/fileshare-real-device-smoke.py
+          python3 -m unittest discover -s scripts -p test_fileshare_smoke.py -v
       - name: Check Go formatting
         shell: bash
         run: |
@@ -208,6 +212,9 @@ jobs:
           }
       - name: Test desktop packages
         run: go test ./agent/divert ./agent/gui ./cmd/relay-agent -count=1
+      - name: Two-Agent file sharing over authenticated Relay and file direct
+        run: |
+          go test ./agent/app ./agent/fileshare -run "Test(FileSharingOverTwoAuthenticatedAgentSessions|UploadResumeAfterBrokenStream|FileShareDownloadResumeValidatesPrefix)" -count=1 -timeout=5m
       - name: Build macOS desktop shell and Network Extension
         if: runner.os == 'macOS'
         shell: bash

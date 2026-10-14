@@ -30,6 +30,8 @@ type StreamRouter struct {
 	relayPolicy                *acl.Policy
 	authChecker                func(clientDeviceID, exitDeviceID string) (bool, error)
 	rdpChecker                 func(controllerDeviceID, targetDeviceID string) (bool, error)
+	fileShareChecker           func(clientDeviceID, hostDeviceID string) (bool, error)
+	fileShareCandidates        func(hostDeviceID string) ([]protocol.FileShareCandidate, error)
 	rdpControlHandler          func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	p2pControlHandler          func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
 	publicDirectControlHandler func(context.Context, tunnel.TunnelStream, *session.DeviceSession)
@@ -38,6 +40,16 @@ type StreamRouter struct {
 
 // SetRDPChecker installs the server-side Controller -> Target authorization
 // check. RDP admission is intentionally separate from generic exit access.
+// SetFileShareCandidates provides the authenticated host's approved client list.
+func (r *StreamRouter) SetFileShareCandidates(fn func(hostDeviceID string) ([]protocol.FileShareCandidate, error)) {
+	r.fileShareCandidates = fn
+}
+
+// SetFileShareChecker delegates stream admission to persisted device grants.
+func (r *StreamRouter) SetFileShareChecker(fn func(clientDeviceID, hostDeviceID string) (bool, error)) {
+	r.fileShareChecker = fn
+}
+
 func (r *StreamRouter) SetRDPChecker(fn func(controllerDeviceID, targetDeviceID string) (bool, error)) {
 	r.rdpChecker = fn
 }
@@ -260,6 +272,18 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 	header.ClientDeviceID = clientSession.DeviceID
 
 	switch header.Type {
+	case protocol.FrameTypeFileDirectPrepare:
+		r.handleFileDirectPrepare(ctx, header, clientStream, clientSession)
+	case protocol.FrameTypeFileDirectPunchPrepare:
+		r.handleFileDirectPunchPrepare(ctx, header, clientStream, clientSession)
+	case protocol.FrameTypeFileDirectCheck:
+		r.handleFileDirectCheck(clientStream, header, clientSession)
+	case protocol.FrameTypeFileShareCandidates:
+		r.handleFileShareCandidates(clientStream, clientSession)
+	case protocol.FrameTypeFileSharePeers:
+		r.handleFileSharePeers(clientStream, clientSession)
+	case protocol.FrameTypeFileShare:
+		r.handleFileShare(ctx, header, clientStream, clientSession)
 	case protocol.FrameTypeOpenTCP:
 		r.handleOpenTCP(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenUDP:

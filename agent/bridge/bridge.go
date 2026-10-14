@@ -33,6 +33,7 @@ const autoStartName = "RelayProxy Agent"
 type UIBridge struct {
 	agent               *app.Agent
 	configPath          string
+	fileTransfers       *fileTransferManager
 	mu                  sync.RWMutex
 	messageTap          func(app.Message)
 	writeConfig         func(string, *config.AgentConfigFile) error
@@ -45,6 +46,7 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 	b := &UIBridge{
 		agent:               agent,
 		configPath:          configPath,
+		fileTransfers:       newFileTransferManager(agent),
 		writeConfig:         config.SaveAgentConfig,
 		ensureDivertService: divert.EnsurePlatformService,
 		syncAutoStart: func(path string, requireAdmin bool) (func() error, error) {
@@ -61,6 +63,9 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 			}
 			return startup.SetAutoStart(autoStartName, executable, path, enabled, requireAdmin)
 		},
+	}
+	if err := b.fileTransfers.initTaskPersistence(configPath); err != nil {
+		fmt.Printf("[Files] 恢复下载任务记录失败: %v\n", err)
 	}
 	b.loadMessageHistory()
 	agent.SetMessageTap(func(message app.Message) {

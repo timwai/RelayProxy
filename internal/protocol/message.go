@@ -29,7 +29,14 @@ const (
 	FrameTypePublicDirectControl FrameType = 0x11
 	// Browser Sync HTTPS CONNECT is distinct from ordinary proxy TCP so the
 	// Exit Agent can enforce a local opt-in instead of trusting Server ACL alone.
-	FrameTypeBrowserNetworkTCP FrameType = 0x12
+	FrameTypeBrowserNetworkTCP      FrameType = 0x12
+	FrameTypeFileShare              FrameType = 0x13
+	FrameTypeFileSharePeers         FrameType = 0x14
+	FrameTypeFileShareCandidates    FrameType = 0x15
+	FrameTypeFileDirectPrepare      FrameType = 0x16
+	FrameTypeFileDirectGrant        FrameType = 0x17
+	FrameTypeFileDirectCheck        FrameType = 0x18
+	FrameTypeFileDirectPunchPrepare FrameType = 0x19
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

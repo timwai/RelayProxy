@@ -57,6 +57,7 @@ type MappingUpdate struct {
 }
 
 type Mapping struct {
+	protocol          string // TCP for file sharing, UDP for legacy proxy P2P
 	service           service
 	internalClient    string
 	internalPort      uint16
@@ -152,10 +153,51 @@ func MapUDPWithPortRange(ctx context.Context, internalPort, portStart, portEnd i
 	return nil, netip.AddrPort{}, ErrUnavailable
 }
 
+// MapTCP creates an explicitly requested, finite-lease TCP mapping for the
+// Agent file-sharing TLS listener. Public reachability is NOT implied by
+// success: callers must validate IsPublicWANIPv4 before advertising and
+// remove the mapping on shutdown.
+func MapTCP(ctx context.Context, internalPort int) (*Mapping, netip.AddrPort, error) {
+	if internalPort < 1 || internalPort > 65535 {
+		return nil, netip.AddrPort{}, fmt.Errorf("invalid UPnP internal TCP port %d", internalPort)
+	}
+	services, err := discoverServices(ctx)
+	if err != nil {
+		return nil, netip.AddrPort{}, err
+	}
+	var lastErr error
+	for _, svc := range services {
+		mapping, address, err := mapPortOnService(ctx, svc, internalPort, 0, 0, "TCP")
+		if err == nil {
+			return mapping, address, nil
+		}
+		lastErr = err
+	}
+	if lastErr != nil {
+		return nil, netip.AddrPort{}, fmt.Errorf("%w: %w", ErrUnavailable, lastErr)
+	}
+	return nil, netip.AddrPort{}, ErrUnavailable
+}
+
+// mappingProtocol defaults to UDP for older mappings and unmodified proxy
+// code/tests while allowing a distinct TCP lease lifecycle.
+func (m *Mapping) mappingProtocol() string {
+	if m.protocol == "TCP" {
+		return "TCP"
+	}
+	return "UDP"
+}
+
 // mapUDPOnService sends SOAP requests to the IGD discovered on the Agent LAN
 // and keeps the mapping alive even when the gateway's WAN address is private.
 // Remote peers never receive that private WAN address as a P2P candidate.
 func mapUDPOnService(ctx context.Context, svc service, internalPort, portStart, portEnd int) (*Mapping, netip.AddrPort, error) {
+	return mapPortOnService(ctx, svc, internalPort, portStart, portEnd, "UDP")
+}
+
+// mapPortOnService shares safe IGD discovery, finite leases, and ownership
+// checks between proxy UDP and explicitly enabled file-sharing TCP mappings.
+func mapPortOnService(ctx context.Context, svc service, internalPort, portStart, portEnd int, protocolName string) (*Mapping, netip.AddrPort, error) {
 	// Select the LAN-side source address using the pinned gateway IP, not a
 	// hostname that could resolve differently on a later lookup.
 	pinnedURL := *svc.controlURL
@@ -183,13 +225,13 @@ func mapUDPOnService(ctx context.Context, svc service, internalPort, portStart, 
 	if err != nil {
 		return nil, netip.AddrPort{}, fmt.Errorf("UPnP router %s GetExternalIPAddress: %w", svc.controlURL.Host, err)
 	}
-	externalPort, leaseSeconds, err := svc.addAvailableUDPMappingRange(ctx, internalIP.String(), uint16(internalPort), portStart, portEnd)
+	externalPort, leaseSeconds, err := svc.addAvailablePortMappingRange(ctx, internalIP.String(), uint16(internalPort), portStart, portEnd, protocolName)
 	if err != nil {
-		return nil, netip.AddrPort{}, fmt.Errorf("UPnP router %s AddPortMapping UDP %d: %w", svc.controlURL.Host, internalPort, err)
+		return nil, netip.AddrPort{}, fmt.Errorf("UPnP router %s AddPortMapping %s %d: %w", svc.controlURL.Host, protocolName, internalPort, err)
 	}
 	address := netip.AddrPortFrom(externalIP, externalPort)
 	m := &Mapping{
-		service: svc, internalClient: internalIP.String(),
+		protocol: protocolName, service: svc, internalClient: internalIP.String(),
 		internalPort: uint16(internalPort), externalPort: externalPort,
 		externalPortStart: portStart, externalPortEnd: portEnd,
 		externalIP: externalIP, leaseSeconds: leaseSeconds,
@@ -200,7 +242,7 @@ func mapUDPOnService(ctx context.Context, svc service, internalPort, portStart, 
 		_ = m.Close()
 		return nil, netip.AddrPort{}, ctx.Err()
 	}
-	log.Printf("[P2P][UPnP] router=%s mapped UDP %s:%d -> %s:%d public_wan=%t", svc.controlURL.Host, externalIP, externalPort, internalIP, internalPort, IsPublicWANIPv4(externalIP))
+	log.Printf("[UPnP] router=%s mapped %s %s:%d -> %s:%d public_wan=%t", svc.controlURL.Host, protocolName, externalIP, externalPort, internalIP, internalPort, IsPublicWANIPv4(externalIP))
 	go m.refreshLoop()
 	return m, address, nil
 }
@@ -264,12 +306,12 @@ func (m *Mapping) Close() error {
 		defer cancel()
 		// A lease may have expired and the port may now belong to another
 		// device. Never delete a mapping without checking its ownership.
-		ownerIP, ownerPort, err := m.service.mappingOwner(ctx, m.externalPort)
+		ownerIP, ownerPort, err := m.service.mappingOwnerProtocol(ctx, m.externalPort, m.mappingProtocol())
 		if err == nil && (ownerIP != m.internalClient || ownerPort != m.internalPort) {
 			err = errors.New("UPnP mapping ownership changed; refusing to delete another device's port")
 		}
 		if err == nil {
-			err = m.service.deletePortMapping(ctx, m.externalPort)
+			err = m.service.deletePortMappingProtocol(ctx, m.externalPort, m.mappingProtocol())
 		}
 		m.closeErr = err
 		m.publish(MappingUpdate{Healthy: false, Reason: "closed"})
@@ -332,12 +374,12 @@ func (m *Mapping) refresh(ctx context.Context) error {
 		return net.ErrClosed
 	default:
 	}
-	err := m.service.addPortMapping(ctx, m.externalPort, m.internalPort, m.internalClient, m.leaseSeconds)
+	err := m.service.addPortMappingProtocol(ctx, m.externalPort, m.internalPort, m.internalClient, m.leaseSeconds, m.mappingProtocol())
 	if soapErrorCode(err) == 718 {
 		// A different owner now occupies the port. Choose a replacement
 		// only within the original configured external-port range.
 		var nextPort uint16
-		nextPort, _, err = m.service.addAvailableUDPMappingRange(ctx, m.internalClient, m.internalPort, m.externalPortStart, m.externalPortEnd)
+		nextPort, _, err = m.service.addAvailablePortMappingRange(ctx, m.internalClient, m.internalPort, m.externalPortStart, m.externalPortEnd, m.mappingProtocol())
 		if err == nil {
 			m.externalPort = nextPort
 		}
@@ -863,6 +905,10 @@ func (s service) addAvailableUDPMapping(ctx context.Context, internalClient stri
 // IGD reports a port collision, it only searches within the configured range.
 // Never silently open a different WAN port outside an explicitly set policy.
 func (s service) addAvailableUDPMappingRange(ctx context.Context, internalClient string, internalPort uint16, portStart, portEnd int) (uint16, uint32, error) {
+	return s.addAvailablePortMappingRange(ctx, internalClient, internalPort, portStart, portEnd, "UDP")
+}
+
+func (s service) addAvailablePortMappingRange(ctx context.Context, internalClient string, internalPort uint16, portStart, portEnd int, protocolName string) (uint16, uint32, error) {
 	const maxAttempts = 16
 	ports := []uint16{internalPort}
 	if portStart == 0 && portEnd == 0 {
@@ -905,7 +951,7 @@ func (s service) addAvailableUDPMappingRange(ctx context.Context, internalClient
 		if err := ctx.Err(); err != nil {
 			return 0, 0, err
 		}
-		err := s.addPortMapping(ctx, externalPort, internalPort, internalClient, mappingLeaseSeconds)
+		err := s.addPortMappingProtocol(ctx, externalPort, internalPort, internalClient, mappingLeaseSeconds, protocolName)
 		if err == nil {
 			return externalPort, mappingLeaseSeconds, nil
 		}
@@ -922,10 +968,14 @@ func (s service) addAvailableUDPMappingRange(ctx context.Context, internalClient
 }
 
 func (s service) addPortMapping(ctx context.Context, externalPort, internalPort uint16, internalClient string, lease uint32) error {
+	return s.addPortMappingProtocol(ctx, externalPort, internalPort, internalClient, lease, "UDP")
+}
+
+func (s service) addPortMappingProtocol(ctx context.Context, externalPort, internalPort uint16, internalClient string, lease uint32, protocolName string) error {
 	args := map[string]string{
 		"NewRemoteHost":             "",
 		"NewExternalPort":           strconv.Itoa(int(externalPort)),
-		"NewProtocol":               "UDP",
+		"NewProtocol":               protocolName,
 		"NewInternalPort":           strconv.Itoa(int(internalPort)),
 		"NewInternalClient":         internalClient,
 		"NewEnabled":                "1",
@@ -940,8 +990,12 @@ func (s service) addPortMapping(ctx context.Context, externalPort, internalPort 
 // Agent before Close deletes it. Failing closed is safer than deleting another
 // device's mapping if the router recycled the external port.
 func (s service) mappingOwner(ctx context.Context, externalPort uint16) (string, uint16, error) {
+	return s.mappingOwnerProtocol(ctx, externalPort, "UDP")
+}
+
+func (s service) mappingOwnerProtocol(ctx context.Context, externalPort uint16, protocolName string) (string, uint16, error) {
 	body, err := s.soap(ctx, "GetSpecificPortMappingEntry", map[string]string{
-		"NewRemoteHost": "", "NewExternalPort": strconv.Itoa(int(externalPort)), "NewProtocol": "UDP",
+		"NewRemoteHost": "", "NewExternalPort": strconv.Itoa(int(externalPort)), "NewProtocol": protocolName,
 	})
 	if err != nil {
 		return "", 0, err
@@ -955,10 +1009,14 @@ func (s service) mappingOwner(ctx context.Context, externalPort uint16) (string,
 }
 
 func (s service) deletePortMapping(ctx context.Context, externalPort uint16) error {
+	return s.deletePortMappingProtocol(ctx, externalPort, "UDP")
+}
+
+func (s service) deletePortMappingProtocol(ctx context.Context, externalPort uint16, protocolName string) error {
 	args := map[string]string{
 		"NewRemoteHost":   "",
 		"NewExternalPort": strconv.Itoa(int(externalPort)),
-		"NewProtocol":     "UDP",
+		"NewProtocol":     protocolName,
 	}
 	_, err := s.soap(ctx, "DeletePortMapping", args)
 	return err

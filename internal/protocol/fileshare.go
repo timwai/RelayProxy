@@ -27,6 +27,8 @@ type FileShareRequest struct {
 	Size         int64  `json:"size,omitempty"`
 	Offset       int64  `json:"offset,omitempty"`
 	PrefixSHA256 string `json:"prefixSha256,omitempty"`
+	Resume        bool   `json:"resume,omitempty"`
+	UploadID      string `json:"uploadId,omitempty"`
 }
 
 type FileShareDescriptor struct {
@@ -50,6 +52,8 @@ type FileShareResponse struct {
 	Size    int64                 `json:"size,omitempty"`
 	SHA256  string                `json:"sha256,omitempty"`
 	Offset  int64                 `json:"offset,omitempty"`
+	UploadID string               `json:"uploadId,omitempty"`
+	PrefixSHA256 string           `json:"prefixSha256,omitempty"`
 }
 
 type FileShareCandidate struct {

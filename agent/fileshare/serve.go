@@ -2,6 +2,8 @@ package fileshare
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"io"
 	"io/fs"
@@ -149,11 +151,24 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		return
 	}
 	_ = stream.SetDeadline(time.Time{})
+	digest := sha256.New()
 	writer := &sharePermissionWriter{
-		stream: stream, store: s, shareID: selected.ID,
+		stream: io.MultiWriter(stream, digest), store: s, shareID: selected.ID,
 		rootPath: selected.RootPath, deviceID: authenticatedDeviceID,
 	}
-	_, _ = io.CopyN(writer, file, info.Size())
+	downloaded, copyErr := io.CopyN(writer, file, info.Size())
+	if copyErr != nil || downloaded != info.Size() || ctx.Err() != nil {
+		// A failed stream must never receive a successful final receipt.
+		if ctx.Err() == nil {
+			fail("download incomplete or permission revoked")
+		}
+		return
+	}
+	// After the exact byte count, a framed final receipt proves the host
+	// completed the source read and retained authorization until completion.
+	_ = protocol.WriteJSON(stream, protocol.FileShareResponse{
+		Success: true, Size: downloaded, SHA256: hex.EncodeToString(digest.Sum(nil)),
+	})
 }
 
 // sharePermissionWriter re-reads the local ACL at most once per second during

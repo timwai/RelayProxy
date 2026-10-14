@@ -47,3 +47,9 @@
 .file-share-upload-actions label.btn{display:inline-flex;align-items:center;cursor:pointer}
 .file-share-upload-actions label.disabled{opacity:.55;pointer-events:none}
 .file-share-upload-staging{margin:9px 0 14px;color:var(--muted);font-size:12px;display:flex;flex-direction:column;gap:8px}
+
+.file-share-grantee{display:flex;flex-direction:column;gap:3px;min-width:0;flex:1}
+.file-share-grantee b{font-size:12px;font-weight:600}
+.file-share-grantee small{display:block;overflow-wrap:anywhere;color:var(--muted)}
+.file-share-permission select.control:first-child{flex:1;min-width:190px;width:auto}
+@media(max-width:640px){.file-share-permission select.control:first-child{min-width:100%;width:100%}.file-share-grantee{min-width:100%}}

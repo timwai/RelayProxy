@@ -16,8 +16,14 @@ import (
 // tryFileDirect negotiates fresh file-scoped credentials over the already
 // authenticated Relay session. TLS pinning + one-time tickets authenticate
 // the destination independently of proxy, RDP or Browser Sync privileges.
+// Short directory/metadata reads should never spend four seconds probing
+// an unreachable NAT. Reserve socket-per-transfer P2P for actual file bytes.
+func fileDirectNeedsPunch(action string) bool {
+	return action == protocol.FileShareDownload || action == protocol.FileShareUpload
+}
+
 func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.FileShareRequest) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
-	return a.tryFileDirectMode(ctx, hostID, req, true)
+	return a.tryFileDirectMode(ctx, hostID, req, fileDirectNeedsPunch(req.Action))
 }
 
 func (a *Agent) tryFileDirectMode(ctx context.Context, hostID string, req protocol.FileShareRequest, allowPunch bool) (tunnel.TunnelStream, protocol.FileShareResponse, error) {

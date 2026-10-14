@@ -409,3 +409,5 @@ flowchart LR
 - 若 Server 未提供 rendezvous 地址，保留既有文件 QUIC/TLS/Relay 协商。P2P 限制同时 4 个候选会话、20 秒票据有效期和 4 秒打洞窗口；失败按 `direct_quic → direct_tls → relay_quic/relay_tls` 回退。
 - 不信任客户端提交的 IP 列表，Server 与共享端分别验证地址数量、协议与地址合法性；文件 QUIC 仍验证主机证书 leaf SHA-256、单次票据和实时 Server 文件审批，并由主机本地目录 ACL 判定读取或写入。
 - **限制**：UDP NAT 打洞是尽力而为，不保证对称 NAT 或双侧 CGNAT 一定成功；尚须本机双 Agent 集成自动化与跨运营商双实体机实测。PR 保持 Draft。
+
+- 小型共享列表与目录枚举不触发每次文件会话的 UDP 打洞；只有实际上传/下载才尝试 `p2p_quic`，避免 UDP 受阻时仅打开目录就引入 4 秒穿透等待。

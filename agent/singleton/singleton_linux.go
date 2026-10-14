@@ -1,10 +1,11 @@
-//go:build linux
+//go:build linux || darwin
 
 package singleton
 
 import (
 	"fmt"
 	"os"
+	"runtime"
 	"path/filepath"
 	"strings"
 	"unicode"
@@ -16,7 +17,7 @@ type Mutex struct{ file *os.File }
 
 func Acquire(name string) (*Mutex, error) {
 	directory := "/run"
-	if os.Geteuid() != 0 {
+	if runtime.GOOS != "linux" || os.Geteuid() != 0 {
 		var err error
 		directory, err = os.UserCacheDir()
 		if err != nil {

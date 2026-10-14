@@ -8,6 +8,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"relayproxy/internal/protocol"
@@ -70,6 +71,14 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		fail("invalid relative path")
 		return
 	}
+	// Private staging files are not part of the shared namespace. Other
+	// readers cannot list or guess them while an upload is incomplete.
+	for _, component := range strings.Split(req.Path, "/") {
+		if strings.HasPrefix(component, ".relayproxy-upload-") {
+			fail("private upload staging path")
+			return
+		}
+	}
 	if req.Action == protocol.FileShareUpload {
 		s.serveUpload(ctx, stream, req, *selected, authenticatedDeviceID)
 		return
@@ -115,7 +124,7 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		for _, item := range infos {
 			// Do not advertise filesystem links (their target may change after
 			// listing, and the UI cannot reliably distinguish them).
-			if item.Mode()&os.ModeSymlink != 0 {
+			if item.Mode()&os.ModeSymlink != 0 || strings.HasPrefix(item.Name(), ".relayproxy-upload-") {
 				continue
 			}
 			entries = append(entries, protocol.FileShareEntry{

@@ -53,3 +53,46 @@ func TestAuthorizeFileShareUsesLiveCapabilitiesAndIdentity(t *testing.T) {
 	if _, err := db.Exec(`UPDATE identities SET status='disabled' WHERE id='idA'`); err != nil {t.Fatal(err)}
 	check("client","host",false)
 }
+
+func TestFileShareCandidatesIncludeOfflineApprovedClientsOnly(t *testing.T) {
+	db, err := OpenDB("sqlite", filepath.Join(t.TempDir(), "file-candidates.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, identity := range []string{"alpha", "beta"} {
+		_, err := db.Exec(`INSERT INTO identities
+			(id, name, status, capabilities, created_by, updated_by, created_at, updated_at)
+			VALUES (?, ?, 'active', '[]', 'test', 'test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`, identity, identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, d := range []struct{ id, identity, caps, approval string }{
+		{"host", "alpha", `["files.host"]`, "approved"},
+		{"client-offline", "alpha", `["files.client"]`, "approved"},
+		{"not-file-client", "alpha", `["proxy.client"]`, "approved"},
+		{"other-identity", "beta", `["files.client"]`, "approved"},
+		{"revoked-client", "alpha", `["files.client"]`, "revoked"},
+	} {
+		_, err := db.Exec(`INSERT INTO devices
+			(id, name, public_key_fingerprint, installation_id, approval_state,
+			 requested_capabilities, approved_capabilities, identity_id, created_at, updated_at)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)`,
+			d.id, d.id, d.id+"-fp", d.id+"-installation", d.approval, d.caps, d.caps, d.identity)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	clients, err := db.ListFileShareCandidates("host")
+	if err != nil || len(clients) != 1 || clients[0].DeviceID != "client-offline" || clients[0].Online {
+		t.Fatalf("expected exactly one eligible offline client: %+v, err=%v", clients, err)
+	}
+	if _, err := db.Exec(`UPDATE devices SET approved_capabilities='[]' WHERE id='host'`); err != nil {
+		t.Fatal(err)
+	}
+	clients, err = db.ListFileShareCandidates("host")
+	if err != nil || len(clients) != 0 {
+		t.Fatalf("host capability revocation must clear inventory: %+v, err=%v", clients, err)
+	}
+}

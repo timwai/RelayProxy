@@ -16,6 +16,9 @@ export default function FileSharingPage({toast}) {
  const [draft,setDraft]=useState(blank);
  const [device,setDevice]=useState('');
  const [permission,setPermission]=useState('read');
+ const [candidates,setCandidates]=useState([]);
+ const [candidateError,setCandidateError]=useState('');
+ const [candidatesLoading,setCandidatesLoading]=useState(false);
  const [peers,setPeers]=useState([]);
  const [remoteDevice,setRemoteDevice]=useState('');
  const [remoteShares,setRemoteShares]=useState([]);
@@ -146,14 +149,24 @@ export default function FileSharingPage({toast}) {
    return false;
   }finally{setBusy(false)}
  }
+ async function loadCandidates(){
+  setCandidatesLoading(true);setCandidateError('');
+  try{
+   const result=await callJSON('goGetFileShareCandidates',[]);
+   if(!Array.isArray(result))throw new Error('设备列表响应无效');
+   setCandidates(result);
+  }catch(e){setCandidates([]);setCandidateError(e.message||String(e))}
+  finally{setCandidatesLoading(false)}
+ }
  function edit(share){
+  void loadCandidates();
   setEditor(share?'edit':'new');
   setDraft(share?{...share,permissions:{...share.permissions}}:blank());
   setDevice('');setPermission('read');
  }
  function addPermission(){
   const id=device.trim();
-  if(!id)return;
+  if(!id||!candidates.some(item=>item.deviceId===id))return;
   setDraft(s=>({...s,permissions:{...(s.permissions||{}),[id]:permission}}));
   setDevice('');
  }
@@ -238,9 +251,11 @@ export default function FileSharingPage({toast}) {
       <label className="field"><span>共享名称</span><input className="control" value={draft.name} maxLength={100} onChange={e=>setDraft(s=>({...s,name:e.target.value}))} placeholder="例如：工作资料"/></label>
       <label className="field"><span>本机绝对路径</span><input className="control" value={draft.rootPath} onChange={e=>setDraft(s=>({...s,rootPath:e.target.value}))} placeholder="例如：/Users/me/Documents"/></label>
      </div>
-     <div className="file-share-permissions"><h3>设备权限</h3><p className="mini">默认不授权。当前先按设备 ID 添加，后续接入 Server 授权设备选择器。</p>
-      {Object.entries(draft.permissions||{}).map(([id,perm])=><div className="file-share-permission" key={id}><span className="mono grow">{id}</span><select className="control" value={perm} onChange={e=>setDraft(s=>({...s,permissions:{...s.permissions,[id]:e.target.value}}))}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn danger" onClick={()=>setDraft(s=>{const permissions={...s.permissions};delete permissions[id];return {...s,permissions}})}>移除</button></div>)}
-      <div className="file-share-permission"><input className="control" placeholder="设备 ID" value={device} onChange={e=>setDevice(e.target.value)}/><select className="control" value={permission} onChange={e=>setPermission(e.target.value)}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn" onClick={addPermission} disabled={!device.trim()}>添加权限</button></div>
+     <div className="file-share-permissions"><h3>设备权限</h3><p className="mini">默认不授权。只显示 Server 已审批、同身份且具备文件访问能力的设备；离线设备也可预先设置权限。</p>
+      {candidateError&&<div className="notice danger" role="alert">{candidateError}</div>}
+      {candidatesLoading&&<div className="mini">正在读取 Server 已授权设备…</div>}
+      {Object.entries(draft.permissions||{}).map(([id,perm])=><div className="file-share-permission" key={id}><span className="grow file-share-grantee"><b>{candidates.find(item=>item.deviceId===id)?.name||'历史授权设备'}</b><small className="mono">{id}</small></span><select className="control" value={perm} onChange={e=>setDraft(s=>({...s,permissions:{...s.permissions,[id]:e.target.value}}))}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn danger" onClick={()=>setDraft(s=>{const permissions={...s.permissions};delete permissions[id];return {...s,permissions}})}>移除</button></div>)}
+      <div className="file-share-permission"><select aria-label="选择已审批的访问设备" className="control" value={device} disabled={candidatesLoading||!candidates.length} onChange={e=>setDevice(e.target.value)}><option value="">选择已审批的设备…</option>{candidates.filter(item=>!draft.permissions?.[item.deviceId]).map(item=><option key={item.deviceId} value={item.deviceId}>{item.name||item.deviceId} · {item.online?'在线':'离线'} · {item.deviceId}</option>)}</select><select className="control" value={permission} onChange={e=>setPermission(e.target.value)}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn" onClick={addPermission} disabled={!device||!candidates.some(item=>item.deviceId===device)}>添加权限</button></div>
      </div>
     </div>
     <div className="modal-foot"><button className="btn" onClick={()=>setEditor(null)} disabled={busy}>取消</button><button className="btn primary" disabled={busy} onClick={saveEditor}>{busy?'保存中…':'保存共享'}</button></div>

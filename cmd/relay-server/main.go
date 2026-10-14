@@ -321,6 +321,7 @@ func main() {
 		return db.AuthorizeRDP(controllerDeviceID, targetDeviceID)
 	})
 	router.SetFileShareChecker(db.AuthorizeFileShare)
+	router.SetFileShareCandidates(db.ListFileShareCandidates)
 	router.SetRDPControlHandler(rdpCoordinator.HandleControl)
 	if proxyP2PCoordinator != nil {
 		router.SetP2PControlHandler(proxyP2PCoordinator.HandleControl)

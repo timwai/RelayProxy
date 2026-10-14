@@ -42,6 +42,8 @@ type fileDirectRuntime struct {
 	tickets      map[string]fileDirectTicket
 	upnpCancel   context.CancelFunc
 	upnpRunning  bool
+	upnpStopping bool
+	upnpRestart  bool
 	upnpAddress    netip.AddrPort
 	upnpState      string
 	upnpReason     string
@@ -266,14 +268,23 @@ func (r *fileDirectRuntime) syncUPnP() {
 		r.udpUPnPAddress = netip.AddrPort{}
 		r.udpUPnPState = "disabled"
 		r.udpUPnPReason = ""
+		// If the user switches back on before the old lease has been
+		// ownership-checked and removed, schedule a clean replacement.
+		r.upnpRestart = false
 		if r.upnpCancel != nil {
+			r.upnpStopping = true
 			r.upnpCancel()
 		}
 		return
 	}
 	if r.upnpRunning {
+		if r.upnpStopping {
+			r.upnpRestart = true
+		}
 		return
 	}
+	r.upnpStopping = false
+	r.upnpRestart = false
 	parent := r.a.ctx
 	if parent == nil {
 		parent = context.Background()
@@ -293,10 +304,19 @@ func (r *fileDirectRuntime) runUPnP(ctx context.Context) {
 	defer r.wg.Done()
 	defer func() {
 		r.mu.Lock()
+		restart := !r.closed && r.upnpRestart
 		r.upnpRunning = false
+		r.upnpStopping = false
+		r.upnpRestart = false
 		r.upnpCancel = nil
 		r.upnpAddress = netip.AddrPort{}
+		r.udpUPnPAddress = netip.AddrPort{}
 		r.mu.Unlock()
+		if restart {
+			// syncUPnP rereads the current opt-in; toggling off again
+			// while cleanup was running cannot re-open a router port.
+			r.syncUPnP()
+		}
 	}()
 	// Both protocols share the explicit file-only opt-in but maintain
 	// separate IGD leases, renewal and ownership-checked cleanup. Wait for

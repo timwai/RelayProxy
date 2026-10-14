@@ -115,3 +115,39 @@ func TestFileDirectQUICUPnPCandidateRequiresPublicWANAndActiveLease(t *testing.T
 		t.Fatalf("disabling UPnP must hide the QUIC endpoint: %+v", status)
 	}
 }
+
+func TestFileDirectUPnPToggleDuringLeaseCleanup(t *testing.T) {
+	store, err := fileshare.New(filepath.Join(t.TempDir(), "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Enabled = true
+	state.DirectUPnPEnabled = true
+	if _, err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{fileShareStore: store}
+	// Model a mapper whose cancellation was requested but whose UDP/TCP
+	// ownership-checked Close has not yet finished.
+	runtime := &fileDirectRuntime{a: a, upnpRunning: true, upnpStopping: true}
+	runtime.syncUPnP()
+	if !runtime.upnpRestart {
+		t.Fatal("re-enable during shutdown must schedule a fresh mapping")
+	}
+	next, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.DirectUPnPEnabled = false
+	if _, err := store.Save(next); err != nil {
+		t.Fatal(err)
+	}
+	runtime.syncUPnP()
+	if runtime.upnpRestart || runtime.upnpState != "disabled" || runtime.udpUPnPState != "disabled" {
+		t.Fatalf("final opt-out must withdraw both candidates and cancel restart: %+v", runtime)
+	}
+}

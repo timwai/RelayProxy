@@ -226,6 +226,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 
 	mux.HandleFunc("GET /api/file-shares", w.fileShares)
 	mux.HandleFunc("GET /api/file-shares/peers", w.fileSharePeers)
+	mux.HandleFunc("GET /api/file-shares/candidates", w.fileShareCandidates)
 	mux.HandleFunc("GET /api/file-shares/remote", w.fileShareRemoteShares)
 	mux.HandleFunc("GET /api/file-shares/entries", w.fileShareRemoteEntries)
 	mux.HandleFunc("GET /api/file-transfers", w.listFileDownloads)
@@ -620,6 +621,7 @@ const webBridgeJS = `(function () {
   function json(path, method, value) {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
+  window.goGetFileShareCandidates = function () { return request('/api/file-shares/candidates'); };
   window.goGetFileSharePeers = function () { return request('/api/file-shares/peers'); };
   window.goGetRemoteFileShares = function (deviceId) { return request('/api/file-shares/remote?deviceId=' + encodeURIComponent(deviceId)); };
   window.goGetRemoteFileEntries = function (deviceId, shareId, relativePath) { return request('/api/file-shares/entries?deviceId=' + encodeURIComponent(deviceId) + '&shareId=' + encodeURIComponent(shareId) + '&path=' + encodeURIComponent(relativePath)); };

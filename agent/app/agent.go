@@ -676,6 +676,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if cfg.IsRDPEnabled() {
 		requested = append(requested, protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic)
 	}
+	requested = append(requested, protocol.CapabilityFilesClient, protocol.CapabilityFilesHost)
 	clientNonce := make([]byte, 32)
 	if _, err := rand.Read(clientNonce); err != nil {
 		return fmt.Errorf("generate client nonce: %w", err)

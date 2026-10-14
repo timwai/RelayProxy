@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -106,6 +107,14 @@ func main() {
 	if *versionFlag {
 		fmt.Printf("relay-agent %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
 		return
+	}
+
+	// app.init normally tees logs to stdout for interactive command-line runs.
+	// Detached startup reserves stdout exclusively for the readiness handshake;
+	// route the live log stream to the inherited log-file stderr instead while
+	// preserving the UI in-memory log buffer.
+	if *backgroundChildFlag {
+		log.SetOutput(io.MultiWriter(app.GlobalLogBuffer, app.BestEffort(os.Stderr)))
 	}
 
 	// A detached launch is a separate CLI process, not a hidden desktop GUI.

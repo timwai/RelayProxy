@@ -329,6 +329,7 @@ type Agent struct {
 	closeOnce            sync.Once
 	closeErr             error
 	fileShareStore       *fileshare.FileStore
+	fileDirect          *fileDirectRuntime
 	rdpConnectMu         sync.Mutex
 }
 
@@ -1120,6 +1121,15 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 		if err != nil {
 			admitted.Add(-1)
 			_ = stream.Close()
+			continue
+		}
+		if header.Type == protocol.FrameTypeFileDirectGrant {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				a.serveFileDirectGrant(ctx, stream, header.ClientDeviceID)
+			}()
 			continue
 		}
 		if header.Type == protocol.FrameTypeFileShare {
@@ -1989,6 +1999,8 @@ func (a *Agent) closeRuntime() error {
 		a.readySession = nil
 		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
 		browserLocalSrv := a.browserLocalServer
+		fileDirect := a.fileDirect
+		a.fileDirect = nil
 		rdpSession, rdpP2P, proxyP2P := a.rdpSession, a.rdpP2P, a.proxyP2P
 		exitHandler := a.exitHandler
 		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
@@ -2028,6 +2040,7 @@ func (a *Agent) closeRuntime() error {
 		if proxyP2P != nil {
 			errs = append(errs, proxyP2P.Close())
 		}
+		if fileDirect != nil { fileDirect.close() }
 		errs = append(errs, a.closePublicDirectClient())
 		if exitHandler != nil {
 			errs = append(errs, exitHandler.Close())

@@ -8,6 +8,10 @@ export const capabilityGroups=[
   {id:'rdp.controller',title:'RDP 控制端',description:'主动连接已授权的远程桌面',icon:'monitor'},
   {id:'rdp.host',title:'RDP 主机',description:'作为远程桌面连接目标',icon:'devices'},
   {id:'rdp.public',title:'RDP 公网入口',description:'允许该 RDP 主机使用公网入口',icon:'shield'}
+ ]},
+ {id:'files',title:'文件共享',description:'访问远程共享与提供本地文件的能力分别审批',icon:'devices',items:[
+  {id:'files.client',title:'文件访问端',description:'浏览和下载已授权设备共享的文件',icon:'devices'},
+  {id:'files.host',title:'文件共享端',description:'允许向经设备级目录授权的访问端提供文件',icon:'shield'}
  ]}
 ];
 export const allCapabilities=capabilityGroups.flatMap(group=>group.items.map(item=>item.id));

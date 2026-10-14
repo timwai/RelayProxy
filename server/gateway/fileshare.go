@@ -10,6 +10,31 @@ import (
 	"relayproxy/server/session"
 )
 
+// Only an authenticated and approved files.host can enumerate prospective
+// files.client devices for the folder ACL picker. Offline approved peers are
+// shown so permissions can be preconfigured safely by device name.
+func (r *StreamRouter) handleFileShareCandidates(stream tunnel.TunnelStream, host *session.DeviceSession) {
+	resp := protocol.FileShareCandidatesResponse{Devices: []protocol.FileShareCandidate{}}
+	if r.fileShareCandidates == nil || !slices.Contains(host.Grants, protocol.CapabilityFilesHost) {
+		resp.Error = "files.host is not approved"
+		_ = protocol.WriteJSON(stream, resp)
+		return
+	}
+	clients, err := r.fileShareCandidates(host.DeviceID)
+	if err != nil {
+		resp.Error = "unable to query approved file clients"
+		_ = protocol.WriteJSON(stream, resp)
+		return
+	}
+	for _, candidate := range clients {
+		peer, connected := r.sessions.Get(candidate.DeviceID)
+		candidate.Online = connected && peer != nil && peer.IdentityID == host.IdentityID &&
+			slices.Contains(peer.Grants, protocol.CapabilityFilesClient)
+		resp.Devices = append(resp.Devices, candidate)
+	}
+	_ = protocol.WriteJSON(stream, resp)
+}
+
 // Device discovery returns authenticated, online peers only. It never leaks
 // directory names or local paths, and is refreshed on demand.
 func (r *StreamRouter) handleFileSharePeers(stream tunnel.TunnelStream, client *session.DeviceSession) {

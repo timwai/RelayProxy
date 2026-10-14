@@ -80,7 +80,7 @@ func (a *Agent) tryFileDirectMode(ctx context.Context, hostID string, req protoc
 	}
 	if len(offer.Token) != 64 || len(offer.Fingerprint) != 64 ||
 		len(offer.Endpoints) == 0 || len(offer.Endpoints) > 16 ||
-		len(offer.UDPEndpoints) > 16 ||
+		len(offer.UDPEndpoints) > 16 || len(offer.PunchCandidates) > candidate.MaxCandidates ||
 		offer.ExpiresAt <= time.Now().UnixMilli() {
 		return nil, protocol.FileShareResponse{}, errors.New("invalid file direct offer")
 	}

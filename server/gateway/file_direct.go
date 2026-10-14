@@ -140,8 +140,15 @@ func (r *StreamRouter) handleFileDirectPrepareMode(ctx context.Context, header *
 			return
 		}
 	}
-	if punched && len(response.PunchCandidates) > 0 {
-		validated, err := candidate.Validate(response.PunchCandidates)
+	// The host is not a credential issuer. Always remove untrusted session
+	// material returned by the host, even when P2P was not requested or no
+	// candidate is available; only the Server may publish a fresh HMAC key.
+	hostPunchCandidates := response.PunchCandidates
+	response.PunchSessionID = 0
+	response.PunchKey = nil
+	response.PunchCandidates = nil
+	if punched && len(hostPunchCandidates) > 0 {
+		validated, err := candidate.Validate(hostPunchCandidates)
 		if err != nil {
 			fail("invalid file host punch candidates")
 			return

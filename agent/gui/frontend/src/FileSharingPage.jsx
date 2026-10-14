@@ -2,6 +2,7 @@ import React, {useCallback,useEffect,useState} from 'react';
 import {callJSON} from './bridge.js';
 import './fileSharing.css';
 
+const formatFileBytes=n=>{const num=Math.max(0,Number(n)||0);if(num<1024)return num.toFixed(0)+' B';const units=['KiB','MiB','GiB','TiB'];const power=Math.min(4,Math.floor(Math.log(num)/Math.log(1024)));return (num/1024**power).toFixed(1)+' '+units[power-1]};
 const blank=()=>({id:'',name:'',rootPath:'',enabled:true,permissions:{}});
 const empty=()=>({revision:0,enabled:false,shares:[]});
 const countPermissions=share=>Object.values(share.permissions||{}).filter(v=>v==='read'||v==='read_write').length;
@@ -15,6 +16,69 @@ export default function FileSharingPage({toast}) {
  const [draft,setDraft]=useState(blank);
  const [device,setDevice]=useState('');
  const [permission,setPermission]=useState('read');
+ const [peers,setPeers]=useState([]);
+ const [remoteDevice,setRemoteDevice]=useState('');
+ const [remoteShares,setRemoteShares]=useState([]);
+ const [remoteShare,setRemoteShare]=useState('');
+ const [remotePath,setRemotePath]=useState('.');
+ const [remoteEntries,setRemoteEntries]=useState([]);
+ const [remoteLoading,setRemoteLoading]=useState(false);
+ const [remoteError,setRemoteError]=useState('');
+ const [transfers,setTransfers]=useState([]);
+ const [transferError,setTransferError]=useState('');
+ const refreshPeers=useCallback(async()=>{
+  try{
+   const result=await callJSON('goGetFileSharePeers',[]);
+   if(!Array.isArray(result))throw new Error('设备发现返回了无效数据');
+   setPeers(result);setRemoteError('');
+  }catch(e){setRemoteError(e.message||String(e))}
+ },[]);
+ const refreshTransfers=useCallback(async()=>{
+  try{
+   const result=await callJSON('goGetFileTransfers',[]);
+   setTransfers(Array.isArray(result)?result:[]);
+   setTransferError('');
+  }catch(e){setTransferError(e.message||String(e))}
+ },[]);
+ useEffect(()=>{if(tab==='remote')void refreshPeers()},[tab,refreshPeers]);
+ useEffect(()=>{
+  if(tab!=='transfers')return;
+  void refreshTransfers();
+  const timer=setInterval(()=>void refreshTransfers(),750);
+  return ()=>clearInterval(timer);
+ },[tab,refreshTransfers]);
+ async function openRemoteDevice(id){
+  setRemoteDevice(id);setRemoteShare('');setRemotePath('.');setRemoteEntries([]);
+  setRemoteLoading(true);setRemoteError('');
+  try{
+   const result=await callJSON('goGetRemoteFileShares',[],id);
+   if(!Array.isArray(result))throw new Error('未能读取设备共享目录');
+   setRemoteShares(result);
+  }catch(e){setRemoteError(e.message||String(e));setRemoteShares([])}
+  finally{setRemoteLoading(false)}
+ }
+ async function openRemoteDir(deviceID,shareID,dir){
+  setRemoteLoading(true);setRemoteError('');
+  try{
+   const result=await callJSON('goGetRemoteFileEntries',[],deviceID,shareID,dir);
+   if(!Array.isArray(result))throw new Error('未能读取文件列表');
+   setRemoteDevice(deviceID);setRemoteShare(shareID);setRemotePath(dir);setRemoteEntries(result);
+  }catch(e){setRemoteError(e.message||String(e))}
+  finally{setRemoteLoading(false)}
+ }
+ async function beginDownload(entry){
+  const relativePath=remotePath==='.'?entry.name:remotePath+'/'+entry.name;
+  try{
+   await callJSON('goStartFileDownload',null,remoteDevice,remoteShare,relativePath);
+   toast?.('下载任务已创建');
+   setTab('transfers');
+  }catch(e){setRemoteError(e.message||String(e))}
+ }
+ async function cancelTransfer(id){
+  try{await callJSON('goCancelFileDownload',null,id);await refreshTransfers()}
+  catch(e){setTransferError(e.message||String(e))}
+ }
+
  const refresh=useCallback(async()=>{
   try{
    const next=await callJSON('goGetFileShares',null);
@@ -93,8 +157,37 @@ export default function FileSharingPage({toast}) {
    </div>)}
    </section>
   </>}
-  {tab==='remote'&&<section className="card file-share-unavailable"><h2>其他设备</h2><p>这一阶段正在接入 Server 的已授权设备发现，以及 Agent 之间的目录浏览协议。本地共享配置不会直接对外暴露；在服务端审批与对端身份校验接通前，这里不显示虚构的远程文件。</p></section>}
-  {tab==='transfers'&&<section className="card file-share-unavailable"><h2>传输任务</h2><p>传输通道、下载速率与进度上报尚在后续实现阶段。任务列表将在真正建立传输后才开始显示，并区分 P2P、公网直连和 Relay 路径。</p></section>}
+  {tab==='remote'&&<>
+   {remoteError&&<div className="notice danger" role="alert">{remoteError}</div>}
+   <section className="card">
+    <div className="card-head"><div><div className="eyebrow">SERVER APPROVED</div><h2>已授权文件共享设备</h2></div><button className="btn" onClick={refreshPeers}>刷新设备</button></div>
+    {peers.length===0?<div className="empty">暂无可用的共享设备。请在 Server 审批访问端 files.client 和共享端 files.host，并确认双方属于相同身份且已连接。</div>:
+     <div className="file-share-peer-list">{peers.map(peer=><button type="button" key={peer.deviceId} className={'file-share-peer '+(remoteDevice===peer.deviceId?'selected':'')} onClick={()=>openRemoteDevice(peer.deviceId)}><b>{peer.name||peer.deviceId}</b><small className="mono">{peer.deviceId}</small><span className="badge ok">在线</span></button>)}</div>}
+   </section>
+   {remoteDevice&&<section className="card"><div className="card-head"><div><div className="eyebrow">SHARED FOLDERS</div><h2>远程共享文件夹</h2></div><span className="mini">{remoteLoading?'读取中…':''}</span></div>
+    {remoteShares.length===0?<div className="empty">{remoteLoading?'读取中…':'此设备尚未向本机开放共享文件夹。请在共享端开启共享，并对本设备授予只读或读写权限。'}</div>:
+     <div className="file-share-peer-list">{remoteShares.map(share=><button type="button" key={share.id} className={'file-share-peer '+(remoteShare===share.id?'selected':'')} onClick={()=>openRemoteDir(remoteDevice,share.id,'.')}><b>▱ {share.name}</b><span className="badge">{share.permission==='read_write'?'读写':'只读'}</span></button>)}</div>}
+   </section>}
+   {remoteShare&&<section className="card">
+    <div className="card-head"><div><div className="eyebrow">REMOTE FILES · RELAY</div><h2>远程文件</h2></div><button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath)} disabled={remoteLoading}>刷新目录</button></div>
+    <div className="file-share-breadcrumb"><button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,'.')} disabled={remoteLoading}>根目录</button><span className="mono">{remotePath==='.'?'/':'/'+remotePath}</span>{remotePath!=='.'&&<button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath.split('/').slice(0,-1).join('/')||'.')} disabled={remoteLoading}>返回上级</button>}</div>
+    {remoteEntries.length===0?<div className="empty">{remoteLoading?'读取中…':'文件夹为空'}</div>:
+     remoteEntries.map(entry=><div className="file-share-entry" key={entry.name}><div className="grow"><b>{entry.isDir?'▱':'▤'} {entry.name}</b><small>{entry.isDir?'文件夹':formatFileBytes(entry.size)}</small></div>{entry.isDir?<button className="btn" disabled={remoteLoading} onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name)}>打开</button>:<button className="btn primary" disabled={remoteLoading} onClick={()=>beginDownload(entry)}>下载</button>}</div>)}
+   </section>}
+  </>}
+  {tab==='transfers'&&<section className="card">
+   <div className="card-head"><div><div className="eyebrow">DOWNLOADS</div><h2>下载任务</h2></div><button className="btn" onClick={refreshTransfers}>刷新</button></div>
+   {transferError&&<div className="notice danger" role="alert">{transferError}</div>}
+   <div className="mini">下载保存至本机 Downloads/RelayProxy。当前使用 Relay 加密通道；公网直连与 P2P 文件通道尚未接入。</div>
+   {transfers.length===0?<div className="empty">暂无传输任务。在“其他设备”中选择文件开始下载。</div>:
+    transfers.map(item=><div className="file-share-task" key={item.id}>
+     <div className="file-share-task-title"><div className="grow"><b>{item.fileName}</b><div className="mini mono">{item.deviceId} · {item.destination||'下载中'}</div></div><span className={'badge '+(item.state==='completed'?'ok':item.state==='failed'?'danger':'neutral')}>{({'running':'下载中','completed':'已完成','failed':'失败','cancelled':'已取消'})[item.state]||item.state}</span></div>
+     <div className="file-share-task-track"><div style={{width:(item.total>0?Math.min(100,item.done/item.total*100):0)+'%'}}/></div>
+     <div className="file-share-task-meta"><span>{formatFileBytes(item.done)} / {item.total>0?formatFileBytes(item.total):'计算中'} · {item.total>0?Math.floor(item.done/item.total*100):0}%</span><span>{item.state==='running'?formatFileBytes(item.speed)+'/s':'Relay QUIC / TLS'}</span></div>
+     {item.error&&<div className="notice danger">{item.error}</div>}
+     {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>取消下载</button>}
+    </div>)}
+  </section>}
   {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>
    <div className="modal wide" role="dialog" aria-modal="true" aria-label={editor==='new'?'添加共享文件夹':'编辑共享文件夹'}>
     <div className="modal-head"><h2>{editor==='new'?'添加共享文件夹':'编辑共享与设备权限'}</h2><button className="close" aria-label="关闭" onClick={()=>setEditor(null)} disabled={busy}>×</button></div>

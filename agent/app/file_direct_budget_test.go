@@ -20,7 +20,7 @@ func TestFileDirectStageContextLeavesTicketForFallback(t *testing.T) {
 }
 
 func TestFileDirectStageContextRespectsTicketAndCallerDeadline(t *testing.T) {
-	expiresAt := time.Now().Add(3500*time.Millisecond).UnixMilli()
+	expiresAt := time.Now().Add(3500 * time.Millisecond).UnixMilli()
 	ctx, cancel := fileDirectStageContext(context.Background(), expiresAt, 4*time.Second)
 	defer cancel()
 	deadline, _ := ctx.Deadline()

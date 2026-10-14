@@ -170,9 +170,12 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	base := strings.TrimSuffix(record.FileName, ext)
 	// Randomized suffix avoids overwriting a pre-existing download.
 	destination := filepath.Join(dir, fmt.Sprintf("%s-%s%s", base, record.ID[:8], ext))
-	if err := os.Rename(tempPath, destination); err != nil {
-		return err
+	// Publish with no-replace semantics. Rename on Windows/Unix can overwrite
+	// a destination that appeared while another download was running.
+	if err := os.Link(tempPath, destination); err != nil {
+		return fmt.Errorf("publish download without overwriting: %w", err)
 	}
+	_ = os.Remove(tempPath)
 	m.mu.Lock()
 	record.Destination = destination
 	m.mu.Unlock()

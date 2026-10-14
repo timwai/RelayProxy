@@ -141,7 +141,9 @@ func TestDownloadTaskCannotCrossIdentityScope(t *testing.T) {
 	}
 	snapshot.Scope = "some-other-relay-identity"
 	raw, err = json.Marshal(snapshot)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(index, raw, 0600); err != nil {
 		t.Fatal(err)
 	}

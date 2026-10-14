@@ -99,7 +99,7 @@ func (m *fileTransferManager) restoreTasksLocked() error {
 		return fmt.Errorf("read file transfer tasks: %w", err)
 	}
 	if snapshot.Scope != m.taskScope {
-	\treturn nil
+		return nil
 	}
 	if snapshot.Version != fileTransferTaskVersion || len(snapshot.Records) > 100 {
 		return errors.New("file transfer task index version or length invalid")

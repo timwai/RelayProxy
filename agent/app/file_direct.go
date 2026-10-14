@@ -41,6 +41,8 @@ type fileDirectRuntime struct {
 	upnpCancel  context.CancelFunc
 	upnpRunning bool
 	upnpAddress netip.AddrPort
+	upnpState   string
+	upnpReason  string
 	closed      bool
 	accepted    atomic.Int64
 	wg          sync.WaitGroup
@@ -122,6 +124,67 @@ func (r *fileDirectRuntime) close() {
 	r.wg.Wait()
 }
 
+// FileDirectStatus is local-only diagnostic metadata. It does not expose
+// file paths, access tokens, public keys, or other peers' identities.
+type FileDirectStatus struct {
+	UPnPEnabled    bool   `json:"upnpEnabled"`
+	ListenerReady  bool   `json:"listenerReady"`
+	MappingState   string `json:"mappingState"`
+	PublicAddress  string `json:"publicAddress,omitempty"`
+	Reason         string `json:"reason,omitempty"`
+}
+
+func (a *Agent) FileDirectStatus() FileDirectStatus {
+	result := FileDirectStatus{MappingState: "disabled"}
+	if a == nil {
+		return result
+	}
+	a.mu.RLock()
+	store := a.fileShareStore
+	runtime := a.fileDirect
+	approved := slices.Contains(a.approvedCapabilities, protocol.CapabilityFilesHost)
+	a.mu.RUnlock()
+	if store == nil {
+		return result
+	}
+	config, err := store.Load()
+	if err != nil {
+		result.MappingState = "unavailable"
+		result.Reason = "unable to read local file sharing preferences"
+		return result
+	}
+	result.UPnPEnabled = config.Enabled && config.DirectUPnPEnabled
+	if !result.UPnPEnabled {
+		return result
+	}
+	if !approved {
+		result.MappingState = "not_approved"
+		return result
+	}
+	if runtime == nil {
+		result.MappingState = "awaiting_request"
+		return result
+	}
+	runtime.mu.Lock()
+	defer runtime.mu.Unlock()
+	result.ListenerReady = !runtime.closed && runtime.listener != nil
+	result.MappingState = runtime.upnpState
+	if result.MappingState == "" {
+		result.MappingState = "awaiting_request"
+	}
+	if !runtime.closed && runtime.upnpAddress.IsValid() &&
+		upnp.IsPublicWANIPv4(runtime.upnpAddress.Addr()) {
+		result.PublicAddress = runtime.upnpAddress.String()
+	}
+	if runtime.upnpReason != "" {
+		result.Reason = runtime.upnpReason
+		if len(result.Reason) > 220 {
+			result.Reason = result.Reason[:220]
+		}
+	}
+	return result
+}
+
 // syncUPnP never opens a router port without an explicit local option. A
 // failed discovery or private CGNAT WAN leaves the existing Relay/LAN paths
 // unchanged. Disabling the option withdraws an advertised address immediately.
@@ -157,6 +220,8 @@ func (r *fileDirectRuntime) syncUPnP() {
 	}
 	if !enabled {
 		r.upnpAddress = netip.AddrPort{}
+		r.upnpState = "disabled"
+		r.upnpReason = ""
 		if r.upnpCancel != nil {
 			r.upnpCancel()
 		}
@@ -171,6 +236,8 @@ func (r *fileDirectRuntime) syncUPnP() {
 	}
 	ctx, cancel := context.WithCancel(parent)
 	r.upnpCancel = cancel
+	r.upnpState = "discovering"
+	r.upnpReason = ""
 	r.upnpRunning = true
 	r.wg.Add(1)
 	go r.runUPnP(ctx)
@@ -190,17 +257,31 @@ func (r *fileDirectRuntime) runUPnP(ctx context.Context) {
 	mapping, address, err := upnp.MapTCP(discoveryCtx, port)
 	cancel()
 	if err != nil {
+		r.mu.Lock()
+		if !r.closed && ctx.Err() == nil {
+			r.upnpState = "unavailable"
+			r.upnpReason = err.Error()
+		}
+		r.mu.Unlock()
 		return
 	}
 	defer mapping.Close()
 	// UPnP can succeed on a private WAN or CGNAT. Publishing such a
 	// candidate would both leak local network topology and waste retries.
 	if !upnp.IsPublicWANIPv4(address.Addr()) {
+		r.mu.Lock()
+		if !r.closed && ctx.Err() == nil {
+			r.upnpState = "private_wan"
+			r.upnpReason = "router WAN IPv4 is not publicly routable"
+		}
+		r.mu.Unlock()
 		return
 	}
 	r.mu.Lock()
 	if !r.closed && ctx.Err() == nil {
 		r.upnpAddress = address
+		r.upnpState = "mapped"
+		r.upnpReason = ""
 	}
 	r.mu.Unlock()
 	for {
@@ -212,8 +293,12 @@ func (r *fileDirectRuntime) runUPnP(ctx context.Context) {
 			if !r.closed && ctx.Err() == nil && state.Healthy &&
 				upnp.IsPublicWANIPv4(state.Address.Addr()) {
 				r.upnpAddress = state.Address
+				r.upnpState = "mapped"
+				r.upnpReason = ""
 			} else {
 				r.upnpAddress = netip.AddrPort{}
+				r.upnpState = "unavailable"
+				r.upnpReason = state.Reason
 			}
 			r.mu.Unlock()
 		}

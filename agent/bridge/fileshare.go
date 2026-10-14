@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"relayproxy/agent/app"
 	"relayproxy/agent/fileshare"
 	"relayproxy/internal/protocol"
 )
@@ -52,4 +53,11 @@ func (b *UIBridge) GetFileShareCandidates() ([]protocol.FileShareCandidate, erro
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	return b.agent.FileShareCandidates(ctx)
+}
+
+func (b *UIBridge) GetFileDirectStatus() app.FileDirectStatus {
+	if b == nil || b.agent == nil {
+		return app.FileDirectStatus{MappingState: "disabled"}
+	}
+	return b.agent.FileDirectStatus()
 }

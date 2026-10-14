@@ -4,6 +4,7 @@ package gui
 
 import (
 	"relayproxy/agent/bridge"
+	"relayproxy/agent/app"
 	"relayproxy/agent/fileshare"
 	"relayproxy/internal/protocol"
 )
@@ -54,4 +55,8 @@ func (s *WailsService) GetFileShareCandidates() ([]protocol.FileShareCandidate, 
 
 func (s *WailsService) ResumeFileDownload(id string) error {
 	return s.owner.bridge.ResumeFileDownload(id)
+}
+
+func (s *WailsService) GetFileDirectStatus() app.FileDirectStatus {
+	return s.owner.bridge.GetFileDirectStatus()
 }

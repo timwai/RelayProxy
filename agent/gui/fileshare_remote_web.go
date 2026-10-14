@@ -188,3 +188,10 @@ func (w *WebServer) fileShareCandidates(rw http.ResponseWriter, _ *http.Request)
 	}
 	writeWebJSON(rw, devices)
 }
+
+func (w *WebServer) fileDirectStatus(rw http.ResponseWriter, _ *http.Request) {
+	if !w.fileShareRemoteAccessAllowed(rw) {
+		return
+	}
+	writeWebJSON(rw, w.bridge.GetFileDirectStatus())
+}

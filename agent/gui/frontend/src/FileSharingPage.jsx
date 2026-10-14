@@ -5,11 +5,13 @@ import './fileSharing.css';
 const formatFileBytes=n=>{const num=Math.max(0,Number(n)||0);if(num<1024)return num.toFixed(0)+' B';const units=['KiB','MiB','GiB','TiB'];const power=Math.min(4,Math.floor(Math.log(num)/Math.log(1024)));return (num/1024**power).toFixed(1)+' '+units[power-1]};
 const blank=()=>({id:'',name:'',rootPath:'',enabled:true,permissions:{}});
 const empty=()=>({revision:0,enabled:false,directUpnpEnabled:false,shares:[]});
+const upnpStateLabel={disabled:'已关闭',not_approved:'等待 Server 审批',awaiting_request:'等待文件直连请求',discovering:'正在发现路由器',mapped:'已取得公网候选地址',private_wan:'网关 WAN 为内网或 CGNAT',unavailable:'映射不可用'};
 const countPermissions=share=>Object.values(share.permissions||{}).filter(v=>v==='read'||v==='read_write').length;
 
 export default function FileSharingPage({toast}) {
  const [state,setState]=useState(null);
  const [tab,setTab]=useState('local');
+ const [directStatus,setDirectStatus]=useState(null);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  const [editor,setEditor]=useState(null);
@@ -75,6 +77,16 @@ export default function FileSharingPage({toast}) {
   }finally{setUploading(false);uploadCancelRef.current=false}
  }
 
+ const refreshDirectStatus=useCallback(async()=>{
+  try{setDirectStatus(await callJSON('goGetFileDirectStatus',null))}
+  catch{setDirectStatus(null)}
+ },[]);
+ useEffect(()=>{
+  if(tab!=='local')return;
+  void refreshDirectStatus();
+  const timer=setInterval(()=>void refreshDirectStatus(),5000);
+  return ()=>clearInterval(timer);
+ },[tab,refreshDirectStatus]);
  const refreshPeers=useCallback(async()=>{
   try{
    const result=await callJSON('goGetFileSharePeers',[]);
@@ -211,7 +223,8 @@ export default function FileSharingPage({toast}) {
    <section className="card">
     <div className="card-head"><div><div className="eyebrow">OPTIONAL · PUBLIC TCP</div><h2>文件直连端口映射</h2></div>
     <button type="button" role="switch" aria-label="允许文件专用 TCP UPnP 映射" aria-checked={!!state?.directUpnpEnabled} className={'switch '+(state?.directUpnpEnabled?'on':'')} disabled={!state||busy} onClick={()=>commit(s=>({...s,directUpnpEnabled:!s.directUpnpEnabled}))}><span/></button></div>
-    <div className="mini">默认关闭。启用后共享端才会尝试通过路由器 UPnP 映射临时 TCP 端口；仅公网可路由的 WAN 地址会作为候选，仍须 Server 审批、一次性授权与 TLS 指纹校验。关闭后在下一次文件直连请求时撤销映射。</div>
+    <div className="mini">默认关闭。启用后共享端才会尝试通过路由器 UPnP 映射临时 TCP 端口；仅公网可路由的 WAN 地址会作为候选，仍须 Server 审批、一次性授权与 TLS 指纹校验。关闭后立即撤销映射。</div>
+    {state?.directUpnpEnabled&&<div className="file-share-upnp-status" role="status"><span>{!state?.enabled?'共享服务未开启':upnpStateLabel[directStatus?.mappingState]||'读取映射状态中…'}</span>{directStatus?.publicAddress&&<span className="mono">{directStatus.publicAddress}</span>}{directStatus?.reason&&<span className="mini" title={directStatus.reason}>{directStatus.reason}</span>}</div>}
    </section>
    <section className="card"><div className="card-head"><div><div className="eyebrow">{shares.length} DIRECTORIES</div><h2>共享文件夹</h2></div></div>
    {!state&&<div className="empty">正在读取本机文件共享配置…</div>}

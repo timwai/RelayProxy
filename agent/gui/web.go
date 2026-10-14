@@ -224,6 +224,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 		mux.HandleFunc("GET /"+name, func(rw http.ResponseWriter, _ *http.Request) { serveEmbeddedAsset(rw, name) })
 	}
 
+	mux.HandleFunc("/api/file-shares", w.fileShares)
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
 	mux.HandleFunc("GET /api/network-capabilities", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.PlatformCapabilities()) })
 	mux.HandleFunc("GET /api/diagnostics", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetDiagnostics()) })
@@ -608,6 +609,8 @@ const webBridgeJS = `(function () {
   function json(path, method, value) {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
+  window.goGetFileShares = function () { return request('/api/file-shares'); };
+  window.goSaveFileShares = function (state) { return json('/api/file-shares', 'PUT', state); };
   window.goGetStatus = function () { return request('/api/status'); };
   window.goGetNetworkCapabilities = function () { return request('/api/network-capabilities'); };
   window.goGetDiagnostics = function () { return request('/api/diagnostics'); };

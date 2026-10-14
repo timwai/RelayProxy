@@ -54,6 +54,8 @@ const MaxConcurrentHostedFileStreams int32 = 6
 type FileStore struct {
 	Path              string
 	activeFileStreams atomic.Int32
+	uploadMu sync.Mutex
+	uploads map[string]*partialFileUpload
 }
 
 func (s *FileStore) acquireFileStream() bool {

@@ -6,6 +6,7 @@ const (
 	FileShareListShares = "list_shares"
 	FileShareListDir    = "list_dir"
 	FileShareDownload   = "download"
+	FileShareUpload     = "upload"
 )
 
 type FileSharePeer struct {
@@ -23,6 +24,7 @@ type FileShareRequest struct {
 	Action  string `json:"action"`
 	ShareID string `json:"shareId,omitempty"`
 	Path    string `json:"path,omitempty"`
+	Size    int64  `json:"size,omitempty"`
 }
 
 type FileShareDescriptor struct {

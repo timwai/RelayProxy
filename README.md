@@ -1286,6 +1286,29 @@ relay-agent --http 127.0.0.1:8081
 relay-agent --no-gui
 ```
 
+命令行后台运行（Windows、macOS、Linux，关闭终端后继续运行）：
+
+```bash
+relay-agent --background --config ./relay-agent.yaml
+# 也支持 relay-agent -d 或 relay-agent --daemon
+```
+
+Windows PowerShell 示例：
+
+```powershell
+.\relay-agent.exe --background --config .\relay-agent.yaml
+```
+
+后台启动自动使用无 GUI 模式，不需要额外指定 `--no-gui`。命令行在 Agent 和本地 Web 管理服务完成启动后返回 PID 和日志路径；配置错误、重复启动或端口冲突会返回非零退出码，并提示查看日志。原有 `--server`、`--exit`、`--socks5`、`--http`、`--web-port` 等参数继续生效。
+
+默认日志位置为 `~/.relayproxy/logs/relay-agent.log`（追加写入），可覆盖：
+
+```bash
+relay-agent -d --log-file ./logs/agent.log
+```
+
+Linux/macOS 可用 `kill -TERM <PID>` 正常停止（PID 为启动时输出的值）；Windows 可在 Agent 的 Web 管理页面触发退出，或者从任务管理器结束进程。若需要系统重启后自动运行，建议使用 systemd、launchd 或 Windows 服务/任务计划程序，而不是依赖一次性命令行后台启动。
+
 关闭本地 Web：
 
 ```bash

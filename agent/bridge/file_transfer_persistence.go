@@ -12,6 +12,8 @@ import (
 	"path"
 	"path/filepath"
 	"strings"
+
+	"relayproxy/agent/app"
 )
 
 const fileTransferTaskVersion = 2

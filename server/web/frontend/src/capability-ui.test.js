@@ -3,8 +3,8 @@ import assert from 'node:assert/strict';
 import {allCapabilities,visibleCapabilityGroups,toggleDeviceCapability} from './capability-ui.js';
 
 test('device capabilities are grouped into network and remote desktop permissions',()=>{
- assert.deepEqual(visibleCapabilityGroups().map(g=>g.title),['网络代理','远程桌面']);
- assert.equal(allCapabilities.length,5);
+ assert.deepEqual(visibleCapabilityGroups().map(g=>g.title),['网络代理','远程桌面','文件共享']);
+ assert.equal(allCapabilities.length,7);
  assert.deepEqual(visibleCapabilityGroups(['proxy.client','rdp.host']).map(g=>g.items.map(i=>i.id)),
    [['proxy.client'],['rdp.host']]);
  assert.deepEqual(visibleCapabilityGroups([]),[]);
@@ -26,4 +26,10 @@ test('public RDP always requires its host capability, including during approval'
 
 test('unknown and unapproved values cannot be introduced by selections',()=>{
  assert.deepEqual(toggleDeviceCapability(['proxy.exit'],'rdp.controller',true,['proxy.client']),[]);
+});
+
+test('file host and client require separate explicit approvals',()=>{
+ assert.deepEqual(toggleDeviceCapability([],'files.client',true),['files.client']);
+ assert.deepEqual(toggleDeviceCapability(['files.client'],'files.host',true),['files.client','files.host']);
+ assert.deepEqual(toggleDeviceCapability(['files.client','files.host'],'files.host',false),['files.client']);
 });

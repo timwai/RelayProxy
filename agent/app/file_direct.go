@@ -34,26 +34,26 @@ type fileDirectTicket struct {
 	expiresAt int64
 }
 type fileDirectRuntime struct {
-	a           *Agent
-	listener    net.Listener
+	a            *Agent
+	listener     net.Listener
 	quicListener *quic.Listener
-	fingerprint string
-	mu          sync.Mutex
-	tickets     map[string]fileDirectTicket
-	upnpCancel  context.CancelFunc
-	upnpRunning bool
-	upnpAddress netip.AddrPort
-	upnpState   string
-	upnpReason  string
-	closed      bool
-	accepted    atomic.Int64
+	fingerprint  string
+	mu           sync.Mutex
+	tickets      map[string]fileDirectTicket
+	upnpCancel   context.CancelFunc
+	upnpRunning  bool
+	upnpAddress  netip.AddrPort
+	upnpState    string
+	upnpReason   string
+	closed       bool
+	accepted     atomic.Int64
 	quicAccepted atomic.Int64
-	wg          sync.WaitGroup
+	wg           sync.WaitGroup
 }
 
 type fileDirectStream struct{ *tls.Conn }
 
-func (s *fileDirectStream) CloseWrite() error { return s.Conn.CloseWrite() }
+func (s *fileDirectStream) CloseWrite() error        { return s.Conn.CloseWrite() }
 func (s *fileDirectStream) FileTransferPath() string { return "direct_tls" }
 
 func makeFileDirectTLS() (*tls.Config, string, error) {

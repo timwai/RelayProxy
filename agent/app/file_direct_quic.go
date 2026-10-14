@@ -126,7 +126,7 @@ func (r *fileDirectRuntime) serveQUICConnection(conn *quic.Conn) {
 		return
 	}
 	defer stream.Close()
-	_ = stream.SetDeadline(time.Now().Add(5*time.Second))
+	_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
 	var auth protocol.FileDirectAuth
 	if err := protocol.ReadJSON(stream, &auth); err != nil {
 		return

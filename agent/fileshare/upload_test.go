@@ -2,6 +2,8 @@ package fileshare
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"io"
 	"os"
 	"path/filepath"
@@ -76,6 +78,8 @@ func TestUploadsAreAtomicAndOnlyAllowAuthorizedWriters(t *testing.T) {
 	if ready.Success{t.Fatal("read-only device started upload")}
 	ready,final=fileUploadRequest(t,store,"writer",req,[]byte("hello"),false)
 	if !ready.Success||!final.Success||final.Size!=5{t.Fatalf("upload ack: %+v %+v",ready,final)}
+	expectedHash := sha256.Sum256([]byte("hello"))
+	if final.SHA256 != hex.EncodeToString(expectedHash[:]) {t.Fatalf("invalid committed SHA-256: %s", final.SHA256)}
 	data,err:=os.ReadFile(filepath.Join(dir,"report.txt"))
 	if err!=nil||string(data)!="hello"{t.Fatalf("data: %q err=%v",data,err)}
 	// A second upload cannot replace any pre-existing file.

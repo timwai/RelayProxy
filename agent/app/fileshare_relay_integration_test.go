@@ -21,7 +21,7 @@ import (
 // not mock direct pipes. The two devices run on one CI host; this is NOT a
 // public Internet / distinct physical hardware acceptance result.
 func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
-	for _, transportMode := range []string{"quic_only", "tls_only"} {
+	for _, transportMode := range []string{"quic_only", "tcp_only"} {
 		t.Run(transportMode, func(t *testing.T) {
 			certificate, err := cert.EnsureCertificate("", "", "localhost")
 			if err != nil {

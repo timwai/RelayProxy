@@ -127,11 +127,11 @@ func (r *fileDirectRuntime) close() {
 // FileDirectStatus is local-only diagnostic metadata. It does not expose
 // file paths, access tokens, public keys, or other peers' identities.
 type FileDirectStatus struct {
-	UPnPEnabled    bool   `json:"upnpEnabled"`
-	ListenerReady  bool   `json:"listenerReady"`
-	MappingState   string `json:"mappingState"`
-	PublicAddress  string `json:"publicAddress,omitempty"`
-	Reason         string `json:"reason,omitempty"`
+	UPnPEnabled   bool   `json:"upnpEnabled"`
+	ListenerReady bool   `json:"listenerReady"`
+	MappingState  string `json:"mappingState"`
+	PublicAddress string `json:"publicAddress,omitempty"`
+	Reason        string `json:"reason,omitempty"`
 }
 
 func (a *Agent) FileDirectStatus() FileDirectStatus {

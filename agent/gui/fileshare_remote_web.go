@@ -134,3 +134,15 @@ func (w *WebServer) discardFileUpload(rw http.ResponseWriter, r *http.Request) {
 	if err:=w.bridge.DiscardFileUpload(r.PathValue("id"));err!=nil {http.Error(rw,err.Error(),http.StatusBadRequest);return}
 	writeWebJSON(rw,map[string]bool{"ok":true})
 }
+
+func (w *WebServer) fileShareCandidates(rw http.ResponseWriter, _ *http.Request) {
+	if !w.fileShareRemoteAccessAllowed(rw) {
+		return
+	}
+	devices, err := w.bridge.GetFileShareCandidates()
+	if err != nil {
+		http.Error(rw, err.Error(), http.StatusBadGateway)
+		return
+	}
+	writeWebJSON(rw, devices)
+}

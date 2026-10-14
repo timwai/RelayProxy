@@ -181,3 +181,45 @@ func (w *fileProgressWriter) Write(p []byte) (int, error) {
 	}
 	return n, err
 }
+
+// FileShareCandidates returns only Server-confirmed files.client devices that
+// are eligible to receive a per-directory ACL. The host never trusts an
+// arbitrary device ID typed into the browser as a source of authorization.
+func (a *Agent) FileShareCandidates(ctx context.Context) ([]protocol.FileShareCandidate, error) {
+	a.mu.RLock()
+	sess := a.readySession
+	approved := slices.Contains(a.approvedCapabilities, protocol.CapabilityFilesHost)
+	connected := a.handshakeOK.Load()
+	a.mu.RUnlock()
+	if sess == nil || !connected {
+		return nil, errors.New("Relay is not connected")
+	}
+	if !approved {
+		return nil, errors.New("files.host must be approved on Relay Server")
+	}
+	stream, err := sess.OpenStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer stream.Close()
+	stop := tunnel.InterruptOnCancel(ctx, stream)
+	defer stop()
+	_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Type: protocol.FrameTypeFileShareCandidates,
+		RequestID: fmt.Sprintf("files_candidates_%d", time.Now().UnixNano()),
+	}); err != nil {
+		return nil, err
+	}
+	var response protocol.FileShareCandidatesResponse
+	if err := protocol.ReadJSON(stream, &response); err != nil {
+		return nil, err
+	}
+	if response.Error != "" {
+		return nil, errors.New(response.Error)
+	}
+	if response.Devices == nil {
+		return []protocol.FileShareCandidate{}, nil
+	}
+	return response.Devices, nil
+}

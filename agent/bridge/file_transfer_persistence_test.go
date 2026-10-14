@@ -111,30 +111,44 @@ func TestDownloadTaskCannotCrossIdentityScope(t *testing.T) {
 	t.Setenv("USERPROFILE", home)
 	configPath := filepath.Join(t.TempDir(), "agent.yaml")
 	dir := filepath.Join(home, "Downloads", "RelayProxy")
-	if err := os.MkdirAll(dir, 0700); err != nil { t.Fatal(err) }
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
 	const id = "ab83fc12a9fc203b7710350192f22ad0"
 	if err := os.WriteFile(filepath.Join(dir, ".relayproxy-download-"+id+".partial"), []byte("partial"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	initial := newFileTransferManager(&app.Agent{})
-	if err := initial.initTaskPersistence(configPath); err != nil { t.Fatal(err) }
+	if err := initial.initTaskPersistence(configPath); err != nil {
+		t.Fatal(err)
+	}
 	initial.records[id] = &fileTransferRecord{FileTransfer: FileTransfer{
 		ID: id, Direction: "download", State: "paused", DeviceID: "client",
 		ShareID: "share", RelativePath: "report.txt", FileName: "report.txt",
 	}}
 	initial.order = []string{id}
-	if err := initial.persistTasksLocked(); err != nil { t.Fatal(err) }
+	if err := initial.persistTasksLocked(); err != nil {
+		t.Fatal(err)
+	}
 	index := configPath + ".file-transfer-tasks.json"
 	raw, err := os.ReadFile(index)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	var snapshot fileTransferTaskSnapshot
-	if err := json.Unmarshal(raw, &snapshot); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(raw, &snapshot); err != nil {
+		t.Fatal(err)
+	}
 	snapshot.Scope = "some-other-relay-identity"
 	raw, err = json.Marshal(snapshot)
 	if err != nil { t.Fatal(err) }
-	if err := os.WriteFile(index, raw, 0600); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(index, raw, 0600); err != nil {
+		t.Fatal(err)
+	}
 	newManager := newFileTransferManager(&app.Agent{})
-	if err := newManager.initTaskPersistence(configPath); err != nil { t.Fatal(err) }
+	if err := newManager.initTaskPersistence(configPath); err != nil {
+		t.Fatal(err)
+	}
 	if len(newManager.list()) != 0 {
 		t.Fatal("stale transfer metadata leaked across Relay identity rotation")
 	}

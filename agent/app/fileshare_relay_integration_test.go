@@ -131,6 +131,22 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			if !bytes.Equal(output.Bytes(), data) {
 				t.Fatal("download contents differ")
 			}
+			// An authenticated file-only TLS stream must have been negotiated:
+			// direct access must not require the proxy/RDP authorization.
+			host.mu.RLock()
+			directRuntime := host.fileDirect
+			host.mu.RUnlock()
+			if directRuntime == nil || directRuntime.accepted.Load() == 0 {
+				t.Fatal("file direct TLS stream was not authenticated")
+			}
+			// A direct listener outage must not break existing Relay
+			// downloads: force direct negotiation to fail, then verify that
+			// Server-checked Relay forwarding succeeds without data loss.
+			directRuntime.close()
+			var fallback bytes.Buffer
+			if _, err := client.DownloadRemoteFile(ctx, "files-host", shares[0].ID, "source.bin", &fallback, nil); err != nil || !bytes.Equal(fallback.Bytes(), data) {
+				t.Fatalf("Relay fallback after direct outage: %v", err)
+			}
 			// Resume after a simulated local connection failure: half a file
 			// already on disk is verified byte-for-byte against the host.
 			partialFile, err := os.CreateTemp(t.TempDir(), "partial-*")

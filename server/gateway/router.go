@@ -272,6 +272,10 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 	header.ClientDeviceID = clientSession.DeviceID
 
 	switch header.Type {
+	case protocol.FrameTypeFileDirectPrepare:
+		r.handleFileDirectPrepare(ctx, header, clientStream, clientSession)
+	case protocol.FrameTypeFileDirectCheck:
+		r.handleFileDirectCheck(clientStream, header, clientSession)
 	case protocol.FrameTypeFileShareCandidates:
 		r.handleFileShareCandidates(clientStream, clientSession)
 	case protocol.FrameTypeFileSharePeers:

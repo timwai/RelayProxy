@@ -55,7 +55,13 @@ func (m *fileTransferManager) expireUpload(id string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	stage := m.stages[id]
-	if stage == nil || time.Since(stage.created) < uploadStageLifetime {
+	if stage == nil {
+		return
+	}
+	if remaining := uploadStageLifetime - time.Since(stage.created); remaining > 0 {
+		// A previous callback can race with a chunk extending the lifetime.
+		// Keep an expiry armed rather than leaking the staged file.
+		stage.expires.Reset(remaining)
 		return
 	}
 	_ = stage.file.Close()

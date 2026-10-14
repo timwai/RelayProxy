@@ -156,3 +156,26 @@ func TestChangingRootRequiresRevokingAccess(t *testing.T) {
 		t.Fatalf("root change after ACL revocation failed: %v", err)
 	}
 }
+
+func TestHostedStreamLimit(t *testing.T) {
+	store, err := New(filepath.Join(t.TempDir(), "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := int32(0); i < MaxConcurrentHostedFileStreams; i++ {
+		if !store.acquireFileStream() {
+			t.Fatalf("slot %d must be admitted", i)
+		}
+	}
+	if store.acquireFileStream() {
+		t.Fatal("concurrency limit bypassed")
+	}
+	store.activeFileStreams.Add(-1)
+	if !store.acquireFileStream() {
+		t.Fatal("slot was not released")
+	}
+	store.activeFileStreams.Add(-MaxConcurrentHostedFileStreams)
+	if count := store.activeFileStreams.Load(); count != 0 {
+		t.Fatalf("active stream accounting leak: %d", count)
+	}
+}

@@ -21,6 +21,13 @@ import (
 // come from the Server-rewritten StreamHeader, never from the request payload.
 func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authenticatedDeviceID string) {
 	defer stream.Close()
+	if !s.acquireFileStream() {
+		_ = protocol.WriteJSON(stream, protocol.FileShareResponse{
+			Success: false, Error: "file sharing host concurrency limit reached",
+		})
+		return
+	}
+	defer s.activeFileStreams.Add(-1)
 	stop := tunnel.InterruptOnCancel(ctx, stream)
 	defer stop()
 	_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
@@ -162,6 +169,14 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		if ctx.Err() == nil {
 			fail("download incomplete or permission revoked")
 		}
+		return
+	}
+	// File writes by other local processes during the transfer invalidate
+	// this snapshot. Never acknowledge a silently modified version.
+	latest, statErr := file.Stat()
+	if statErr != nil || latest.Size() != info.Size() ||
+		!latest.ModTime().Equal(info.ModTime()) {
+		fail("shared file changed during download")
 		return
 	}
 	// After the exact byte count, a framed final receipt proves the host

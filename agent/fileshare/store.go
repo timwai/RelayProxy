@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type Permission string
@@ -46,7 +47,26 @@ type Descriptor struct {
 
 // FileStore uses a local sidecar adjacent to the Agent YAML so file shares are
 // never transmitted in the public device inventory or overwritten by YAML edits.
-type FileStore struct{ Path string }
+// Hosting is intentionally bounded even when a peer opens many concurrent
+// authenticated streams. The local configuration API is not subject to this limit.
+const MaxConcurrentHostedFileStreams int32 = 6
+
+type FileStore struct {
+	Path string
+	activeFileStreams atomic.Int32
+}
+
+func (s *FileStore) acquireFileStream() bool {
+	for {
+		active := s.activeFileStreams.Load()
+		if active >= MaxConcurrentHostedFileStreams {
+			return false
+		}
+		if s.activeFileStreams.CompareAndSwap(active, active+1) {
+			return true
+		}
+	}
+}
 
 // All FileStore instances inside a running Agent share this lock. This also
 // covers the Web and Wails management surfaces using the same sidecar.

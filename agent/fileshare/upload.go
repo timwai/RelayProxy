@@ -71,6 +71,13 @@ func (s *FileStore) serveUpload(ctx context.Context, stream tunnel.TunnelStream,
 	tempRel := path.Join(parent, ".relayproxy-upload-"+hex.EncodeToString(nonce[:])+".partial")
 	tempLocal := filepath.FromSlash(tempRel)
 	targetLocal := filepath.FromSlash(req.Path)
+	if _, statErr := root.Lstat(targetLocal); statErr == nil {
+		fail("destination already exists")
+		return
+	} else if !errors.Is(statErr, os.ErrNotExist) {
+		fail("unable to inspect destination file")
+		return
+	}
 	temp, err := root.OpenFile(tempLocal, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
 	if err != nil {
 		fail("unable to prepare destination file")

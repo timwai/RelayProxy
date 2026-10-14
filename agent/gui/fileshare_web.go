@@ -12,6 +12,12 @@ import (
 // This is a management API behind the Agent's existing Web authorization.
 // Remote peers MUST NOT be routed to this handler.
 func (w *WebServer) fileShares(rw http.ResponseWriter, r *http.Request) {
+	// Unlike ordinary proxy configuration, this API reveals local absolute
+	// filesystem paths. Do not expose it on unauthenticated LAN listeners.
+	if !w.loopback && w.token == "" {
+		http.Error(rw, "file sharing requires a Web token on non-loopback listeners", http.StatusForbidden)
+		return
+	}
 	switch r.Method {
 	case http.MethodGet:
 		state, err := w.bridge.GetFileShares()

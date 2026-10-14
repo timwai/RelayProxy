@@ -329,7 +329,7 @@ type Agent struct {
 	closeOnce            sync.Once
 	closeErr             error
 	fileShareStore       *fileshare.FileStore
-	fileDirect          *fileDirectRuntime
+	fileDirect           *fileDirectRuntime
 	rdpConnectMu         sync.Mutex
 }
 
@@ -2040,7 +2040,9 @@ func (a *Agent) closeRuntime() error {
 		if proxyP2P != nil {
 			errs = append(errs, proxyP2P.Close())
 		}
-		if fileDirect != nil { fileDirect.close() }
+		if fileDirect != nil {
+			fileDirect.close()
+		}
 		errs = append(errs, a.closePublicDirectClient())
 		if exitHandler != nil {
 			errs = append(errs, exitHandler.Close())

@@ -221,10 +221,10 @@ export default function FileSharingPage({toast}) {
     <div className="mini">开启后仍需在 Server 审批文件能力，并为每个共享目录明确授权具体设备；未授权设备不能访问。</div>
    </section>
    <section className="card">
-    <div className="card-head"><div><div className="eyebrow">OPTIONAL · PUBLIC TCP</div><h2>文件直连端口映射</h2></div>
-    <button type="button" role="switch" aria-label="允许文件专用 TCP UPnP 映射" aria-checked={!!state?.directUpnpEnabled} className={'switch '+(state?.directUpnpEnabled?'on':'')} disabled={!state||busy} onClick={()=>commit(s=>({...s,directUpnpEnabled:!s.directUpnpEnabled}))}><span/></button></div>
-    <div className="mini">默认关闭。启用后共享端才会尝试通过路由器 UPnP 映射临时 TCP 端口；仅公网可路由的 WAN 地址会作为候选，仍须 Server 审批、一次性授权与 TLS 指纹校验。关闭后立即撤销映射。</div>
-    {state?.directUpnpEnabled&&<div className="file-share-upnp-status" role="status"><span>{!state?.enabled?'共享服务未开启':upnpStateLabel[directStatus?.mappingState]||'读取映射状态中…'}</span>{directStatus?.publicAddress&&<span className="mono">{directStatus.publicAddress}</span>}{directStatus?.reason&&<span className="mini" title={directStatus.reason}>{directStatus.reason}</span>}</div>}
+    <div className="card-head"><div><div className="eyebrow">OPTIONAL · PUBLIC TCP / QUIC</div><h2>文件直连端口映射</h2></div>
+    <button type="button" role="switch" aria-label="允许文件专用 TCP 与 QUIC UPnP 映射" aria-checked={!!state?.directUpnpEnabled} className={'switch '+(state?.directUpnpEnabled?'on':'')} disabled={!state||busy} onClick={()=>commit(s=>({...s,directUpnpEnabled:!s.directUpnpEnabled}))}><span/></button></div>
+    <div className="mini">默认关闭。启用后尝试独立映射文件专用 TCP 与 QUIC/UDP 端口；只有公网可路由的 WAN 地址才会公布，仍须 Server 审批、一次性票据与 TLS 指纹校验。关闭后同时撤销两种映射。映射成功不代表跨运营商公网可达，也不代表完成 NAT 打洞。</div>
+    {state?.directUpnpEnabled&&<><div className="file-share-upnp-status" role="status"><b>TCP</b><span>{!state?.enabled?'共享服务未开启':upnpStateLabel[directStatus?.mappingState]||'读取映射状态中…'}</span>{directStatus?.publicAddress&&<span className="mono">{directStatus.publicAddress}</span>}{directStatus?.reason&&<span className="mini" title={directStatus.reason}>{directStatus.reason}</span>}</div><div className="file-share-upnp-status" role="status"><b>QUIC / UDP</b><span>{!state?.enabled?'共享服务未开启':upnpStateLabel[directStatus?.quicMappingState]||'读取映射状态中…'}</span>{directStatus?.quicPublicAddress&&<span className="mono">{directStatus.quicPublicAddress}</span>}{directStatus?.quicReason&&<span className="mini" title={directStatus.quicReason}>{directStatus.quicReason}</span>}</div></>}
    </section>
    <section className="card"><div className="card-head"><div><div className="eyebrow">{shares.length} DIRECTORIES</div><h2>共享文件夹</h2></div></div>
    {!state&&<div className="empty">正在读取本机文件共享配置…</div>}

@@ -1,6 +1,9 @@
 package app
 
 import (
+	"slices"
+
+	"github.com/apernet/quic-go"
 	"net/netip"
 	"path/filepath"
 	"testing"
@@ -52,5 +55,63 @@ func TestFileDirectStatusOnlyPublishesValidPublicWANWithOptIn(t *testing.T) {
 	a.RefreshFileDirectUPnP()
 	if got := a.FileDirectStatus(); got.UPnPEnabled || got.PublicAddress != "" {
 		t.Fatalf("disabled mapping must not expose public candidate: %+v", got)
+	}
+}
+
+func TestFileDirectQUICUPnPCandidateRequiresPublicWANAndActiveLease(t *testing.T) {
+	store, err := fileshare.New(filepath.Join(t.TempDir(), "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Enabled = true
+	state.DirectUPnPEnabled = true
+	if _, err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	a := &Agent{fileShareStore: store, approvedCapabilities: []string{protocol.CapabilityFilesHost}}
+	cfg, _, err := makeFileDirectTLS()
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := quic.ListenAddr("127.0.0.1:0", fileDirectQUICServerTLS(cfg), fileDirectQUICConfig())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	runtime := &fileDirectRuntime{a: a, quicListener: listener,
+		udpUPnPState: "mapped", udpUPnPAddress: netip.MustParseAddrPort("100.64.1.1:51234")}
+	a.fileDirect = runtime
+	if status := a.FileDirectStatus(); status.QUICPublicAddress != "" {
+		t.Fatalf("CGNAT mapping must not be published: %+v", status)
+	}
+	if got := runtime.quicCandidates(); slices.Contains(got, "100.64.1.1:51234") {
+		t.Fatalf("private UDP mapping must not become a QUIC candidate: %v", got)
+	}
+	runtime.udpUPnPAddress = netip.MustParseAddrPort("8.8.4.4:51234")
+	if status := a.FileDirectStatus(); status.QUICPublicAddress != "8.8.4.4:51234" {
+		t.Fatalf("missing valid QUIC public candidate: %+v", status)
+	}
+	if got := runtime.quicCandidates(); !slices.Contains(got, "8.8.4.4:51234") {
+		t.Fatalf("missing mapped UDP endpoint: %v", got)
+	}
+	runtime.udpUPnPAddress = netip.AddrPort{}
+	if got := runtime.quicCandidates(); slices.Contains(got, "8.8.4.4:51234") {
+		t.Fatalf("expired mapping must be withdrawn: %v", got)
+	}
+	next, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	next.DirectUPnPEnabled = false
+	if _, err := store.Save(next); err != nil {
+		t.Fatal(err)
+	}
+	a.RefreshFileDirectUPnP()
+	if status := a.FileDirectStatus(); status.QUICPublicAddress != "" || status.QUICMappingState != "disabled" {
+		t.Fatalf("disabling UPnP must hide the QUIC endpoint: %+v", status)
 	}
 }

@@ -11,6 +11,7 @@ import (
 
 	"github.com/apernet/quic-go"
 	"relayproxy/internal/p2p/candidate"
+	"relayproxy/internal/p2p/upnp"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -49,9 +50,8 @@ func fileDirectQUICConfig() *quic.Config {
 	return config
 }
 
-// quicCandidates only advertises the actual bound UDP listener. This stage
-// supports LAN and routable IPv6/IPv4; NAT hole punching requires additional
-// Server-mediated candidate exchange and is not assumed here.
+// quicCandidates advertises the bound listener plus an optional valid UDP
+// UPnP mapping. UPnP is not NAT hole punching and cannot bypass CGNAT.
 func (r *fileDirectRuntime) quicCandidates() []string {
 	if r.quicListener == nil {
 		return nil
@@ -61,6 +61,11 @@ func (r *fileDirectRuntime) quicCandidates() []string {
 		return nil
 	}
 	result := make([]string, 0, 16)
+	// offer() calls this under r.mu. A mapped endpoint is only advertised
+	// while its lease is healthy and the router reports public IPv4.
+	if r.udpUPnPAddress.IsValid() && upnp.IsPublicWANIPv4(r.udpUPnPAddress.Addr()) {
+		result = append(result, r.udpUPnPAddress.String())
+	}
 	for _, c := range candidate.Discover(addr.Port, 0) {
 		if c.Protocol == "udp" {
 			result = append(result, c.Address)

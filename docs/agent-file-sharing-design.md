@@ -356,3 +356,12 @@ flowchart LR
 - 双 Agent 自动化进一步断言一次成功的 QUIC 直连，在关闭 QUIC 监听器后回退到文件 TCP 直连，再关闭文件 TCP 监听器后回退 Relay。上传、下载、前缀续传与 SHA-256 完整性沿用同一文件协议。
 - **当前不声称完成 NAT 打洞**：QUIC 候选仅从本地真实监听接口取得，LAN 和可路由公网地址可能直连；双方经由 NAT/CGNAT 或对称 NAT 时，仍缺少与 Server 协调的每会话 UDP 反射候选交换、双向 HMAC 打洞和稳定 socket 复用，遇不可达 UDP 将安全回退 TCP/Relay。不能把 QUIC 直连或现有 UPnP TCP 映射冒充完整 P2P 穿透。
 - PR #204 的 QUIC 增强仍需最新 Go/UI/Windows/macOS CI 全部通过，异网双物理设备验收独立待办。
+
+## 20. 文件专用 QUIC/UDP UPnP 映射（2026-10-14）
+
+- 延续本机共享设置中默认关闭的 `directUpnpEnabled`，只有用户显式开启才尝试文件专用 UDP UPnP 映射。与既有文件 TCP 映射及代理 P2P UDP 映射互不复用租约；使用 QUIC 实际监听的内部 UDP 端口，并分别进行网关发现、短租约、续期、所有权检查、关闭删除。
+- 有效公网 WAN IPv4:UDP 映射候选优先附加到 Server 已认证的文件 `FileDirectOffer.UDPEndpoints`，由客户端按 `direct_quic → direct_tls → relay_quic/relay_tls` 顺序尝试；TLS 1.3 证书指纹、ALPN、Server 一次性票据、`files.client/files.host` 和主机目录 ACL 全部保持原有检查，不因 UPnP 改变。
+- 映射失败、续期故障、网关私网/CGNAT、关闭共享或关闭开关时，必须立即撤销公网 UDP 候选，不影响 LAN 候选、TCP 直连与 Relay。TCP 失败时正常的 UDP 独立租约仍可使用，避免两条传输路径互相牵连。
+- 本机 Web/Wails 诊断分开显示 TCP 和 QUIC/UDP 的映射状态、有效公网地址及失败原因；仍以实际传输任务的 `transportPath` 为成功直连依据。
+- 单测覆盖私网 WAN 地址不得发布、启用与停用、健康公网 UDP 候选发布和续期候选撤销。最新代码提交后需单独确认 Go/UI/跨平台 CI，且必须进行不同运营商的实体设备网络测试。
+- **边界**：UPnP 是主动在用户路由器开放入站端口，不是 Server 协调的反射候选 + 双向 NAT 打洞；双侧 CGNAT、对称 NAT 的连接能力仍未实现，也没有跨网络实测证明，PR 维持 Draft。

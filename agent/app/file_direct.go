@@ -42,9 +42,12 @@ type fileDirectRuntime struct {
 	tickets      map[string]fileDirectTicket
 	upnpCancel   context.CancelFunc
 	upnpRunning  bool
-	upnpAddress  netip.AddrPort
-	upnpState    string
-	upnpReason   string
+	upnpAddress    netip.AddrPort
+	upnpState      string
+	upnpReason     string
+	udpUPnPAddress netip.AddrPort
+	udpUPnPState   string
+	udpUPnPReason  string
 	closed       bool
 	accepted     atomic.Int64
 	quicAccepted atomic.Int64
@@ -144,16 +147,19 @@ func (r *fileDirectRuntime) close() {
 // FileDirectStatus is local-only diagnostic metadata. It does not expose
 // file paths, access tokens, public keys, or other peers' identities.
 type FileDirectStatus struct {
-	UPnPEnabled   bool   `json:"upnpEnabled"`
-	ListenerReady bool   `json:"listenerReady"`
-	QUICReady     bool   `json:"quicReady"`
-	MappingState  string `json:"mappingState"`
-	PublicAddress string `json:"publicAddress,omitempty"`
-	Reason        string `json:"reason,omitempty"`
+	UPnPEnabled       bool   `json:"upnpEnabled"`
+	ListenerReady     bool   `json:"listenerReady"`
+	QUICReady         bool   `json:"quicReady"`
+	MappingState      string `json:"mappingState"`
+	PublicAddress     string `json:"publicAddress,omitempty"`
+	Reason            string `json:"reason,omitempty"`
+	QUICMappingState  string `json:"quicMappingState"`
+	QUICPublicAddress string `json:"quicPublicAddress,omitempty"`
+	QUICReason        string `json:"quicReason,omitempty"`
 }
 
 func (a *Agent) FileDirectStatus() FileDirectStatus {
-	result := FileDirectStatus{MappingState: "disabled"}
+	result := FileDirectStatus{MappingState: "disabled", QUICMappingState: "disabled"}
 	if a == nil {
 		return result
 	}
@@ -177,10 +183,12 @@ func (a *Agent) FileDirectStatus() FileDirectStatus {
 	}
 	if !approved {
 		result.MappingState = "not_approved"
+		result.QUICMappingState = "not_approved"
 		return result
 	}
 	if runtime == nil {
 		result.MappingState = "awaiting_request"
+		result.QUICMappingState = "awaiting_request"
 		return result
 	}
 	runtime.mu.Lock()
@@ -199,6 +207,20 @@ func (a *Agent) FileDirectStatus() FileDirectStatus {
 		result.Reason = runtime.upnpReason
 		if len(result.Reason) > 220 {
 			result.Reason = result.Reason[:220]
+		}
+	}
+	result.QUICMappingState = runtime.udpUPnPState
+	if result.QUICMappingState == "" {
+		result.QUICMappingState = "awaiting_request"
+	}
+	if !runtime.closed && runtime.quicListener != nil &&
+		runtime.udpUPnPAddress.IsValid() && upnp.IsPublicWANIPv4(runtime.udpUPnPAddress.Addr()) {
+		result.QUICPublicAddress = runtime.udpUPnPAddress.String()
+	}
+	if runtime.udpUPnPReason != "" {
+		result.QUICReason = runtime.udpUPnPReason
+		if len(result.QUICReason) > 220 {
+			result.QUICReason = result.QUICReason[:220]
 		}
 	}
 	return result
@@ -241,6 +263,9 @@ func (r *fileDirectRuntime) syncUPnP() {
 		r.upnpAddress = netip.AddrPort{}
 		r.upnpState = "disabled"
 		r.upnpReason = ""
+		r.udpUPnPAddress = netip.AddrPort{}
+		r.udpUPnPState = "disabled"
+		r.udpUPnPReason = ""
 		if r.upnpCancel != nil {
 			r.upnpCancel()
 		}
@@ -257,6 +282,8 @@ func (r *fileDirectRuntime) syncUPnP() {
 	r.upnpCancel = cancel
 	r.upnpState = "discovering"
 	r.upnpReason = ""
+	r.udpUPnPState = "discovering"
+	r.udpUPnPReason = ""
 	r.upnpRunning = true
 	r.wg.Add(1)
 	go r.runUPnP(ctx)
@@ -271,6 +298,15 @@ func (r *fileDirectRuntime) runUPnP(ctx context.Context) {
 		r.upnpAddress = netip.AddrPort{}
 		r.mu.Unlock()
 	}()
+	// Both protocols share the explicit file-only opt-in but maintain
+	// separate IGD leases, renewal and ownership-checked cleanup. Wait for
+	// the UDP mapper before declaring this runtime idle to avoid overlap.
+	udpDone := make(chan struct{})
+	go func() {
+		defer close(udpDone)
+		r.runQUICUPnP(ctx)
+	}()
+	defer func() { <-udpDone }()
 	port := r.listener.Addr().(*net.TCPAddr).Port
 	discoveryCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
 	mapping, address, err := upnp.MapTCP(discoveryCtx, port)
@@ -282,6 +318,12 @@ func (r *fileDirectRuntime) runUPnP(ctx context.Context) {
 			r.upnpReason = err.Error()
 		}
 		r.mu.Unlock()
+		// TCP failure must not kill a healthy independently mapped QUIC
+		// listener; keep its UDP lease until the option is switched off.
+		select {
+		case <-ctx.Done():
+		case <-udpDone:
+		}
 		return
 	}
 	defer mapping.Close()

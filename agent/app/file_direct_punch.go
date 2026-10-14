@@ -37,7 +37,7 @@ func (a *Agent) prepareFilePunch(ctx context.Context) (*net.UDPConn, []protocol.
 	reflexive, err := candidate.ProbeReflexiveAll(probeCtx, rendezvous, conn, "udp")
 	cancel()
 	if err == nil {
-		items = append(items, reflexive...)
+		items = mergeFilePunchCandidates(items, reflexive)
 	}
 	validated, err := candidate.Validate(items)
 	if err != nil || len(validated) == 0 {
@@ -45,6 +45,20 @@ func (a *Agent) prepareFilePunch(ctx context.Context) (*net.UDPConn, []protocol.
 		return nil, nil
 	}
 	return conn, validated
+}
+
+// Ignore individual invalid reflection responses (e.g. 127.0.0.1 from a
+// localhost integration rendezvous) without losing the valid LAN candidates.
+// A bad IP family or CGNAT hint must not disable a reachable same-LAN route.
+func mergeFilePunchCandidates(local, reflexive []protocol.P2PCandidate) []protocol.P2PCandidate {
+	result := append([]protocol.P2PCandidate(nil), local...)
+	for _, item := range reflexive {
+		valid, err := candidate.Validate([]protocol.P2PCandidate{item})
+		if err == nil && len(valid) == 1 && len(result) < candidate.MaxCandidates {
+			result = append(result, valid[0])
+		}
+	}
+	return result
 }
 
 func (r *fileDirectRuntime) startFilePunch(grant protocol.FileDirectGrant) ([]protocol.P2PCandidate, error) {

@@ -8,6 +8,7 @@ import (
 	"net"
 	"time"
 
+	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -56,7 +57,7 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 		}
 	}
 	var lastErr error
-	for _, endpoint := range offer.Endpoints {
+	for _, endpoint := range prioritizeFileDirectEndpoints(offer.Endpoints, candidate.LocalInterfaceSubnets()) {
 		if ctx.Err() != nil {
 			return nil, protocol.FileShareResponse{}, ctx.Err()
 		}

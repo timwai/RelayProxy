@@ -200,7 +200,7 @@ func (r *fileDirectRuntime) serveQUICConnection(conn *quic.Conn) {
 // ultimately Relay to preserve connectivity without weakening permissions.
 func (a *Agent) tryFileQUIC(ctx context.Context, offer protocol.FileDirectOffer, req protocol.FileShareRequest) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
 	var lastErr error = errors.New("no direct QUIC candidate reachable")
-	for _, endpoint := range offer.UDPEndpoints {
+	for _, endpoint := range prioritizeFileDirectEndpoints(offer.UDPEndpoints, candidate.LocalInterfaceSubnets()) {
 		addr, err := netip.ParseAddrPort(endpoint)
 		if err != nil || addr.Port() == 0 || addr.Addr().IsUnspecified() ||
 			addr.Addr().IsMulticast() || addr.Addr().IsLinkLocalUnicast() {

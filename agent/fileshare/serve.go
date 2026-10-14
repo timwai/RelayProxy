@@ -88,6 +88,10 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 			return
 		}
 	}
+	if req.Action == protocol.FileShareUpload && (req.Resume || req.UploadID != "") {
+		s.serveResumableUpload(ctx, stream, req, *selected, authenticatedDeviceID)
+		return
+	}
 	if req.Action == protocol.FileShareUpload {
 		s.serveUpload(ctx, stream, req, *selected, authenticatedDeviceID)
 		return

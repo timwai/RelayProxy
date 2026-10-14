@@ -1,6 +1,8 @@
 package fileshare
 
 import (
+	"bytes"
+	"strings"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -136,5 +138,69 @@ func TestFileShareServiceDoesNotFollowEscapingSymlink(t *testing.T) {
 		Action: protocol.FileShareDownload, ShareID: state.Shares[0].ID, Path: "escape.txt"})
 	if response.Success {
 		t.Fatalf("escaped root via symlink: %+v", response)
+	}
+}
+
+func TestFileShareDownloadResumeValidatesPrefix(t *testing.T) {
+	dir := t.TempDir()
+	data := []byte("the quick brown fox jumps over the lazy dog")
+	if err := os.WriteFile(filepath.Join(dir, "data.txt"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	store, err := New(filepath.Join(t.TempDir(), "agent.yaml"))
+	if err != nil { t.Fatal(err) }
+	state, err := store.Load()
+	if err != nil { t.Fatal(err) }
+	state.Enabled = true
+	state.Shares = []Share{{
+		Name: "test", RootPath: dir, Enabled: true,
+		Permissions: map[string]Permission{"client-1": PermissionRead},
+	}}
+	state, err = store.Save(state)
+	if err != nil { t.Fatal(err) }
+	const offset = 17
+	h := sha256.Sum256(data[:offset])
+	issue := func(from string, resumeHash string) (protocol.FileShareResponse, []byte, protocol.FileShareResponse) {
+		client, host := net.Pipe()
+		defer client.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		done := make(chan struct{})
+		go func() {
+			defer close(done)
+			store.Serve(ctx, fileShareTestStream{host}, from)
+		}()
+		if err := protocol.WriteJSON(client, protocol.FileShareRequest{
+			Action: protocol.FileShareDownload, ShareID: state.Shares[0].ID,
+			Path: "data.txt", Offset: offset, PrefixSHA256: resumeHash,
+		}); err != nil { t.Fatal(err) }
+		var initial protocol.FileShareResponse
+		if err := protocol.ReadJSON(client, &initial); err != nil { t.Fatal(err) }
+		var suffix []byte
+		var receipt protocol.FileShareResponse
+		if initial.Success {
+			suffix = make([]byte, len(data)-offset)
+			if _, err := io.ReadFull(client, suffix); err != nil { t.Fatal(err) }
+			if err := protocol.ReadJSON(client, &receipt); err != nil { t.Fatal(err) }
+		}
+		<-done
+		return initial, suffix, receipt
+	}
+	initial, suffix, receipt := issue("client-1", hex.EncodeToString(h[:]))
+	if !initial.Success || initial.Offset != offset || initial.Size != int64(len(data)) ||
+		!bytes.Equal(suffix, data[offset:]) || !receipt.Success {
+		t.Fatalf("resume failed: initial=%+v suffix=%q receipt=%+v", initial, suffix, receipt)
+	}
+	whole := sha256.Sum256(data)
+	if receipt.SHA256 != hex.EncodeToString(whole[:]) {
+		t.Fatalf("resume full digest mismatch: %q", receipt.SHA256)
+	}
+	rejected, _, _ := issue("client-1", strings.Repeat("0", 64))
+	if rejected.Success || !strings.Contains(rejected.Error, "prefix mismatch") {
+		t.Fatalf("corrupt resume prefix accepted: %+v", rejected)
+	}
+	rejected, _, _ = issue("intruder", hex.EncodeToString(h[:]))
+	if rejected.Success {
+		t.Fatal("unapproved device accessed a partial file")
 	}
 }

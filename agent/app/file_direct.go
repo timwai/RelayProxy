@@ -16,6 +16,7 @@ import (
 	"net"
 	"slices"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"relayproxy/internal/p2p/candidate"
@@ -36,6 +37,7 @@ type fileDirectRuntime struct {
 	mu sync.Mutex
 	tickets map[string]fileDirectTicket
 	closed bool
+	accepted atomic.Int64
 	wg sync.WaitGroup
 }
 
@@ -119,6 +121,7 @@ func (r *fileDirectRuntime) offer(clientID string, grant protocol.FileDirectGran
 	// Same-host integration and localhost device pairing use loopback as a
 	// *hint* only; the TLS certificate fingerprint and random ticket still
 	// prevent another local process from impersonating the peer.
+	if len(endpoints)>15 {endpoints=endpoints[:15]}
 	endpoints=append(endpoints,net.JoinHostPort("127.0.0.1",fmt.Sprint(port)))
 	result.Endpoints=endpoints
 	result.Fingerprint=r.fingerprint
@@ -174,6 +177,7 @@ func (r *fileDirectRuntime) serveConnection(conn net.Conn) {
 		return
 	}
 	if err:=protocol.WriteJSON(conn,protocol.FileDirectAuthResult{Allowed:true});err!=nil{return}
+	r.accepted.Add(1)
 	_ = conn.SetDeadline(time.Time{})
 	// Explicit live Server rechecks are essential: the local directory ACL
 	// alone cannot observe Server-side device capability revocation.

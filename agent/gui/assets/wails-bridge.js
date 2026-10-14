@@ -12,6 +12,7 @@
   window.goGetConnections = () => invoke('GetConnections');
   window.goClearConnections = () => invoke('ClearConnections');
   window.goGetFileShares = () => invoke('GetFileShares');
+  window.goGetFileShareCandidates = () => invoke('GetFileShareCandidates');
   window.goGetFileSharePeers = () => invoke('GetFileSharePeers');
   window.goGetRemoteFileShares = deviceID => invoke('GetRemoteFileShares', deviceID);
   window.goGetRemoteFileEntries = (deviceID, shareID, relativePath) => invoke('GetRemoteFileEntries', deviceID, shareID, relativePath);

@@ -2,6 +2,8 @@ package fileshare
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"crypto/rand"
 	"encoding/hex"
 	"errors"
@@ -86,7 +88,8 @@ func (s *FileStore) serveUpload(ctx context.Context, stream tunnel.TunnelStream,
 		input: stream, store: s, shareID: selected.ID, rootPath: selected.RootPath,
 		deviceID: authenticatedDeviceID,
 	}
-	n, err := io.CopyN(temp, src, req.Size)
+	digest := sha256.New()
+	n, err := io.CopyN(io.MultiWriter(temp, digest), src, req.Size)
 	if err != nil || n != req.Size || ctx.Err() != nil {
 		// A canceled or truncated transfer cannot leave visible partial data.
 		if ctx.Err() == nil {
@@ -122,7 +125,9 @@ func (s *FileStore) serveUpload(ctx context.Context, stream tunnel.TunnelStream,
 		}
 		return
 	}
-	_ = protocol.WriteJSON(stream, protocol.FileShareResponse{Success: true, Size: req.Size})
+	_ = protocol.WriteJSON(stream, protocol.FileShareResponse{
+		Success: true, Size: req.Size, SHA256: hex.EncodeToString(digest.Sum(nil)),
+	})
 }
 
 // sharePermissionReader handles mid-upload revocation as well as the initial

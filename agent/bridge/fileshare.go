@@ -43,3 +43,9 @@ func (b *UIBridge) GetRemoteFileEntries(deviceID, shareID, relativePath string) 
 	defer cancel()
 	return b.agent.RemoteFileList(ctx, deviceID, shareID, relativePath)
 }
+
+func (b *UIBridge) GetFileShareCandidates() ([]protocol.FileShareCandidate, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return b.agent.FileShareCandidates(ctx)
+}

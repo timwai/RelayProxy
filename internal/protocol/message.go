@@ -32,6 +32,7 @@ const (
 	FrameTypeBrowserNetworkTCP FrameType = 0x12
 	FrameTypeFileShare          FrameType = 0x13
 	FrameTypeFileSharePeers     FrameType = 0x14
+	FrameTypeFileShareCandidates FrameType = 0x15
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

@@ -69,6 +69,13 @@ func (a *Agent) FileSharePeers(ctx context.Context) ([]protocol.FileSharePeer, e
 }
 
 func (a *Agent) openRemoteFile(ctx context.Context, targetDeviceID string, req protocol.FileShareRequest) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
+	// File-scoped direct credentials are independent of Proxy/RDP grants.
+	// If the host has no reachable LAN/public endpoint, preserve the existing
+	// authenticated Relay data path without exposing file contents to a
+	// partially authenticated peer.
+	if direct, response, directErr := a.tryFileDirect(ctx, targetDeviceID, req); directErr == nil {
+		return direct, response, nil
+	}
 	sess, _, err := a.fileSharingSession()
 	if err != nil {
 		return nil, protocol.FileShareResponse{}, err

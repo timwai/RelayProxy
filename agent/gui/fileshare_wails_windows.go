@@ -3,8 +3,8 @@
 package gui
 
 import (
-	"relayproxy/agent/bridge"
 	"relayproxy/agent/app"
+	"relayproxy/agent/bridge"
 	"relayproxy/agent/fileshare"
 	"relayproxy/internal/protocol"
 )

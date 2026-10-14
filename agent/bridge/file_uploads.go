@@ -196,7 +196,7 @@ func (m *fileTransferManager) upload(ctx context.Context, record *fileTransferRe
 	} else {
 		started := time.Now()
 		var lastDone int64
-		_, err = m.agent.UploadRemoteFile(ctx, record.DeviceID, record.ShareID, record.RelativePath,
+		_, err = m.agent.UploadRemoteFileResuming(ctx, record.DeviceID, record.ShareID, record.RelativePath,
 			file, record.Total, func(done, total int64) {
 				m.mu.Lock()
 				record.Done, record.Total = done, total

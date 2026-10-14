@@ -46,3 +46,54 @@ func (db *DB) AuthorizeFileShare(clientID, hostID string) (bool, error) {
 	return slices.Contains(clientGrants, protocol.CapabilityFilesClient) &&
 		slices.Contains(hostGrants, protocol.CapabilityFilesHost), nil
 }
+
+// ListFileShareCandidates enumerates approved files.client devices in the
+// requesting host's active identity. It intentionally includes offline peers,
+// never exposes members of a different identity, and does not grant access.
+func (db *DB) ListFileShareCandidates(hostDeviceID string) ([]protocol.FileShareCandidate, error) {
+	result := []protocol.FileShareCandidate{}
+	if hostDeviceID == "" {
+		return result, nil
+	}
+	var approved string
+	var identityID string
+	err := db.QueryRow(`SELECT h.approved_capabilities, h.identity_id
+		FROM devices h
+		JOIN identities ident ON ident.id = h.identity_id AND ident.status = 'active'
+		WHERE h.id = ? AND h.approval_state = 'approved'`, hostDeviceID).Scan(&approved, &identityID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return result, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	hostGrants, err := decodeCapabilities(approved)
+	if err != nil {
+		return nil, err
+	}
+	if !slices.Contains(hostGrants, protocol.CapabilityFilesHost) {
+		return result, nil
+	}
+	rows, err := db.Query(`SELECT id, name, approved_capabilities
+		FROM devices
+		WHERE identity_id = ? AND approval_state = 'approved' AND id <> ?
+		ORDER BY name, id LIMIT 512`, identityID, hostDeviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id, name, raw string
+		if err := rows.Scan(&id, &name, &raw); err != nil {
+			return nil, err
+		}
+		grants, err := decodeCapabilities(raw)
+		if err != nil {
+			return nil, err
+		}
+		if slices.Contains(grants, protocol.CapabilityFilesClient) {
+			result = append(result, protocol.FileShareCandidate{DeviceID: id, Name: name})
+		}
+	}
+	return result, rows.Err()
+}

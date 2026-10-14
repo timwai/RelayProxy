@@ -61,7 +61,7 @@ func fileUploadRequest(t *testing.T, store *FileStore, from string, req protocol
 			delete(state.Shares[0].Permissions,from)
 			if _,err:=store.Save(state);err!=nil{t.Fatal(err)}
 		}
-		if _,err:=client.Write(contents);err!=nil{t.Fatal(err)}
+		if !revokeBeforeData { if _,err:=client.Write(contents);err!=nil{t.Fatal(err)} }
 		if err:=client.CloseWrite();err!=nil{t.Fatal(err)}
 		if err:=protocol.ReadJSON(client,&final);err!=nil{t.Fatal(err)}
 	}

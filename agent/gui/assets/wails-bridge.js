@@ -12,6 +12,12 @@
   window.goGetConnections = () => invoke('GetConnections');
   window.goClearConnections = () => invoke('ClearConnections');
   window.goGetFileShares = () => invoke('GetFileShares');
+  window.goGetFileSharePeers = () => invoke('GetFileSharePeers');
+  window.goGetRemoteFileShares = deviceID => invoke('GetRemoteFileShares', deviceID);
+  window.goGetRemoteFileEntries = (deviceID, shareID, relativePath) => invoke('GetRemoteFileEntries', deviceID, shareID, relativePath);
+  window.goStartFileDownload = (deviceID, shareID, relativePath) => invoke('StartFileDownload', deviceID, shareID, relativePath);
+  window.goGetFileTransfers = () => invoke('GetFileTransfers');
+  window.goCancelFileDownload = id => invoke('CancelFileDownload', id);
   window.goSaveFileShares = state => invoke('SaveFileShares', state);
   window.goGetStatus = () => invoke('GetStatus');
   window.goGetDiagnostics = () => invoke('GetDiagnostics');

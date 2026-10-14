@@ -1,0 +1,38 @@
+name: Agent Background CI
+
+on:
+  push:
+    branches:
+      - main
+      - "feat/**"
+      - "fix/**"
+    paths:
+      - "cmd/relay-agent/**"
+      - "agent/singleton/**"
+      - ".github/workflows/agent-background.yml"
+  pull_request:
+    paths:
+      - "cmd/relay-agent/**"
+      - "agent/singleton/**"
+      - ".github/workflows/agent-background.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  background-platforms:
+    name: Background CLI (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test background CLI and singleton
+        run: go test ./cmd/relay-agent ./agent/singleton -run 'TestBackground|TestAcquirePreventsDuplicateAgent' -count=1 -timeout=5m

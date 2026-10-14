@@ -5,6 +5,7 @@ import (
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"os"
@@ -62,6 +63,11 @@ func main() {
 	minimizedFlag := flag.Bool("minimized", false, "Start the desktop window minimized to the system tray")
 	hiddenFlag := flag.Bool("hidden", false, "Alias for --minimized (kept for existing autostart entries)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
+	backgroundFlag := flag.Bool("background", false, "Run the Agent in a detached background process (headless)")
+	daemonFlag := flag.Bool("daemon", false, "Alias for --background")
+	shortBackgroundFlag := flag.Bool("d", false, "Alias for --background")
+	backgroundLogFlag := flag.String("log-file", "", "Background log file (default: ~/.relayproxy/logs/relay-agent.log)")
+	backgroundChildFlag := flag.Bool("_background-child", false, "Internal detached child process")
 	startupHelperFlag := flag.String(startup.HelperFlagName(), "", "Internal Windows startup helper action")
 	networkServiceFlag := flag.Bool(divert.NetworkServiceModeFlagName(), false, "Internal Windows network service mode")
 	networkServiceSIDFlag := flag.String(divert.NetworkServiceSIDFlagName(), "", "Internal Windows network service allowed SID")
@@ -101,6 +107,31 @@ func main() {
 	if *versionFlag {
 		fmt.Printf("relay-agent %s (%s/%s)\n", Version, runtime.GOOS, runtime.GOARCH)
 		return
+	}
+
+	// app.init normally tees logs to stdout for interactive command-line runs.
+	// Detached startup reserves stdout exclusively for the readiness handshake;
+	// route the live log stream to the inherited log-file stderr instead while
+	// preserving the UI in-memory log buffer.
+	if *backgroundChildFlag {
+		log.SetOutput(io.MultiWriter(app.GlobalLogBuffer, app.BestEffort(os.Stderr)))
+	}
+
+	// A detached launch is a separate CLI process, not a hidden desktop GUI.
+	// Launch it before acquiring the instance lock; the child acquires the lock
+	// itself and reports readiness only after the listeners have started.
+	if *backgroundFlag || *daemonFlag || *shortBackgroundFlag {
+		if *guiFlag || *minimizedFlag || *hiddenFlag {
+			fmt.Fprintln(os.Stderr, "[Agent] --background cannot be combined with --gui, --minimized or --hidden")
+			os.Exit(2)
+		}
+		if !*backgroundChildFlag {
+			if err := launchBackground(os.Args[1:], *backgroundLogFlag); err != nil {
+				fmt.Fprintf(os.Stderr, "[Agent] Background startup failed: %v\n", err)
+				os.Exit(1)
+			}
+			return
+		}
 	}
 
 	// A GUI restart starts the replacement process before the current process
@@ -330,6 +361,12 @@ func main() {
 		}()
 	}
 
+	// The short-lived launcher must never report success before the Agent and
+	// the optional Web server are both running. The child owns cleanup/signals.
+	if *backgroundChildFlag {
+		notifyBackgroundReady()
+	}
+
 	// --- Desktop window -----------------------------------------------------
 	// A bare Windows/macOS desktop launch is explicit user intent. Do not let a
 	// stale gui.enabled=false from an older config silently turn a GUI-subsystem
@@ -375,7 +412,11 @@ func main() {
 	}
 
 	// --- Headless -----------------------------------------------------------
-	log.Println("[Agent] Press Ctrl+C to terminate.")
+	if *backgroundChildFlag {
+		log.Println("[Agent] Running in detached background mode.")
+	} else {
+		log.Println("[Agent] Press Ctrl+C to terminate.")
+	}
 
 	sigChan := make(chan os.Signal, 1)
 	signal.Notify(sigChan, os.Interrupt, syscall.SIGTERM)

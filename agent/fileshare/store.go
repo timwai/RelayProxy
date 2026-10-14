@@ -102,10 +102,14 @@ func (s *FileStore) Save(next State) (State,error) {
   if !info.IsDir(){return State{},fmt.Errorf("%s: root must be a directory",share.Name)}
   share.RootPath=resolved
   for _,p:=range paths{
-   a,e1:=filepath.Rel(p,resolved);b,e2:=filepath.Rel(resolved,p)
-   if e1==nil&&e2==nil&&(a=="."||a==".."||strings.HasPrefix(a,".."+string(filepath.Separator))||b==".."||strings.HasPrefix(b,".."+string(filepath.Separator))) {
-    // Only equality or ancestor/descendant is a conflict. Siblings are allowed.
-    if a=="."||(!strings.HasPrefix(a,".."+string(filepath.Separator))&&a!="..")||(!strings.HasPrefix(b,".."+string(filepath.Separator))&&b!=".."){return State{},fmt.Errorf("overlapping shared folders: %s",share.Name)}
+   relativeFromExisting,e1:=filepath.Rel(p,resolved)
+   relativeFromNew,e2:=filepath.Rel(resolved,p)
+   if e1!=nil||e2!=nil{continue} // Different volumes cannot overlap.
+   within:=func(relative string)bool{
+    return relative=="."||(relative!=".."&&!strings.HasPrefix(relative,".."+string(filepath.Separator)))
+   }
+   if within(relativeFromExisting)||within(relativeFromNew){
+    return State{},fmt.Errorf("overlapping shared folders: %s",share.Name)
    }
   }
   paths=append(paths,resolved)

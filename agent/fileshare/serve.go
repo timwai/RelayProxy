@@ -136,5 +136,45 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		return
 	}
 	_ = stream.SetDeadline(time.Time{})
-	_, _ = io.CopyN(stream, file, info.Size())
+	writer := &sharePermissionWriter{
+		stream: stream, store: s, shareID: selected.ID,
+		rootPath: selected.RootPath, deviceID: authenticatedDeviceID,
+	}
+	_, _ = io.CopyN(writer, file, info.Size())
+}
+
+// sharePermissionWriter re-reads the local ACL at most once per second during
+// a long transfer. Removing a share, disabling it, changing its root or
+// revoking the peer's read access terminates the stream immediately.
+type sharePermissionWriter struct {
+	stream   io.Writer
+	store    *FileStore
+	shareID  string
+	rootPath string
+	deviceID string
+	lastCheck time.Time
+}
+
+func (w *sharePermissionWriter) Write(p []byte) (int, error) {
+	if w.lastCheck.IsZero() || time.Since(w.lastCheck) >= time.Second {
+		state, err := w.store.Load()
+		if err != nil || !state.Enabled {
+			return 0, errors.New("file sharing is disabled")
+		}
+		valid := false
+		for _, share := range state.Shares {
+			perm := share.Permissions[w.deviceID]
+			if share.ID == w.shareID && share.Enabled &&
+				share.RootPath == w.rootPath &&
+				(perm == PermissionRead || perm == PermissionReadWrite) {
+				valid = true
+				break
+			}
+		}
+		if !valid {
+			return 0, errors.New("file sharing permission revoked")
+		}
+		w.lastCheck = time.Now()
+	}
+	return w.stream.Write(p)
 }

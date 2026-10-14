@@ -142,6 +142,14 @@ func (s *FileStore) Save(next State) (State, error) {
 		if !info.IsDir() {
 			return State{}, fmt.Errorf("%s: root must be a directory", share.Name)
 		}
+		// Keep old ACLs from silently granting access to a different tree.
+		// Changing a previously authorized share root requires explicit ACL
+		// removal; the GUI can then re-authorize devices against the new root.
+		for _, previous := range old.Shares {
+			if previous.ID == share.ID && previous.RootPath != resolved && len(share.Permissions) != 0 {
+				return State{}, fmt.Errorf("%s: clear device permissions before changing the shared folder", share.Name)
+			}
+		}
 		share.RootPath = resolved
 		for _, p := range paths {
 			relativeFromExisting, e1 := filepath.Rel(p, resolved)

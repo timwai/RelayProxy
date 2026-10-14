@@ -70,6 +70,10 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		fail("invalid relative path")
 		return
 	}
+	if req.Action == protocol.FileShareUpload {
+		s.serveUpload(ctx, stream, req, *selected, authenticatedDeviceID)
+		return
+	}
 	if req.Action != protocol.FileShareListDir && req.Action != protocol.FileShareDownload {
 		fail("unsupported file sharing operation")
 		return

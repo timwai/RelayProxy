@@ -225,6 +225,12 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	}
 
 	mux.HandleFunc("GET /api/file-shares", w.fileShares)
+	mux.HandleFunc("GET /api/file-shares/peers", w.fileSharePeers)
+	mux.HandleFunc("GET /api/file-shares/remote", w.fileShareRemoteShares)
+	mux.HandleFunc("GET /api/file-shares/entries", w.fileShareRemoteEntries)
+	mux.HandleFunc("GET /api/file-transfers", w.listFileDownloads)
+	mux.HandleFunc("POST /api/file-transfers", w.startFileDownload)
+	mux.HandleFunc("POST /api/file-transfers/{id}/cancel", w.cancelFileDownload)
 	mux.HandleFunc("PUT /api/file-shares", w.fileShares)
 	mux.HandleFunc("GET /api/status", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetStatus()) })
 	mux.HandleFunc("GET /api/network-capabilities", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, divert.PlatformCapabilities()) })
@@ -610,6 +616,12 @@ const webBridgeJS = `(function () {
   function json(path, method, value) {
     return request(path, {method: method, headers: {'Content-Type':'application/json'}, body: JSON.stringify(value)});
   }
+  window.goGetFileSharePeers = function () { return request('/api/file-shares/peers'); };
+  window.goGetRemoteFileShares = function (deviceId) { return request('/api/file-shares/remote?deviceId=' + encodeURIComponent(deviceId)); };
+  window.goGetRemoteFileEntries = function (deviceId, shareId, relativePath) { return request('/api/file-shares/entries?deviceId=' + encodeURIComponent(deviceId) + '&shareId=' + encodeURIComponent(shareId) + '&path=' + encodeURIComponent(relativePath)); };
+  window.goStartFileDownload = function (deviceId, shareId, relativePath) { return json('/api/file-transfers', 'POST', {deviceId:deviceId, shareId:shareId, path:relativePath}); };
+  window.goGetFileTransfers = function () { return request('/api/file-transfers'); };
+  window.goCancelFileDownload = function (id) { return json('/api/file-transfers/' + encodeURIComponent(id) + '/cancel', 'POST', {}); };
   window.goGetFileShares = function () { return request('/api/file-shares'); };
   window.goSaveFileShares = function (state) { return json('/api/file-shares', 'PUT', state); };
   window.goGetStatus = function () { return request('/api/status'); };

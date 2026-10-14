@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
 	"path"
 	"strings"
@@ -28,6 +29,7 @@ type fileUploadSession struct {
 	done     int64
 	created  time.Time
 	file     *os.File
+	expires  *time.Timer
 }
 
 type FileUploadProgress struct {
@@ -39,11 +41,26 @@ type FileUploadProgress struct {
 func (m *fileTransferManager) cleanupStagesLocked() {
 	for id, stage := range m.stages {
 		if time.Since(stage.created) > uploadStageLifetime {
+			stage.expires.Stop()
 			_ = stage.file.Close()
 			_ = os.Remove(stage.file.Name())
 			delete(m.stages, id)
 		}
 	}
+}
+
+// expireUpload cleans abandoned temp files even if the user closes the file
+// picker or stops interacting with the transfer UI.
+func (m *fileTransferManager) expireUpload(id string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	stage := m.stages[id]
+	if stage == nil || time.Since(stage.created) < uploadStageLifetime {
+		return
+	}
+	_ = stage.file.Close()
+	_ = os.Remove(stage.file.Name())
+	delete(m.stages, id)
 }
 
 func (m *fileTransferManager) beginUpload(deviceID, shareID, remotePath string, size int64) (FileUploadProgress, error) {
@@ -52,7 +69,7 @@ func (m *fileTransferManager) beginUpload(deviceID, shareID, remotePath string, 
 	}
 	if strings.TrimSpace(deviceID) == "" || strings.TrimSpace(shareID) == "" ||
 		remotePath == "" || remotePath == "." || strings.Contains(remotePath, "\\") ||
-		strings.HasPrefix(remotePath, "/") || strings.Contains(remotePath, "..") ||
+		strings.HasPrefix(remotePath, "/") || !fs.ValidPath(remotePath) ||
 		path.Base(remotePath) == "" || path.Base(remotePath) == "." {
 		return FileUploadProgress{}, errors.New("invalid file upload target")
 	}
@@ -80,10 +97,12 @@ func (m *fileTransferManager) beginUpload(deviceID, shareID, remotePath string, 
 		os.Remove(file.Name())
 		return FileUploadProgress{}, errors.New("最多同时准备 5 个上传文件")
 	}
-	m.stages[id] = &fileUploadSession{
+	stage := &fileUploadSession{
 		id: id, deviceID: deviceID, shareID: shareID, path: remotePath,
 		size: size, created: time.Now(), file: file,
 	}
+	stage.expires = time.AfterFunc(uploadStageLifetime, func() { m.expireUpload(id) })
+	m.stages[id] = stage
 	return FileUploadProgress{ID: id, Size: size}, nil
 }
 
@@ -108,6 +127,7 @@ func (m *fileTransferManager) appendUpload(id, base64Chunk string) (FileUploadPr
 	n, err := stage.file.Write(payload)
 	stage.done += int64(n)
 	stage.created = time.Now()
+	stage.expires.Reset(uploadStageLifetime)
 	if err != nil || n != len(payload) {
 		return FileUploadProgress{}, fmt.Errorf("write upload staging data: %w", io.ErrShortWrite)
 	}
@@ -140,6 +160,7 @@ func (m *fileTransferManager) commitUpload(id string) (FileTransfer, error) {
 	if err := stage.file.Close(); err != nil {
 		return FileTransfer{}, err
 	}
+	stage.expires.Stop()
 	delete(m.stages, id)
 	ctx, cancel := context.WithCancel(context.Background())
 	rec := &fileTransferRecord{FileTransfer: FileTransfer{
@@ -203,6 +224,7 @@ func (m *fileTransferManager) discardUpload(id string) error {
 	if stage == nil {
 		return errors.New("upload staging session not found")
 	}
+	stage.expires.Stop()
 	delete(m.stages, id)
 	_ = stage.file.Close()
 	return os.Remove(stage.file.Name())

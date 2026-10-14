@@ -38,3 +38,14 @@ func TestBrowserUploadStagingValidatesPathsAndSize(t *testing.T) {
 	}
 	if _, err := m.beginUpload("", "share", "ok.txt", 1); err == nil { t.Fatal("accepted missing device") }
 }
+
+func TestBrowserUploadStageAcceptsFileNamesContainingDoubleDots(t *testing.T) {
+	m := newFileTransferManager(&app.Agent{})
+	stage, err := m.beginUpload("device", "share", "reports/final..review.pdf", 0)
+	if err != nil {
+		t.Fatalf("valid filename rejected: %v", err)
+	}
+	if err := m.discardUpload(stage.ID); err != nil {
+		t.Fatal(err)
+	}
+}

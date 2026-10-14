@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path"
 	"path/filepath"
@@ -34,9 +35,9 @@ type FileTransfer struct {
 
 type fileTransferRecord struct {
 	FileTransfer
-	cancel      context.CancelFunc
-	lastSample  time.Time
-	lastBytes   int64
+	cancel     context.CancelFunc
+	lastSample time.Time
+	lastBytes  int64
 }
 
 type fileTransferManager struct {
@@ -65,7 +66,7 @@ func (m *fileTransferManager) start(deviceID, shareID, relativePath string) (Fil
 	}
 	if deviceID == "" || shareID == "" || relativePath == "" || relativePath == "." ||
 		strings.Contains(relativePath, "\\") || strings.HasPrefix(relativePath, "/") ||
-		strings.Contains(relativePath, "..") {
+		!fs.ValidPath(relativePath) {
 		return FileTransfer{}, errors.New("invalid remote file selection")
 	}
 	name := path.Base(relativePath)
@@ -172,6 +173,9 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	destination := filepath.Join(dir, fmt.Sprintf("%s-%s%s", base, record.ID[:8], ext))
 	// Publish with no-replace semantics. Rename on Windows/Unix can overwrite
 	// a destination that appeared while another download was running.
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	if err := os.Link(tempPath, destination); err != nil {
 		return fmt.Errorf("publish download without overwriting: %w", err)
 	}

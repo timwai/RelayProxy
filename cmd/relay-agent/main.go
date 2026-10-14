@@ -18,10 +18,10 @@ import (
 	"time"
 
 	"relayproxy/agent/app"
-	"relayproxy/agent/fileshare"
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
+	"relayproxy/agent/fileshare"
 	"relayproxy/agent/gui"
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"

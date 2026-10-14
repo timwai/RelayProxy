@@ -160,11 +160,11 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 // a long transfer. Removing a share, disabling it, changing its root or
 // revoking the peer's read access terminates the stream immediately.
 type sharePermissionWriter struct {
-	stream   io.Writer
-	store    *FileStore
-	shareID  string
-	rootPath string
-	deviceID string
+	stream    io.Writer
+	store     *FileStore
+	shareID   string
+	rootPath  string
+	deviceID  string
 	lastCheck time.Time
 }
 

@@ -167,9 +167,9 @@ func (a *Agent) DownloadRemoteFile(ctx context.Context, deviceID, shareID, relat
 }
 
 type fileProgressWriter struct {
-	w io.Writer
-	n int64
-	size int64
+	w        io.Writer
+	n        int64
+	size     int64
 	progress func(int64, int64)
 }
 

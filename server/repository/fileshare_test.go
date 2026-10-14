@@ -19,7 +19,7 @@ func TestAuthorizeFileShareUsesLiveCapabilitiesAndIdentity(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	for _, d := range []struct { id, identity, caps string }{
+	for _, d := range []struct{ id, identity, caps string }{
 		{"client", "idA", `["files.client"]`},
 		{"host", "idA", `["files.host"]`},
 		{"other", "idB", `["files.host"]`},
@@ -40,18 +40,26 @@ func TestAuthorizeFileShareUsesLiveCapabilitiesAndIdentity(t *testing.T) {
 			t.Fatalf("AuthorizeFileShare(%q,%q)=%v,%v; want %v", client, host, ok, err, want)
 		}
 	}
-	check("client","host",true)
-	check("client","other",false)
-	check("host","client",false)
-	check("client","client",false)
-	check("missing","host",false)
-	if _, err := db.Exec(`UPDATE devices SET approved_capabilities='[]' WHERE id='host'`); err != nil {t.Fatal(err)}
-	check("client","host",false)
-	if _, err := db.Exec(`UPDATE devices SET approved_capabilities='["files.host"]', approval_state='revoked' WHERE id='host'`); err != nil {t.Fatal(err)}
-	check("client","host",false)
-	if _, err := db.Exec(`UPDATE devices SET approval_state='approved' WHERE id='host'`); err != nil {t.Fatal(err)}
-	if _, err := db.Exec(`UPDATE identities SET status='disabled' WHERE id='idA'`); err != nil {t.Fatal(err)}
-	check("client","host",false)
+	check("client", "host", true)
+	check("client", "other", false)
+	check("host", "client", false)
+	check("client", "client", false)
+	check("missing", "host", false)
+	if _, err := db.Exec(`UPDATE devices SET approved_capabilities='[]' WHERE id='host'`); err != nil {
+		t.Fatal(err)
+	}
+	check("client", "host", false)
+	if _, err := db.Exec(`UPDATE devices SET approved_capabilities='["files.host"]', approval_state='revoked' WHERE id='host'`); err != nil {
+		t.Fatal(err)
+	}
+	check("client", "host", false)
+	if _, err := db.Exec(`UPDATE devices SET approval_state='approved' WHERE id='host'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec(`UPDATE identities SET status='disabled' WHERE id='idA'`); err != nil {
+		t.Fatal(err)
+	}
+	check("client", "host", false)
 }
 
 func TestFileShareCandidatesIncludeOfflineApprovedClientsOnly(t *testing.T) {

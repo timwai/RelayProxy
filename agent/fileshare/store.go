@@ -52,7 +52,7 @@ type Descriptor struct {
 const MaxConcurrentHostedFileStreams int32 = 6
 
 type FileStore struct {
-	Path string
+	Path              string
 	activeFileStreams atomic.Int32
 }
 

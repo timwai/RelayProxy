@@ -2,9 +2,8 @@ package fileshare
 
 import (
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -140,11 +139,11 @@ func (s *FileStore) serveUpload(ctx context.Context, stream tunnel.TunnelStream,
 // sharePermissionReader handles mid-upload revocation as well as the initial
 // grant. A blocked network read is also bounded by the enclosing context.
 type sharePermissionReader struct {
-	input    io.Reader
-	store    *FileStore
-	shareID  string
-	rootPath string
-	deviceID string
+	input     io.Reader
+	store     *FileStore
+	shareID   string
+	rootPath  string
+	deviceID  string
 	lastCheck time.Time
 }
 

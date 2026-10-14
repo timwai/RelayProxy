@@ -57,5 +57,5 @@ type FileShareCandidate struct {
 
 type FileShareCandidatesResponse struct {
 	Devices []FileShareCandidate `json:"devices"`
-	Error   string `json:"error,omitempty"`
+	Error   string               `json:"error,omitempty"`
 }

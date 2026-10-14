@@ -226,7 +226,7 @@ func (a *Agent) FileShareCandidates(ctx context.Context) ([]protocol.FileShareCa
 	defer stop()
 	_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
-		Type: protocol.FrameTypeFileShareCandidates,
+		Type:      protocol.FrameTypeFileShareCandidates,
 		RequestID: fmt.Sprintf("files_candidates_%d", time.Now().UnixNano()),
 	}); err != nil {
 		return nil, err

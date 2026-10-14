@@ -103,36 +103,67 @@ type stagedFileUploadRequest struct {
 	Path     string `json:"path"`
 	Size     int64  `json:"size"`
 }
+
 func (w *WebServer) beginFileUpload(rw http.ResponseWriter, r *http.Request) {
-	if !w.fileShareRemoteAccessAllowed(rw) { return }
+	if !w.fileShareRemoteAccessAllowed(rw) {
+		return
+	}
 	var v stagedFileUploadRequest
 	r.Body = http.MaxBytesReader(rw, r.Body, 8<<10)
-	d := json.NewDecoder(r.Body); d.DisallowUnknownFields()
-	if err := d.Decode(&v); err != nil { http.Error(rw,"invalid upload request",http.StatusBadRequest);return }
-	result,err := w.bridge.BeginFileUpload(v.DeviceID,v.ShareID,v.Path,v.Size)
-	if err != nil { http.Error(rw,err.Error(),http.StatusBadRequest);return }
-	writeWebJSON(rw,result)
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(&v); err != nil {
+		http.Error(rw, "invalid upload request", http.StatusBadRequest)
+		return
+	}
+	result, err := w.bridge.BeginFileUpload(v.DeviceID, v.ShareID, v.Path, v.Size)
+	if err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeWebJSON(rw, result)
 }
 func (w *WebServer) appendFileUpload(rw http.ResponseWriter, r *http.Request) {
-	if !w.fileShareRemoteAccessAllowed(rw) { return }
-	var v struct {Chunk string `json:"chunk"`}
-	r.Body = http.MaxBytesReader(rw,r.Body, 384<<10)
-	d := json.NewDecoder(r.Body); d.DisallowUnknownFields()
-	if err:=d.Decode(&v);err!=nil {http.Error(rw,"invalid upload chunk",http.StatusBadRequest);return}
-	result,err := w.bridge.AppendFileUploadChunk(r.PathValue("id"),v.Chunk)
-	if err!=nil {http.Error(rw,err.Error(),http.StatusBadRequest);return}
-	writeWebJSON(rw,result)
+	if !w.fileShareRemoteAccessAllowed(rw) {
+		return
+	}
+	var v struct {
+		Chunk string `json:"chunk"`
+	}
+	r.Body = http.MaxBytesReader(rw, r.Body, 384<<10)
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(&v); err != nil {
+		http.Error(rw, "invalid upload chunk", http.StatusBadRequest)
+		return
+	}
+	result, err := w.bridge.AppendFileUploadChunk(r.PathValue("id"), v.Chunk)
+	if err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeWebJSON(rw, result)
 }
 func (w *WebServer) commitFileUpload(rw http.ResponseWriter, r *http.Request) {
-	if !w.fileShareRemoteAccessAllowed(rw) { return }
-	result,err := w.bridge.CommitFileUpload(r.PathValue("id"))
-	if err!=nil {http.Error(rw,err.Error(),http.StatusBadRequest);return}
-	writeWebJSON(rw,result)
+	if !w.fileShareRemoteAccessAllowed(rw) {
+		return
+	}
+	result, err := w.bridge.CommitFileUpload(r.PathValue("id"))
+	if err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeWebJSON(rw, result)
 }
 func (w *WebServer) discardFileUpload(rw http.ResponseWriter, r *http.Request) {
-	if !w.fileShareRemoteAccessAllowed(rw) { return }
-	if err:=w.bridge.DiscardFileUpload(r.PathValue("id"));err!=nil {http.Error(rw,err.Error(),http.StatusBadRequest);return}
-	writeWebJSON(rw,map[string]bool{"ok":true})
+	if !w.fileShareRemoteAccessAllowed(rw) {
+		return
+	}
+	if err := w.bridge.DiscardFileUpload(r.PathValue("id")); err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeWebJSON(rw, map[string]bool{"ok": true})
 }
 
 func (w *WebServer) fileShareCandidates(rw http.ResponseWriter, _ *http.Request) {

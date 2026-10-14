@@ -1,13 +1,12 @@
 package app
 
 import (
-	"slices"
-
-	"github.com/apernet/quic-go"
 	"net/netip"
 	"path/filepath"
+	"slices"
 	"testing"
 
+	"github.com/apernet/quic-go"
 	"relayproxy/agent/fileshare"
 	"relayproxy/internal/protocol"
 )

@@ -34,26 +34,26 @@ type fileDirectTicket struct {
 	expiresAt int64
 }
 type fileDirectRuntime struct {
-	a            *Agent
-	listener     net.Listener
-	quicListener *quic.Listener
-	fingerprint  string
-	mu           sync.Mutex
-	tickets      map[string]fileDirectTicket
-	upnpCancel   context.CancelFunc
-	upnpRunning  bool
-	upnpStopping bool
-	upnpRestart  bool
+	a              *Agent
+	listener       net.Listener
+	quicListener   *quic.Listener
+	fingerprint    string
+	mu             sync.Mutex
+	tickets        map[string]fileDirectTicket
+	upnpCancel     context.CancelFunc
+	upnpRunning    bool
+	upnpStopping   bool
+	upnpRestart    bool
 	upnpAddress    netip.AddrPort
 	upnpState      string
 	upnpReason     string
 	udpUPnPAddress netip.AddrPort
 	udpUPnPState   string
 	udpUPnPReason  string
-	closed       bool
-	accepted     atomic.Int64
-	quicAccepted atomic.Int64
-	wg           sync.WaitGroup
+	closed         bool
+	accepted       atomic.Int64
+	quicAccepted   atomic.Int64
+	wg             sync.WaitGroup
 }
 
 type fileDirectStream struct{ *tls.Conn }

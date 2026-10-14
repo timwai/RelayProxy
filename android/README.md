@@ -169,6 +169,7 @@ VPN、网络出口和本机代理使用三个独立运行意图，共享一个 G
 ## P2P 与省电策略
 
 - Android Exit 和代理客户端都会按设置声明 `proxy_p2p_v1`。Relay Server 仅负责候选交换、租约和授权，直连数据不经过 Server。
+- Android 复用 Agent 的 P2P UDP 直连实现：同子网候选优先，其他路径并行竞争；打洞使用共享 5 秒默认超时（不再强制 1.2 秒）。同一 Wi-Fi / LAN 不需要 UPnP，但需允许两端 UDP 通信。更新时必须重新构建 gomobile AAR 和 APK，旧 APK 不会自动获得 Go Core 的修复。
 - P2P 不可用、打洞失败、租约失效或进入冷却时，新连接会继续使用 Relay，不影响出口可用性。
 - 首页会显示当前 P2P 状态、Direct Path 类型、RTT 和 P2P 电源策略。
 - 屏幕关闭、Android Power Saver、Device Idle/Doze 或当前出口为蜂窝网络时自动进入省电模式。

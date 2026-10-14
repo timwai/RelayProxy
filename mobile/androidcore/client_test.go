@@ -13,6 +13,39 @@ import (
 	"relayproxy/internal/tunnel"
 )
 
+// Android must not override the shared P2P manager's default punch window:
+// the 1.2s legacy override prevented the 5s LAN/NAT rebind fix taking effect.
+func TestAndroidP2PManagerOptionsInheritSharedPunchTimeout(t *testing.T) {
+	allowed := true
+	cfg := clientConfig{UPnPAllowed: &allowed, DisableLossCompensation: true}
+	accepted := protocol.DeviceAccepted{
+		P2PPortStart: 20900, P2PPortEnd: 20999, P2PUPnPEnabled: true,
+		BrutalUploadBPS: 4000000, BrutalDownloadBPS: 7000000,
+	}
+	options := androidP2PManagerOptions(cfg, accepted)
+	if options.PunchTimeout != 0 {
+		t.Fatalf("Android overrides shared P2P punch timeout: %v", options.PunchTimeout)
+	}
+	if options.KeepAlive != 10*time.Second || options.IdleTimeout != 120*time.Second ||
+		options.LowPowerIdleTimeout != 60*time.Second || options.MaxExitSessions != 1 || options.LowPowerMaxSessions != 1 {
+		t.Fatalf("Android P2P power profile changed unexpectedly: %+v", options)
+	}
+	if options.PortStart != 20900 || options.PortEnd != 20999 || !options.UPnPEnabled ||
+		options.BrutalUploadBPS != 4000000 || options.BrutalDownloadBPS != 7000000 ||
+		!options.DisableLossCompensation {
+		t.Fatalf("Android P2P server and local policy options not preserved: %+v", options)
+	}
+	allowed = false
+	options = androidP2PManagerOptions(cfg, accepted)
+	if options.UPnPEnabled {
+		t.Fatal("Android UPnP user disallow was ignored")
+	}
+	options = androidP2PManagerOptions(clientConfig{}, accepted)
+	if options.UPnPEnabled {
+		t.Fatal("Android UPnP nil permission was treated as allowed")
+	}
+}
+
 func TestPowerConstrainedStatusBeforeStart(t *testing.T) {
 	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`, filepath.Join(t.TempDir(), "device-identity.json"))
 	if err != nil {

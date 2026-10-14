@@ -22,6 +22,24 @@ func testDescription(address, fingerprint string) LocalDescription {
 	}
 }
 
+func TestQUICManagerDefaultPunchTimeoutAndExplicitOverride(t *testing.T) {
+	manager := NewQUICManagerWithOptions(context.Background(), nil, "", time.Minute, QUICManagerOptions{
+		KeepAlive: 10 * time.Second,
+	})
+	if manager.punchTimeout != 5*time.Second {
+		t.Fatalf("manager punch timeout=%v, want shared 5s default", manager.punchTimeout)
+	}
+	_ = manager.Close()
+
+	override := NewQUICManagerWithOptions(context.Background(), nil, "", time.Minute, QUICManagerOptions{
+		PunchTimeout: 2 * time.Second,
+	})
+	defer override.Close()
+	if override.punchTimeout != 2*time.Second {
+		t.Fatalf("explicit manager punch timeout=%v, want 2s", override.punchTimeout)
+	}
+}
+
 func TestManagersExchangeOfferAndAnswer(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

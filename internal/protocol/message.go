@@ -33,6 +33,9 @@ const (
 	FrameTypeFileShare           FrameType = 0x13
 	FrameTypeFileSharePeers      FrameType = 0x14
 	FrameTypeFileShareCandidates FrameType = 0x15
+	FrameTypeFileDirectPrepare FrameType = 0x16
+	FrameTypeFileDirectGrant FrameType = 0x17
+	FrameTypeFileDirectCheck FrameType = 0x18
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

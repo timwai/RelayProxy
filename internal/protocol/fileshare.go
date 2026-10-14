@@ -46,6 +46,7 @@ type FileShareResponse struct {
 	Shares  []FileShareDescriptor `json:"shares,omitempty"`
 	Entries []FileShareEntry      `json:"entries,omitempty"`
 	Size    int64                 `json:"size,omitempty"`
+	SHA256  string                `json:"sha256,omitempty"`
 }
 
 type FileShareCandidate struct {

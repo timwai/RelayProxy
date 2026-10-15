@@ -26,7 +26,7 @@ func TestFileP2POnlyRunsForBulkTransfers(t *testing.T) {
 func TestFileMetadataSkipsDirectNegotiation(t *testing.T) {
 	for _, tc := range []struct {
 		action string
-		want bool
+		want   bool
 	}{
 		{protocol.FileShareListDir, false},
 		{protocol.FileShareListShares, false},

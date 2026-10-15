@@ -38,6 +38,8 @@ export default function FileSharingPage({toast}) {
  const [selectedFile,setSelectedFile]=useState(null);
  const saveHandles=useRef(new Map());
  const completedSaves=useRef(new Set());
+ const completedUploads=useRef(new Set());
+ const peersRef=useRef([]);
  const directoryCache=useRef(createDirectoryCache());
  const directoryInflight=useRef(new Map());
  const navigationSerial=useRef(0);
@@ -119,14 +121,17 @@ export default function FileSharingPage({toast}) {
    setRemoteError('');
    // Visibility is based on the host's current folder ACL, not just its
    // Server grant. Clear stale selected content after revocation.
-   setPeers(previous=>{
-    for(const oldPeer of previous){
-     if(!result.some(peer=>peer.deviceId===oldPeer.deviceId)){
-      directoryCache.current.clearDevice(oldPeer.deviceId);
+   for(const oldPeer of peersRef.current){
+    if(!result.some(peer=>peer.deviceId===oldPeer.deviceId)){
+     directoryCache.current.clearDevice(oldPeer.deviceId);
+     // Old slow requests for revoked shares are never reused.
+     for(const key of directoryInflight.current.keys()){
+      try{if(JSON.parse(key)[0]===oldPeer.deviceId)directoryInflight.current.delete(key)}catch{}
      }
     }
-    return result;
-   });
+   }
+   peersRef.current=result;
+   setPeers(result);
    if(remoteDevice&&!result.some(peer=>peer.deviceId===remoteDevice)){
     navigationSerial.current+=1;
     setRemoteDevice('');setRemoteShare('');setRemoteShares([]);
@@ -137,6 +142,8 @@ export default function FileSharingPage({toast}) {
    // advertised as accessible.
    navigationSerial.current+=1;
    directoryCache.current.clear();
+   directoryInflight.current.clear();
+   peersRef.current=[];
    setPeers([]);setRemoteDevice('');setRemoteShare('');
    setRemoteShares([]);setRemoteEntries([]);setRemotePath('.');setRemoteLoading(false);
    setRemoteError(e.message||String(e));
@@ -148,6 +155,10 @@ export default function FileSharingPage({toast}) {
    const tasks=Array.isArray(result)?result:[];
    setTransfers(tasks);
    for(const task of tasks){
+    if(task.direction==='upload'&&task.state==='completed'&&!completedUploads.current.has(task.id)){
+     completedUploads.current.add(task.id);
+     directoryCache.current.clearDevice(task.deviceId);
+    }
     if(task.direction!=='download'||task.state!=='completed'||completedSaves.current.has(task.id))continue;
     const entry=saveHandles.current.get(task.id);
     if(!entry)continue;
@@ -222,7 +233,7 @@ export default function FileSharingPage({toast}) {
   setRemoteEntries([]);setRemoteLoading(true);
   const start=performance.now();
   const key=JSON.stringify([deviceID,shareID,dir]);
-  let pending=directoryInflight.current.get(key);
+  let pending=force?null:directoryInflight.current.get(key);
   if(!pending){
    pending=callJSON('goGetRemoteFileEntries',[],deviceID,shareID,dir);
    directoryInflight.current.set(key,pending);

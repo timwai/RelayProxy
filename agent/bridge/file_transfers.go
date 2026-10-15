@@ -239,11 +239,8 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	if err := file.Close(); err != nil {
 		return err
 	}
-	ext := filepath.Ext(record.FileName)
-	base := strings.TrimSuffix(record.FileName, ext)
-	// Full random task ID avoids collisions with another prior download.
-	destinationName := fmt.Sprintf("%s-%s%s", base, record.ID, ext)
-	destination := filepath.Join(dir, destinationName)
+	var destinationName string
+	var destination string
 	if record.savePath != "" {
 		// Save-dialog destinations may live on a different filesystem, so a
 		// hard link from the private partial folder would fail with EXDEV.
@@ -254,18 +251,52 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 		}
 		destination = record.savePath
 	} else {
-		if err := ctx.Err(); err != nil {
-			return err
+		// Preserve the source filename as-is when free. If the user already
+		// has it, use Explorer-style (1), (2), ... instead of a random ID.
+		// os.Root.Link atomically prevents replacing existing files, including
+		// concurrent downloads racing for the same name.
+		var publishErr error
+		destinationName, publishErr = publishDefaultFileDownload(ctx, root, tempName, record.FileName)
+		if publishErr != nil {
+			return publishErr
 		}
-		if err := root.Link(tempName, destinationName); err != nil {
-			return fmt.Errorf("publish download without overwriting: %w", err)
-		}
+		destination = filepath.Join(dir, destinationName)
 	}
 	_ = root.Remove(tempName)
 	m.mu.Lock()
 	record.Destination = destination
 	m.mu.Unlock()
 	return nil
+}
+
+// publishDefaultFileDownload preserves remote file names and never overwrites
+// existing files. For duplicates, append a human-readable numeric suffix
+// before the extension rather than exposing the private transfer ID.
+func publishDefaultFileDownload(ctx context.Context, root *os.Root, partialName, requestedName string) (string, error) {
+	if root == nil || requestedName == "" || requestedName == "." || requestedName == ".." ||
+		filepath.Base(requestedName) != requestedName || strings.ContainsAny(requestedName, "/\\:") {
+		return "", errors.New("invalid download filename")
+	}
+	ext := filepath.Ext(requestedName)
+	base := strings.TrimSuffix(requestedName, ext)
+	if base == "" {
+		base, ext = requestedName, ""
+	}
+	for i := 0; i <= 9999; i++ {
+		if err := ctx.Err(); err != nil {
+			return "", err
+		}
+		name := requestedName
+		if i > 0 {
+			name = fmt.Sprintf("%s (%d)%s", base, i, ext)
+		}
+		if err := root.Link(partialName, name); err == nil {
+			return name, nil
+		} else if !errors.Is(err, os.ErrExist) {
+			return "", fmt.Errorf("publish download without overwriting: %w", err)
+		}
+	}
+	return "", errors.New("too many conflicting filenames in download directory")
 }
 
 // validateFileDownloadDestination prevents a UI dialog result from becoming
@@ -470,6 +501,7 @@ func (b *UIBridge) OpenCompletedFileDownload(id string) (*os.File, string, error
 		return nil, "", os.ErrNotExist
 	}
 	name := record.FileName
+	destination := record.Destination
 	if name == "" || path.Base(name) != name {
 		m.mu.Unlock()
 		return nil, "", os.ErrInvalid
@@ -479,13 +511,19 @@ func (b *UIBridge) OpenCompletedFileDownload(id string) (*os.File, string, error
 	if err != nil {
 		return nil, "", err
 	}
-	root, err := os.OpenRoot(filepath.Join(home, "Downloads", "RelayProxy"))
+	downloads := filepath.Join(home, "Downloads", "RelayProxy")
+	if destination == "" || filepath.Dir(destination) != downloads {
+		return nil, "", os.ErrNotExist
+	}
+	diskName := filepath.Base(destination)
+	if diskName == "" || diskName == "." || diskName == ".." {
+		return nil, "", os.ErrInvalid
+	}
+	root, err := os.OpenRoot(downloads)
 	if err != nil {
 		return nil, "", err
 	}
 	defer root.Close()
-	ext := filepath.Ext(name)
-	diskName := fmt.Sprintf("%s-%s%s", strings.TrimSuffix(name, ext), id, ext)
 	info, err := root.Lstat(diskName)
 	if err != nil || !info.Mode().IsRegular() {
 		return nil, "", os.ErrNotExist

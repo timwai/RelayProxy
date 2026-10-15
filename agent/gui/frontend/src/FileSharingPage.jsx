@@ -108,8 +108,20 @@ export default function FileSharingPage({toast}) {
    const result=await callJSON('goGetFileSharePeers',[]);
    if(!Array.isArray(result))throw new Error('设备发现返回了无效数据');
    setPeers(result);setRemoteError('');
-  }catch(e){setRemoteError(e.message||String(e))}
- },[]);
+   // Visibility is based on the host's current folder ACL, not just its
+   // Server grant. Clear stale selected content after revocation.
+   if(remoteDevice&&!result.some(peer=>peer.deviceId===remoteDevice)){
+    setRemoteDevice('');setRemoteShare('');setRemoteShares([]);
+    setRemoteEntries([]);setRemotePath('.');setSelectedFile(null);
+   }
+  }catch(e){
+   // An unavailable ACL check must not leave previously visible hosts
+   // advertised as accessible.
+   setPeers([]);setRemoteDevice('');setRemoteShare('');
+   setRemoteShares([]);setRemoteEntries([]);setRemotePath('.');
+   setRemoteError(e.message||String(e));
+  }
+ },[remoteDevice]);
  const refreshTransfers=useCallback(async()=>{
   try{
    const result=await callJSON('goGetFileTransfers',[]);
@@ -139,7 +151,12 @@ export default function FileSharingPage({toast}) {
    }
   }catch(e){setTransferError(e.message||String(e))}
  },[]);
- useEffect(()=>{if(tab==='remote')void refreshPeers()},[tab,refreshPeers]);
+ useEffect(()=>{
+  if(tab!=='remote')return;
+  void refreshPeers();
+  const timer=setInterval(()=>void refreshPeers(),15000);
+  return ()=>clearInterval(timer);
+ },[tab,refreshPeers]);
  useEffect(()=>{
   if(tab==='transfers')void refreshTransfers();
   // A browser-selected Save As handle must still be fulfilled when the

@@ -1,19 +1,17 @@
 package gui
 
 import (
+	"context"
 	"encoding/json"
 	"io"
-	"os"
+	"io/fs"
+	"net"
+	"net/http"
 	"path"
 	"path/filepath"
-	"net"
 	"strconv"
 	"strings"
-	"context"
-	"io/fs"
 	"time"
-	"net/http"
-	"strings"
 )
 
 func (w *WebServer) fileShareRemoteAccessAllowed(rw http.ResponseWriter) bool {
@@ -262,8 +260,8 @@ func (w *WebServer) chooseLocalFileDownload(rw http.ResponseWriter, r *http.Requ
 	}
 	var request struct {
 		DeviceID string `json:"deviceId"`
-		ShareID string `json:"shareId"`
-		Path string `json:"path"`
+		ShareID  string `json:"shareId"`
+		Path     string `json:"path"`
 	}
 	r.Body = http.MaxBytesReader(rw, r.Body, 8<<10)
 	decoder := json.NewDecoder(r.Body)

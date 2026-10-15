@@ -333,6 +333,7 @@ type fileContextReader struct {
 	ctx context.Context
 	r   io.Reader
 }
+
 func (r *fileContextReader) Read(p []byte) (int, error) {
 	if err := r.ctx.Err(); err != nil {
 		return 0, err

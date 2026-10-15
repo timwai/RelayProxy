@@ -25,12 +25,18 @@ end run`
 
 func nativeChooseShareFolder(ctx context.Context) (string, error) {
 	out, err := exec.CommandContext(ctx, "osascript", "-e", chooseFolderAppleScript).Output()
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return strings.TrimSpace(string(out)), nil
 }
 func nativeChooseDownloadPath(ctx context.Context, name string) (string, error) {
-	if name == "" || strings.ContainsAny(name, "/\\") { return "", errors.New("invalid name") }
+	if name == "" || strings.ContainsAny(name, "/\\") {
+		return "", errors.New("invalid name")
+	}
 	out, err := exec.CommandContext(ctx, "osascript", "-e", chooseSaveAppleScript, name).Output()
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return strings.TrimSpace(string(out)), nil
 }

@@ -24,3 +24,9 @@ test('malformed and unauthenticated inventories fail closed',()=>{
  assert.deepEqual(onlyVerifiedFilePeers(null),[]);
  assert.deepEqual(onlyVerifiedFilePeers([{deviceId:'host',online:true,shares:[{id:'',permission:'read'}]}]),[]);
 });
+test('invalid folder descriptors are not exposed beside a valid share',()=>{
+ const result=onlyVerifiedFilePeers([{deviceId:'host',online:true,shares:[
+  {id:'readable',permission:'read'}, {id:'not-approved',permission:'none'}
+ ]}]);
+ assert.deepEqual(result[0].shares,[{id:'readable',permission:'read'}]);
+});

@@ -131,15 +131,18 @@ func filterAccessibleFileSharePeers(
 			if err != nil || probeCtx.Err() != nil {
 				return
 			}
+			visible := make([]protocol.FileShareDescriptor, 0, len(shares))
 			for _, share := range shares {
 				if share.ID != "" &&
 					(share.Permission == string(fileshare.PermissionRead) ||
 						share.Permission == string(fileshare.PermissionReadWrite)) {
-					verified[i] = peer
-					verified[i].Shares = shares
-					allowed[i] = true
-					return
+					visible = append(visible, share)
 				}
+			}
+			if len(visible) > 0 {
+				verified[i] = peer
+				verified[i].Shares = visible
+				allowed[i] = true
 			}
 		}(i, peer)
 	}

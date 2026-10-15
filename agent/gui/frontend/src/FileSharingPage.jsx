@@ -1,5 +1,5 @@
 import React, {useCallback,useEffect,useRef,useState} from 'react';
-import {callJSON} from './bridge.js';
+import {call,callJSON} from './bridge.js';
 import {Icon} from './icons.jsx';
 import './fileSharing.css';
 
@@ -202,7 +202,7 @@ export default function FileSharingPage({toast}) {
  }
  async function chooseShareFolder(){
   try{
-   const selected=await callJSON('goChooseShareFolder',null);
+   const selected=await call('goChooseShareFolder');
    const value=typeof selected==='string'?selected:selected?.path;
    if(!value)return;
    const name=value.replace(/[\\/]+$/,'').split(/[\\/]/).pop();
@@ -361,7 +361,7 @@ export default function FileSharingPage({toast}) {
       {remoteLoading&&<div className="empty">正在加载文件…</div>}
       {!remoteLoading&&visibleFiles.length===0&&<div className="empty">{fileQuery?'没有匹配的文件':'此文件夹为空'}</div>}
       {!remoteLoading&&<div className={'file-browser-files '+(viewMode==='grid'?'grid-view':'list-view')}>
-       {visibleFiles.map(entry=><div key={entry.name} className={'file-browser-file '+(selectedFile===entry.name?'selected':'')} onClick={()=>setSelectedFile(entry.name)} onDoubleClick={()=>entry.isDir&&openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name)}>
+       {visibleFiles.map(entry=><div key={entry.name} className={'file-browser-file '+(selectedFile===entry.name?'selected':'')} onClick={()=>entry.isDir?openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name):setSelectedFile(entry.name)}>
         <span className={'file-browser-file-icon '+(entry.isDir?'directory':'document')}><Icon name="folder" size={19}/></span>
         <span className="file-browser-file-name"><strong title={entry.name}>{entry.name}</strong><small>{entry.isDir?'文件夹':'文件'}</small></span>
         <span className="file-browser-file-size">{entry.isDir?'—':formatFileBytes(entry.size)}</span>

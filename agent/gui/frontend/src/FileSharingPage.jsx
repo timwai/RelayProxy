@@ -122,14 +122,14 @@ export default function FileSharingPage({toast}) {
     saveHandles.current.delete(task.id);
     void (async()=>{
      try{
-      const response=await fetch('/api/file-transfers/'+encodeURIComponent(task.id)+'/file',{credentials:'same-origin',cache:'no-store'});
-      if(!response.ok||!response.body)throw new Error('无法从 Agent 获取已验证文件');
+      const url='/api/file-transfers/'+encodeURIComponent(task.id)+'/file';
       if(entry==='browser'){
-       const blob=await response.blob();
-       const url=URL.createObjectURL(blob);
+       // Native browser attachment download streams to disk; do not Blob a
+       // 20 GiB file into renderer memory just to trigger Save As.
        const anchor=document.createElement('a');anchor.href=url;anchor.download=task.fileName;document.body.append(anchor);anchor.click();anchor.remove();
-       URL.revokeObjectURL(url);
       }else{
+       const response=await fetch(url,{credentials:'same-origin',cache:'no-store'});
+       if(!response.ok||!response.body)throw new Error('无法从 Agent 获取已验证文件');
        const writable=await entry.createWritable();
        try{await response.body.pipeTo(writable)}catch(err){try{await writable.abort()}catch{}throw err}
       }

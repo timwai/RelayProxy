@@ -598,3 +598,20 @@ func TestAgentSpeedTestShowsPathAndQUICDiagnostics(t *testing.T) {
 		}
 	}
 }
+
+func TestFileDialogRejectsRequestsFromLANManagementListeners(t *testing.T) {
+	for _, test := range []struct { local bool; peer string; want int }{
+		{false, "192.168.1.50:50000", http.StatusForbidden},
+		{false, "127.0.0.1:50000", http.StatusForbidden},
+		{true, "192.168.1.50:50000", http.StatusForbidden},
+	} {
+		_, handler := webTestHandler(newWebTestBridge(t), test.local)
+		request := httptest.NewRequest(http.MethodPost, "http://127.0.0.1/api/file-dialogs/folder", strings.NewReader("{}"))
+		request.RemoteAddr = test.peer
+		response := httptest.NewRecorder()
+		handler.ServeHTTP(response, request)
+		if response.Code != test.want {
+			t.Fatalf("loopback=%t remote=%q: got HTTP %d", test.local, test.peer, response.Code)
+		}
+	}
+}

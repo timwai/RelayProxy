@@ -2,6 +2,7 @@ import React, {useCallback,useEffect,useRef,useState} from 'react';
 import {call,callJSON} from './bridge.js';
 import {Icon} from './icons.jsx';
 import {createDirectoryCache} from './fileBrowserCache.js';
+import {onlyVerifiedFilePeers} from './fileShareVisibility.js';
 import './fileSharing.css';
 
 const formatFileBytes=n=>{const num=Math.max(0,Number(n)||0);if(num<1024)return num.toFixed(0)+' B';const units=['KiB','MiB','GiB','TiB'];const power=Math.min(4,Math.floor(Math.log(num)/Math.log(1024)));return (num/1024**power).toFixed(1)+' '+units[power-1]};
@@ -41,10 +42,13 @@ export default function FileSharingPage({toast}) {
  const completedSaves=useRef(new Set());
  const completedUploads=useRef(new Set());
  const peersRef=useRef([]);
+ const peerRefreshSerial=useRef(0);
+ const selectedRemote=useRef({device:'',share:''});
  const directoryCache=useRef(createDirectoryCache());
  const directoryInflight=useRef(new Map());
  const navigationSerial=useRef(0);
  const [browseLatency,setBrowseLatency]=useState('');
+ useEffect(()=>{selectedRemote.current={device:remoteDevice,share:remoteShare}},[remoteDevice,remoteShare]);
 
  const [transfers,setTransfers]=useState([]);
  const [transferError,setTransferError]=useState('');
@@ -116,16 +120,19 @@ export default function FileSharingPage({toast}) {
   return ()=>clearInterval(timer);
  },[tab,refreshDirectStatus]);
  const refreshPeers=useCallback(async()=>{
+  const seq=++peerRefreshSerial.current;
   try{
-   const result=await callJSON('goGetFileSharePeers',[]);
-   if(!Array.isArray(result))throw new Error('设备发现返回了无效数据');
-   setRemoteError('');
-   // Visibility is based on the host's current folder ACL, not just its
-   // Server grant. Clear stale selected content after revocation.
+   const raw=await callJSON('goGetFileSharePeers',[]);
+   if(seq!==peerRefreshSerial.current)return;
+   if(!Array.isArray(raw))throw new Error('设备发现返回了无效数据');
+   // Never trust a files.host or Server peer list by itself. Only hosts
+   // verified by the requesting Agent's live list_shares ACL query appear.
+   // Old Agents lacking this proof fail closed.
+   const result=onlyVerifiedFilePeers(raw);
    for(const oldPeer of peersRef.current){
-    if(!result.some(peer=>peer.deviceId===oldPeer.deviceId)){
+    const updated=result.find(peer=>peer.deviceId===oldPeer.deviceId);
+    if(!updated||JSON.stringify(updated.shares)!==JSON.stringify(oldPeer.shares)){
      directoryCache.current.clearDevice(oldPeer.deviceId);
-     // Old slow requests for revoked shares are never reused.
      for(const key of directoryInflight.current.keys()){
       try{if(JSON.parse(key)[0]===oldPeer.deviceId)directoryInflight.current.delete(key)}catch{}
      }
@@ -133,23 +140,38 @@ export default function FileSharingPage({toast}) {
    }
    peersRef.current=result;
    setPeers(result);
-   if(remoteDevice&&!result.some(peer=>peer.deviceId===remoteDevice)){
-    navigationSerial.current+=1;
-    setRemoteDevice('');setRemoteShare('');setRemoteShares([]);
-    setRemoteEntries([]);setRemotePath('.');setSelectedFile(null);setRemoteLoading(false);
+   const selected=selectedRemote.current;
+   if(selected.device){
+    const current=result.find(peer=>peer.deviceId===selected.device);
+    if(!current){
+     navigationSerial.current+=1;
+     selectedRemote.current={device:'',share:''};
+     setRemoteDevice('');setRemoteShare('');setRemoteShares([]);
+     setRemoteEntries([]);setRemotePath('.');setSelectedFile(null);setRemoteLoading(false);
+    }else{
+     setRemoteShares(current.shares);
+     directoryCache.current.set(current.deviceId,'','',current.shares);
+     if(selected.share&&!current.shares.some(share=>share.id===selected.share)){
+      navigationSerial.current+=1;
+      selectedRemote.current={device:current.deviceId,share:''};
+      setRemoteShare('');setRemotePath('.');setRemoteEntries([]);
+      setSelectedFile(null);setRemoteLoading(false);
+     }
+    }
    }
+   setRemoteError('');
   }catch(e){
-   // An unavailable ACL check must not leave previously visible hosts
-   // advertised as accessible.
+   if(seq!==peerRefreshSerial.current)return;
    navigationSerial.current+=1;
    directoryCache.current.clear();
    directoryInflight.current.clear();
    peersRef.current=[];
+   selectedRemote.current={device:'',share:''};
    setPeers([]);setRemoteDevice('');setRemoteShare('');
    setRemoteShares([]);setRemoteEntries([]);setRemotePath('.');setRemoteLoading(false);
    setRemoteError(e.message||String(e));
   }
- },[remoteDevice]);
+ },[]);
  const refreshTransfers=useCallback(async()=>{
   try{
    const result=await callJSON('goGetFileTransfers',[]);
@@ -187,7 +209,10 @@ export default function FileSharingPage({toast}) {
   if(tab!=='remote')return;
   void refreshPeers();
   const timer=setInterval(()=>void refreshPeers(),15000);
-  return ()=>clearInterval(timer);
+  return ()=>{
+   clearInterval(timer);
+   peerRefreshSerial.current+=1; // discard responses after leaving the file browser
+  };
  },[tab,refreshPeers]);
  useEffect(()=>{
   if(tab==='transfers')void refreshTransfers();
@@ -199,10 +224,13 @@ export default function FileSharingPage({toast}) {
   return ()=>clearInterval(timer);
  },[tab,refreshTransfers]);
  async function openRemoteDevice(id){
+  const verified=peersRef.current.find(peer=>peer.deviceId===id);
+  if(!verified)return;
+  selectedRemote.current={device:id,share:''};
   const seq=++navigationSerial.current;
   setRemoteDevice(id);setRemoteShare('');setRemoteShares([]);setRemotePath('.');setRemoteEntries([]);setSelectedFile(null);setFileQuery('');setVisibleLimit(200);
   setRemoteError('');setBrowseLatency('');
-  const cached=directoryCache.current.get(id,'','');
+  const cached=verified.shares||directoryCache.current.get(id,'','');
   if(cached){
    setRemoteShares(cached);setRemoteLoading(false);setBrowseLatency('缓存');
    return;
@@ -223,6 +251,9 @@ export default function FileSharingPage({toast}) {
   }
  }
  async function openRemoteDir(deviceID,shareID,dir,{force=false}={}){
+  const verified=peersRef.current.find(peer=>peer.deviceId===deviceID);
+  if(!verified||!verified.shares.some(share=>share.id===shareID))return;
+  selectedRemote.current={device:deviceID,share:shareID};
   const seq=++navigationSerial.current;
   setRemoteDevice(deviceID);setRemoteShare(shareID);setRemotePath(dir);
   setSelectedFile(null);setFileQuery('');setVisibleLimit(200);setRemoteError('');setBrowseLatency('');

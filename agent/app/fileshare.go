@@ -8,8 +8,10 @@ import (
 	"fmt"
 	"hash"
 	"io"
+	"log"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"relayproxy/agent/fileshare"
@@ -81,16 +83,100 @@ func (a *Agent) FileSharePeers(ctx context.Context) ([]protocol.FileSharePeer, e
 	if response.Peers == nil {
 		return []protocol.FileSharePeer{}, nil
 	}
-	return response.Peers, nil
+	// Server results alone are not proof of local folder ACL: older Servers
+	// may still advertise every files.host device. Verify directly against
+	// the authenticated host's current, per-device shared-folder inventory.
+	return filterAccessibleFileSharePeers(ctx, response.Peers, a.RemoteFileShares), nil
+}
+
+// filterAccessibleFileSharePeers fails closed for empty/denied or unreachable
+// hosts and bounds total discovery latency. It attaches the verified list
+// of visible shares, avoiding another request when the UI selects a device.
+func filterAccessibleFileSharePeers(
+	ctx context.Context,
+	candidates []protocol.FileSharePeer,
+	list func(context.Context, string) ([]protocol.FileShareDescriptor, error),
+) []protocol.FileSharePeer {
+	if len(candidates) == 0 {
+		return []protocol.FileSharePeer{}
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	const maxChecks = 6
+	sem := make(chan struct{}, maxChecks)
+	verified := make([]protocol.FileSharePeer, len(candidates))
+	allowed := make([]bool, len(candidates))
+	seen := make(map[string]bool, len(candidates))
+	var wg sync.WaitGroup
+	for i, peer := range candidates {
+		if peer.DeviceID == "" || !peer.Online || seen[peer.DeviceID] {
+			continue
+		}
+		seen[peer.DeviceID] = true
+		select {
+		case sem <- struct{}{}:
+		case <-checkCtx.Done():
+			break
+		}
+		if checkCtx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(i int, peer protocol.FileSharePeer) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			probeCtx, stop := context.WithTimeout(checkCtx, 3*time.Second)
+			defer stop()
+			shares, err := list(probeCtx, peer.DeviceID)
+			if err != nil || probeCtx.Err() != nil {
+				return
+			}
+			visible := make([]protocol.FileShareDescriptor, 0, len(shares))
+			for _, share := range shares {
+				if share.ID != "" &&
+					(share.Permission == string(fileshare.PermissionRead) ||
+						share.Permission == string(fileshare.PermissionReadWrite)) {
+					visible = append(visible, share)
+				}
+			}
+			if len(visible) > 0 {
+				verified[i] = peer
+				verified[i].Shares = visible
+				allowed[i] = true
+			}
+		}(i, peer)
+	}
+	wg.Wait()
+	result := make([]protocol.FileSharePeer, 0, len(candidates))
+	for i := range candidates {
+		if allowed[i] {
+			result = append(result, verified[i])
+		}
+	}
+	return result
+}
+
+// File metadata uses the existing, authenticated Relay session immediately.
+// Negotiating a fresh file-only QUIC/TLS ticket for every directory made
+// browsing wait for unreachable NAT candidates (up to several seconds).
+// Actual file bytes still prefer P2P/direct with Relay fallback.
+func fileSharePrefersDirect(action string) bool {
+	return action == protocol.FileShareDownload || action == protocol.FileShareUpload
 }
 
 func (a *Agent) openRemoteFile(ctx context.Context, targetDeviceID string, req protocol.FileShareRequest) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
-	// File-scoped direct credentials are independent of Proxy/RDP grants.
-	// If the host has no reachable LAN/public endpoint, preserve the existing
-	// authenticated Relay data path without exposing file contents to a
-	// partially authenticated peer.
-	if direct, response, directErr := a.tryFileDirect(ctx, targetDeviceID, req); directErr == nil {
-		return &fileTransportStream{TunnelStream: direct, path: fileTransferPath(direct)}, response, nil
+	metadata := req.Action == protocol.FileShareListShares || req.Action == protocol.FileShareListDir
+	start := time.Now()
+	defer func() {
+		if metadata && time.Since(start) > 250*time.Millisecond {
+			// Never log share names, remote paths, directory entries or device IDs.
+			log.Printf("[FileBrowse] action=%s relay_request_ms=%d", req.Action, time.Since(start).Milliseconds())
+		}
+	}()
+	if fileSharePrefersDirect(req.Action) {
+		if direct, response, directErr := a.tryFileDirect(ctx, targetDeviceID, req); directErr == nil {
+			return &fileTransportStream{TunnelStream: direct, path: fileTransferPath(direct)}, response, nil
+		}
 	}
 	sess, _, err := a.fileSharingSession()
 	if err != nil {

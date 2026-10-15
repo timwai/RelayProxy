@@ -144,6 +144,12 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			if err != nil || len(entries) != 1 || entries[0].Name != "source.bin" {
 				t.Fatalf("remote listing: %+v err=%v", entries, err)
 			}
+			// Listing metadata must not set up any new file-direct listener.
+			// The transport stays an authenticated Relay session; downloads
+			// below still exercise punched QUIC, direct QUIC/TLS and fallback.
+			if fileSharePrefersDirect(protocol.FileShareListDir) || fileSharePrefersDirect(protocol.FileShareListShares) {
+				t.Fatal("unexpected directory routing strategy")
+			}
 			var output bytes.Buffer
 			if _, err := client.DownloadRemoteFile(ctx, "files-host", shares[0].ID, "source.bin", &output, nil); err != nil {
 				t.Fatalf("authenticated download: %v", err)

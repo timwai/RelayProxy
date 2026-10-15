@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -124,6 +125,7 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 			fail("not a directory")
 			return
 		}
+		listStarted := time.Now()
 		infos, err := file.Readdir(5001)
 		if err != nil && !errors.Is(err, io.EOF) {
 			fail("unable to list directory")
@@ -151,6 +153,9 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 			}
 			return entries[i].Name < entries[j].Name
 		})
+		if elapsed := time.Since(listStarted); elapsed > 100*time.Millisecond {
+			log.Printf("[FileBrowse] host directory_scan_ms=%d entries=%d", elapsed.Milliseconds(), len(entries))
+		}
 		_ = protocol.WriteJSON(stream, protocol.FileShareResponse{Success: true, Entries: entries})
 		return
 	}

@@ -10,9 +10,10 @@ const (
 )
 
 type FileSharePeer struct {
-	DeviceID string `json:"deviceId"`
-	Name     string `json:"name"`
-	Online   bool   `json:"online"`
+	DeviceID string                `json:"deviceId"`
+	Name     string                `json:"name"`
+	Online   bool                  `json:"online"`
+	Shares   []FileShareDescriptor `json:"shares,omitempty"` // attached by the requesting Agent after verifying host ACL
 }
 
 type FileSharePeersResponse struct {

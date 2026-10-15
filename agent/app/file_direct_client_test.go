@@ -22,3 +22,20 @@ func TestFileP2POnlyRunsForBulkTransfers(t *testing.T) {
 		}
 	}
 }
+
+func TestFileMetadataSkipsDirectNegotiation(t *testing.T) {
+	for _, tc := range []struct {
+		action string
+		want   bool
+	}{
+		{protocol.FileShareListDir, false},
+		{protocol.FileShareListShares, false},
+		{protocol.FileShareDownload, true},
+		{protocol.FileShareUpload, true},
+		{"unknown", false},
+	} {
+		if got := fileSharePrefersDirect(tc.action); got != tc.want {
+			t.Errorf("action %q direct=%t, want %t", tc.action, got, tc.want)
+		}
+	}
+}

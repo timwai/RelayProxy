@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"context"
+	"log"
 	"time"
 
 	"relayproxy/agent/app"
@@ -40,13 +41,23 @@ func (b *UIBridge) GetFileSharePeers() ([]protocol.FileSharePeer, error) {
 func (b *UIBridge) GetRemoteFileShares(deviceID string) ([]protocol.FileShareDescriptor, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return b.agent.RemoteFileShares(ctx, deviceID)
+	start := time.Now()
+	shares, err := b.agent.RemoteFileShares(ctx, deviceID)
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond || err != nil {
+		log.Printf("[FileBrowse] shares total_ms=%d count=%d failed=%t", elapsed.Milliseconds(), len(shares), err != nil)
+	}
+	return shares, err
 }
 
 func (b *UIBridge) GetRemoteFileEntries(deviceID, shareID, relativePath string) ([]protocol.FileShareEntry, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	return b.agent.RemoteFileList(ctx, deviceID, shareID, relativePath)
+	start := time.Now()
+	entries, err := b.agent.RemoteFileList(ctx, deviceID, shareID, relativePath)
+	if elapsed := time.Since(start); elapsed > 250*time.Millisecond || err != nil {
+		log.Printf("[FileBrowse] list total_ms=%d count=%d failed=%t", elapsed.Milliseconds(), len(entries), err != nil)
+	}
+	return entries, err
 }
 
 func (b *UIBridge) GetFileShareCandidates() ([]protocol.FileShareCandidate, error) {

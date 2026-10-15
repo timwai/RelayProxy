@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"io/fs"
+	"log"
 	"os"
 	"path/filepath"
 	"sort"
@@ -120,6 +121,12 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		return
 	}
 	if req.Action == protocol.FileShareListDir {
+		listStarted := time.Now()
+		defer func() {
+			if elapsed := time.Since(listStarted); elapsed > 100*time.Millisecond {
+				log.Printf("[FileBrowse] host directory_scan_ms=%d", elapsed.Milliseconds())
+			}
+		}()
 		if !info.IsDir() {
 			fail("not a directory")
 			return

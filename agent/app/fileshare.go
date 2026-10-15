@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"hash"
+	"log"
 	"io"
 	"slices"
 	"strings"
@@ -84,13 +85,27 @@ func (a *Agent) FileSharePeers(ctx context.Context) ([]protocol.FileSharePeer, e
 	return response.Peers, nil
 }
 
+// File metadata uses the existing, authenticated Relay session immediately.
+// Negotiating a fresh file-only QUIC/TLS ticket for every directory made
+// browsing wait for unreachable NAT candidates (up to several seconds).
+// Actual file bytes still prefer P2P/direct with Relay fallback.
+func fileSharePrefersDirect(action string) bool {
+	return action == protocol.FileShareDownload || action == protocol.FileShareUpload
+}
+
 func (a *Agent) openRemoteFile(ctx context.Context, targetDeviceID string, req protocol.FileShareRequest) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
-	// File-scoped direct credentials are independent of Proxy/RDP grants.
-	// If the host has no reachable LAN/public endpoint, preserve the existing
-	// authenticated Relay data path without exposing file contents to a
-	// partially authenticated peer.
-	if direct, response, directErr := a.tryFileDirect(ctx, targetDeviceID, req); directErr == nil {
-		return &fileTransportStream{TunnelStream: direct, path: fileTransferPath(direct)}, response, nil
+	metadata := req.Action == protocol.FileShareListShares || req.Action == protocol.FileShareListDir
+	start := time.Now()
+	defer func() {
+		if metadata && time.Since(start) > 250*time.Millisecond {
+			// Never log share names, remote paths, directory entries or device IDs.
+			log.Printf("[FileBrowse] action=%s relay_request_ms=%d", req.Action, time.Since(start).Milliseconds())
+		}
+	}()
+	if fileSharePrefersDirect(req.Action) {
+		if direct, response, directErr := a.tryFileDirect(ctx, targetDeviceID, req); directErr == nil {
+			return &fileTransportStream{TunnelStream: direct, path: fileTransferPath(direct)}, response, nil
+		}
 	}
 	sess, _, err := a.fileSharingSession()
 	if err != nil {

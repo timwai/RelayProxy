@@ -1134,6 +1134,26 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 			}()
 			continue
 		}
+ 		if header.Type == protocol.FrameTypeFileShareVisibility {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer admitted.Add(-1)
+				defer stream.Close()
+				a.mu.RLock()
+				store := a.fileShareStore
+				granted := slices.Contains(a.approvedCapabilities, protocol.CapabilityFilesHost)
+				a.mu.RUnlock()
+				visible := false
+				if granted && store != nil && header.ClientDeviceID != "" {
+					if shares, err := store.Visible(header.ClientDeviceID); err == nil {
+						visible = len(shares) > 0
+					}
+				}
+				_ = protocol.WriteJSON(stream, protocol.FileShareVisibilityResponse{Allowed: visible})
+			}()
+			continue
+		}
 		if header.Type == protocol.FrameTypeFileShare {
 			a.mu.RLock()
 			store := a.fileShareStore

@@ -281,7 +281,7 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 	case protocol.FrameTypeFileShareCandidates:
 		r.handleFileShareCandidates(clientStream, clientSession)
 	case protocol.FrameTypeFileSharePeers:
-		r.handleFileSharePeers(clientStream, clientSession)
+		r.handleFileSharePeers(ctx, clientStream, clientSession)
 	case protocol.FrameTypeFileShare:
 		r.handleFileShare(ctx, header, clientStream, clientSession)
 	case protocol.FrameTypeOpenTCP:

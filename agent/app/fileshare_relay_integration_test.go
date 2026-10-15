@@ -132,6 +132,10 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			waitAgentReady(t, client)
 			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
 			defer cancel()
+			peers, err := client.FileSharePeers(ctx)
+			if err != nil || len(peers) != 1 || peers[0].DeviceID != "files-host" {
+				t.Fatalf("visible file hosts must have a live directory ACL: %+v err=%v", peers, err)
+			}
 			shares, err := client.RemoteFileShares(ctx, "files-host")
 			if err != nil || len(shares) != 1 || shares[0].ID != state.Shares[0].ID {
 				t.Fatalf("authorized share inventory: %+v err=%v", shares, err)
@@ -266,6 +270,10 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			delete(updated.Shares[0].Permissions, "files-client")
 			if _, err := store.Save(updated); err != nil {
 				t.Fatal(err)
+			}
+			peers, err = client.FileSharePeers(ctx)
+			if err != nil || len(peers) != 0 {
+				t.Fatalf("revoked host must disappear from peer list: %+v err=%v", peers, err)
 			}
 			if _, err := client.RemoteFileShares(ctx, "files-host"); err != nil {
 				// The share inventory is allowed to succeed empty; connection

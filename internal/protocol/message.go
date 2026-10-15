@@ -37,6 +37,7 @@ const (
 	FrameTypeFileDirectGrant        FrameType = 0x17
 	FrameTypeFileDirectCheck        FrameType = 0x18
 	FrameTypeFileDirectPunchPrepare FrameType = 0x19
+	FrameTypeFileShareVisibility    FrameType = 0x1A // Relay asks a host whether a named client has any active folder ACL
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

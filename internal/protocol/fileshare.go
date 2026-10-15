@@ -66,3 +66,10 @@ type FileShareCandidatesResponse struct {
 	Devices []FileShareCandidate `json:"devices"`
 	Error   string               `json:"error,omitempty"`
 }
+
+// FileShareVisibilityResponse is produced by the authenticated files.host
+// Agent using its current local directory ACL. No paths or share names are
+// returned to Server or unauthorized clients.
+type FileShareVisibilityResponse struct {
+	Allowed bool `json:"allowed"`
+}

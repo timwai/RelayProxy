@@ -135,12 +135,13 @@ func TestBrowserCanOnlyExportCompletedDefaultDownloads(t *testing.T) {
 	}
 	const id = "330ed2033103fa305616bac0db1c9cb9"
 	name := "report.txt"
-	if err := os.WriteFile(filepath.Join(dir, "report-"+id+".txt"), []byte("finished"), 0600); err != nil {
+	destination := filepath.Join(dir, name)
+	if err := os.WriteFile(destination, []byte("finished"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	manager := newFileTransferManager(nil)
 	manager.records[id] = &fileTransferRecord{FileTransfer: FileTransfer{
-		ID: id, Direction: "download", FileName: name, State: "completed",
+		ID: id, Direction: "download", FileName: name, State: "completed", Destination: destination,
 	}}
 	bridge := &UIBridge{fileTransfers: manager}
 	f, publicName, err := bridge.OpenCompletedFileDownload(id)
@@ -162,5 +163,50 @@ func TestBrowserCanOnlyExportCompletedDefaultDownloads(t *testing.T) {
 	if file, _, err := bridge.OpenCompletedFileDownload(id); err == nil {
 		file.Close()
 		t.Fatal("native private destination exported via browser")
+	}
+}
+
+// Default downloads now keep the source name. Duplicate names are numbered,
+// and existing targets, even symlinks, must never be overwritten.
+func TestDownloadOriginalFilenameAndSafeDuplicate(t *testing.T) {
+	dir := t.TempDir()
+	root, err := os.OpenRoot(dir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer root.Close()
+	if err := os.WriteFile(filepath.Join(dir, "pending.partial"), []byte("download data"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	name, err := publishDefaultFileDownload(context.Background(), root, "pending.partial", "report.pdf")
+	if err != nil || name != "report.pdf" {
+		t.Fatalf("original name not preserved: %q %v", name, err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "report (1).pdf"), []byte("existing"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	name, err = publishDefaultFileDownload(context.Background(), root, "pending.partial", "report.pdf")
+	if err != nil || name != "report (2).pdf" {
+		t.Fatalf("duplicate name not safely numbered: %q %v", name, err)
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "report.pdf")); string(got) != "download data" {
+		t.Fatal("first download was overwritten")
+	}
+	if got, _ := os.ReadFile(filepath.Join(dir, "report (1).pdf")); string(got) != "existing" {
+		t.Fatal("existing duplicate was overwritten")
+	}
+	if err := os.WriteFile(filepath.Join(dir, "private.data"), []byte("secret"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("private.data", filepath.Join(dir, ".config")); err == nil {
+		name, err = publishDefaultFileDownload(context.Background(), root, "pending.partial", ".config")
+		if err != nil || name != ".config (1)" {
+			t.Fatalf("symlink filename should not be replaced: %q %v", name, err)
+		}
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if _, err := publishDefaultFileDownload(ctx, root, "pending.partial", "cancel.txt"); !errors.Is(err, context.Canceled) {
+		t.Fatalf("cancelled download published a file: %v", err)
 	}
 }

@@ -3,6 +3,8 @@ package gateway
 import (
 	"context"
 	"slices"
+	"sort"
+	"sync"
 	"time"
 
 	"relayproxy/internal/protocol"
@@ -35,9 +37,11 @@ func (r *StreamRouter) handleFileShareCandidates(stream tunnel.TunnelStream, hos
 	_ = protocol.WriteJSON(stream, resp)
 }
 
-// Device discovery returns authenticated, online peers only. It never leaks
-// directory names or local paths, and is refreshed on demand.
-func (r *StreamRouter) handleFileSharePeers(stream tunnel.TunnelStream, client *session.DeviceSession) {
+// Device discovery is gated by BOTH Server file grants and the host's
+// current local folder ACL. A host with files.host but no active share for
+// this client must not appear in the device inventory at all.
+// Fail closed on old/unreachable hosts that cannot answer the new query.
+func (r *StreamRouter) handleFileSharePeers(ctx context.Context, stream tunnel.TunnelStream, client *session.DeviceSession) {
 	response := protocol.FileSharePeersResponse{Peers: []protocol.FileSharePeer{}}
 	if r.fileShareChecker == nil ||
 		!slices.Contains(client.Grants, protocol.CapabilityFilesClient) {
@@ -45,20 +49,76 @@ func (r *StreamRouter) handleFileSharePeers(stream tunnel.TunnelStream, client *
 		_ = protocol.WriteJSON(stream, response)
 		return
 	}
+	// Do not let a stalled host hold device discovery indefinitely.
+	queryCtx, cancel := context.WithTimeout(ctx, 4*time.Second)
+	defer cancel()
+	sem := make(chan struct{}, 8)
+	var wg sync.WaitGroup
+	var mu sync.Mutex
 	for _, host := range r.sessions.List() {
-		if host == nil || host.DeviceID == client.DeviceID ||
+		if host == nil || host.Tunnel == nil || host.DeviceID == client.DeviceID ||
 			host.IdentityID == "" || host.IdentityID != client.IdentityID ||
 			!slices.Contains(host.Grants, protocol.CapabilityFilesHost) {
 			continue
 		}
-		allowed, err := r.fileShareChecker(client.DeviceID, host.DeviceID)
-		if err == nil && allowed {
+		select {
+		case sem <- struct{}{}:
+		case <-queryCtx.Done():
+			break
+		}
+		if queryCtx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(host *session.DeviceSession) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			allowed, err := r.fileShareChecker(client.DeviceID, host.DeviceID)
+			if err != nil || !allowed || !hostHasVisibleFileShare(queryCtx, host, client.DeviceID) {
+				return
+			}
+			// Recheck current session and approval after the host's ACL answer.
+			current, online := r.sessions.Get(host.DeviceID)
+			allowed, err = r.fileShareChecker(client.DeviceID, host.DeviceID)
+			if !online || current != host || err != nil || !allowed {
+				return
+			}
+			mu.Lock()
 			response.Peers = append(response.Peers, protocol.FileSharePeer{
 				DeviceID: host.DeviceID, Name: host.DeviceName, Online: true,
 			})
-		}
+			mu.Unlock()
+		}(host)
 	}
+	wg.Wait()
+	sort.Slice(response.Peers, func(i, j int) bool {
+		return response.Peers[i].DeviceID < response.Peers[j].DeviceID
+	})
 	_ = protocol.WriteJSON(stream, response)
+}
+
+// Ask the authenticated host for one boolean only; never sync its path/ACL
+// inventory to the Server. The host does not trust the querying client to
+// provide or forge another identity.
+func hostHasVisibleFileShare(ctx context.Context, host *session.DeviceSession, clientID string) bool {
+	stream, err := host.Tunnel.OpenStream(ctx)
+	if err != nil {
+		return false
+	}
+	defer stream.Close()
+	deadline := time.Now().Add(2 * time.Second)
+	if ctxDeadline, ok := ctx.Deadline(); ok && ctxDeadline.Before(deadline) {
+		deadline = ctxDeadline
+	}
+	_ = stream.SetDeadline(deadline)
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Type: protocol.FrameTypeFileShareVisibility, ClientDeviceID: clientID,
+		ExitDeviceID: host.DeviceID,
+	}); err != nil {
+		return false
+	}
+	var response protocol.FileShareVisibilityResponse
+	return protocol.ReadJSON(stream, &response) == nil && response.Allowed
 }
 
 func (r *StreamRouter) handleFileShare(

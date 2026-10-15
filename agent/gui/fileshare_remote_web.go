@@ -304,3 +304,46 @@ func (w *WebServer) chooseLocalFileDownload(rw http.ResponseWriter, r *http.Requ
 	}
 	writeWebJSON(rw, transfer)
 }
+
+func (w *WebServer) chooseLocalResumeDownload(rw http.ResponseWriter, r *http.Request) {
+	if !w.fileDialogLocalOnly(rw, r) {
+		return
+	}
+	_ = http.NewResponseController(rw).SetWriteDeadline(time.Now().Add(2 * time.Minute))
+	var body struct { ID string `json:"id"` }
+	r.Body = http.MaxBytesReader(rw, r.Body, 1024)
+	d := json.NewDecoder(r.Body)
+	d.DisallowUnknownFields()
+	if err := d.Decode(&body); err != nil {
+		http.Error(rw, "invalid download task", http.StatusBadRequest)
+		return
+	}
+	var name string
+	for _, item := range w.bridge.GetFileTransfers() {
+		if item.ID == body.ID && item.Direction == "download" &&
+			(item.State == "paused" || item.State == "failed") {
+			name = item.FileName
+			break
+		}
+	}
+	if name == "" {
+		http.Error(rw, "download task unavailable", http.StatusNotFound)
+		return
+	}
+	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
+	defer cancel()
+	destination, err := nativeChooseDownloadPath(ctx, name)
+	if err != nil {
+		http.Error(rw, "system Save As dialog unavailable", http.StatusNotImplemented)
+		return
+	}
+	if destination == "" {
+		writeWebJSON(rw, map[string]bool{"cancelled": true})
+		return
+	}
+	if err := w.bridge.ResumeFileDownloadTo(body.ID, destination); err != nil {
+		http.Error(rw, "unable to resume download", http.StatusBadRequest)
+		return
+	}
+	writeWebJSON(rw, map[string]bool{"ok": true})
+}

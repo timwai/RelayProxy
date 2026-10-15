@@ -28,6 +28,7 @@ type FileTransfer struct {
 	Direction     string  `json:"direction"`
 	TransportPath string  `json:"transportPath,omitempty"`
 	Destination   string  `json:"destination,omitempty"`
+	RequiresSaveAs bool  `json:"requiresSaveAs,omitempty"`
 	State         string  `json:"state"`
 	Total         int64   `json:"total"`
 	Done          int64   `json:"done"`
@@ -98,6 +99,7 @@ func (m *fileTransferManager) startTo(deviceID, shareID, relativePath, savePath 
 	record := &fileTransferRecord{FileTransfer: FileTransfer{
 		ID: id, DeviceID: deviceID, ShareID: shareID, RelativePath: relativePath,
 		FileName: name, Direction: "download", State: "running", StartedAt: time.Now().UnixMilli(),
+		RequiresSaveAs: savePath != "",
 	}, cancel: cancel, lastSample: time.Now(), savePath: savePath}
 	m.mu.Lock()
 	running := 0
@@ -355,6 +357,9 @@ func (m *fileTransferManager) resumeTransfer(id string) error {
 		(item.State != "paused" && item.State != "failed") {
 		return errors.New("download task cannot be resumed")
 	}
+	if item.RequiresSaveAs && item.savePath == "" {
+		return errors.New("请重新选择下载保存位置，然后继续")
+	}
 	active := 0
 	for _, record := range m.records {
 		if record.State == "running" {
@@ -382,6 +387,26 @@ func (m *fileTransferManager) resumeTransfer(id string) error {
 	_ = m.persistTasksLocked()
 	go m.download(ctx, item)
 	return nil
+}
+
+// Resume custom Save As tasks only after an explicit local OS picker result.
+// A restarted Agent must never silently redirect a previously chosen
+// destination into Downloads/RelayProxy.
+func (m *fileTransferManager) resumeTransferTo(id, destination string) error {
+	if err := validateFileDownloadDestination(destination); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	record := m.records[id]
+	if record == nil || record.Direction != "download" ||
+		(record.State != "paused" && record.State != "failed") {
+		m.mu.Unlock()
+		return errors.New("download task cannot be resumed")
+	}
+	record.savePath = destination
+	record.RequiresSaveAs = true
+	m.mu.Unlock()
+	return m.resumeTransfer(id)
 }
 
 func (m *fileTransferManager) list() []FileTransfer {
@@ -479,6 +504,10 @@ func (b *UIBridge) CancelFileDownload(id string) error {
 
 func (b *UIBridge) ResumeFileDownload(id string) error {
 	return b.fileTransfers.resumeTransfer(id)
+}
+
+func (b *UIBridge) ResumeFileDownloadTo(id, savePath string) error {
+	return b.fileTransfers.resumeTransferTo(id, savePath)
 }
 
 func isRetryableFileDownloadError(err error) bool {

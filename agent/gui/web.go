@@ -234,6 +234,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/file-transfers/{id}/file", w.serveCompletedFileDownload)
 	mux.HandleFunc("POST /api/file-dialogs/folder", w.chooseLocalShareFolder)
 	mux.HandleFunc("POST /api/file-dialogs/download", w.chooseLocalFileDownload)
+	mux.HandleFunc("POST /api/file-dialogs/resume", w.chooseLocalResumeDownload)
 	mux.HandleFunc("POST /api/file-transfers", w.startFileDownload)
 	mux.HandleFunc("POST /api/file-transfers/{id}/cancel", w.cancelFileDownload)
 	mux.HandleFunc("POST /api/file-transfers/{id}/resume", w.resumeFileDownload)
@@ -638,6 +639,7 @@ const webBridgeJS = `(function () {
   window.goStartFileDownload = function (deviceId, shareId, relativePath) { return json('/api/file-transfers', 'POST', {deviceId:deviceId, shareId:shareId, path:relativePath}); };
   window.goChooseShareFolder = function () { return json('/api/file-dialogs/folder', 'POST', {}); };
   window.goChooseAndStartFileDownload = function (deviceId, shareId, relativePath) { return json('/api/file-dialogs/download', 'POST', {deviceId:deviceId, shareId:shareId, path:relativePath}); };
+  window.goChooseAndResumeFileDownload = function (id) { return json('/api/file-dialogs/resume', 'POST', {id:id}); };
   window.goGetFileTransfers = function () { return request('/api/file-transfers'); };
   window.goCancelFileDownload = function (id) { return json('/api/file-transfers/' + encodeURIComponent(id) + '/cancel', 'POST', {}); };
   window.goResumeFileDownload = function (id) { return json('/api/file-transfers/' + encodeURIComponent(id) + '/resume', 'POST', {}); };

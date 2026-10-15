@@ -214,8 +214,28 @@ export default function FileSharingPage({toast}) {
   catch(e){setTransferError(e.message||String(e))}
  }
  async function resumeDownload(id){
-  try{await callJSON('goResumeFileDownload',null,id);await refreshTransfers()}
-  catch(e){setTransferError(e.message||String(e))}
+  const item=transfers.find(t=>t.id===id);
+  if(!item)return;
+  try{
+   const nativeWails=!!globalThis.wails?.Call?.ByName;
+   const macBrowser=!nativeWails&&/Macintosh|Mac OS X/i.test(navigator.userAgent||'');
+   if(item.requiresSaveAs&&(nativeWails||macBrowser)){
+    const result=await callJSON('goChooseAndResumeFileDownload',null,id);
+    if(!result||result.cancelled||result===false)return;
+   }else{
+    if(!nativeWails&&!macBrowser){
+     let handle='browser';
+     if(typeof window.showSaveFilePicker==='function'){
+      try{handle=await window.showSaveFilePicker({suggestedName:item.fileName})}
+      catch(e){if(e.name==='AbortError')return;throw e}
+     }
+     saveHandles.current.set(id,handle);
+     completedSaves.current.delete(id);
+    }
+    await callJSON('goResumeFileDownload',null,id);
+   }
+   await refreshTransfers();
+  }catch(e){setTransferError(e.message||String(e))}
  }
 
  const refresh=useCallback(async()=>{

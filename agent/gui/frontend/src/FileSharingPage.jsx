@@ -35,6 +35,7 @@ export default function FileSharingPage({toast}) {
  const [fileQuery,setFileQuery]=useState('');
  const [fileSort,setFileSort]=useState('name');
  const [viewMode,setViewMode]=useState('list');
+ const [visibleLimit,setVisibleLimit]=useState(200);
  const [selectedFile,setSelectedFile]=useState(null);
  const saveHandles=useRef(new Map());
  const completedSaves=useRef(new Set());
@@ -199,7 +200,7 @@ export default function FileSharingPage({toast}) {
  },[tab,refreshTransfers]);
  async function openRemoteDevice(id){
   const seq=++navigationSerial.current;
-  setRemoteDevice(id);setRemoteShare('');setRemotePath('.');setRemoteEntries([]);setSelectedFile(null);setFileQuery('');
+  setRemoteDevice(id);setRemoteShare('');setRemotePath('.');setRemoteEntries([]);setSelectedFile(null);setFileQuery('');setVisibleLimit(200);
   setRemoteError('');setBrowseLatency('');
   const cached=directoryCache.current.get(id,'','');
   if(cached){
@@ -224,7 +225,7 @@ export default function FileSharingPage({toast}) {
  async function openRemoteDir(deviceID,shareID,dir,{force=false}={}){
   const seq=++navigationSerial.current;
   setRemoteDevice(deviceID);setRemoteShare(shareID);setRemotePath(dir);
-  setSelectedFile(null);setFileQuery('');setRemoteError('');setBrowseLatency('');
+  setSelectedFile(null);setFileQuery('');setVisibleLimit(200);setRemoteError('');setBrowseLatency('');
   const cached=force?null:directoryCache.current.get(deviceID,shareID,dir);
   if(cached){
    setRemoteEntries(cached);setRemoteLoading(false);setBrowseLatency('缓存');
@@ -458,7 +459,7 @@ export default function FileSharingPage({toast}) {
        {remotePath!=='.'&&remotePath.split('/').map((part,i,parts)=><React.Fragment key={i}><span className="file-browser-separator">/</span><button type="button" onClick={()=>openRemoteDir(remoteDevice,remoteShare,parts.slice(0,i+1).join('/'))} disabled={remoteLoading}>{part}</button></React.Fragment>)}
       </nav>
       <div className="file-browser-filters">
-       <input aria-label="搜索当前目录" className="control file-browser-search" type="search" placeholder="搜索此文件夹…" value={fileQuery} onChange={e=>setFileQuery(e.target.value)}/>
+       <input aria-label="搜索当前目录" className="control file-browser-search" type="search" placeholder="搜索此文件夹…" value={fileQuery} onChange={e=>{setFileQuery(e.target.value);setVisibleLimit(200)}}/>
        <select aria-label="排序方式" className="control file-browser-sort" value={fileSort} onChange={e=>setFileSort(e.target.value)}><option value="name">按名称</option><option value="size">按大小</option><option value="time">按时间</option></select>
        <button className="btn" aria-label="切换文件视图" title="切换列表／网格" onClick={()=>setViewMode(v=>v==='list'?'grid':'list')}>{viewMode==='list'?'▦':'☰'}</button>
       </div>
@@ -470,13 +471,16 @@ export default function FileSharingPage({toast}) {
       {remoteLoading&&<div className="empty">正在加载文件…</div>}
       {!remoteLoading&&visibleFiles.length===0&&<div className="empty">{fileQuery?'没有匹配的文件':'此文件夹为空'}</div>}
       {!remoteLoading&&<div className={'file-browser-files '+(viewMode==='grid'?'grid-view':'list-view')}>
-       {visibleFiles.map(entry=><div key={entry.name} className={'file-browser-file '+(selectedFile===entry.name?'selected':'')} onClick={()=>entry.isDir?openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name):setSelectedFile(entry.name)}>
+       {visibleFiles.slice(0,visibleLimit).map(entry=><div key={entry.name} className={'file-browser-file '+(selectedFile===entry.name?'selected':'')} onClick={()=>entry.isDir?openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name):setSelectedFile(entry.name)}>
         <span className={'file-browser-file-icon '+(entry.isDir?'directory':'document')}><Icon name={entry.isDir?'folder':'file'} size={19}/></span>
         <span className="file-browser-file-name"><strong title={entry.name}>{entry.name}</strong><small>{entry.isDir?'文件夹':'文件'}</small></span>
         <span className="file-browser-file-size">{entry.isDir?'—':formatFileBytes(entry.size)}</span>
         <span className="file-browser-file-date">{entry.modTime?new Date(entry.modTime>1e12?entry.modTime:entry.modTime*1000).toLocaleDateString():'—'}</span>
         <button type="button" className={'btn '+(entry.isDir?'':'primary')} onClick={e=>{e.stopPropagation();entry.isDir?openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name):beginDownload(entry)}} disabled={remoteLoading}>{entry.isDir?'打开':'下载'}</button>
        </div>)}
+      </div>}
+      {!remoteLoading&&visibleFiles.length>visibleLimit&&<div className="file-browser-more">
+       <button className="btn" type="button" onClick={()=>setVisibleLimit(n=>n+200)}>显示更多（剩余 {visibleFiles.length-visibleLimit} 项）</button>
       </div>}
       <div className="file-browser-status"><span>{visibleFiles.length} 个项目 · {currentShare?.permission==='read_write'?'可读取和上传':'只读访问'}</span><span>{browseLatency?'目录读取 '+browseLatency+' · ':''}{activeDownloads?'正在传输 '+activeDownloads+' 项 · ':''}传输采用已授权的加密通道</span></div>
      </>}

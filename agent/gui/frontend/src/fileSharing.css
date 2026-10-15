@@ -124,3 +124,6 @@
 @media(max-width:1050px){.file-browser-table-head{grid-template-columns:35px minmax(0,1fr) 78px 80px 62px}}
 @media(max-width:800px){.file-browser-table-head{grid-template-columns:35px minmax(0,1fr) 72px 62px}}
 @media(max-width:520px){.file-browser-table-head{grid-template-columns:35px minmax(0,1fr) 62px}}
+
+/* Render large folders in bounded batches instead of thousands of DOM rows. */
+.file-browser-more{display:flex;justify-content:center;padding:14px 12px;border-top:1px solid var(--line)}

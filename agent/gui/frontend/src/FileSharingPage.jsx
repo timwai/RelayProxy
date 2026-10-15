@@ -200,7 +200,7 @@ export default function FileSharingPage({toast}) {
  },[tab,refreshTransfers]);
  async function openRemoteDevice(id){
   const seq=++navigationSerial.current;
-  setRemoteDevice(id);setRemoteShare('');setRemotePath('.');setRemoteEntries([]);setSelectedFile(null);setFileQuery('');setVisibleLimit(200);
+  setRemoteDevice(id);setRemoteShare('');setRemoteShares([]);setRemotePath('.');setRemoteEntries([]);setSelectedFile(null);setFileQuery('');setVisibleLimit(200);
   setRemoteError('');setBrowseLatency('');
   const cached=directoryCache.current.get(id,'','');
   if(cached){

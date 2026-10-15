@@ -460,3 +460,5 @@ flowchart LR
 `go test ./agent/app ./agent/bridge ./agent/fileshare`、前端 `npm test` 与
 `npm run build`、Go/UI CI、Windows/macOS 平台测试；保留两 Agent 已鉴权
 Relay、文件 P2P 及 fallback 回归。
+
+- 为减少 5000 项大目录的 DOM 和排版成本，首次最多渲染 200 个文件项，点击“显示更多”每次再增加 200；搜索与排序仍覆盖后端完整响应。

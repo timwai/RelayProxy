@@ -142,7 +142,7 @@ func TestBrowserCanOnlyExportCompletedDefaultDownloads(t *testing.T) {
 	manager.records[id] = &fileTransferRecord{FileTransfer: FileTransfer{
 		ID: id, Direction: "download", FileName: name, State: "completed",
 	}}
-	bridge := &UIBridge{fileTransfers:manager}
+	bridge := &UIBridge{fileTransfers: manager}
 	f, publicName, err := bridge.OpenCompletedFileDownload(id)
 	if err != nil || publicName != name {
 		t.Fatalf("verified browser export: %s %v", publicName, err)

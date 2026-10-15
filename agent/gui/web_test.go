@@ -600,7 +600,11 @@ func TestAgentSpeedTestShowsPathAndQUICDiagnostics(t *testing.T) {
 }
 
 func TestFileDialogRejectsRequestsFromLANManagementListeners(t *testing.T) {
-	for _, test := range []struct { local bool; peer string; want int }{
+	for _, test := range []struct {
+		local bool
+		peer  string
+		want  int
+	}{
 		{false, "192.168.1.50:50000", http.StatusForbidden},
 		{false, "127.0.0.1:50000", http.StatusForbidden},
 		{true, "192.168.1.50:50000", http.StatusForbidden},

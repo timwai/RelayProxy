@@ -310,7 +310,9 @@ func (w *WebServer) chooseLocalResumeDownload(rw http.ResponseWriter, r *http.Re
 		return
 	}
 	_ = http.NewResponseController(rw).SetWriteDeadline(time.Now().Add(2 * time.Minute))
-	var body struct { ID string `json:"id"` }
+	var body struct {
+		ID string `json:"id"`
+	}
 	r.Body = http.MaxBytesReader(rw, r.Body, 1024)
 	d := json.NewDecoder(r.Body)
 	d.DisallowUnknownFields()

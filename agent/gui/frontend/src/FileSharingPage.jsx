@@ -137,7 +137,6 @@ export default function FileSharingPage({toast}) {
      }catch(err){setTransferError('保存文件失败：'+(err.message||String(err)))}
     })();
    }
-   setTransferError('');
   }catch(e){setTransferError(e.message||String(e))}
  },[]);
  useEffect(()=>{if(tab==='remote')void refreshPeers()},[tab,refreshPeers]);
@@ -223,7 +222,7 @@ export default function FileSharingPage({toast}) {
     const result=await callJSON('goChooseAndResumeFileDownload',null,id);
     if(!result||result.cancelled||result===false)return;
    }else{
-    if(!nativeWails&&!macBrowser){
+    if(!nativeWails){
      let handle='browser';
      if(typeof window.showSaveFilePicker==='function'){
       try{handle=await window.showSaveFilePicker({suggestedName:item.fileName})}
@@ -404,7 +403,7 @@ export default function FileSharingPage({toast}) {
      <div className="file-share-task-track"><div style={{width:(item.total>0?Math.min(100,item.done/item.total*100):0)+'%'}}/></div>
      <div className="file-share-task-meta"><span>{formatFileBytes(item.done)} / {item.total>0?formatFileBytes(item.total):'计算中'} · {item.total>0?Math.floor(item.done/item.total*100):0}%</span><span>{item.transportPath==='p2p_quic'?'P2P QUIC':item.transportPath==='direct_quic'?'直连 QUIC':item.transportPath=== 'direct_tls'?'直连 TLS':item.transportPath==='relay_quic'?'Relay QUIC':item.transportPath==='relay_tls'?'Relay TLS':'协商中'}{item.state==='running'?' · '+formatFileBytes(item.speed)+'/s':''}</span></div>
      {item.error&&<div className="notice danger">{item.error}</div>}
-     {item.direction==='download'&&item.state==='completed'&&<button type="button" className="btn" onClick={()=>{
+     {item.direction==='download'&&item.state==='completed'&&!globalThis.wails?.Call?.ByName&&<button type="button" className="btn" onClick={()=>{
        if(globalThis.wails?.Call?.ByName){toast?.(item.destination||'文件已保存到选择的位置');return}
        const link=document.createElement('a');
        link.href='/api/file-transfers/'+encodeURIComponent(item.id)+'/file';

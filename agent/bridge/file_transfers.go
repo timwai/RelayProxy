@@ -20,21 +20,21 @@ import (
 )
 
 type FileTransfer struct {
-	ID            string  `json:"id"`
-	DeviceID      string  `json:"deviceId"`
-	ShareID       string  `json:"shareId"`
-	RelativePath  string  `json:"relativePath"`
-	FileName      string  `json:"fileName"`
-	Direction     string  `json:"direction"`
-	TransportPath string  `json:"transportPath,omitempty"`
-	Destination   string  `json:"destination,omitempty"`
-	RequiresSaveAs bool  `json:"requiresSaveAs,omitempty"`
-	State         string  `json:"state"`
-	Total         int64   `json:"total"`
-	Done          int64   `json:"done"`
-	Speed         float64 `json:"speed"`
-	Error         string  `json:"error,omitempty"`
-	StartedAt     int64   `json:"startedAt"`
+	ID              string  `json:"id"`
+	DeviceID        string  `json:"deviceId"`
+	ShareID         string  `json:"shareId"`
+	RelativePath    string  `json:"relativePath"`
+	FileName        string  `json:"fileName"`
+	Direction       string  `json:"direction"`
+	TransportPath   string  `json:"transportPath,omitempty"`
+	Destination     string  `json:"destination,omitempty"`
+	RequiresSaveAs  bool    `json:"requiresSaveAs,omitempty"`
+	State           string  `json:"state"`
+	Total           int64   `json:"total"`
+	Done            int64   `json:"done"`
+	Speed           float64 `json:"speed"`
+	Error           string  `json:"error,omitempty"`
+	StartedAt       int64   `json:"startedAt"`
 }
 
 type fileTransferRecord struct {

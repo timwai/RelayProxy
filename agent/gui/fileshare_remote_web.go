@@ -221,6 +221,9 @@ func (w *WebServer) serveCompletedFileDownload(rw http.ResponseWriter, r *http.R
 		http.Error(rw, "download not a regular file", http.StatusNotFound)
 		return
 	}
+	// The management server has a 30s default WriteTimeout for JSON APIs;
+	// streamed browser downloads may be much larger than that.
+	_ = http.NewResponseController(rw).SetWriteDeadline(time.Now().Add(2 * time.Hour))
 	rw.Header().Set("Content-Disposition", "attachment; filename="+strconv.Quote(name))
 	rw.Header().Set("Content-Type", "application/octet-stream")
 	rw.Header().Set("Content-Length", strconv.FormatInt(info.Size(), 10))
@@ -244,6 +247,7 @@ func (w *WebServer) chooseLocalShareFolder(rw http.ResponseWriter, r *http.Reque
 	if !w.fileDialogLocalOnly(rw, r) {
 		return
 	}
+	_ = http.NewResponseController(rw).SetWriteDeadline(time.Now().Add(2 * time.Minute))
 	ctx, cancel := context.WithTimeout(r.Context(), 90*time.Second)
 	defer cancel()
 	selected, err := nativeChooseShareFolder(ctx)
@@ -258,6 +262,7 @@ func (w *WebServer) chooseLocalFileDownload(rw http.ResponseWriter, r *http.Requ
 	if !w.fileDialogLocalOnly(rw, r) {
 		return
 	}
+	_ = http.NewResponseController(rw).SetWriteDeadline(time.Now().Add(2 * time.Minute))
 	var request struct {
 		DeviceID string `json:"deviceId"`
 		ShareID  string `json:"shareId"`

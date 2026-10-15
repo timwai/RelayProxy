@@ -21,6 +21,7 @@ export default function FileSharingPage({toast}) {
  const [permission,setPermission]=useState('read');
  const [candidates,setCandidates]=useState([]);
  const [candidateError,setCandidateError]=useState('');
+ const [folderPickerError,setFolderPickerError]=useState('');
  const [candidatesLoading,setCandidatesLoading]=useState(false);
  const [peers,setPeers]=useState([]);
  const [remoteDevice,setRemoteDevice]=useState('');
@@ -205,8 +206,8 @@ export default function FileSharingPage({toast}) {
    const value=typeof selected==='string'?selected:selected?.path;
    if(!value)return;
    const name=value.replace(/[\\/]+$/,'').split(/[\\/]/).pop();
-   setDraft(s=>({...s,rootPath:value,name:s.name||name||''}));
-  }catch(e){setError('系统文件夹选择不可用：'+(e.message||String(e)))}
+   setFolderPickerError('');setDraft(s=>({...s,rootPath:value,name:s.name||name||''}));
+  }catch(e){setFolderPickerError('系统文件夹选择不可用：'+(e.message||String(e)))}
  }
  async function cancelTransfer(id){
   try{await callJSON('goCancelFileDownload',null,id);await refreshTransfers()}
@@ -254,6 +255,7 @@ export default function FileSharingPage({toast}) {
  }
  function edit(share){
   void loadCandidates();
+  setFolderPickerError('');
   setEditor(share?'edit':'new');
   setDraft(share?{...share,permissions:{...share.permissions}}:blank());
   setDevice('');setPermission('read');
@@ -382,6 +384,12 @@ export default function FileSharingPage({toast}) {
      <div className="file-share-task-track"><div style={{width:(item.total>0?Math.min(100,item.done/item.total*100):0)+'%'}}/></div>
      <div className="file-share-task-meta"><span>{formatFileBytes(item.done)} / {item.total>0?formatFileBytes(item.total):'计算中'} · {item.total>0?Math.floor(item.done/item.total*100):0}%</span><span>{item.transportPath==='p2p_quic'?'P2P QUIC':item.transportPath==='direct_quic'?'直连 QUIC':item.transportPath=== 'direct_tls'?'直连 TLS':item.transportPath==='relay_quic'?'Relay QUIC':item.transportPath==='relay_tls'?'Relay TLS':'协商中'}{item.state==='running'?' · '+formatFileBytes(item.speed)+'/s':''}</span></div>
      {item.error&&<div className="notice danger">{item.error}</div>}
+     {item.direction==='download'&&item.state==='completed'&&<button type="button" className="btn" onClick={()=>{
+       if(globalThis.wails?.Call?.ByName){toast?.(item.destination||'文件已保存到选择的位置');return}
+       const link=document.createElement('a');
+       link.href='/api/file-transfers/'+encodeURIComponent(item.id)+'/file';
+       link.download=item.fileName;document.body.append(link);link.click();link.remove();
+     }}>保存到浏览器下载目录</button>}
      {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>{item.direction==='download'?'暂停下载':'取消上传'}</button>}
      {item.direction==='download'&&(item.state==='paused'||item.state==='failed')&&<button className="btn primary" onClick={()=>resumeDownload(item.id)}>继续下载</button>}
     </div>)}
@@ -392,7 +400,7 @@ export default function FileSharingPage({toast}) {
     <div className="modal-body">
      <div className="form-grid">
       <label className="field"><span>共享名称</span><input className="control" value={draft.name} maxLength={100} onChange={e=>setDraft(s=>({...s,name:e.target.value}))} placeholder="例如：工作资料"/></label>
-      <div className="field"><span>本机共享文件夹</span><div className="file-share-folder-input"><input className="control" value={draft.rootPath} onChange={e=>setDraft(s=>({...s,rootPath:e.target.value}))} placeholder="点击浏览选择文件夹，或输入绝对路径"/><button type="button" className="btn" onClick={chooseShareFolder} disabled={busy}><Icon name="folder"/> 浏览…</button></div><small className="mini">选择的是运行 Agent 的设备上的文件夹。远程访问管理页时须手动输入 Agent 主机路径。</small></div>
+      <div className="field"><span>本机共享文件夹</span><div className="file-share-folder-input"><input className="control" value={draft.rootPath} onChange={e=>setDraft(s=>({...s,rootPath:e.target.value}))} placeholder="点击浏览选择文件夹，或输入绝对路径"/><button type="button" className="btn" onClick={chooseShareFolder} disabled={busy}><Icon name="folder"/> 浏览…</button></div><small className="mini">选择的是运行 Agent 的设备上的文件夹。远程访问管理页时须手动输入 Agent 主机路径。</small>{folderPickerError&&<div className="notice danger" role="alert">{folderPickerError}</div>}</div>
      </div>
      <div className="file-share-permissions"><h3>设备权限</h3><p className="mini">默认不授权。只显示 Server 已审批、同身份且具备文件访问能力的设备；离线设备也可预先设置权限。</p>
       {candidateError&&<div className="notice danger" role="alert">{candidateError}</div>}

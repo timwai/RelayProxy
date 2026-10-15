@@ -433,3 +433,30 @@ flowchart LR
 //   fail closed（不显示），需要更新共享端 Agent。
 // - 下载默认保持 source filename，遇到同名文件使用 (1)、(2) 顺序命名，不使用随机任务 ID。
 //   SHA-256 验证、私有 .partial 暂存、无覆盖发布、断点续传与浏览器完成后再导出保持不变。
+
+## 2026-10-15：文件浏览器目录加载性能优化
+
+### 问题与修复
+
+- 当前目录/共享列表每次调用 `openRemoteFile` 都先走文件专用直连 ticket 协商；
+  不可达时需要等待 QUIC/TCP 逐级超时后才回退 Relay，和元数据小请求的目标冲突。
+- `list_shares` / `list_dir` 现在直接使用已鉴权 Relay QUIC/TLS 会话的单个 stream，
+  保留 Server 身份/能力授权、host 本地目录 ACL、`os.Root` 范围约束；
+  `download` / `upload` 仍使用原有 P2P -> direct QUIC -> direct TLS -> Relay。
+- Agent 目录浏览接口记录超过 250ms 的元数据请求总耗时、条目数与失败状态，
+  Host 仅记录超过 100ms 的目录扫描耗时；不记录目录路径、设备 ID 或文件名。
+- React 文件浏览器对每个 device/share/path 设置 6 秒、最多 48 项的内存缓存，
+  缓存命中即时显示；“刷新”强制跳过缓存。
+  请求序号避免慢请求覆盖最近导航结果，同目录并发请求复用同一个 Promise。
+  切换设备/撤销授权/设备发现失败、上传提交后主动清除相关缓存。
+  footer 展示目录耗时或“缓存”。
+- 此缓存仅保存在当前 UI 进程中，不是持久化授权数据，也不缓存文件内容。
+  真实服务器仍对每个网络请求验证 Server 权限与 host ACL。
+- 仍需要两台物理设备实网测试 RTT、局域网 P2P 传输、离线/ACL 撤销、
+  超过 5000 项目录与 NAS 高延迟目录情况；CI 局域连接不能代表实网。
+
+### 验收
+
+`go test ./agent/app ./agent/bridge ./agent/fileshare`、前端 `npm test` 与
+`npm run build`、Go/UI CI、Windows/macOS 平台测试；保留两 Agent 已鉴权
+Relay、文件 P2P 及 fallback 回归。

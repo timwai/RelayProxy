@@ -3,6 +3,10 @@
 package gui
 
 import (
+	"os"
+	"path"
+	"path/filepath"
+
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/fileshare"
@@ -10,6 +14,33 @@ import (
 )
 
 // Native Wails callers use exactly the same bridge validation as local Web.
+// ChooseShareFolder uses the OS directory picker; the returned absolute
+// path is shown for confirmation and still validated by FileStore.Save.
+func (s *WailsService) ChooseShareFolder() (string, error) {
+	return s.owner.app.Dialog.OpenFile().
+		SetTitle("选择要共享的文件夹").
+		CanChooseDirectories(true).CanChooseFiles(false).
+		PromptForSingleSelection()
+}
+
+// ChooseAndStartFileDownload avoids giving the webpage a writable local
+// filesystem API. The native save dialog supplies the destination to Go.
+func (s *WailsService) ChooseAndStartFileDownload(deviceID, shareID, relativePath string) (bridge.FileTransfer, error) {
+	name := path.Base(relativePath)
+	if name == "" || name == "." || name == ".." {
+		return bridge.FileTransfer{}, os.ErrInvalid
+	}
+	dialog := s.owner.app.Dialog.SaveFile().SetTitle("保存远程文件").SetFilename(name)
+	if home, err := os.UserHomeDir(); err == nil {
+		dialog.SetDirectory(filepath.Join(home, "Downloads"))
+	}
+	destination, err := dialog.PromptForSingleSelection()
+	if err != nil || destination == "" {
+		return bridge.FileTransfer{}, err
+	}
+	return s.owner.bridge.StartFileDownloadTo(deviceID, shareID, relativePath, destination)
+}
+
 func (s *WailsService) GetFileShares() (fileshare.State, error) {
 	return s.owner.bridge.GetFileShares()
 }

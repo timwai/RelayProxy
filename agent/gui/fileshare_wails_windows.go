@@ -30,7 +30,7 @@ func (s *WailsService) ChooseAndStartFileDownload(deviceID, shareID, relativePat
 	if name == "" || name == "." || name == ".." {
 		return bridge.FileTransfer{}, os.ErrInvalid
 	}
-	dialog := s.owner.app.Dialog.SaveFile().SetTitle("保存远程文件").SetFilename(name)
+	dialog := s.owner.app.Dialog.SaveFile().SetMessage("保存远程文件").SetFilename(name)
 	if home, err := os.UserHomeDir(); err == nil {
 		dialog.SetDirectory(filepath.Join(home, "Downloads"))
 	}

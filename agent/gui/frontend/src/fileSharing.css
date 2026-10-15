@@ -61,7 +61,7 @@
 .file-share-upnp-status .mono{overflow-wrap:anywhere;font-size:11px}
 .file-share-upnp-status .mini{width:100%;overflow-wrap:anywhere}
 
-// Two-pane file manager. Reuses Agent global theme tokens and button styles.
+/* Two-pane file manager. Reuses Agent global theme tokens and button styles. */
 .file-browser{display:grid;grid-template-columns:245px minmax(0,1fr);border:1px solid var(--line);border-radius:17px;overflow:hidden;min-height:530px;background:var(--surface2)}
 .file-browser-sidebar{min-width:0;display:flex;flex-direction:column;background:var(--surface3);border-right:1px solid var(--line);padding:13px 10px}
 .file-browser-aside-title{padding:3px 7px 12px;display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:800;color:var(--muted)}

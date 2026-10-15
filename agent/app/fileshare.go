@@ -10,6 +10,7 @@ import (
 	"io"
 	"log"
 	"slices"
+	"sync"
 	"strings"
 	"time"
 
@@ -82,7 +83,74 @@ func (a *Agent) FileSharePeers(ctx context.Context) ([]protocol.FileSharePeer, e
 	if response.Peers == nil {
 		return []protocol.FileSharePeer{}, nil
 	}
-	return response.Peers, nil
+	// Server results alone are not proof of local folder ACL: older Servers
+	// may still advertise every files.host device. Verify directly against
+	// the authenticated host's current, per-device shared-folder inventory.
+	return filterAccessibleFileSharePeers(ctx, response.Peers, a.RemoteFileShares), nil
+}
+
+// filterAccessibleFileSharePeers fails closed for empty/denied or unreachable
+// hosts and bounds total discovery latency. It attaches the verified list
+// of visible shares, avoiding another request when the UI selects a device.
+func filterAccessibleFileSharePeers(
+	ctx context.Context,
+	candidates []protocol.FileSharePeer,
+	list func(context.Context, string) ([]protocol.FileShareDescriptor, error),
+) []protocol.FileSharePeer {
+	if len(candidates) == 0 {
+		return []protocol.FileSharePeer{}
+	}
+	checkCtx, cancel := context.WithTimeout(ctx, 8*time.Second)
+	defer cancel()
+	const maxChecks = 6
+	sem := make(chan struct{}, maxChecks)
+	verified := make([]protocol.FileSharePeer, len(candidates))
+	allowed := make([]bool, len(candidates))
+	seen := make(map[string]bool, len(candidates))
+	var wg sync.WaitGroup
+	for i, peer := range candidates {
+		if peer.DeviceID == "" || !peer.Online || seen[peer.DeviceID] {
+			continue
+		}
+		seen[peer.DeviceID] = true
+		select {
+		case sem <- struct{}{}:
+		case <-checkCtx.Done():
+			break
+		}
+		if checkCtx.Err() != nil {
+			break
+		}
+		wg.Add(1)
+		go func(i int, peer protocol.FileSharePeer) {
+			defer wg.Done()
+			defer func() { <-sem }()
+			probeCtx, stop := context.WithTimeout(checkCtx, 3*time.Second)
+			defer stop()
+			shares, err := list(probeCtx, peer.DeviceID)
+			if err != nil || probeCtx.Err() != nil {
+				return
+			}
+			for _, share := range shares {
+				if share.ID != "" &&
+					(share.Permission == string(fileshare.PermissionRead) ||
+						share.Permission == string(fileshare.PermissionReadWrite)) {
+					verified[i] = peer
+					verified[i].Shares = shares
+					allowed[i] = true
+					return
+				}
+			}
+		}(i, peer)
+	}
+	wg.Wait()
+	result := make([]protocol.FileSharePeer, 0, len(candidates))
+	for i := range candidates {
+		if allowed[i] {
+			result = append(result, verified[i])
+		}
+	}
+	return result
 }
 
 // File metadata uses the existing, authenticated Relay session immediately.

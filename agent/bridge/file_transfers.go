@@ -428,6 +428,46 @@ func (b *UIBridge) StartFileDownloadTo(deviceID, shareID, relativePath, savePath
 	return b.fileTransfers.startTo(deviceID, shareID, relativePath, savePath)
 }
 
+// OpenCompletedFileDownload exposes only successfully verified, default-root
+// downloads to the local authenticated browser. Native Save As paths are
+// deliberately NOT readable through this Web endpoint.
+func (b *UIBridge) OpenCompletedFileDownload(id string) (*os.File, string, error) {
+	m := b.fileTransfers
+	if m == nil || !validDownloadTaskID(id) {
+		return nil, "", os.ErrNotExist
+	}
+	m.mu.Lock()
+	record := m.records[id]
+	if record == nil || record.Direction != "download" || record.State != "completed" ||
+		record.savePath != "" {
+		m.mu.Unlock()
+		return nil, "", os.ErrNotExist
+	}
+	name := record.FileName
+	if name == "" || path.Base(name) != name {
+		m.mu.Unlock()
+		return nil, "", os.ErrInvalid
+	}
+	m.mu.Unlock()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", err
+	}
+	root, err := os.OpenRoot(filepath.Join(home, "Downloads", "RelayProxy"))
+	if err != nil {
+		return nil, "", err
+	}
+	defer root.Close()
+	ext := filepath.Ext(name)
+	diskName := fmt.Sprintf("%s-%s%s", strings.TrimSuffix(name, ext), id, ext)
+	info, err := root.Lstat(diskName)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, "", os.ErrNotExist
+	}
+	f, err := root.Open(diskName)
+	return f, name, err
+}
+
 func (b *UIBridge) GetFileTransfers() []FileTransfer {
 	return b.fileTransfers.list()
 }

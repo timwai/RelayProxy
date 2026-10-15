@@ -10,8 +10,8 @@ import (
 	"io"
 	"log"
 	"slices"
-	"sync"
 	"strings"
+	"sync"
 	"time"
 
 	"relayproxy/agent/fileshare"

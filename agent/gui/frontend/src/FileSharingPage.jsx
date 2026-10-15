@@ -1,6 +1,7 @@
 import React, {useCallback,useEffect,useRef,useState} from 'react';
 import {call,callJSON} from './bridge.js';
 import {Icon} from './icons.jsx';
+import {createDirectoryCache} from './fileBrowserCache.js';
 import './fileSharing.css';
 
 const formatFileBytes=n=>{const num=Math.max(0,Number(n)||0);if(num<1024)return num.toFixed(0)+' B';const units=['KiB','MiB','GiB','TiB'];const power=Math.min(4,Math.floor(Math.log(num)/Math.log(1024)));return (num/1024**power).toFixed(1)+' '+units[power-1]};
@@ -37,6 +38,11 @@ export default function FileSharingPage({toast}) {
  const [selectedFile,setSelectedFile]=useState(null);
  const saveHandles=useRef(new Map());
  const completedSaves=useRef(new Set());
+ const directoryCache=useRef(createDirectoryCache());
+ const directoryInflight=useRef(new Map());
+ const navigationSerial=useRef(0);
+ const [browseLatency,setBrowseLatency]=useState('');
+
  const [transfers,setTransfers]=useState([]);
  const [transferError,setTransferError]=useState('');
  const uploadCancelRef=useRef(false);
@@ -85,6 +91,9 @@ export default function FileSharingPage({toast}) {
    const task=await callJSON('goCommitFileUpload',null,sessionId);
    if(!task?.id)throw new Error('未能开始远程上传');
    sessionId='';
+   // Upload may alter any cached listing for this host; the next browse
+   // must re-fetch with its current permission and directory contents.
+   directoryCache.current.clearDevice(remoteDevice);
    toast?.('上传任务已提交，正在将文件传输到远程设备');
    setTab('transfers');
   }catch(e){
@@ -107,18 +116,29 @@ export default function FileSharingPage({toast}) {
   try{
    const result=await callJSON('goGetFileSharePeers',[]);
    if(!Array.isArray(result))throw new Error('设备发现返回了无效数据');
-   setPeers(result);setRemoteError('');
+   setRemoteError('');
    // Visibility is based on the host's current folder ACL, not just its
    // Server grant. Clear stale selected content after revocation.
+   setPeers(previous=>{
+    for(const oldPeer of previous){
+     if(!result.some(peer=>peer.deviceId===oldPeer.deviceId)){
+      directoryCache.current.clearDevice(oldPeer.deviceId);
+     }
+    }
+    return result;
+   });
    if(remoteDevice&&!result.some(peer=>peer.deviceId===remoteDevice)){
+    navigationSerial.current+=1;
     setRemoteDevice('');setRemoteShare('');setRemoteShares([]);
-    setRemoteEntries([]);setRemotePath('.');setSelectedFile(null);
+    setRemoteEntries([]);setRemotePath('.');setSelectedFile(null);setRemoteLoading(false);
    }
   }catch(e){
    // An unavailable ACL check must not leave previously visible hosts
    // advertised as accessible.
+   navigationSerial.current+=1;
+   directoryCache.current.clear();
    setPeers([]);setRemoteDevice('');setRemoteShare('');
-   setRemoteShares([]);setRemoteEntries([]);setRemotePath('.');
+   setRemoteShares([]);setRemoteEntries([]);setRemotePath('.');setRemoteLoading(false);
    setRemoteError(e.message||String(e));
   }
  },[remoteDevice]);
@@ -167,23 +187,62 @@ export default function FileSharingPage({toast}) {
   return ()=>clearInterval(timer);
  },[tab,refreshTransfers]);
  async function openRemoteDevice(id){
+  const seq=++navigationSerial.current;
   setRemoteDevice(id);setRemoteShare('');setRemotePath('.');setRemoteEntries([]);setSelectedFile(null);setFileQuery('');
-  setRemoteLoading(true);setRemoteError('');
+  setRemoteError('');setBrowseLatency('');
+  const cached=directoryCache.current.get(id,'','');
+  if(cached){
+   setRemoteShares(cached);setRemoteLoading(false);setBrowseLatency('缓存');
+   return;
+  }
+  setRemoteLoading(true);
+  const start=performance.now();
   try{
    const result=await callJSON('goGetRemoteFileShares',[],id);
    if(!Array.isArray(result))throw new Error('未能读取设备共享目录');
-   setRemoteShares(result);
-  }catch(e){setRemoteError(e.message||String(e));setRemoteShares([])}
-  finally{setRemoteLoading(false)}
+   if(seq!==navigationSerial.current)return;
+   directoryCache.current.set(id,'','',result);
+   setRemoteShares(result);setBrowseLatency(Math.round(performance.now()-start)+' ms');
+  }catch(e){
+   if(seq!==navigationSerial.current)return;
+   setRemoteError(e.message||String(e));setRemoteShares([]);
+  }finally{
+   if(seq===navigationSerial.current)setRemoteLoading(false);
+  }
  }
- async function openRemoteDir(deviceID,shareID,dir){
-  setRemoteLoading(true);setRemoteError('');
+ async function openRemoteDir(deviceID,shareID,dir,{force=false}={}){
+  const seq=++navigationSerial.current;
+  setRemoteDevice(deviceID);setRemoteShare(shareID);setRemotePath(dir);
+  setSelectedFile(null);setFileQuery('');setRemoteError('');setBrowseLatency('');
+  const cached=force?null:directoryCache.current.get(deviceID,shareID,dir);
+  if(cached){
+   setRemoteEntries(cached);setRemoteLoading(false);setBrowseLatency('缓存');
+   return;
+  }
+  setRemoteEntries([]);setRemoteLoading(true);
+  const start=performance.now();
+  const key=JSON.stringify([deviceID,shareID,dir]);
+  let pending=directoryInflight.current.get(key);
+  if(!pending){
+   pending=callJSON('goGetRemoteFileEntries',[],deviceID,shareID,dir);
+   directoryInflight.current.set(key,pending);
+   void pending.finally(()=>{
+    if(directoryInflight.current.get(key)===pending)directoryInflight.current.delete(key);
+   }).catch(()=>{});
+  }
   try{
-   const result=await callJSON('goGetRemoteFileEntries',[],deviceID,shareID,dir);
+   const result=await pending;
    if(!Array.isArray(result))throw new Error('未能读取文件列表');
-   setRemoteDevice(deviceID);setRemoteShare(shareID);setRemotePath(dir);setRemoteEntries(result);setSelectedFile(null);setFileQuery('');
-  }catch(e){setRemoteError(e.message||String(e))}
-  finally{setRemoteLoading(false)}
+   if(seq!==navigationSerial.current)return; // Slow prior requests cannot replace the active folder.
+   directoryCache.current.set(deviceID,shareID,dir,result);
+   setRemoteEntries(result);setBrowseLatency(Math.round(performance.now()-start)+' ms');
+  }catch(e){
+   if(seq!==navigationSerial.current)return;
+   directoryCache.current.delete(deviceID,shareID,dir);
+   setRemoteError(e.message||String(e));setRemoteEntries([]);
+  }finally{
+   if(seq===navigationSerial.current)setRemoteLoading(false);
+  }
  }
  async function beginDownload(entry){
   const relativePath=remotePath==='.'?entry.name:remotePath+'/'+entry.name;
@@ -379,7 +438,7 @@ export default function FileSharingPage({toast}) {
       <div><div className="eyebrow">REMOTE FILE EXPLORER</div><h2>{currentShare?.name||'远程文件浏览器'}</h2><div className="mini">{remoteDevice?(peers.find(p=>p.deviceId===remoteDevice)?.name||remoteDevice):'选择设备并打开已授权的共享文件夹'}</div></div>
       <div className="file-share-upload-actions">
        {remoteShare&&canUpload&&<label className={'btn primary '+(uploading?'disabled':'')} title="使用系统文件选择器上传文件"><Icon name="folder"/> 上传文件<input aria-label="选择要上传的文件" type="file" disabled={uploading||remoteLoading} onChange={uploadSelectedFile} style={{display:'none'}}/></label>}
-       {remoteShare&&<button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath)} disabled={remoteLoading||uploading}><Icon name="activity"/> 刷新</button>}
+       {remoteShare&&<button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})} disabled={remoteLoading||uploading}><Icon name="activity"/> 刷新</button>}
       </div>
      </div>
      {remoteShare&&<div className="file-browser-tools">
@@ -408,7 +467,7 @@ export default function FileSharingPage({toast}) {
         <button type="button" className={'btn '+(entry.isDir?'':'primary')} onClick={e=>{e.stopPropagation();entry.isDir?openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name):beginDownload(entry)}} disabled={remoteLoading}>{entry.isDir?'打开':'下载'}</button>
        </div>)}
       </div>}
-      <div className="file-browser-status"><span>{visibleFiles.length} 个项目 · {currentShare?.permission==='read_write'?'可读取和上传':'只读访问'}</span><span>{activeDownloads?'正在传输 '+activeDownloads+' 项 · ':''}传输采用已授权的加密通道</span></div>
+      <div className="file-browser-status"><span>{visibleFiles.length} 个项目 · {currentShare?.permission==='read_write'?'可读取和上传':'只读访问'}</span><span>{browseLatency?'目录读取 '+browseLatency+' · ':''}{activeDownloads?'正在传输 '+activeDownloads+' 项 · ':''}传输采用已授权的加密通道</span></div>
      </>}
     </div>
    </section>

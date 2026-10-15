@@ -2,9 +2,9 @@ package gateway
 
 import (
 	"context"
+	"slices"
 	"sort"
 	"sync"
-	"slices"
 	"time"
 
 	"relayproxy/internal/protocol"

@@ -1134,7 +1134,7 @@ func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSes
 			}()
 			continue
 		}
- 		if header.Type == protocol.FrameTypeFileShareVisibility {
+		if header.Type == protocol.FrameTypeFileShareVisibility {
 			workers.Add(1)
 			go func() {
 				defer workers.Done()

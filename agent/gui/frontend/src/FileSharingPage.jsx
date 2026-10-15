@@ -141,9 +141,12 @@ export default function FileSharingPage({toast}) {
  },[]);
  useEffect(()=>{if(tab==='remote')void refreshPeers()},[tab,refreshPeers]);
  useEffect(()=>{
-  if(tab!=='transfers')return;
-  void refreshTransfers();
-  const timer=setInterval(()=>void refreshTransfers(),750);
+  if(tab==='transfers')void refreshTransfers();
+  // A browser-selected Save As handle must still be fulfilled when the
+  // user navigates back to files or switches to another Agent page.
+  const timer=setInterval(()=>{
+   if(tab==='transfers'||saveHandles.current.size>0)void refreshTransfers();
+  },900);
   return ()=>clearInterval(timer);
  },[tab,refreshTransfers]);
  async function openRemoteDevice(id){

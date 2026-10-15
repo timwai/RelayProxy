@@ -413,3 +413,13 @@ flowchart LR
 - 小型共享列表与目录枚举不触发每次文件会话的 UDP 打洞；只有实际上传/下载才尝试 `p2p_quic`，避免 UDP 受阻时仅打开目录就引入 4 秒穿透等待。
 
 - P2P 授权安全加固：Server 无条件剔除共享端自行回传的任何 session ID/HMAC key，再仅在经格式验证的文件 P2P 候选存在时填充 Server 新签发凭据；客户端额外限制候选总量，不能利用不可信主机伪造协商材料。
+
+## 文件浏览器双栏改版与系统选择器（2026-10-15 / PR #205）
+
+- Agent React「其他设备」采用设备与共享目录侧栏 + 文件浏览器主工作区，支持路径面包屑、文件排序、目录搜索、列表／网格切换、窄屏响应式；文件夹单击进入。
+- Windows 原生 Wails3 GUI：`app.Dialog.OpenFile()` 目录选取，`app.Dialog.SaveFile()` 文件另存为；Windows 本机浏览器管理页使用 PowerShell Windows Forms；macOS 本机 Agent Web 使用 AppleScript。只有本机 loopback Web 请求可触发**运行 Agent 的系统**上的文件对话框，远程 Agent Web 不支持触发宿主机弹窗。
+- 上传沿用浏览器／WebView 文件输入控件，系统弹窗只选择用户授权的源文件，后续分块和端到端文件 ACL 不变。
+- 浏览器保存使用 File System Access API（支持的浏览器）或浏览器附件下载；只有 Agent SHA-256 校验完成的默认下载任务才能通过只读 GET 接口导出，不在 Web API 提供写入任意主机绝对路径能力。Windows/macOS 本地保存位置通过原生对话框选择后直接传递给 Agent Bridge。
+- 自定义保存跨磁盘时，先复制到目标目录的私有暂存文件，再 fsync 和无覆盖链接发布；停电／取消不将不完整文件作为正常文件发布。
+- 原 Agent 重启恢复的下载任务如果来自系统另存为，需要再次选择保存路径再继续，防止保存路径丢失后默默回落到默认下载目录。
+- **仍待实机验收**：Windows Wails WebView2/macOS Safari 对话框权限和路径编码、浏览器较大文件保存的内存与磁盘表现、跨文件系统以及取消后清理。CI 成功不代表完成这些物理设备测试。

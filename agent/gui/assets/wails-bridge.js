@@ -22,6 +22,9 @@
   window.goCommitFileUpload = id => invoke('CommitFileUpload', id);
   window.goDiscardFileUpload = id => invoke('DiscardFileUpload', id);
   window.goStartFileDownload = (deviceID, shareID, relativePath) => invoke('StartFileDownload', deviceID, shareID, relativePath);
+  window.goChooseShareFolder = () => invoke('ChooseShareFolder');
+  window.goChooseAndStartFileDownload = (deviceID, shareID, relativePath) => invoke('ChooseAndStartFileDownload', deviceID, shareID, relativePath);
+  window.goChooseAndResumeFileDownload = id => invoke('ChooseAndResumeFileDownload', id);
   window.goGetFileTransfers = () => invoke('GetFileTransfers');
   window.goCancelFileDownload = id => invoke('CancelFileDownload', id);
   window.goResumeFileDownload = id => invoke('ResumeFileDownload', id);

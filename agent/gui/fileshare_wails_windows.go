@@ -3,6 +3,10 @@
 package gui
 
 import (
+	"os"
+	"path"
+	"path/filepath"
+
 	"relayproxy/agent/app"
 	"relayproxy/agent/bridge"
 	"relayproxy/agent/fileshare"
@@ -10,6 +14,60 @@ import (
 )
 
 // Native Wails callers use exactly the same bridge validation as local Web.
+// ChooseShareFolder uses the OS directory picker; the returned absolute
+// path is shown for confirmation and still validated by FileStore.Save.
+func (s *WailsService) ChooseShareFolder() (string, error) {
+	return s.owner.app.Dialog.OpenFile().
+		SetTitle("选择要共享的文件夹").
+		CanChooseDirectories(true).CanChooseFiles(false).
+		PromptForSingleSelection()
+}
+
+// ChooseAndStartFileDownload avoids giving the webpage a writable local
+// filesystem API. The native save dialog supplies the destination to Go.
+func (s *WailsService) ChooseAndStartFileDownload(deviceID, shareID, relativePath string) (bridge.FileTransfer, error) {
+	name := path.Base(relativePath)
+	if name == "" || name == "." || name == ".." {
+		return bridge.FileTransfer{}, os.ErrInvalid
+	}
+	dialog := s.owner.app.Dialog.SaveFile().SetMessage("保存远程文件").SetFilename(name)
+	if home, err := os.UserHomeDir(); err == nil {
+		dialog.SetDirectory(filepath.Join(home, "Downloads"))
+	}
+	destination, err := dialog.PromptForSingleSelection()
+	if err != nil || destination == "" {
+		return bridge.FileTransfer{}, err
+	}
+	return s.owner.bridge.StartFileDownloadTo(deviceID, shareID, relativePath, destination)
+}
+
+// Restore an explicit Save As target after pause or Agent restart. The file
+// is still downloaded to the private partial before publication.
+func (s *WailsService) ChooseAndResumeFileDownload(id string) (bool, error) {
+	var name string
+	for _, item := range s.owner.bridge.GetFileTransfers() {
+		if item.ID == id && item.Direction == "download" {
+			name = item.FileName
+			break
+		}
+	}
+	if name == "" {
+		return false, os.ErrNotExist
+	}
+	dialog := s.owner.app.Dialog.SaveFile().SetMessage("选择继续下载的保存位置").SetFilename(name)
+	if home, err := os.UserHomeDir(); err == nil {
+		dialog.SetDirectory(filepath.Join(home, "Downloads"))
+	}
+	destination, err := dialog.PromptForSingleSelection()
+	if err != nil || destination == "" {
+		return false, err
+	}
+	if err := s.owner.bridge.ResumeFileDownloadTo(id, destination); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
 func (s *WailsService) GetFileShares() (fileshare.State, error) {
 	return s.owner.bridge.GetFileShares()
 }

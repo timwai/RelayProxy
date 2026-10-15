@@ -60,3 +60,67 @@
 .file-share-upnp-status{display:flex;align-items:center;flex-wrap:wrap;gap:8px;margin-top:12px;padding:9px 11px;border:1px solid var(--line);border-radius:9px;background:var(--surface3);font-size:12px}
 .file-share-upnp-status .mono{overflow-wrap:anywhere;font-size:11px}
 .file-share-upnp-status .mini{width:100%;overflow-wrap:anywhere}
+
+/* Two-pane file manager. Reuses Agent global theme tokens and button styles. */
+.file-browser{display:grid;grid-template-columns:245px minmax(0,1fr);border:1px solid var(--line);border-radius:17px;overflow:hidden;min-height:530px;background:var(--surface2)}
+.file-browser-sidebar{min-width:0;display:flex;flex-direction:column;background:var(--surface3);border-right:1px solid var(--line);padding:13px 10px}
+.file-browser-aside-title{padding:3px 7px 12px;display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:800;color:var(--muted)}
+.file-browser-aside-empty{font-size:12px;color:var(--muted);padding:20px 8px;line-height:1.7}
+.file-browser-device{width:100%;display:flex;align-items:center;text-align:left;gap:9px;border:1px solid transparent;background:transparent;padding:10px;border-radius:10px;cursor:pointer;color:var(--text)}
+.file-browser-device:hover,.file-browser-device.active{background:var(--surface2);border-color:var(--line)}
+.file-browser-device-mark{width:32px;height:32px;display:grid;place-items:center;background:color-mix(in srgb,var(--brand) 10%,var(--surface2));border-radius:9px;color:var(--brand);flex-shrink:0}
+.file-browser-device-label{display:flex;flex-direction:column;min-width:0;flex:1}
+.file-browser-device-label strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-browser-device-label small{font-size:10px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.file-browser-online-dot{width:8px;height:8px;background:var(--ok);border-radius:50%;flex-shrink:0}
+.file-browser-shares{display:flex;flex-direction:column;gap:2px;margin:1px 0 12px 19px;border-left:1px solid var(--line);padding-left:8px}
+.file-browser-share{display:flex;align-items:center;min-width:0;gap:8px;border:0;border-radius:8px;background:transparent;padding:9px;color:var(--muted);cursor:pointer;text-align:left}
+.file-browser-share span{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:650}
+.file-browser-share small{font-size:9px}
+.file-browser-share.active{color:var(--brand);background:color-mix(in srgb,var(--brand) 11%,var(--surface2))}
+.file-browser-share:hover{background:var(--surface2)}
+.file-browser-aside-bottom{display:flex;align-items:flex-start;gap:8px;margin-top:auto;border-top:1px solid var(--line);padding:14px 8px 4px;color:var(--muted);font-size:10px;line-height:1.5}
+.file-browser-content{display:flex;flex-direction:column;min-width:0;min-height:0}
+.file-browser-header{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:20px 20px 16px;border-bottom:1px solid var(--line)}
+.file-browser-header h2{font-size:19px;letter-spacing:-.35px;margin:4px 0}
+.file-browser-tools{padding:14px 20px;border-bottom:1px solid var(--line);display:flex;flex-direction:column;gap:13px}
+.file-browser-crumbs{display:flex;align-items:center;gap:7px;white-space:nowrap;overflow-x:auto;min-width:0}
+.file-browser-crumbs button{display:inline-flex;align-items:center;gap:5px;border:0;background:transparent;color:var(--brand);padding:4px 3px;font-weight:600;white-space:nowrap}
+.file-browser-separator{color:var(--subtle)}
+.file-browser-filters{display:flex;align-items:center;gap:9px}
+.file-browser-search{flex:1;min-width:120px}
+.file-browser-sort{width:115px}
+.file-browser-filters>.btn{flex:0 0 36px}
+.file-browser-table-head{display:grid;grid-template-columns:minmax(0,1fr) 92px 115px 62px;gap:12px;padding:11px 20px;font-size:11px;color:var(--muted);font-weight:650;border-bottom:1px solid var(--line)}
+.file-browser-files{min-width:0;flex:1}
+.file-browser-file{display:grid;grid-template-columns:38px minmax(0,1fr) 92px 115px 62px;align-items:center;gap:12px;padding:10px 20px;border-bottom:1px solid var(--line);min-height:61px;cursor:default}
+.file-browser-file:hover,.file-browser-file.selected{background:color-mix(in srgb,var(--brand) 5%,var(--surface2))}
+.file-browser-file-icon{width:35px;height:35px;border-radius:9px;display:grid;place-items:center;background:var(--surface3);color:var(--muted)}
+.file-browser-file-icon.directory{background:color-mix(in srgb,var(--brand) 11%,var(--surface3));color:var(--brand)}
+.file-browser-file-name{display:flex;flex-direction:column;gap:2px;min-width:0}
+.file-browser-file-name strong{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px}
+.file-browser-file-name small{font-size:10px;color:var(--muted)}
+.file-browser-file-size,.file-browser-file-date{color:var(--muted);font-size:11px}
+.file-browser-file .btn{min-height:29px;padding:0 8px;font-size:11px}
+.file-browser-status{margin-top:auto;padding:12px 20px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:7px;color:var(--muted);font-size:10px;background:var(--surface3)}
+.file-browser-placeholder{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;padding:40px 20px;text-align:center}
+.file-browser-placeholder-icon{width:70px;height:70px;display:grid;place-items:center;border-radius:20px;background:color-mix(in srgb,var(--brand) 9%,var(--surface3));color:var(--brand)}
+.file-browser-placeholder h3{font-size:15px;margin:0}
+.file-browser-placeholder p{font-size:12px;color:var(--muted);margin:0}
+.file-share-folder-input{display:flex;gap:8px;align-items:center}
+.file-share-folder-input>.control{flex:1;min-width:0}
+.file-share-folder-input>.btn{display:flex;align-items:center;gap:5px;flex:0 0 auto}
+.file-browser-files.grid-view{display:grid;grid-template-columns:repeat(auto-fill,minmax(145px,1fr));gap:12px;padding:16px;align-content:start}
+.file-browser-files.grid-view .file-browser-file{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:7px;padding:18px 8px;border:1px solid var(--line);border-radius:12px;min-width:0}
+.file-browser-files.grid-view .file-browser-file-icon{width:54px;height:54px}
+.file-browser-files.grid-view .file-browser-file-name{text-align:center;width:100%}
+.file-browser-files.grid-view .file-browser-file-size,.file-browser-files.grid-view .file-browser-file-date{display:none}
+@media(max-width:1050px){.file-browser{grid-template-columns:207px minmax(0,1fr)}.file-browser-table-head{grid-template-columns:minmax(0,1fr) 78px 80px 62px}.file-browser-file{grid-template-columns:35px minmax(0,1fr) 78px 80px 62px;gap:9px}}
+@media(max-width:800px){.file-browser{grid-template-columns:1fr;min-height:420px}.file-browser-sidebar{border-right:0;border-bottom:1px solid var(--line);max-height:205px;overflow:auto}.file-browser-aside-bottom{display:none}.file-browser-header{padding:16px}.file-browser-tools{padding:12px 16px}.file-browser-table-head{grid-template-columns:minmax(0,1fr) 72px 62px}.file-browser-table-head span:nth-child(3){display:none}.file-browser-file{grid-template-columns:35px minmax(0,1fr) 72px 62px;padding:10px 14px}.file-browser-file-date{display:none}}
+@media(max-width:520px){.file-browser-header{align-items:flex-start;flex-direction:column}.file-browser-filters{flex-wrap:wrap}.file-browser-search{flex:1 1 100%}.file-browser-sort{flex:1}.file-browser-table-head{grid-template-columns:minmax(0,1fr) 62px}.file-browser-table-head span:nth-child(2){display:none}.file-browser-file{grid-template-columns:35px minmax(0,1fr) 62px}.file-browser-file-size{display:none}.file-share-folder-input{flex-wrap:wrap}.file-share-folder-input>.btn{width:100%;justify-content:center}}
+
+.file-browser-table-head{grid-template-columns:38px minmax(0,1fr) 92px 115px 62px}
+.file-browser-table-head>span:first-child{grid-column:1 / 3}
+@media(max-width:1050px){.file-browser-table-head{grid-template-columns:35px minmax(0,1fr) 78px 80px 62px}}
+@media(max-width:800px){.file-browser-table-head{grid-template-columns:35px minmax(0,1fr) 72px 62px}}
+@media(max-width:520px){.file-browser-table-head{grid-template-columns:35px minmax(0,1fr) 62px}}

@@ -20,20 +20,21 @@ import (
 )
 
 type FileTransfer struct {
-	ID            string  `json:"id"`
-	DeviceID      string  `json:"deviceId"`
-	ShareID       string  `json:"shareId"`
-	RelativePath  string  `json:"relativePath"`
-	FileName      string  `json:"fileName"`
-	Direction     string  `json:"direction"`
-	TransportPath string  `json:"transportPath,omitempty"`
-	Destination   string  `json:"destination,omitempty"`
-	State         string  `json:"state"`
-	Total         int64   `json:"total"`
-	Done          int64   `json:"done"`
-	Speed         float64 `json:"speed"`
-	Error         string  `json:"error,omitempty"`
-	StartedAt     int64   `json:"startedAt"`
+	ID             string  `json:"id"`
+	DeviceID       string  `json:"deviceId"`
+	ShareID        string  `json:"shareId"`
+	RelativePath   string  `json:"relativePath"`
+	FileName       string  `json:"fileName"`
+	Direction      string  `json:"direction"`
+	TransportPath  string  `json:"transportPath,omitempty"`
+	Destination    string  `json:"destination,omitempty"`
+	RequiresSaveAs bool    `json:"requiresSaveAs,omitempty"`
+	State          string  `json:"state"`
+	Total          int64   `json:"total"`
+	Done           int64   `json:"done"`
+	Speed          float64 `json:"speed"`
+	Error          string  `json:"error,omitempty"`
+	StartedAt      int64   `json:"startedAt"`
 }
 
 type fileTransferRecord struct {
@@ -41,6 +42,7 @@ type fileTransferRecord struct {
 	cancel     context.CancelFunc
 	lastSample time.Time
 	lastBytes  int64
+	savePath   string // from local OS picker only; never accepted from Web HTTP
 }
 
 type fileTransferManager struct {
@@ -66,6 +68,17 @@ func transferID() (string, error) {
 }
 
 func (m *fileTransferManager) start(deviceID, shareID, relativePath string) (FileTransfer, error) {
+	return m.startTo(deviceID, shareID, relativePath, "")
+}
+
+// startTo is available to a trusted native UI only. Browser endpoints never
+// accept an arbitrary Agent-host filesystem destination from HTTP requests.
+func (m *fileTransferManager) startTo(deviceID, shareID, relativePath, savePath string) (FileTransfer, error) {
+	if savePath != "" {
+		if err := validateFileDownloadDestination(savePath); err != nil {
+			return FileTransfer{}, err
+		}
+	}
 	if m == nil || m.agent == nil {
 		return FileTransfer{}, errors.New("file transfer manager unavailable")
 	}
@@ -86,7 +99,8 @@ func (m *fileTransferManager) start(deviceID, shareID, relativePath string) (Fil
 	record := &fileTransferRecord{FileTransfer: FileTransfer{
 		ID: id, DeviceID: deviceID, ShareID: shareID, RelativePath: relativePath,
 		FileName: name, Direction: "download", State: "running", StartedAt: time.Now().UnixMilli(),
-	}, cancel: cancel, lastSample: time.Now()}
+		RequiresSaveAs: savePath != "",
+	}, cancel: cancel, lastSample: time.Now(), savePath: savePath}
 	m.mu.Lock()
 	running := 0
 	for _, item := range m.records {
@@ -230,19 +244,103 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	// Full random task ID avoids collisions with another prior download.
 	destinationName := fmt.Sprintf("%s-%s%s", base, record.ID, ext)
 	destination := filepath.Join(dir, destinationName)
-	// Publish with no-replace semantics. Rename on Windows/Unix can overwrite
-	// a destination that appeared while another download was running.
-	if err := ctx.Err(); err != nil {
-		return err
-	}
-	if err := root.Link(tempName, destinationName); err != nil {
-		return fmt.Errorf("publish download without overwriting: %w", err)
+	if record.savePath != "" {
+		// Save-dialog destinations may live on a different filesystem, so a
+		// hard link from the private partial folder would fail with EXDEV.
+		// Copy to a private file in the chosen directory, fsync, then
+		// publish without replacement, never leaving a partial visible.
+		if err := publishFileDownloadTo(ctx, root, tempName, record.savePath, record.ID); err != nil {
+			return err
+		}
+		destination = record.savePath
+	} else {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if err := root.Link(tempName, destinationName); err != nil {
+			return fmt.Errorf("publish download without overwriting: %w", err)
+		}
 	}
 	_ = root.Remove(tempName)
 	m.mu.Lock()
 	record.Destination = destination
 	m.mu.Unlock()
 	return nil
+}
+
+// validateFileDownloadDestination prevents a UI dialog result from becoming
+// an implicit create-directory or symlink-following operation. os.Root below
+// resolves files only inside the explicitly selected existing directory.
+func validateFileDownloadDestination(destination string) error {
+	if !filepath.IsAbs(destination) || filepath.Clean(destination) != destination {
+		return errors.New("download save path must be absolute and canonical")
+	}
+	name := filepath.Base(destination)
+	if name == "." || name == ".." || name == "" || name == string(filepath.Separator) {
+		return errors.New("invalid download save file name")
+	}
+	if len(name) > 255 {
+		return errors.New("download save file name too long")
+	}
+	return nil
+}
+
+func publishFileDownloadTo(ctx context.Context, sourceRoot *os.Root, sourceName, destination, id string) error {
+	if err := validateFileDownloadDestination(destination); err != nil {
+		return err
+	}
+	parent := filepath.Dir(destination)
+	root, err := os.OpenRoot(parent)
+	if err != nil {
+		return err
+	}
+	defer root.Close()
+	name := filepath.Base(destination)
+	if _, err := root.Lstat(name); err == nil {
+		return os.ErrExist // The save dialog must not silently overwrite files.
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	tmp := ".relayproxy-save-" + id + ".partial"
+	out, err := root.OpenFile(tmp, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+	if err != nil {
+		return err
+	}
+	defer root.Remove(tmp)
+	defer out.Close()
+	in, err := sourceRoot.Open(sourceName)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+	if _, err := io.Copy(out, &fileContextReader{ctx: ctx, r: in}); err != nil {
+		return err
+	}
+	if err := out.Sync(); err != nil {
+		return err
+	}
+	if err := out.Close(); err != nil {
+		return err
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if err := root.Link(tmp, name); err != nil {
+		return fmt.Errorf("publish chosen save file without overwriting: %w", err)
+	}
+	return nil
+}
+
+type fileContextReader struct {
+	ctx context.Context
+	r   io.Reader
+}
+
+func (r *fileContextReader) Read(p []byte) (int, error) {
+	if err := r.ctx.Err(); err != nil {
+		return 0, err
+	}
+	return r.r.Read(p)
 }
 
 // resumeTransfer deliberately supports downloads only. Upload source files
@@ -258,6 +356,9 @@ func (m *fileTransferManager) resumeTransfer(id string) error {
 	if item == nil || item.Direction != "download" ||
 		(item.State != "paused" && item.State != "failed") {
 		return errors.New("download task cannot be resumed")
+	}
+	if item.RequiresSaveAs && item.savePath == "" {
+		return errors.New("请重新选择下载保存位置，然后继续")
 	}
 	active := 0
 	for _, record := range m.records {
@@ -286,6 +387,26 @@ func (m *fileTransferManager) resumeTransfer(id string) error {
 	_ = m.persistTasksLocked()
 	go m.download(ctx, item)
 	return nil
+}
+
+// Resume custom Save As tasks only after an explicit local OS picker result.
+// A restarted Agent must never silently redirect a previously chosen
+// destination into Downloads/RelayProxy.
+func (m *fileTransferManager) resumeTransferTo(id, destination string) error {
+	if err := validateFileDownloadDestination(destination); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	record := m.records[id]
+	if record == nil || record.Direction != "download" ||
+		(record.State != "paused" && record.State != "failed") {
+		m.mu.Unlock()
+		return errors.New("download task cannot be resumed")
+	}
+	record.savePath = destination
+	record.RequiresSaveAs = true
+	m.mu.Unlock()
+	return m.resumeTransfer(id)
 }
 
 func (m *fileTransferManager) list() []FileTransfer {
@@ -324,6 +445,55 @@ func (b *UIBridge) StartFileDownload(deviceID, shareID, relativePath string) (Fi
 	return b.fileTransfers.start(deviceID, shareID, relativePath)
 }
 
+// StartFileDownloadTo is for a local OS Save dialog (Wails). Do not expose
+// this method as an Agent Web HTTP endpoint accepting caller-supplied paths.
+func (b *UIBridge) StartFileDownloadTo(deviceID, shareID, relativePath, savePath string) (FileTransfer, error) {
+	if savePath == "" {
+		return FileTransfer{}, errors.New("save dialog was cancelled")
+	}
+	return b.fileTransfers.startTo(deviceID, shareID, relativePath, savePath)
+}
+
+// OpenCompletedFileDownload exposes only successfully verified, default-root
+// downloads to the local authenticated browser. Native Save As paths are
+// deliberately NOT readable through this Web endpoint.
+func (b *UIBridge) OpenCompletedFileDownload(id string) (*os.File, string, error) {
+	m := b.fileTransfers
+	if m == nil || !validDownloadTaskID(id) {
+		return nil, "", os.ErrNotExist
+	}
+	m.mu.Lock()
+	record := m.records[id]
+	if record == nil || record.Direction != "download" || record.State != "completed" ||
+		record.savePath != "" {
+		m.mu.Unlock()
+		return nil, "", os.ErrNotExist
+	}
+	name := record.FileName
+	if name == "" || path.Base(name) != name {
+		m.mu.Unlock()
+		return nil, "", os.ErrInvalid
+	}
+	m.mu.Unlock()
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, "", err
+	}
+	root, err := os.OpenRoot(filepath.Join(home, "Downloads", "RelayProxy"))
+	if err != nil {
+		return nil, "", err
+	}
+	defer root.Close()
+	ext := filepath.Ext(name)
+	diskName := fmt.Sprintf("%s-%s%s", strings.TrimSuffix(name, ext), id, ext)
+	info, err := root.Lstat(diskName)
+	if err != nil || !info.Mode().IsRegular() {
+		return nil, "", os.ErrNotExist
+	}
+	f, err := root.Open(diskName)
+	return f, name, err
+}
+
 func (b *UIBridge) GetFileTransfers() []FileTransfer {
 	return b.fileTransfers.list()
 }
@@ -334,6 +504,10 @@ func (b *UIBridge) CancelFileDownload(id string) error {
 
 func (b *UIBridge) ResumeFileDownload(id string) error {
 	return b.fileTransfers.resumeTransfer(id)
+}
+
+func (b *UIBridge) ResumeFileDownloadTo(id, savePath string) error {
+	return b.fileTransfers.resumeTransferTo(id, savePath)
 }
 
 func isRetryableFileDownloadError(err error) bool {

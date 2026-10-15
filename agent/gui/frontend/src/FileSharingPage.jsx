@@ -143,7 +143,7 @@ export default function FileSharingPage({toast}) {
  useEffect(()=>{
   if(tab==='transfers')void refreshTransfers();
   // A browser-selected Save As handle must still be fulfilled when the
-  // user navigates back to files or switches to another Agent page.
+  // user switches between the remote explorer and transfers tabs.
   const timer=setInterval(()=>{
    if(tab==='transfers'||saveHandles.current.size>0)void refreshTransfers();
   },900);
@@ -384,7 +384,7 @@ export default function FileSharingPage({toast}) {
       {!remoteLoading&&visibleFiles.length===0&&<div className="empty">{fileQuery?'没有匹配的文件':'此文件夹为空'}</div>}
       {!remoteLoading&&<div className={'file-browser-files '+(viewMode==='grid'?'grid-view':'list-view')}>
        {visibleFiles.map(entry=><div key={entry.name} className={'file-browser-file '+(selectedFile===entry.name?'selected':'')} onClick={()=>entry.isDir?openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name):setSelectedFile(entry.name)}>
-        <span className={'file-browser-file-icon '+(entry.isDir?'directory':'document')}><Icon name="folder" size={19}/></span>
+        <span className={'file-browser-file-icon '+(entry.isDir?'directory':'document')}><Icon name={entry.isDir?'folder':'file'} size={19}/></span>
         <span className="file-browser-file-name"><strong title={entry.name}>{entry.name}</strong><small>{entry.isDir?'文件夹':'文件'}</small></span>
         <span className="file-browser-file-size">{entry.isDir?'—':formatFileBytes(entry.size)}</span>
         <span className="file-browser-file-date">{entry.modTime?new Date(entry.modTime>1e12?entry.modTime:entry.modTime*1000).toLocaleDateString():'—'}</span>

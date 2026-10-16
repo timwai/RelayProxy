@@ -57,7 +57,7 @@ func NewSecurityManager(db *repository.DB) (*SecurityManager, error) {
 }
 
 // NewSecurityManagerWithGeoIP enforces a China-mainland-only admission policy
-// when a validated offline CSV database path is configured. No database means
+// when a validated offline database path is configured. No database means
 // the existing RDP policy is unchanged.
 func NewSecurityManagerWithGeoIP(db *repository.DB, countryCSVPath string) (*SecurityManager, error) {
 	var countryDB *CountryDB
@@ -75,6 +75,13 @@ func NewSecurityManagerWithGeoIP(db *repository.DB, countryCSVPath string) (*Sec
 	}
 	go s.writeLoop()
 	return s, nil
+}
+
+// SetCountryDB swaps an immutable verified GeoIP index without stopping ingress.
+func (s *SecurityManager) SetCountryDB(db *CountryDB) {
+	s.mu.Lock()
+	s.countryDB = db
+	s.mu.Unlock()
 }
 
 // Reload is called on every administrative security mutation. Expiry is
@@ -165,6 +172,11 @@ func (s *SecurityManager) Admit(ingressID, sourceIP string, countTCP bool) (bool
 	}
 	if !allowAuto {
 		for _, ban := range s.bans {
+			// A disabled GeoIP feature also disables existing geo-generated
+			// automatic bans; operator bans still apply.
+			if s.countryDB == nil && strings.HasPrefix(ban.record.Reason, "GEO_NON_CN:") {
+				continue
+			}
 			if ban.record.Kind != "auto" || (ban.record.IngressID != "" && ban.record.IngressID != ingressID) {
 				continue
 			}
@@ -237,9 +249,12 @@ func (s *SecurityManager) Record(entry repository.RDPSecurityLog) {
 	if s == nil {
 		return
 	}
-	if entry.SourceCountry == "" && s.countryDB != nil {
-		if addr, err := netip.ParseAddr(entry.SourceIP); err == nil && isPublicGeoIP(addr) {
-			entry.SourceCountry = s.countryDB.Lookup(addr)
+	if entry.SourceCountry == "" {
+		s.mu.Lock()
+		countryDB := s.countryDB
+		s.mu.Unlock()
+		if addr, err := netip.ParseAddr(entry.SourceIP); err == nil && isPublicGeoIP(addr) && countryDB != nil {
+			entry.SourceCountry = countryDB.Lookup(addr)
 		}
 	}
 	select {

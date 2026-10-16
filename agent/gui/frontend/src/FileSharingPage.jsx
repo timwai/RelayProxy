@@ -11,9 +11,10 @@ const empty=()=>({revision:0,enabled:false,directUpnpEnabled:false,shares:[]});
 const upnpStateLabel={disabled:'已关闭',not_approved:'等待 Server 审批',awaiting_request:'等待文件直连请求',discovering:'正在发现路由器',mapped:'已取得公网候选地址',private_wan:'网关 WAN 为内网或 CGNAT',unavailable:'映射不可用'};
 const countPermissions=share=>Object.values(share.permissions||{}).filter(v=>v==='read'||v==='read_write').length;
 
-export default function FileSharingPage({toast}) {
+export default function FileSharingPage({toast,initialDeviceId=''}) {
  const [state,setState]=useState(null);
- const [tab,setTab]=useState('local');
+ const [tab,setTab]=useState(initialDeviceId?'remote':'local');
+ const initialDeviceToOpen=useRef(initialDeviceId);
  const [directStatus,setDirectStatus]=useState(null);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
@@ -214,6 +215,15 @@ export default function FileSharingPage({toast}) {
    peerRefreshSerial.current+=1; // discard responses after leaving the file browser
   };
  },[tab,refreshPeers]);
+ useEffect(()=>{
+  if(tab!=='remote'||!initialDeviceToOpen.current)return;
+  const peer=peers.find(item=>item.deviceId===initialDeviceToOpen.current);
+  if(!peer)return; // Never select an unverified or revoked shared folder.
+  initialDeviceToOpen.current='';
+  const first=peer.shares?.[0];
+  if(first)void openRemoteDir(peer.deviceId,first.id,'.');
+  else void openRemoteDevice(peer.deviceId);
+ },[peers,tab]);
  useEffect(()=>{
   if(tab==='transfers')void refreshTransfers();
   // A browser-selected Save As handle must still be fulfilled when the

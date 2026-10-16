@@ -18,6 +18,7 @@ import (
 	"relayproxy/internal/tunnel"
 	"relayproxy/internal/webui"
 	browsersync "relayproxy/server/browser_sync"
+	serverrdp "relayproxy/server/rdp"
 	"relayproxy/server/repository"
 	"relayproxy/server/service"
 	"relayproxy/server/session"
@@ -38,6 +39,7 @@ type Router struct {
 	browserSync                    *browsersync.Handler
 	live                           *liveUpdates
 	settings                       *config.ServerSettings
+	geoIPUpdater                   *serverrdp.GeoIPUpdater
 	onDeviceRevoked                func(string)
 	onDeviceAuthorizationChanged   func(string)
 	onIdentityAuthorizationChanged func(identityID string)
@@ -62,6 +64,11 @@ type RouterOption func(*Router)
 // It is nil unless browser_sync.enabled is explicitly enabled.
 func WithBrowserSync(handler *browsersync.Handler) RouterOption {
 	return func(r *Router) { r.browserSync = handler }
+}
+
+// WithRDPGeoIPUpdater exposes real runtime status and manual rule update to admins.
+func WithRDPGeoIPUpdater(updater *serverrdp.GeoIPUpdater) RouterOption {
+	return func(r *Router) { r.geoIPUpdater = updater }
 }
 
 // RDPIngressRuntimeStatus describes the sockets currently owned by the
@@ -365,6 +372,8 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("GET /api/v1/rdp/security/bans", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityBans)))
 	r.mux.HandleFunc("POST /api/v1/rdp/security/bans", r.requireAuth(r.requireAdmin(r.handleCreateRDPSecurityBan)))
 	r.mux.HandleFunc("DELETE /api/v1/rdp/security/bans/{id}", r.requireAuth(r.requireAdmin(r.handleRevokeRDPSecurityBan)))
+	r.mux.HandleFunc("GET /api/v1/rdp/security/geoip/status", r.requireAuth(r.requireAdmin(r.handleRDPGeoIPStatus)))
+	r.mux.HandleFunc("POST /api/v1/rdp/security/geoip/update", r.requireAuth(r.requireAdmin(r.handleRDPGeoIPUpdate)))
 	r.mux.HandleFunc("GET /api/v1/rdp/security/rules", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityRules)))
 	r.mux.HandleFunc("PUT /api/v1/rdp/security/rules/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateRDPSecurityRule)))
 

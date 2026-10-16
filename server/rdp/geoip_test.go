@@ -7,6 +7,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"relayproxy/server/repository"
 )
 
 const geoFixture = "198.51.100.0,198.51.100.255,US\n203.0.113.0,203.0.113.255,CN\n192.0.2.0,192.0.2.255,ZZ\n2001:db8::,2001:db8::ffff,HK\n"
@@ -142,5 +145,35 @@ func TestGeoCountryRejectsInvalidOrOverlappingFile(t *testing.T) {
 		if _, err := LoadCountryDB(p); err == nil {
 			t.Fatalf("invalid file accepted: %q", bad)
 		}
+	}
+}
+
+func TestGeoCountryAppearsInAuditSummariesAndDetails(t *testing.T) {
+	db := openSecurityTestDB(t)
+	s, err := NewSecurityManagerWithGeoIP(db, writeGeoFixture(t, false))
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	s.Record(repository.RDPSecurityLog{
+		IngressID: "entry", TargetDeviceID: "target",
+		SourceIP: "198.51.100.88", Transport: "tcp",
+		Result: "REJECTED", Reason: "GEO_NON_CN:US",
+		StartedAt: now, EndedAt: now,
+	})
+	s.Close()
+	page, err := db.ListRDPSecurityLogPage("198.51.100.88", 1, 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(page.Items) != 1 || page.Items[0].SourceCountry != "US" {
+		t.Fatalf("missing country from RDP detail: %+v", page.Items)
+	}
+	groups, err := db.ListRDPSecuritySourceGroups("198.51.100.88", 1, 20)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(groups.Items) != 1 || groups.Items[0].SourceCountry != "US" {
+		t.Fatalf("missing country from source IP group: %+v", groups.Items)
 	}
 }

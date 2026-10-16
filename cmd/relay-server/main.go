@@ -677,6 +677,7 @@ func main() {
 			}
 			return out
 		}),
+		api.WithRDPGeoIPUpdater(geoUpdater),
 		api.WithRDPSecurityReload(rdpSecurity.Reload),
 		api.WithRDPSecurityLogsClear(rdpSecurity.ClearLogs),
 		api.WithRDPIngressEnabled(ingress.Enabled),

@@ -19,6 +19,7 @@ type RDPSecurityLog struct {
 	TargetDeviceID string    `json:"targetDeviceId"`
 	TargetName     string    `json:"targetName"`
 	SourceIP       string    `json:"sourceIp"`
+	SourceCountry  string    `json:"sourceCountry"`
 	Transport      string    `json:"transport"`
 	Result         string    `json:"result"`
 	Reason         string    `json:"reason"`
@@ -50,7 +51,7 @@ type RDPSecurityRule struct {
 
 func (db *DB) ensureRDPSecuritySchema() error {
 	statements := []string{
-		"CREATE TABLE IF NOT EXISTS rdp_security_logs (id TEXT PRIMARY KEY, ingress_id TEXT NOT NULL, target_device_id TEXT NOT NULL, source_ip TEXT NOT NULL, transport TEXT NOT NULL, result TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', started_at TIMESTAMP NOT NULL, ended_at TIMESTAMP NOT NULL, bytes_up BIGINT NOT NULL DEFAULT 0, bytes_down BIGINT NOT NULL DEFAULT 0)",
+		"CREATE TABLE IF NOT EXISTS rdp_security_logs (id TEXT PRIMARY KEY, ingress_id TEXT NOT NULL, target_device_id TEXT NOT NULL, source_ip TEXT NOT NULL, source_country TEXT NOT NULL DEFAULT '', transport TEXT NOT NULL, result TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', started_at TIMESTAMP NOT NULL, ended_at TIMESTAMP NOT NULL, bytes_up BIGINT NOT NULL DEFAULT 0, bytes_down BIGINT NOT NULL DEFAULT 0)",
 		"CREATE INDEX IF NOT EXISTS idx_rdp_security_logs_started ON rdp_security_logs(started_at)",
 		"CREATE INDEX IF NOT EXISTS idx_rdp_security_logs_source ON rdp_security_logs(source_ip, started_at)",
 		"CREATE TABLE IF NOT EXISTS rdp_security_bans (id TEXT PRIMARY KEY, cidr TEXT NOT NULL, ingress_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', actor TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL, expires_at TIMESTAMP, revoked_at TIMESTAMP)",
@@ -66,6 +67,17 @@ func (db *DB) ensureRDPSecuritySchema() error {
 			return fmt.Errorf("RDP security schema: %w", err)
 		}
 	}
+	// Existing deployments need the column too; CREATE TABLE IF NOT EXISTS
+	// does not migrate a pre-existing table.
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('rdp_security_logs') WHERE name = 'source_country'").Scan(&count); err != nil {
+		return err
+	}
+	if count == 0 {
+		if _, err := db.Exec("ALTER TABLE rdp_security_logs ADD COLUMN source_country TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
@@ -79,8 +91,8 @@ func (db *DB) InsertRDPSecurityLog(item RDPSecurityLog) error {
 	if item.EndedAt.IsZero() {
 		item.EndedAt = item.StartedAt
 	}
-	_, err := db.Exec("INSERT INTO rdp_security_logs (id,ingress_id,target_device_id,source_ip,transport,result,reason,started_at,ended_at,bytes_up,bytes_down) VALUES (?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET result=excluded.result,reason=excluded.reason,ended_at=excluded.ended_at,bytes_up=excluded.bytes_up,bytes_down=excluded.bytes_down",
-		item.ID, item.IngressID, item.TargetDeviceID, item.SourceIP, item.Transport, item.Result, item.Reason, item.StartedAt.UTC(), item.EndedAt.UTC(), item.BytesUp, item.BytesDown)
+	_, err := db.Exec("INSERT INTO rdp_security_logs (id,ingress_id,target_device_id,source_ip,source_country,transport,result,reason,started_at,ended_at,bytes_up,bytes_down) VALUES (?,?,?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET result=excluded.result,reason=excluded.reason,ended_at=excluded.ended_at,bytes_up=excluded.bytes_up,bytes_down=excluded.bytes_down,source_country=excluded.source_country",
+		item.ID, item.IngressID, item.TargetDeviceID, item.SourceIP, item.SourceCountry, item.Transport, item.Result, item.Reason, item.StartedAt.UTC(), item.EndedAt.UTC(), item.BytesUp, item.BytesDown)
 	return err
 }
 
@@ -91,7 +103,7 @@ func (db *DB) ListRDPSecurityLogs(ip, ingressID string, limit int) ([]RDPSecurit
 	if limit > 500 {
 		limit = 500
 	}
-	query := "SELECT id,ingress_id,target_device_id,source_ip,transport,result,reason,started_at,ended_at,bytes_up,bytes_down FROM rdp_security_logs WHERE 1=1"
+	query := "SELECT id,ingress_id,target_device_id,source_ip,source_country,transport,result,reason,started_at,ended_at,bytes_up,bytes_down FROM rdp_security_logs WHERE 1=1"
 	args := make([]any, 0, 3)
 	if ip != "" {
 		query += " AND source_ip = ?"
@@ -111,7 +123,7 @@ func (db *DB) ListRDPSecurityLogs(ip, ingressID string, limit int) ([]RDPSecurit
 	result := make([]RDPSecurityLog, 0)
 	for rows.Next() {
 		var item RDPSecurityLog
-		if err := rows.Scan(&item.ID, &item.IngressID, &item.TargetDeviceID, &item.SourceIP, &item.Transport, &item.Result, &item.Reason, &item.StartedAt, &item.EndedAt, &item.BytesUp, &item.BytesDown); err != nil {
+		if err := rows.Scan(&item.ID, &item.IngressID, &item.TargetDeviceID, &item.SourceIP, &item.SourceCountry, &item.Transport, &item.Result, &item.Reason, &item.StartedAt, &item.EndedAt, &item.BytesUp, &item.BytesDown); err != nil {
 			return nil, err
 		}
 		result = append(result, item)

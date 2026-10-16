@@ -20,6 +20,7 @@ type RDPSecurityPage[T any] struct {
 
 type RDPSourceGroup struct {
 	SourceIP        string    `json:"sourceIp"`
+	SourceCountry   string    `json:"sourceCountry"`
 	Targets         []string  `json:"targets"`
 	ConnectionCount int64     `json:"connectionCount"`
 	ForwardedCount  int64     `json:"forwardedCount"`
@@ -50,7 +51,7 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 	if err := db.QueryRow(countQuery, pattern).Scan(&total); err != nil {
 		return nil, err
 	}
-	rows, err := db.Query(`SELECT l.source_ip,
+	rows, err := db.Query(`SELECT l.source_ip,MAX(l.source_country),
 		JSON_GROUP_ARRAY(DISTINCT COALESCE(NULLIF(d.name,''),NULLIF(l.target_device_id,''),'未知设备')),
 		COUNT(*), SUM(CASE WHEN l.result = 'FORWARDED' THEN 1 ELSE 0 END),
 		SUM(CASE WHEN l.result = 'REJECTED' THEN 1 ELSE 0 END),
@@ -71,7 +72,7 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 		var item RDPSourceGroup
 		var targets string
 		var firstRaw, lastRaw any
-		if err := rows.Scan(&item.SourceIP, &targets, &item.ConnectionCount, &item.ForwardedCount,
+		if err := rows.Scan(&item.SourceIP, &item.SourceCountry, &targets, &item.ConnectionCount, &item.ForwardedCount,
 			&item.RejectedCount, &item.BytesUp, &item.BytesDown, &firstRaw, &lastRaw); err != nil {
 			return nil, err
 		}
@@ -152,7 +153,7 @@ func (db *DB) ListRDPSecurityLogPage(sourceIP string, page, size int) (*RDPSecur
 	}
 	query := `SELECT l.id,l.ingress_id,l.target_device_id,
 		COALESCE(NULLIF(d.name,''),NULLIF(l.target_device_id,''),'未知设备') AS target_name,
-		l.source_ip,l.transport,l.result,l.reason,l.started_at,l.ended_at,l.bytes_up,l.bytes_down
+		l.source_ip,l.source_country,l.transport,l.result,l.reason,l.started_at,l.ended_at,l.bytes_up,l.bytes_down
 		FROM rdp_security_logs l LEFT JOIN devices d ON d.id=l.target_device_id` + where +
 		" ORDER BY l.started_at DESC,l.id DESC LIMIT ? OFFSET ?"
 	args = append(args, size, (page-1)*size)
@@ -164,7 +165,7 @@ func (db *DB) ListRDPSecurityLogPage(sourceIP string, page, size int) (*RDPSecur
 	output := &RDPSecurityPage[RDPSecurityLog]{Items: make([]RDPSecurityLog, 0), Page: page, PageSize: size, Total: total}
 	for rows.Next() {
 		var item RDPSecurityLog
-		if err := rows.Scan(&item.ID, &item.IngressID, &item.TargetDeviceID, &item.TargetName, &item.SourceIP, &item.Transport,
+		if err := rows.Scan(&item.ID, &item.IngressID, &item.TargetDeviceID, &item.TargetName, &item.SourceIP, &item.SourceCountry, &item.Transport,
 			&item.Result, &item.Reason, &item.StartedAt, &item.EndedAt, &item.BytesUp, &item.BytesDown); err != nil {
 			return nil, err
 		}

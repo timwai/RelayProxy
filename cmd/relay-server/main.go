@@ -523,11 +523,26 @@ func main() {
 		P2PUPnPEnabled:           cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
 	}, sessionMgr, router)
 
-	rdpSecurity, err := serverrdp.NewSecurityManager(db)
+	// An explicit path is authoritative. A conventional local file enables the
+	// policy without requiring a new server setting; missing data never causes
+	// guessed geography or irreversible bans.
+	geoCountryFile := strings.TrimSpace(os.Getenv("RELAY_RDP_GEOIP_DB"))
+	if geoCountryFile == "" {
+		const defaultCountryFile = "data/dbip-country-lite-latest.csv.gz"
+		if _, statErr := os.Stat(defaultCountryFile); statErr == nil {
+			geoCountryFile = defaultCountryFile
+		} else {
+			log.Printf("[RDP Security] GeoIP country ban inactive: place DB-IP Country Lite CSV.GZ at %s or set RELAY_RDP_GEOIP_DB", defaultCountryFile)
+		}
+	}
+	rdpSecurity, err := serverrdp.NewSecurityManagerWithGeoIP(db, geoCountryFile)
 	if err != nil {
 		log.Fatalf("[RDP Security] Failed to load security policy: %v", err)
 	}
 	defer rdpSecurity.Close()
+	if geoCountryFile != "" {
+		log.Printf("[RDP Security] country policy active: only CN public IPs permitted; other known countries permanently banned, unknown public IPs rejected; database=%s", geoCountryFile)
+	}
 
 	ingress := serverrdp.NewIngressManager(context.Background(), db, sessionMgr, serverrdp.IngressConfig{
 		Security: rdpSecurity,

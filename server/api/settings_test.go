@@ -151,6 +151,9 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	want.RDPIngress.PortEnd = 34100
 	want.RDPIngress.SourceCIDRs = []string{" 203.0.113.0/24 ", "203.0.113.0/24"}
 	want.RDPIngress.RateLimitPerMin = 240
+	want.RDPIngress.GeoIPEnabled = true
+	want.RDPIngress.GeoIPSourceURL = "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+	want.RDPIngress.GeoIPUpdateHours = 12
 	want.P2P.RendezvousListen = " :3479 "
 	want.P2P.RendezvousAdvertise = " relay.example.com:3479 "
 	want.P2P.PortStart = 30000
@@ -173,7 +176,7 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 		saved.Config.Tunnel.BrutalTotalUpMbps != 60 || saved.Config.Tunnel.BrutalTotalDownMbps != 80 ||
 		!saved.Config.Tunnel.BrutalDisableLossCompensation || saved.Runtime.Tunnel.BrutalTotalUpMbps != 0 ||
 		len(saved.Config.RelayACL.Domains) != 1 || !saved.Config.ServerExit.Enabled || !saved.Config.ServerExit.AllowPrivateNetwork ||
-		saved.Config.ServerExit.UpstreamMode != "direct" || saved.Config.ServerExit.AccessMode != "deny" ||
+		!saved.Config.RDPIngress.GeoIPEnabled || saved.Config.RDPIngress.GeoIPUpdateHours != 12 || saved.Runtime.RDPIngress.GeoIPEnabled || saved.Config.ServerExit.UpstreamMode != "direct" || saved.Config.ServerExit.AccessMode != "deny" ||
 		len(saved.Config.ServerExit.Domains) != 1 || len(saved.Config.ServerExit.CIDRs) != 1 ||
 		saved.Runtime.ServerExit.Enabled || !saved.Config.RDPIngress.Enabled || saved.Config.RDPIngress.Listen != "127.0.0.1:0" ||
 		len(saved.Config.RDPIngress.SourceCIDRs) != 1 || saved.Config.P2P.RendezvousListen != ":3479" ||

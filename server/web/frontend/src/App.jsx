@@ -283,7 +283,27 @@ function BanIP({ip,ctx}){
  return <form onSubmit={submit}><p className="dialog-note">将拒绝来自 <code>{ip}</code> 的新 RDP 连接。可在“IP 安全策略”中随时解封。</p><div className="form-grid"><Field label="来源 IP" value={ip} onChange={()=>{}} disabled/><Field label="作用范围" type="select" value={scope} onChange={setScope} options={ [['','所有 RDP 入口'],...ctx.data.ingress.map(x=>[x.id,x.targetName||x.targetDeviceId||x.id])] }/><Field label="封禁时长" type="select" value={String(duration)} onChange={v=>setDuration(Number(v))} options={ [['900','15 分钟'],['3600','1 小时'],['86400','24 小时'],['604800','7 天'],['0','永久']]} /><Field label="原因" value={reason} onChange={setReason} wide/></div>{error&&<p className="err-notice">{error}</p>}<div className="form-actions"><Action tone="primary" type="submit" disabled={busy}>{busy?'正在封禁…':'确认封禁'}</Action></div></form>
 }
 function AuditDetails({ip,ctx}){const [page,setPage]=useState(1),[r,setR]=useState({items:[],total:0});useEffect(()=>{api('/rdp/security/logs?ip='+encodeURIComponent(ip)+'&page='+page+'&pageSize=10').then(setR).catch(e=>ctx.setError(e.message))},[ip,page]);return <><Table columns={['连接时间','国家 / 地区','目标设备','入口','协议','状态 / 原因','流量']} items={list(r.items)} render={x=><><td>{fmtDate(x.startedAt)}</td><td>{x.sourceCountry==='CN'?'中国大陆':x.sourceCountry||'未识别'}</td><td><DeviceLabel name={x.targetName} id={x.targetDeviceId}/></td><td title={x.ingressId||undefined}>{formatAuditIngress(x.ingressId,ctx.data.ingress)}</td><td>{x.transport}</td><td>{x.result}<small>{x.reason}</small></td><td>{fmtBytes(x.bytesUp)} / {fmtBytes(x.bytesDown)}</td></>}/><div className="form-actions"><Action disabled={page===1} onClick={()=>setPage(x=>x-1)}>上一页</Action><span>{page} / {Math.max(1,Math.ceil((r.total||0)/10))}</span><Action disabled={page>=Math.ceil((r.total||0)/10)} onClick={()=>setPage(x=>x+1)}>下一页</Action></div></>}
-function Security({ctx}){const {data,run}=ctx;return <><Head title="RDP IP 安全" desc="黑名单、白名单和自动封禁规则仅对公网 RDP 新连接生效。" actions={<Action tone="primary" onClick={()=>ctx.open('新增 IP 安全策略',<SecurityCreate ctx={ctx}/>)}>＋ 新增 IP 策略</Action>}/><Panel title="活跃 IP 策略" desc="白名单只豁免自动封禁，不能绕过手动封禁、来源 CIDR 和目标授权。"><Table columns={['IP / CIDR','类型','范围','原因','过期时间','操作']} items={data.bans} render={x=><><td className="mono">{x.cidr}</td><td>{x.kind==='manual'?'手动封禁':x.kind==='allow'?'白名单':'自动封禁'}</td><td>{x.ingressId||'全局 RDP'}</td><td>{x.reason||'—'}</td><td>{x.expiresAt?fmtDate(x.expiresAt):'永久'}</td><td><Action tone="danger" onClick={()=>{if(confirm('解除此策略？'))run(()=>api('/rdp/security/bans/'+encodeURIComponent(x.id),{method:'DELETE'}),'策略已解除')}}>解封 / 删除</Action></td></>}/></Panel><Panel title="自动封禁规则" desc="仅统计新的 TCP 连接，达到阈值后拒绝后续新连接。">{data.rules.map(rule=><SecurityRule key={rule.id} rule={rule} ctx={ctx}/>)}</Panel></>}
+function GeoIPStatusPanel({ctx}){
+ const [status,setStatus]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const load=()=>api('/rdp/security/geoip/status').then(setStatus).catch(e=>setError(e.message));
+ useEffect(()=>{load()},[]);
+ const refresh=async()=>{setBusy(true);setError('');try{const r=await api('/rdp/security/geoip/update',{method:'POST'});setStatus(r);ctx.flash('GeoIP 规则已校验并更新')}catch(e){setError(e.message)}finally{setBusy(false)}};
+ return <Panel title="GeoIP 国家限制" desc="仅对公网 RDP 入口生效，功能开关、规则源和更新周期请到服务配置 → RDP 公网入口修改。">
+  <div className="rule-card">
+   <div className="card-title-area"><b>{status?.enabled?(status.loaded?'已启用 · 规则已加载':'已启用 · 数据未加载'):'未启用'}</b><Badge tone={status?.enabled&&status?.loaded?'ok':''}>{status?.enabled?'运行中':'已关闭'}</Badge></div>
+   <div className="form-grid">
+    <div className="field wide"><span>当前规则源</span><strong className="mono" style={{overflowWrap:'anywhere'}}>{status?.sourceUrl||'—'}</strong></div>
+    <div className="field"><span>更新间隔</span><strong>{status?.updateHours?status.updateHours+' 小时':'—'}</strong></div>
+    <div className="field"><span>最后成功更新</span><strong>{status?.lastUpdatedAt?fmtDate(status.lastUpdatedAt):'—'}</strong></div>
+    <div className="field"><span>下次计划更新</span><strong>{status?.nextUpdateAt?fmtDate(status.nextUpdateAt):'—'}</strong></div>
+   </div>
+   {status?.lastError&&<p className="err-notice" role="alert">最近更新失败：{status.lastError}。当前仍使用上一次成功加载的规则。</p>}
+   {error&&<p className="err-notice" role="alert">{error}</p>}
+   <div className="form-actions"><Action tone="primary" disabled={!status?.enabled||busy} onClick={refresh}>{busy?'更新中…':'立即更新规则'}</Action><Action disabled={busy} onClick={load}>刷新状态</Action></div>
+  </div>
+ </Panel>
+}
+function Security({ctx}){const {data,run}=ctx;return <><Head title="RDP IP 安全" desc="黑名单、白名单和自动封禁规则仅对公网 RDP 新连接生效。" actions={<Action tone="primary" onClick={()=>ctx.open('新增 IP 安全策略',<SecurityCreate ctx={ctx}/>)}>＋ 新增 IP 策略</Action>}/><Panel title="活跃 IP 策略" desc="白名单只豁免自动封禁，不能绕过手动封禁、来源 CIDR 和目标授权。"><Table columns={['IP / CIDR','类型','范围','原因','过期时间','操作']} items={data.bans} render={x=><><td className="mono">{x.cidr}</td><td>{x.kind==='manual'?'手动封禁':x.kind==='allow'?'白名单':'自动封禁'}</td><td>{x.ingressId||'全局 RDP'}</td><td>{x.reason||'—'}</td><td>{x.expiresAt?fmtDate(x.expiresAt):'永久'}</td><td><Action tone="danger" onClick={()=>{if(confirm('解除此策略？'))run(()=>api('/rdp/security/bans/'+encodeURIComponent(x.id),{method:'DELETE'}),'策略已解除')}}>解封 / 删除</Action></td></>}/></Panel><GeoIPStatusPanel ctx={ctx}/><Panel title="自动封禁规则" desc="仅统计新的 TCP 连接，达到阈值后拒绝后续新连接。">{data.rules.map(rule=><SecurityRule key={rule.id} rule={rule} ctx={ctx}/>)}</Panel></>}
 function SecurityCreate({ctx}){
  const [cidr,setCidr]=useState(''),[kind,setKind]=useState('manual'),[scope,setScope]=useState(''),[duration,setDuration]=useState(0),[reason,setReason]=useState('');
  const [busy,setBusy]=useState(false),[error,setError]=useState('');
@@ -325,8 +345,9 @@ function Settings({ctx}){
         <div className="config-card-content">
           <div className="config-form-grid">
             {group.fields.map(([field,label,type,placeholder,opts])=>{
+              const geoField=group.id==='rdp'&&['geoipEnabled','geoipSourceUrl','geoipUpdateHours'].includes(field);
               const disabled=(group.id==='direct'||group.id==='exit'||group.id==='rdp')&&
-                !draft[key]?.enabled&&field!=='enabled';
+                !draft[key]?.enabled&&field!=='enabled'&&!geoField;
               const proxy=key==='serverExit'&&
                 ['upstreamAddress','upstreamUsername','upstreamPassword'].includes(field)&&
                 draft.serverExit?.upstreamMode==='direct';
@@ -339,6 +360,7 @@ function Settings({ctx}){
           </div>
           {group.id==='admin'&&<p className="settings-inline-warning">更改管理端口或协议后，需要使用新地址访问。</p>}
           {group.id==='tunnel'&&<p className="settings-inline-warning">拥塞控制可选择 BBR Aggressive 或 Brutal。BBR 会拒绝客户端 Brutal 请求；Brutal 只对已获授权、明确申报非零带宽的 QUIC 设备生效，其余继续 BBR。Server 预算考虑最高 125% 丢包补偿；更改需重启 Server。</p>}
+          {group.id==='rdp'&&<p className="settings-inline-warning">GeoIP 默认关闭。开启后仅允许中国大陆公网 IP，其他明确识别的国家和地区来源会自动永久封禁。保存开关、规则源、更新周期后需要重启 Server；后续规则下载成功即可实时生效。</p>}
           {group.id==='rdp'&&draft.rdpIngress?.enabled&&<p className="settings-inline-warning">开启服务后还需在 RDP 公网入口页面授权目标设备。</p>}
           {group.id==='acl'&&draft.relayACL?.accessMode==='allow'&&
             !draft.relayACL?.domains?.length&&!draft.relayACL?.cidrs?.length&&

@@ -61,6 +61,11 @@ type ServerConfig struct {
 			SourceCIDRs     []string `yaml:"source_cidrs"`
 			RateLimitPerMin int      `yaml:"rate_limit_per_minute"`
 		} `yaml:"ingress"`
+		GeoIP struct {
+			Enabled     bool   `yaml:"enabled"`
+			SourceURL   string `yaml:"source_url"`
+			UpdateHours int    `yaml:"update_hours"`
+		} `yaml:"geoip"`
 	} `yaml:"rdp"`
 
 	P2P struct {
@@ -308,6 +313,12 @@ func applyServerDefaults(cfg *ServerConfig) {
 	}
 	if cfg.RDP.Ingress.RateLimitPerMin == 0 {
 		cfg.RDP.Ingress.RateLimitPerMin = 120
+	}
+	if cfg.RDP.GeoIP.SourceURL == "" {
+		cfg.RDP.GeoIP.SourceURL = "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+	}
+	if cfg.RDP.GeoIP.UpdateHours == 0 {
+		cfg.RDP.GeoIP.UpdateHours = 24
 	}
 	if cfg.RDP.Ingress.Enabled == nil {
 		cfg.RDP.Ingress.Enabled = BoolPtr(false)

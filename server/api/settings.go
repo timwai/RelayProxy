@@ -67,12 +67,15 @@ type ServerExitSettings struct {
 }
 
 type RDPIngressSettings struct {
-	Enabled         bool     `json:"enabled"`
-	Listen          string   `json:"listen"`
-	PortStart       int      `json:"portStart"`
-	PortEnd         int      `json:"portEnd"`
-	SourceCIDRs     []string `json:"sourceCidrs"`
-	RateLimitPerMin int      `json:"rateLimitPerMinute"`
+	Enabled          bool     `json:"enabled"`
+	Listen           string   `json:"listen"`
+	PortStart        int      `json:"portStart"`
+	PortEnd          int      `json:"portEnd"`
+	SourceCIDRs      []string `json:"sourceCidrs"`
+	RateLimitPerMin  int      `json:"rateLimitPerMinute"`
+	GeoIPEnabled     bool     `json:"geoipEnabled"`
+	GeoIPSourceURL   string   `json:"geoipSourceUrl"`
+	GeoIPUpdateHours int      `json:"geoipUpdateHours"`
 }
 
 type P2PSettings struct {
@@ -183,7 +186,8 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 			CIDRs: append([]string{}, exitPolicy.AccessCIDRs...),
 		},
 		RDPIngress: RDPIngressSettings{ingressEnabled, c.RDP.Ingress.Listen, c.RDP.Ingress.PortStart,
-			c.RDP.Ingress.PortEnd, append([]string{}, c.RDP.Ingress.SourceCIDRs...), c.RDP.Ingress.RateLimitPerMin},
+			c.RDP.Ingress.PortEnd, append([]string{}, c.RDP.Ingress.SourceCIDRs...), c.RDP.Ingress.RateLimitPerMin,
+			c.RDP.GeoIP.Enabled, c.RDP.GeoIP.SourceURL, c.RDP.GeoIP.UpdateHours},
 		P2P: P2PSettings{
 			RendezvousListen: c.P2P.RendezvousListen, RendezvousAdvertise: c.P2P.RendezvousAdvertise,
 			PortStart: c.P2P.PortStart, PortEnd: c.P2P.PortEnd,
@@ -247,6 +251,9 @@ func (c ServerEditableConfig) apply(target *config.ServerConfig) error {
 	target.RDP.Ingress.PortEnd = c.RDPIngress.PortEnd
 	target.RDP.Ingress.SourceCIDRs = cleanSettingLines(c.RDPIngress.SourceCIDRs)
 	target.RDP.Ingress.RateLimitPerMin = c.RDPIngress.RateLimitPerMin
+	target.RDP.GeoIP.Enabled = c.RDPIngress.GeoIPEnabled
+	target.RDP.GeoIP.SourceURL = strings.TrimSpace(c.RDPIngress.GeoIPSourceURL)
+	target.RDP.GeoIP.UpdateHours = c.RDPIngress.GeoIPUpdateHours
 	target.P2P.RendezvousListen = strings.TrimSpace(c.P2P.RendezvousListen)
 	target.P2P.RendezvousAdvertise = strings.TrimSpace(c.P2P.RendezvousAdvertise)
 	target.P2P.PortStart = c.P2P.PortStart

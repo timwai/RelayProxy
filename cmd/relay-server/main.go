@@ -523,11 +523,32 @@ func main() {
 		P2PUPnPEnabled:           cfg.P2P.UPnPEnabled != nil && *cfg.P2P.UPnPEnabled,
 	}, sessionMgr, router)
 
+	// GeoIP is opt-in. Merely possessing an old geoip.dat file must never
+	// activate a persistent country ban until the administrator enables it.
 	rdpSecurity, err := serverrdp.NewSecurityManager(db)
 	if err != nil {
-		log.Fatalf("[RDP Security] Failed to load security policy: %v", err)
+		log.Fatalf("[RDP Security] Failed to initialize rules: %v", err)
 	}
 	defer rdpSecurity.Close()
+	var geoUpdater *serverrdp.GeoIPUpdater
+	if cfg.RDP.GeoIP.Enabled {
+		cache := strings.TrimSpace(os.Getenv("RELAY_RDP_GEOIP_DB"))
+		if cache == "" {
+			cache = "data/geoip.dat"
+		}
+		geoUpdater, err = serverrdp.NewGeoIPUpdater(rdpSecurity, cache,
+			cfg.RDP.GeoIP.SourceURL, cfg.RDP.GeoIP.UpdateHours)
+		if err != nil {
+			log.Fatalf("[RDP GeoIP] Enabled but no verified database available: %v", err)
+		}
+		geoCtx, geoCancel := context.WithCancel(context.Background())
+		defer geoCancel()
+		go geoUpdater.Run(geoCtx)
+		log.Printf("[RDP GeoIP] country policy active: %s; update every %d hours",
+			cfg.RDP.GeoIP.SourceURL, cfg.RDP.GeoIP.UpdateHours)
+	} else {
+		log.Printf("[RDP GeoIP] country policy disabled")
+	}
 
 	ingress := serverrdp.NewIngressManager(context.Background(), db, sessionMgr, serverrdp.IngressConfig{
 		Security: rdpSecurity,
@@ -656,6 +677,7 @@ func main() {
 			}
 			return out
 		}),
+		api.WithRDPGeoIPUpdater(geoUpdater),
 		api.WithRDPSecurityReload(rdpSecurity.Reload),
 		api.WithRDPSecurityLogsClear(rdpSecurity.ClearLogs),
 		api.WithRDPIngressEnabled(ingress.Enabled),

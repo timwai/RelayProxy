@@ -3,8 +3,10 @@ package rdp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log"
 	"net/netip"
+	"strings"
 	"sync"
 	"time"
 
@@ -39,6 +41,7 @@ type compiledBan struct {
 // does not ban authenticated Agent tunnels or P2P traffic by source NAT IP.
 type SecurityManager struct {
 	db        *repository.DB
+	countryDB *CountryDB
 	mu        sync.Mutex
 	bans      []compiledBan
 	rules     []repository.RDPSecurityRule
@@ -50,13 +53,35 @@ type SecurityManager struct {
 }
 
 func NewSecurityManager(db *repository.DB) (*SecurityManager, error) {
-	s := &SecurityManager{db: db, counters: make(map[string]securityWindow),
+	return NewSecurityManagerWithGeoIP(db, "")
+}
+
+// NewSecurityManagerWithGeoIP enforces a China-mainland-only admission policy
+// when a validated offline database path is configured. No database means
+// the existing RDP policy is unchanged.
+func NewSecurityManagerWithGeoIP(db *repository.DB, countryCSVPath string) (*SecurityManager, error) {
+	var countryDB *CountryDB
+	if countryCSVPath != "" {
+		var err error
+		countryDB, err = LoadCountryDB(countryCSVPath)
+		if err != nil {
+			return nil, fmt.Errorf("RDP geo country policy unavailable: %w", err)
+		}
+	}
+	s := &SecurityManager{db: db, countryDB: countryDB, counters: make(map[string]securityWindow),
 		logs: make(chan rdpSecurityAuditTask, 4096), stopping: make(chan struct{}), done: make(chan struct{})}
 	if err := s.Reload(); err != nil {
 		return nil, err
 	}
 	go s.writeLoop()
 	return s, nil
+}
+
+// SetCountryDB swaps an immutable verified GeoIP index without stopping ingress.
+func (s *SecurityManager) SetCountryDB(db *CountryDB) {
+	s.mu.Lock()
+	s.countryDB = db
+	s.mu.Unlock()
 }
 
 // Reload is called on every administrative security mutation. Expiry is
@@ -115,8 +140,43 @@ func (s *SecurityManager) Admit(ingressID, sourceIP string, countTCP bool) (bool
 			allowAuto = true
 		}
 	}
+	// Country bans are independent of the automatic rate-limit allowlist.
+	// Persist a global /32 or /128, permanent (no expiry) auto-ban before
+	// admitting any public RDP TCP or UDP session from outside CN.
+	if s.countryDB != nil && isPublicGeoIP(addr) {
+		country := s.countryDB.Lookup(addr)
+		if country == "" {
+			s.mu.Unlock()
+			return false, "GEO_COUNTRY_UNKNOWN"
+		}
+		if country != "CN" {
+			reason := "GEO_NON_CN:" + country
+			cidr := netip.PrefixFrom(addr, addr.BitLen()).String()
+			for _, existing := range s.bans {
+				if existing.record.Kind == "auto" && existing.record.IngressID == "" &&
+					existing.record.CIDR == cidr && existing.record.ExpiresAt == nil &&
+					strings.HasPrefix(existing.record.Reason, "GEO_NON_CN:") {
+					s.mu.Unlock()
+					return false, reason
+				}
+			}
+			entry := repository.RDPSecurityBan{CIDR: cidr, Kind: "auto",
+				Reason: reason, Actor: "system", CreatedAt: now.UTC()}
+			s.bans = append(s.bans, compiledBan{record: entry, prefix: netip.PrefixFrom(addr, addr.BitLen())})
+			s.mu.Unlock()
+			if _, err := s.db.CreateRDPSecurityBan(cidr, "", "auto", reason, "system", nil); err != nil {
+				log.Printf("[RDP Security] failed to persist permanent country ban for %s: %v", addr, err)
+			}
+			return false, reason
+		}
+	}
 	if !allowAuto {
 		for _, ban := range s.bans {
+			// A disabled GeoIP feature also disables existing geo-generated
+			// automatic bans; operator bans still apply.
+			if s.countryDB == nil && strings.HasPrefix(ban.record.Reason, "GEO_NON_CN:") {
+				continue
+			}
 			if ban.record.Kind != "auto" || (ban.record.IngressID != "" && ban.record.IngressID != ingressID) {
 				continue
 			}
@@ -188,6 +248,14 @@ func (s *SecurityManager) Admit(ingressID, sourceIP string, countTCP bool) (bool
 func (s *SecurityManager) Record(entry repository.RDPSecurityLog) {
 	if s == nil {
 		return
+	}
+	if entry.SourceCountry == "" {
+		s.mu.Lock()
+		countryDB := s.countryDB
+		s.mu.Unlock()
+		if addr, err := netip.ParseAddr(entry.SourceIP); err == nil && isPublicGeoIP(addr) && countryDB != nil {
+			entry.SourceCountry = countryDB.Lookup(addr)
+		}
 	}
 	select {
 	case s.logs <- rdpSecurityAuditTask{entry: &entry}:

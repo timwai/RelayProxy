@@ -37,6 +37,7 @@ type GeoIPUpdater struct {
 	interval time.Duration
 	status   GeoIPUpdateStatus
 	fetch    func(context.Context, string) ([]byte, error)
+	changed  chan struct{}
 }
 
 func NewGeoIPUpdater(manager *SecurityManager, cachePath, sourceURL string, hours int) (*GeoIPUpdater, error) {
@@ -54,6 +55,7 @@ func NewGeoIPUpdater(manager *SecurityManager, cachePath, sourceURL string, hour
 		interval: time.Duration(hours) * time.Hour,
 		status:   GeoIPUpdateStatus{Enabled: true, SourceURL: sourceURL, UpdateHours: hours},
 		fetch:    downloadGeoIP,
+		changed:  make(chan struct{}, 1),
 	}
 	if db, err := LoadCountryDB(cachePath); err == nil {
 		manager.SetCountryDB(db)
@@ -68,21 +70,27 @@ func NewGeoIPUpdater(manager *SecurityManager, cachePath, sourceURL string, hour
 	return u, nil
 }
 
-// Run refreshes a stale cache in the background and retries every interval.
+// Run waits until the next scheduled time, including after a manual refresh.
+// A manual update resets the timer so the displayed next-update time is real.
 func (u *GeoIPUpdater) Run(ctx context.Context) {
-	s := u.Status()
-	if s.LastUpdatedAt == nil || time.Since(*s.LastUpdatedAt) >= u.interval {
-		if err := u.Refresh(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("[RDP GeoIP] update failed; last verified database retained: %v", err)
-		}
-	}
-	ticker := time.NewTicker(u.interval)
-	defer ticker.Stop()
 	for {
+		status := u.Status()
+		delay := time.Duration(0)
+		if status.NextUpdateAt != nil {
+			delay = time.Until(*status.NextUpdateAt)
+			if delay < 0 {
+				delay = 0
+			}
+		}
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return
-		case <-ticker.C:
+		case <-u.changed:
+			timer.Stop()
+			continue
+		case <-timer.C:
 			if err := u.Refresh(ctx); err != nil && ctx.Err() == nil {
 				log.Printf("[RDP GeoIP] update failed; last verified database retained: %v", err)
 			}
@@ -110,6 +118,12 @@ func (u *GeoIPUpdater) Status() GeoIPUpdateStatus {
 func (u *GeoIPUpdater) Refresh(ctx context.Context) error {
 	u.mu.Lock()
 	defer u.mu.Unlock()
+	defer func() {
+		select {
+		case u.changed <- struct{}{}:
+		default:
+		}
+	}()
 	now := time.Now().UTC()
 	u.status.LastAttemptAt = &now
 	ctx, cancel := context.WithTimeout(ctx, 35*time.Second)

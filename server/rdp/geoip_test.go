@@ -7,7 +7,6 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
-
 )
 
 const geoFixture = "198.51.100.0,198.51.100.255,US\n203.0.113.0,203.0.113.255,CN\n2001:db8::,2001:db8::ffff,HK\n"

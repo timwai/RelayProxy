@@ -9,7 +9,7 @@ import (
 	"testing"
 )
 
-const geoFixture = "198.51.100.0,198.51.100.255,US\n203.0.113.0,203.0.113.255,CN\n2001:db8::,2001:db8::ffff,HK\n"
+const geoFixture = "198.51.100.0,198.51.100.255,US\n203.0.113.0,203.0.113.255,CN\n192.0.2.0,192.0.2.255,ZZ\n2001:db8::,2001:db8::ffff,HK\n"
 
 func writeGeoFixture(t *testing.T, zipped bool) string {
 	t.Helper()

@@ -8,8 +8,6 @@ import (
 	"path/filepath"
 	"testing"
 	"time"
-
-	"relayproxy/server/repository"
 )
 
 func TestGeoIPUpdaterVerifiedCacheAndRollback(t *testing.T) {

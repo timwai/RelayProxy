@@ -102,6 +102,11 @@ func (db *CountryDB) Lookup(addr netip.Addr) string {
 	if i == 0 || ranges[i-1].end.Compare(addr) < 0 {
 		return ""
 	}
+	// DB-IP uses ZZ for blocks without a meaningful location. Unknown is
+	// denied without creating an irreversible country ban.
+	if ranges[i-1].country == "ZZ" {
+		return ""
+	}
 	return ranges[i-1].country
 }
 

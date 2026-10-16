@@ -25,6 +25,9 @@ const NAV=[
 // open the same React route as the desktop shell. Never trust arbitrary page
 // names or persist unknown values into the navigation state.
 const PAGE_IDS = new Set([...NAV.flatMap(group => group.items.map(item => item[0])), 'settings']);
+const initialSelectedDevice=()=>{
+ try{return sessionStorage.getItem('relayproxy-react-selected-device')||'local'}catch{return 'local'}
+};
 function initialPage() {
  const requested = new URLSearchParams(window.location.search).get('page');
  if (PAGE_IDS.has(requested)) return requested;
@@ -591,7 +594,7 @@ function BatchSpeedModal({open,exits,onClose,toast}){
 }
 
 export default function App(){
- const[page,setPage]=useState(initialPage),[selectedDeviceId,setSelectedDeviceId]=useState('local'),[deviceQuery,setDeviceQuery]=useState(''),[filePeers,setFilePeers]=useState([]),[rdpDeviceBusy,setRdpDeviceBusy]=useState(''),[status,setStatus]=useState({connected:false,proxyExits:[]}),[config,setConfig]=useState(EMPTY),[loaded,setLoaded]=useState(false),[configError,setConfigError]=useState(''),[confirmQuit,setConfirmQuit]=useState(false),[dirty,setDirty]=useState(false),[pendingAction,setPendingAction]=useState(null),[exits,setExits]=useState([]),[exitsReady,setExitsReady]=useState(false),[targets,setTargets]=useState([]),[messages,setMessages]=useState([]),[unreadMessages,setUnreadMessages]=useState(0),[connections,setConnections]=useState({connections:[],active:0,total:0,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}),[logs,setLogs]=useState([]),[diagnostics,setDiagnostics]=useState({}),[toastState,setToastState]=useState(null),[speedOpen,setSpeedOpen]=useState(false),[speedExit,setSpeedExit]=useState(''),[batchSpeedOpen,setBatchSpeedOpen]=useState(false),[history,setHistory]=useState({down:[],up:[],total:[],active:[],latency:[]});
+ const[page,setPage]=useState(initialPage),[selectedDeviceId,setSelectedDeviceId]=useState(initialSelectedDevice),[deviceQuery,setDeviceQuery]=useState(''),[filePeers,setFilePeers]=useState([]),[rdpDeviceBusy,setRdpDeviceBusy]=useState(''),[status,setStatus]=useState({connected:false,proxyExits:[]}),[config,setConfig]=useState(EMPTY),[loaded,setLoaded]=useState(false),[configError,setConfigError]=useState(''),[confirmQuit,setConfirmQuit]=useState(false),[dirty,setDirty]=useState(false),[pendingAction,setPendingAction]=useState(null),[exits,setExits]=useState([]),[exitsReady,setExitsReady]=useState(false),[targets,setTargets]=useState([]),[messages,setMessages]=useState([]),[unreadMessages,setUnreadMessages]=useState(0),[connections,setConnections]=useState({connections:[],active:0,total:0,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}),[logs,setLogs]=useState([]),[diagnostics,setDiagnostics]=useState({}),[toastState,setToastState]=useState(null),[speedOpen,setSpeedOpen]=useState(false),[speedExit,setSpeedExit]=useState(''),[batchSpeedOpen,setBatchSpeedOpen]=useState(false),[history,setHistory]=useState({down:[],up:[],total:[],active:[],latency:[]});
  const pushHistory=useCallback(patch=>setHistory(h=>{const n={...h};for(const k in patch)n[k]=[...h[k],Number(patch[k])||0].slice(-SPARK_POINTS);return n}),[]);
  const applyStatus=useCallback(x=>{setStatus(x||{});pushHistory({latency:x?.connected?x.latency:0})},[pushHistory]);
  const toastTimer=useRef(null),exitInventoryKey=useRef(''),pageRef=useRef(page),messageIDs=useRef(new Set());
@@ -623,7 +626,8 @@ export default function App(){
  // Wails or the HTTP bridge may start after React mounts. Keep retrying
  // until settings are actually available instead of freezing on empty defaults.
  useEffect(()=>{if(loaded)return;const timer=setInterval(()=>{void refreshConfig()},3000);return()=>clearInterval(timer)},[loaded,refreshConfig]);
- useEffect(()=>{pageRef.current=page;sessionStorage.setItem('relayproxy-react-page',page);if(page==='exits')refreshExits();if(page==='rdp')refreshTargets();if(page==='messages'){setUnreadMessages(0);refreshMessages()}if(page==='monitor')refreshConnections();if(page==='diagnostics'){refreshDiagnostics();refreshLogs()}},[page,refreshExits,refreshTargets,refreshMessages,refreshConnections,refreshDiagnostics,refreshLogs]);
+ useEffect(()=>{try{sessionStorage.setItem('relayproxy-react-selected-device',selectedDeviceId)}catch{}},[selectedDeviceId]);
+  useEffect(()=>{pageRef.current=page;sessionStorage.setItem('relayproxy-react-page',page);if(page==='exits')refreshExits();if(page==='rdp')refreshTargets();if(page==='messages'){setUnreadMessages(0);refreshMessages()}if(page==='monitor')refreshConnections();if(page==='diagnostics'){refreshDiagnostics();refreshLogs()}},[page,refreshExits,refreshTargets,refreshMessages,refreshConnections,refreshDiagnostics,refreshLogs]);
  useEffect(()=>theme(config.theme||'system'),[config.theme,theme]);
 
  const setv=useCallback((path,value,markDirty=true)=>{setConfig(prev=>{const next=structuredClone(prev),keys=path.split('.');let o=next;for(let i=0;i<keys.length-1;i++){o[keys[i]]=o[keys[i]]&&typeof o[keys[i]]==='object'?o[keys[i]]:{};o=o[keys[i]]}o[keys[keys.length-1]]=value;return next});if(markDirty)setDirty(true)},[]);

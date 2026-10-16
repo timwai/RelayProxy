@@ -62,9 +62,9 @@ type ServerConfig struct {
 			RateLimitPerMin int      `yaml:"rate_limit_per_minute"`
 		} `yaml:"ingress"`
 		GeoIP struct {
-			Enabled bool   `yaml:"enabled"`
-			SourceURL string `yaml:"source_url"`
-			UpdateHours int `yaml:"update_hours"`
+			Enabled     bool   `yaml:"enabled"`
+			SourceURL   string `yaml:"source_url"`
+			UpdateHours int    `yaml:"update_hours"`
 		} `yaml:"geoip"`
 	} `yaml:"rdp"`
 

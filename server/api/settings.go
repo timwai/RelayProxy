@@ -67,15 +67,15 @@ type ServerExitSettings struct {
 }
 
 type RDPIngressSettings struct {
-	Enabled         bool     `json:"enabled"`
-	Listen          string   `json:"listen"`
-	PortStart       int      `json:"portStart"`
-	PortEnd         int      `json:"portEnd"`
-	SourceCIDRs     []string `json:"sourceCidrs"`
-	RateLimitPerMin int      `json:"rateLimitPerMinute"`
-	GeoIPEnabled bool `json:"geoipEnabled"`
-	GeoIPSourceURL string `json:"geoipSourceUrl"`
-	GeoIPUpdateHours int `json:"geoipUpdateHours"`
+	Enabled          bool     `json:"enabled"`
+	Listen           string   `json:"listen"`
+	PortStart        int      `json:"portStart"`
+	PortEnd          int      `json:"portEnd"`
+	SourceCIDRs      []string `json:"sourceCidrs"`
+	RateLimitPerMin  int      `json:"rateLimitPerMinute"`
+	GeoIPEnabled     bool     `json:"geoipEnabled"`
+	GeoIPSourceURL   string   `json:"geoipSourceUrl"`
+	GeoIPUpdateHours int      `json:"geoipUpdateHours"`
 }
 
 type P2PSettings struct {

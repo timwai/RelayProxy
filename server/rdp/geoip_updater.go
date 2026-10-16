@@ -52,8 +52,8 @@ func NewGeoIPUpdater(manager *SecurityManager, cachePath, sourceURL string, hour
 	u := &GeoIPUpdater{
 		manager: manager, file: cachePath, source: sourceURL,
 		interval: time.Duration(hours) * time.Hour,
-		status: GeoIPUpdateStatus{Enabled: true, SourceURL: sourceURL, UpdateHours: hours},
-		fetch: downloadGeoIP,
+		status:   GeoIPUpdateStatus{Enabled: true, SourceURL: sourceURL, UpdateHours: hours},
+		fetch:    downloadGeoIP,
 	}
 	if db, err := LoadCountryDB(cachePath); err == nil {
 		manager.SetCountryDB(db)

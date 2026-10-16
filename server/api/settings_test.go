@@ -251,3 +251,25 @@ func TestRemovedPairEndpointAndStaticAssets(t *testing.T) {
 		}
 	}
 }
+
+func TestRDPGeoIPStatusRequiresAdminAndReflectsRuntime(t *testing.T) {
+	r, admin := settingsRouter(t)
+	_, user := apiUser(t, r, "geoip-status-reader")
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		p := "/api/v1/rdp/security/geoip/status"
+		if method == http.MethodPost {
+			p = "/api/v1/rdp/security/geoip/update"
+		}
+		if res := apiRequest(r, user, method, p); res.Code != http.StatusForbidden {
+			t.Fatalf("non-admin %s to GeoIP endpoint: %d", method, res.Code)
+		}
+	}
+	res := apiRequest(r, admin, http.MethodGet, "/api/v1/rdp/security/geoip/status")
+	if res.Code != http.StatusOK || !strings.Contains(res.Body.String(), `"enabled":false`) {
+		t.Fatalf("wrong effective disabled GeoIP status: %d %s", res.Code, res.Body.String())
+	}
+	res = apiRequest(r, admin, http.MethodPost, "/api/v1/rdp/security/geoip/update")
+	if res.Code != http.StatusConflict {
+		t.Fatalf("manual GeoIP refresh should require enabled runtime: %d %s", res.Code, res.Body.String())
+	}
+}

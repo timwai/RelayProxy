@@ -11,7 +11,7 @@ import (
 func TestWindowsDefaultConfigUsesUserProfile(t *testing.T) {
 	profile := filepath.Join(t.TempDir(), "用户 profile")
 	t.Setenv("USERPROFILE", profile)
-	path, err := resolveConfigPath("", false)
+	path, err := resolveConfigPath("", "", false, false)
 	if err != nil || path != filepath.Join(profile, ".relayproxy", agentConfigName) {
 		t.Fatalf("unexpected default path %q: %v", path, err)
 	}

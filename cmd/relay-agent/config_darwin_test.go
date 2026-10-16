@@ -12,7 +12,7 @@ func TestDarwinDefaultConfigUsesUserHome(t *testing.T) {
 	home := filepath.Join(t.TempDir(), "用户 home")
 	t.Setenv("HOME", home)
 
-	path, err := resolveConfigPath("", false)
+	path, err := resolveConfigPath("", "", false, false)
 	if err != nil || path != filepath.Join(home, ".relayproxy", agentConfigName) {
 		t.Fatalf("unexpected default path %q: %v", path, err)
 	}

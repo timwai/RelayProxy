@@ -14,8 +14,17 @@ import (
 
 const agentConfigName = "relay-agent.yaml"
 
-func resolveConfigPath(requested string, explicit bool) (string, error) {
-	if explicit {
+func resolveConfigPath(requested, directory string, fileExplicit, dirExplicit bool) (string, error) {
+	if fileExplicit && dirExplicit {
+		return "", fmt.Errorf("--config and --config-dir cannot be used together")
+	}
+	if dirExplicit {
+		if strings.TrimSpace(directory) == "" {
+			return "", fmt.Errorf("--config-dir must specify a directory path")
+		}
+		return filepath.Abs(filepath.Join(directory, agentConfigName))
+	}
+	if fileExplicit {
 		if strings.TrimSpace(requested) == "" {
 			return "", fmt.Errorf("--config must specify a file path")
 		}

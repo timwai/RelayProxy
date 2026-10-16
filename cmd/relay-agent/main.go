@@ -52,7 +52,16 @@ func runDesktopUI(b *bridge.UIBridge, opts gui.Options) (err error) {
 }
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "install" {
+		if err := runInstall(os.Args[2:], os.Stdin, os.Stdout); err != nil && !errors.Is(err, flag.ErrHelp) {
+			fmt.Fprintf(os.Stderr, "[Install] %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
+
 	configPath := flag.String("config", "", "Path to configuration file (Windows/macOS default: ~/.relayproxy/relay-agent.yaml)")
+	configDir := flag.String("config-dir", "", "Directory containing relay-agent.yaml (cannot be combined with --config)")
 	serverFlag := flag.String("server", "", "Override server address")
 	exitFlag := flag.String("exit", "", "Default exit node ID (omit to auto-select when exactly one exit is online)")
 	socksFlag := flag.String("socks5", "", "Override SOCKS5 listen address")
@@ -80,6 +89,11 @@ func main() {
 	flag.IntVar(&webPortFlag, "web-port", 0, "Override the web management port")
 	webListenFlag := flag.String("web-listen", "", "Override the web management listen address")
 
+	flag.Usage = func() {
+		name := filepath.Base(os.Args[0])
+		fmt.Fprintf(flag.CommandLine.Output(), "Usage: %s [flags]\n       %s install [flags] (interactive setup and background startup)\n\n", name, name)
+		flag.PrintDefaults()
+	}
 	flag.Parse()
 
 	if *networkServiceFlag {
@@ -182,12 +196,16 @@ func main() {
 	defer instanceLock.Release()
 
 	configExplicit := false
+	configDirExplicit := false
 	flag.Visit(func(f *flag.Flag) {
-		if f.Name == "config" {
+		switch f.Name {
+		case "config":
 			configExplicit = true
+		case "config-dir":
+			configDirExplicit = true
 		}
 	})
-	*configPath, err = resolveConfigPath(*configPath, configExplicit)
+	*configPath, err = resolveConfigPath(*configPath, *configDir, configExplicit, configDirExplicit)
 	if err != nil {
 		startupFatal(wantGUI, "[Config] Failed to resolve configuration path: %v", err)
 	}

@@ -1244,6 +1244,16 @@ server:
 
 # 15. Agent 命令行
 
+首次安装并配置（按提示填写 Server 地址、TCP/QUIC 端口、TLS、身份 ID 和设备名称，保存后自动后台启动）：
+
+```bash
+relay-agent install
+# 指定配置目录和可选的后台日志路径
+relay-agent install --config-dir ./my-config --log-file ./logs/agent.log
+```
+
+Windows PowerShell 使用 `.\relay-agent.exe install --config-dir .\my-config`。直接回车使用提示中的默认值；已有配置会作为默认值，其他设置将保留。身份 ID 必须填写 Server 生成的 16 位字母数字组合。中途结束输入不会保存配置或启动 Agent。安装完成后会显示后台进程 PID 和日志路径，首次连接仍需在 Server 管理页面审批设备。此命令完成基础配置和本次后台启动；系统重启后的自动运行可通过系统服务或自启动设置配置。
+
 查看版本：
 
 ```bash
@@ -1255,6 +1265,14 @@ relay-agent --version
 ```bash
 relay-agent --config ./relay-agent.yaml
 ```
+
+指定配置目录（加载该目录下的 `relay-agent.yaml`）：
+
+```bash
+relay-agent --config-dir ./my-config
+```
+
+`--config-dir` 支持相对路径和绝对路径；目录或配置文件不存在时会自动创建最小配置。设备身份文件 `device-identity.json` 也保存在该目录。此参数可用于 GUI、无 GUI 和后台启动，不能与 `--config` 同时使用。不指定这两个参数时，保留原有的默认配置查找行为。
 
 临时覆盖 Server：
 

@@ -21,8 +21,8 @@ type CountryDB struct {
 	v6 []countryRange
 	// datV4/V6 may contain overlapping CIDRs from different sources. Prefix
 	// maximum ends allow log-time lookups plus a short overlap scan.
-	datV4 []countryRange
-	datV6 []countryRange
+	datV4    []countryRange
+	datV6    []countryRange
 	maxEndV4 []netip.Addr
 	maxEndV6 []netip.Addr
 }

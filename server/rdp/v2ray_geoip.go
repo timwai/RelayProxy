@@ -234,7 +234,7 @@ func (db *CountryDB) lookupDAT(addr netip.Addr) string {
 		return ranges[i].start.Compare(addr) > 0
 	})
 	bestCountry, bestBits := "", -1
-	for i := firstGreater-1; i >= 0 && ends[i].Compare(addr) >= 0; i-- {
+	for i := firstGreater - 1; i >= 0 && ends[i].Compare(addr) >= 0; i-- {
 		r := ranges[i]
 		if r.end.Compare(addr) < 0 {
 			continue

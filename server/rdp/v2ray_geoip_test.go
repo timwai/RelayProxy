@@ -55,12 +55,12 @@ func TestV2RayGeoIPChinaAndOtherCountries(t *testing.T) {
 		t.Fatal(err)
 	}
 	for ip, want := range map[string]string{
-		"1.2.3.10": "CN",  // CN data always wins overlap with US
-		"1.2.4.10": "US",
-		"2.2.2.10": "HK",
+		"1.2.3.10":    "CN", // CN data always wins overlap with US
+		"1.2.4.10":    "US",
+		"2.2.2.10":    "HK",
 		"2001:db8::9": "US",
-		"240e::abcd": "CN",
-		"3.3.3.3": "", // Unknown is rejected without a permanent ban
+		"240e::abcd":  "CN",
+		"3.3.3.3":     "", // Unknown is rejected without a permanent ban
 	} {
 		addr := netip.MustParseAddr(ip)
 		if got := db.Lookup(addr); got != want {

@@ -1,0 +1,89 @@
+/* Device-first Agent workspace. Uses the existing shared light/dark tokens. */
+.device-overline{font-size:10px;letter-spacing:1.2px;font-weight:800;color:var(--subtle)}
+.device-home-head .btn,.device-detail-hero .btn{display:inline-flex;align-items:center;gap:7px}
+.device-home,.device-detail{display:flex;flex-direction:column;gap:16px}
+.device-summary,.device-hero-info{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+.device-summary>div,.device-hero-info>div{display:flex;flex-direction:column;gap:5px;background:var(--surface2);border:1px solid var(--line);border-radius:13px;padding:14px 16px;min-width:0}
+.device-summary span,.device-hero-info span{font-size:11px;color:var(--muted)}
+.device-summary strong{font-size:19px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device-hero-info{grid-template-columns:repeat(3,minmax(0,1fr))}
+.device-hero-info b{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device-section-label{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+.device-section-label h2{font-size:16px;margin:0}.device-section-label span{font-size:12px;color:var(--muted)}
+.device-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:13px}
+.device-grid.local-grid{grid-template-columns:minmax(220px,320px)}
+.device-tile{min-width:0;min-height:180px;text-align:left;background:var(--surface2);color:var(--text);border:1px solid var(--line);border-radius:16px;padding:17px;display:flex;flex-direction:column;gap:7px}
+.device-tile:hover{border-color:var(--brand);box-shadow:var(--shadow2)}
+.device-tile:focus-visible{outline:2px solid var(--brand)}
+.device-tile-top{display:flex;align-items:center;justify-content:space-between;margin-bottom:7px}
+.device-mark{width:41px;height:41px;display:inline-flex;align-items:center;justify-content:center;color:var(--brand);border-radius:13px;background:color-mix(in srgb,var(--brand) 11%,var(--surface2));flex:0 0 auto}
+.device-mark.self{color:var(--brand2);background:color-mix(in srgb,var(--brand2) 13%,var(--surface2))}
+.device-mark.large{width:64px;height:64px;border-radius:18px}
+.device-tile strong{font-size:16px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.device-tile>small{color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.device-state{display:inline-flex;align-items:center;gap:7px;color:var(--muted);font-size:11px;white-space:nowrap}
+.device-state i{display:inline-block;width:7px;height:7px;border-radius:50%;background:var(--subtle)}
+.device-state i.on{background:var(--ok)}
+.device-pill{border:1px solid var(--line);background:var(--surface3);border-radius:7px;padding:3px 7px;font-size:10px;color:var(--muted);white-space:nowrap}
+.device-pill.blue{color:var(--brand);background:color-mix(in srgb,var(--brand) 9%,var(--surface2))}
+.device-pill.green{color:var(--ok);background:color-mix(in srgb,var(--ok) 10%,var(--surface2))}
+.device-tile-chips{display:flex;flex-wrap:wrap;gap:5px;min-height:22px}
+.device-tile-open{display:flex;justify-content:space-between;align-items:center;color:var(--brand);font-weight:650;font-size:11px;margin-top:auto;padding-top:12px}
+.device-activity-actions{display:flex;gap:10px;flex-wrap:wrap}
+.device-activity-actions button{display:flex;gap:8px;align-items:center}
+.device-empty,.device-missing{background:var(--surface2);border:1px dashed var(--line2);border-radius:16px;display:flex;flex-direction:column;align-items:center;gap:12px;text-align:center;padding:35px}
+.device-empty svg{color:var(--subtle)}.device-empty p,.device-missing p{margin:0;max-width:440px;color:var(--muted)}
+.device-back{width:max-content;border:0;padding:0;background:none;color:var(--brand);font-weight:650}
+.device-detail-hero{display:flex;gap:16px;align-items:center;background:var(--surface2);border:1px solid var(--line);border-radius:18px;padding:19px}
+.device-detail-hero h1{margin:3px 0 5px;font-size:24px;overflow-wrap:anywhere}
+.device-detail-hero .grow{min-width:0}
+.device-section{display:flex;flex-direction:column;gap:12px}
+.device-cap-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(275px,1fr));gap:10px}
+.device-cap-card{border:1px solid var(--line);border-radius:13px;background:var(--surface2);padding:14px;display:flex;align-items:center;gap:12px;text-align:left;min-width:0;color:var(--text);min-height:78px}
+button.device-cap-card:hover{border-color:var(--brand);background:var(--surface3)}
+.device-cap-card.static{cursor:default}
+.device-cap-icon{width:42px;height:42px;border-radius:12px;background:var(--surface3);color:var(--brand);display:grid;place-items:center;flex:0 0 auto}
+.device-cap-card .grow{display:flex;flex-direction:column;gap:4px;min-width:0}
+.device-cap-card .grow b{font-size:13px}.device-cap-card .grow small{color:var(--muted);font-size:11px;line-height:1.45}
+.device-cap-card .btn{flex:0 0 auto}
+.device-arrow{color:var(--subtle);font-size:20px;margin-left:auto}
+.device-folder-list{border:1px solid var(--line);border-radius:12px;overflow:hidden}
+.device-folder-row{display:flex;align-items:center;gap:12px;padding:13px 15px;background:var(--surface2);border:0;border-bottom:1px solid var(--line);color:var(--text);text-align:left;width:100%}
+.device-folder-row:last-child{border-bottom:0}
+.device-folder-row:hover{background:var(--surface3)}
+.device-folder-row svg{color:var(--brand)}
+.device-folder-row strong{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device-note{font-size:11px;color:var(--muted);line-height:1.6}
+/* Replaces a feature tree with an actual device navigator. */
+.device-sidebar-head{display:flex;align-items:center;gap:9px;padding:9px 9px 16px;color:var(--text);font-size:15px;font-weight:800}
+.device-sidebar-head .device-brand{height:30px;width:30px;border-radius:9px;background:var(--brand);color:white;display:grid;place-items:center}
+.device-side-search{width:calc(100% - 10px);margin:0 5px 8px;background:var(--surface2);border:1px solid var(--line2);border-radius:9px;padding:9px 10px;font-size:12px;outline:none}
+.device-side-heading{font-size:10px;color:var(--subtle);font-weight:750;padding:12px 11px 7px}
+.device-side-item{display:flex;align-items:center;gap:9px;border:0;border-radius:10px;background:transparent;color:var(--muted);width:100%;padding:9px 10px;text-align:left;min-width:0;font-size:12px;font-weight:650}
+.device-side-item:hover{background:var(--surface3);color:var(--text)}
+.device-side-item.active{color:var(--brand);background:color-mix(in srgb,var(--brand) 11%,var(--surface2))}
+.device-side-item .device-side-name{min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1}
+.device-side-item .device-side-dot{height:6px;width:6px;background:var(--subtle);border-radius:50%;flex:0 0 auto}
+.device-side-item .device-side-dot.online{background:var(--ok)}
+.device-side-empty{padding:11px;font-size:11px;color:var(--muted);line-height:1.5}
+.device-side-item .nav-dot{position:static}
+.device-sidebar-tools{border-top:1px solid var(--line);margin-top:12px;padding-top:8px}
+.device-side-search::placeholder{color:var(--subtle)}
+@media(max-width:1050px){.device-summary{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:820px){
+ .device-sidebar-head{justify-content:center;padding:9px 0}
+ .device-sidebar-head>span:last-child,.device-side-search,.device-side-heading,.device-side-name,.device-side-dot{display:none}
+ .device-side-item{justify-content:center;padding:10px 0}
+ .device-side-item .nav-dot{position:absolute;right:4px}
+ .device-side-item{position:relative}
+ .device-grid.local-grid{grid-template-columns:minmax(0,1fr)}
+ .device-cap-grid{grid-template-columns:minmax(0,1fr)}
+ .device-detail-hero{flex-wrap:wrap}
+ .device-detail-hero .grow{flex-basis:calc(100% - 90px)}
+}
+@media(max-width:560px){
+ .device-summary,.device-hero-info{grid-template-columns:repeat(2,minmax(0,1fr))}
+ .device-detail-hero .device-state{margin-left:0}
+ .device-cap-card.static{flex-wrap:wrap}.device-cap-card.static .btn{margin-left:54px}
+ .device-grid{grid-template-columns:minmax(0,1fr)}
+}

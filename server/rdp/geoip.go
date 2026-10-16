@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/netip"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 )
@@ -18,18 +19,28 @@ import (
 type CountryDB struct {
 	v4 []countryRange
 	v6 []countryRange
+	// datV4/V6 may contain overlapping CIDRs from different sources. Prefix
+	// maximum ends allow log-time lookups plus a short overlap scan.
+	datV4 []countryRange
+	datV6 []countryRange
+	maxEndV4 []netip.Addr
+	maxEndV6 []netip.Addr
 }
 
 type countryRange struct {
 	start   netip.Addr
 	end     netip.Addr
 	country string
+	bits    int
 }
 
-// LoadCountryDB supports DB-IP Country Lite CSV and CSV.GZ files. Validate the
+// LoadCountryDB supports V2Ray geoip.dat and DB-IP Country Lite CSV / CSV.GZ. Validate the
 // entire file before publishing it to the RDP admission path. Never use a
 // partial database to decide on permanent IP bans.
 func LoadCountryDB(path string) (*CountryDB, error) {
+	if strings.EqualFold(filepath.Ext(path), ".dat") {
+		return loadV2RayCountryDB(path)
+	}
 	f, err := os.Open(path)
 	if err != nil {
 		return nil, fmt.Errorf("open RDP GeoIP country file: %w", err)
@@ -94,6 +105,9 @@ func (db *CountryDB) Lookup(addr netip.Addr) string {
 		return ""
 	}
 	addr = addr.Unmap()
+	if len(db.datV4)+len(db.datV6) != 0 {
+		return db.lookupDAT(addr)
+	}
 	ranges := db.v6
 	if addr.Is4() {
 		ranges = db.v4

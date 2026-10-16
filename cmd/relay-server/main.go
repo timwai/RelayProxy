@@ -528,11 +528,14 @@ func main() {
 	// guessed geography or irreversible bans.
 	geoCountryFile := strings.TrimSpace(os.Getenv("RELAY_RDP_GEOIP_DB"))
 	if geoCountryFile == "" {
-		const defaultCountryFile = "data/dbip-country-lite-latest.csv.gz"
-		if _, statErr := os.Stat(defaultCountryFile); statErr == nil {
-			geoCountryFile = defaultCountryFile
-		} else {
-			log.Printf("[RDP Security] GeoIP country ban inactive: place DB-IP Country Lite CSV.GZ at %s or set RELAY_RDP_GEOIP_DB", defaultCountryFile)
+		for _, candidate := range []string{"data/geoip.dat", "data/dbip-country-lite-latest.csv.gz"} {
+			if _, statErr := os.Stat(candidate); statErr == nil {
+				geoCountryFile = candidate
+				break
+			}
+		}
+		if geoCountryFile == "" {
+			log.Printf("[RDP Security] GeoIP country ban inactive: put Loyalsoldier geoip.dat at data/geoip.dat or set RELAY_RDP_GEOIP_DB")
 		}
 	}
 	rdpSecurity, err := serverrdp.NewSecurityManagerWithGeoIP(db, geoCountryFile)

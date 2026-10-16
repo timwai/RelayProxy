@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"net/url"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -70,6 +71,16 @@ func NormalizeServerConfig(c *ServerConfig) error {
 	c.Exit.Upstream.Mode = strings.ToLower(strings.TrimSpace(c.Exit.Upstream.Mode))
 	c.Exit.Upstream.Address = strings.TrimSpace(c.Exit.Upstream.Address)
 	c.Exit.Upstream.Username = strings.TrimSpace(c.Exit.Upstream.Username)
+	c.RDP.GeoIP.SourceURL = strings.TrimSpace(c.RDP.GeoIP.SourceURL)
+	if c.RDP.GeoIP.UpdateHours < 1 || c.RDP.GeoIP.UpdateHours > 720 {
+		return errors.New("rdp.geoip.update_hours 必须在 1-720 小时之间")
+	}
+	geoURL, geoErr := url.Parse(c.RDP.GeoIP.SourceURL)
+	if geoErr != nil || geoURL.Scheme != "https" || geoURL.Hostname() == "" ||
+		geoURL.User != nil || geoURL.Fragment != "" || geoURL.Port() != "" ||
+		strings.ContainsAny(geoURL.Hostname(), " \\	\r\n") {
+		return errors.New("rdp.geoip.source_url 必须是公开 HTTPS URL（无认证信息、自定义端口或 fragment）")
+	}
 	c.RDP.Ingress.Listen = strings.TrimSpace(c.RDP.Ingress.Listen)
 	for i, raw := range c.RDP.Ingress.SourceCIDRs {
 		c.RDP.Ingress.SourceCIDRs[i] = strings.TrimSpace(raw)

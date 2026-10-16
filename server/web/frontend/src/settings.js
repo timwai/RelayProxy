@@ -23,7 +23,10 @@ export const groups = [
     ['accessMode','目标访问模式','select',null,[['','不附加筛选'],['allow','允许列表'],['deny','拒绝列表']]],['domains','匹配域名（每行一条）','lines'],['cidrs','IP / CIDR（每行一条）','lines']]},
   {id:'rdp',key:'rdpIngress',title:'RDP 公网入口',subtitle:'公网监听端口、来源和速率限制',section:'安全与访问',fields:[
     ['enabled','启用公网入口服务','checkbox'],['listen','监听地址','text','0.0.0.0:0'],['portStart','自动端口起始','number'],['portEnd','自动端口结束','number'],
-    ['sourceCidrs','全局来源 CIDR（每行一条）','lines'],['rateLimitPerMinute','每来源 IP 每分钟上限','number']]},
+    ['sourceCidrs','全局来源 CIDR（每行一条）','lines'],['rateLimitPerMinute','每来源 IP 每分钟上限','number'],
+    ['geoipEnabled','启用 GeoIP 非中国大陆封禁','checkbox'],
+    ['geoipSourceUrl','GeoIP 规则下载地址','text','https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat'],
+    ['geoipUpdateHours','GeoIP 规则更新间隔（小时）','number']]},
   {id:'certificate',title:'证书管理',subtitle:'HTTPS / QUIC 证书路径',section:'安全与访问',fields:[
     ['certFile','证书链 PEM 路径','text','/data/config/fullchain.pem'],['keyFile','私钥 PEM 路径','text','/data/config/privkey.pem']]},
   {id:'acl',key:'relayACL',title:'目标访问权限',subtitle:'服务端统一 ACL 与目标匹配规则',section:'安全与访问',fields:[

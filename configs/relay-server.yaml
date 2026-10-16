@@ -41,6 +41,10 @@ rdp:
     port_end: 20200
     source_cidrs: []
     rate_limit_per_minute: 120
+  geoip:
+    enabled: false                # 启用后非中国大陆公网 IP 首次访问自动永久封禁
+    source_url: "https://cdn.jsdelivr.net/gh/Loyalsoldier/v2ray-rules-dat@release/geoip.dat"
+    update_hours: 24              # 更新周期，1-720 小时；失败保留旧规则
 
 
 

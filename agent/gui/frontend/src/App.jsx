@@ -4,6 +4,9 @@ import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavaila
 import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolChoice,protocolsFromChoice,ruleListText,splitRuleList} from './ruleLines.js';
 import {Icon} from './icons.jsx';
 import FileSharingPage from './FileSharingPage.jsx';
+import {DeviceHome,DeviceDetail} from './DeviceWorkspace.jsx';
+import {buildDeviceInventory} from './deviceWorkspace.js';
+import {onlyVerifiedFilePeers} from './fileShareVisibility.js';
 import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
 import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
@@ -11,6 +14,7 @@ import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 
 const NAV=[
+ {group:'设备空间',items:[['fleet','devices','我的设备'],['device','monitor','设备工作台']]},
  {group:'概览',items:[['overview','dashboard','运行概览'],['devices','devices','身份与设备']]},
  {group:'连接',items:[['connection','route','连接与路径'],['exits','globe','出口选择']]},
  {group:'本机',items:[['proxy','swap','本机代理'],['routing','split','分流规则'],['dns','shield','DNS 与防泄漏'],['exitshare','share','本机出口共享'],['rdp','monitor','远程桌面'],['files','folder','文件共享']]},
@@ -25,7 +29,7 @@ function initialPage() {
  const requested = new URLSearchParams(window.location.search).get('page');
  if (PAGE_IDS.has(requested)) return requested;
  const previous = sessionStorage.getItem('relayproxy-react-page');
- return PAGE_IDS.has(previous) ? previous : 'overview';
+ return PAGE_IDS.has(previous) ? previous : 'fleet';
 }
 
 const EMPTY={
@@ -587,7 +591,7 @@ function BatchSpeedModal({open,exits,onClose,toast}){
 }
 
 export default function App(){
- const[page,setPage]=useState(initialPage),[status,setStatus]=useState({connected:false,proxyExits:[]}),[config,setConfig]=useState(EMPTY),[loaded,setLoaded]=useState(false),[configError,setConfigError]=useState(''),[confirmQuit,setConfirmQuit]=useState(false),[dirty,setDirty]=useState(false),[pendingAction,setPendingAction]=useState(null),[exits,setExits]=useState([]),[exitsReady,setExitsReady]=useState(false),[targets,setTargets]=useState([]),[messages,setMessages]=useState([]),[unreadMessages,setUnreadMessages]=useState(0),[connections,setConnections]=useState({connections:[],active:0,total:0,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}),[logs,setLogs]=useState([]),[diagnostics,setDiagnostics]=useState({}),[toastState,setToastState]=useState(null),[speedOpen,setSpeedOpen]=useState(false),[speedExit,setSpeedExit]=useState(''),[batchSpeedOpen,setBatchSpeedOpen]=useState(false),[history,setHistory]=useState({down:[],up:[],total:[],active:[],latency:[]});
+ const[page,setPage]=useState(initialPage),[selectedDeviceId,setSelectedDeviceId]=useState('local'),[deviceQuery,setDeviceQuery]=useState(''),[filePeers,setFilePeers]=useState([]),[rdpDeviceBusy,setRdpDeviceBusy]=useState(''),[status,setStatus]=useState({connected:false,proxyExits:[]}),[config,setConfig]=useState(EMPTY),[loaded,setLoaded]=useState(false),[configError,setConfigError]=useState(''),[confirmQuit,setConfirmQuit]=useState(false),[dirty,setDirty]=useState(false),[pendingAction,setPendingAction]=useState(null),[exits,setExits]=useState([]),[exitsReady,setExitsReady]=useState(false),[targets,setTargets]=useState([]),[messages,setMessages]=useState([]),[unreadMessages,setUnreadMessages]=useState(0),[connections,setConnections]=useState({connections:[],active:0,total:0,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}),[logs,setLogs]=useState([]),[diagnostics,setDiagnostics]=useState({}),[toastState,setToastState]=useState(null),[speedOpen,setSpeedOpen]=useState(false),[speedExit,setSpeedExit]=useState(''),[batchSpeedOpen,setBatchSpeedOpen]=useState(false),[history,setHistory]=useState({down:[],up:[],total:[],active:[],latency:[]});
  const pushHistory=useCallback(patch=>setHistory(h=>{const n={...h};for(const k in patch)n[k]=[...h[k],Number(patch[k])||0].slice(-SPARK_POINTS);return n}),[]);
  const applyStatus=useCallback(x=>{setStatus(x||{});pushHistory({latency:x?.connected?x.latency:0})},[pushHistory]);
  const toastTimer=useRef(null),exitInventoryKey=useRef(''),pageRef=useRef(page),messageIDs=useRef(new Set());
@@ -599,6 +603,16 @@ export default function App(){
  const refreshNetworkCapabilities=useCallback(async()=>{if(!hasBridge('goGetNetworkCapabilities'))return null;try{const x=await callJSON('goGetNetworkCapabilities',{});setConfig(p=>({...p,networkCapabilities:x||{}}));return x}catch{return null}},[]);
  const refreshExits=useCallback(async()=>{if(hasBridge('goGetProxyExits'))try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch(e){toast('读取授权出口失败：'+e.message,'danger')}},[toast]);
  const refreshTargets=useCallback(async()=>{if(hasBridge('goGetRDPTargets'))try{setTargets(arr(await callJSON('goGetRDPTargets',[])))}catch(e){toast(e.message,'danger')}},[toast]);
+  const refreshFilePeers=useCallback(async()=>{
+    if(!hasBridge('goGetFileSharePeers')){setFilePeers([]);return}
+    try{setFilePeers(onlyVerifiedFilePeers(await callJSON('goGetFileSharePeers',[])))}catch{setFilePeers([])}
+  },[]);
+  useEffect(()=>{
+    if(!status.connected){setFilePeers([]);return}
+    void refreshFilePeers();
+    const timer=setInterval(()=>void refreshFilePeers(),15000);
+    return()=>clearInterval(timer);
+  },[status.connected,refreshFilePeers]);
  const refreshMessages=useCallback(async()=>{if(hasBridge('goGetMessages'))try{const items=arr(await callJSON('goGetMessages',[]));messageIDs.current=new Set(items.map(x=>x?.id).filter(Boolean));setMessages(items)}catch{}},[]);
  const refreshConnections=useCallback(async()=>{if(hasBridge('goGetConnections'))try{const x=await callJSON('goGetConnections',{connections:[]});const snap=Array.isArray(x)?{connections:x,active:x.filter(v=>/active|connecting/i.test(v.state||'')).length,total:x.length,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}:{connections:arr(x?.connections),active:Number(x?.active||0),total:Number(x?.total||0),omitted:Number(x?.omitted||0),upload:Number(x?.upload||0),download:Number(x?.download||0),upload_rate:Number(x?.upload_rate||0),download_rate:Number(x?.download_rate||0),sampled_at:x?.sampled_at,rate_window:x?.rate_window};setConnections(snap);pushHistory({down:snap.download_rate,up:snap.upload_rate,total:snap.download_rate+snap.upload_rate,active:snap.active})}catch{}},[pushHistory]);
  const refreshLogs=useCallback(async()=>{if(hasBridge('goGetLogs'))try{setLogs(arr(await callJSON('goGetLogs',[])).map(logText).filter(Boolean))}catch{}},[]);
@@ -620,22 +634,53 @@ export default function App(){
  const clearLogs=useCallback(async()=>{await call('goClearLogs');setLogs([]);toast('日志已清空')},[toast]);
  const copyLogs=useCallback(async()=>{const text=logs.join('\n');if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',text);else await navigator.clipboard.writeText(text);toast('日志已复制')},[logs,toast]);
  const requestPage=useCallback(next=>{if(next===page)return;if(dirty){setPendingAction({kind:'page',target:next});return}setPage(next)},[dirty,page]);
+  const requestDevice=useCallback(id=>{
+    if(dirty){setPendingAction({kind:'device',target:id});return}
+    setSelectedDeviceId(id);setPage('device');
+  },[dirty]);
+  const requestDeviceFiles=useCallback(id=>{
+    if(dirty){setPendingAction({kind:'device-files',target:id});return}
+    setSelectedDeviceId(id);setPage('files');
+  },[dirty]);
+  const refreshDeviceInventory=useCallback(()=>{
+    void Promise.all([refreshStatus(),refreshExits(),refreshTargets(),refreshFilePeers()]);
+  },[refreshStatus,refreshExits,refreshTargets,refreshFilePeers]);
+  const connectDeviceRDP=useCallback(async id=>{
+    setRdpDeviceBusy(id);
+    try{const result=parseMutation(await call('goConnectRDP',id,true));
+      if(!result.ok)throw Error(result.message||'远程桌面连接失败');
+      toast('已建立远程桌面连接');await refreshStatus();
+    }catch(e){toast(e.message||String(e),'danger')}finally{setRdpDeviceBusy('')}
+  },[refreshStatus,toast]);
+  const disconnectDeviceRDP=useCallback(async()=>{
+    try{const result=parseMutation(await call('goDisconnectRDP'));
+      if(!result.ok)throw Error(result.message||'断开失败');
+      await refreshStatus();toast('远程桌面已断开');
+    }catch(e){toast(e.message||String(e),'danger')}
+  },[refreshStatus,toast]);
  useEffect(()=>{window.relayNavigate=requestPage;return()=>{delete window.relayNavigate}},[requestPage]);
  const reloadConfig=useCallback(async()=>{let r;try{r=parseMutation(await call('goReloadConfig'))}catch(e){r={ok:false,message:e.message}}await refreshConfig();await refreshStatus();if(!r.ok){toast(r.message||'重新读取配置失败','danger');return}toast(r.message||'已重新读取配置')},[refreshConfig,refreshStatus,toast]);
  const restartApp=useCallback(async()=>{try{const r=parseMutation(await call('goRestart'));if(!r.ok)throw new Error(r.message||'重启客户端失败')}catch(e){toast(e.message,'danger')}},[toast]);
  const quitApp=useCallback(async()=>{try{await call('goQuit')}catch(e){toast('退出失败：'+(e?.message||String(e)),'danger')}},[toast]);
  const requestLifecycle=useCallback(kind=>{if(dirty){setPendingAction({kind});return}if(kind==='reload')void reloadConfig();else if(kind==='restart')void restartApp();else if(kind==='quit')setConfirmQuit(true)},[dirty,reloadConfig,restartApp,quitApp]);
- const discardAndContinue=useCallback(async()=>{const action=pendingAction;if(!action)return;setPendingAction(null);setDirty(false);if(action.kind==='page'){await refreshConfig();setPage(action.target);return}if(action.kind==='reload'){await reloadConfig();return}if(action.kind==='restart'){await restartApp();return}if(action.kind==='quit'){await quitApp()}},[pendingAction,refreshConfig,reloadConfig,restartApp,quitApp]);
+ const discardAndContinue=useCallback(async()=>{const action=pendingAction;if(!action)return;setPendingAction(null);setDirty(false);if(action.kind==='page'){await refreshConfig();setPage(action.target);return}if(action.kind==='device'||action.kind==='device-files'){await refreshConfig();setSelectedDeviceId(action.target);setPage(action.kind==='device'?'device':'files');return}if(action.kind==='reload'){await reloadConfig();return}if(action.kind==='restart'){await restartApp();return}if(action.kind==='quit'){await quitApp()}},[pendingAction,refreshConfig,reloadConfig,restartApp,quitApp]);
  useEffect(()=>{const h=e=>{if(!dirty)return;e.preventDefault();e.returnValue=''};window.addEventListener('beforeunload',h);return()=>window.removeEventListener('beforeunload',h)},[dirty]);
  const selectedExit=status.selectedExit||config.defaultExitId||'';
  const exitUnavailable=selectedExitUnavailable({exitsReady,connected:!!status.connected,exits,selected:selectedExit});
  const approval=String(status.approvalState||'').toLowerCase();
  const approvalPending=/pending|wait|approval|待审批/.test(approval);
  const approvalRejected=/reject|denied|revoked|撤销|拒绝/.test(approval);
- const title=useMemo(()=>{for(const g of NAV){const x=g.items.find(i=>i[0]===page);if(x)return x[2]}return page==='settings'?'设置':'RelayProxy'},[page]);
+ const devices=useMemo(()=>buildDeviceInventory({status,config,exits,targets,filePeers}),[status,config,exits,targets,filePeers]);
+  const selectedDevice=devices.find(x=>x.id===selectedDeviceId)||null;
+  const filteredRemotes=devices.filter(x=>!x.self&&x.name.toLocaleLowerCase().includes(deviceQuery.toLocaleLowerCase()));
+  const title=useMemo(()=>{for(const g of NAV){const x=g.items.find(i=>i[0]===page);if(x)return x[2]}return page==='settings'?'设置':'RelayProxy'},[page]);
  const p={status,config,exits,setv,save,toast,dirty};
  let content;
- if(page==='overview')content=<Overview {...p} traffic={connections} history={history} onRefresh={refreshStatus} onGoto={requestPage}/>;
+ if(page==='fleet')content=<DeviceHome devices={devices} status={status} onOpenDevice={requestDevice} onOpenPage={requestPage} onRefresh={refreshDeviceInventory}/>;
+  else if(page==='device')content=<DeviceDetail device={selectedDevice} devices={devices} status={status} config={config} selectedExit={selectedExit}
+   onOpenDevice={requestDevice} onOpenPage={requestPage} onOpenFiles={requestDeviceFiles} onConnectRDP={connectDeviceRDP}
+   onDisconnectRDP={disconnectDeviceRDP} onSelectExit={select} onRefresh={refreshDeviceInventory} busyRDP={rdpDeviceBusy}/>;
+  else if(page==='overview')content=<Overview {...p} traffic={connections} history={history} onRefresh={refreshStatus} onGoto={requestPage}/>;
  else if(page==='devices')content=<Devices {...p} onRefresh={refreshStatus}/>;
  else if(page==='connection')content=<Connection {...p} onReload={()=>requestLifecycle('reload')}/>;
  else if(page==='exits')content=<Exits status={status} exits={exits} selected={status.selectedExit||config.defaultExitId||''} onSelect={select} onSpeed={id=>{setSpeedExit(id||'');setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} config={config} save={save} toast={toast}/>;
@@ -643,11 +688,42 @@ export default function App(){
  else if(page==='exitshare')content=<ExitShare {...p}/>;
  else if(page==='routing')content=<RoutingPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;
  else if(page==='dns')content=<DNSPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃 DNS 设置草稿')}}/>;
- else if(page==='files')content=<FileSharingPage toast={toast}/>;
+ else if(page==='files')content=<FileSharingPage key={selectedDeviceId} toast={toast} initialDeviceId={selectedDeviceId==='local'?'':selectedDeviceId}/>;
  else if(page==='rdp')content=<RDPPage status={status} config={config} setv={setv} save={save} dirty={dirty} targets={targets} refreshTargets={refreshTargets} refreshStatus={refreshStatus} toast={toast}/>;
  else if(page==='messages')content=<MessagesPage messages={messages} refresh={refreshMessages} clear={clearMessages} toast={toast} config={config} setv={setv} save={save}/>;
  else if(page==='monitor')content=<MonitorPage connections={connections} history={history} refresh={refreshConnections} clear={clearConnections} openNative={()=>call('goOpenConnections')}/>;
  else if(page==='diagnostics')content=<DiagnosticsPage diagnostics={diagnostics} logs={logs} refreshDiagnostics={refreshDiagnostics} clearLogs={clearLogs} copyLogs={copyLogs}/>;
  else content=<SettingsPage config={config} setv={setv} save={save} toast={toast} dirty={dirty} onGoto={requestPage} onConfigRefresh={async()=>{await refreshConfig();await refreshStatus()}} onRefreshCapabilities={refreshNetworkCapabilities} onReload={()=>requestLifecycle('reload')} onRestart={()=>requestLifecycle('restart')} onQuit={()=>requestLifecycle('quit')}/>;
- return <div className="app-shell"><aside className="sidebar"><div className="nav-scroll">{NAV.map(g=><div className="nav-group" key={g.group}><div className="group-name">{g.group}</div>{g.items.map(x=><button key={x[0]} className={cx('nav-item',page===x[0]&&'active')} onClick={()=>requestPage(x[0])}><span className="nav-icon"><Icon name={x[1]}/></span><span>{x[2]}</span>{x[0]==='messages'&&unreadMessages>0&&<i className="nav-dot" title={unreadMessages+' 条新消息'}>{unreadMessages>9?'9+':unreadMessages}</i>}</button>)}</div>)}</div><div className="sidebar-footer"><button className={cx('nav-item',page==='settings'&&'active')} onClick={()=>requestPage('settings')}><span className="nav-icon"><Icon name="settings"/></span><span>设置</span></button><div className="connection-mini"><span className={cx('dot',status.connected?'online':'offline')}/><div><strong>{status.connected?'已连接':'未连接'}</strong><span>{status.connected?((status.latency||0)+' ms'):'—'}</span></div></div></div></aside><section className="workspace"><header className="topbar"><div className="crumb"><b>{title}</b><span>·</span><span>{status.deviceName||config.deviceName||'本设备'}</span></div><div className="top-actions">{dirty&&<Badge tone="blue">未保存</Badge>}{config.restartRequired&&<Badge tone="warn">需重启</Badge>}</div></header><main className="main">{approvalPending&&<div className="notice warn state-banner"><b>设备等待审批。</b> 请在 Relay Server 使用当前身份审批此设备所需能力。</div>}{approvalRejected&&<div className="notice danger state-banner"><b>设备授权不可用。</b> 当前设备可能已被拒绝或撤销，代理、出口与 RDP 能力会受限。</div>}{!loaded&&<div className="notice danger state-banner"><b>配置尚未加载。</b> {configError||'正在连接配置接口…'} <Button quiet onClick={()=>void refreshConfig()}>重试读取</Button></div>}{exitUnavailable&&<div className="notice warn state-banner"><b>已选出口不可用。</b> RelayProxy 不会静默改选其他出口；请在“出口选择”重新选择。 <Button quiet onClick={()=>requestPage('exits')}>重新选择</Button></div>}{content}</main></section><SpeedModal open={speedOpen} exits={exits} initialExit={speedExit} onClose={()=>setSpeedOpen(false)} toast={toast}/><BatchSpeedModal open={batchSpeedOpen} exits={exits} onClose={()=>setBatchSpeedOpen(false)} toast={toast}/><Modal open={!!pendingAction} title="有未保存的修改" onClose={()=>setPendingAction(null)} footer={<><Button onClick={()=>setPendingAction(null)}>继续编辑</Button><Button danger onClick={discardAndContinue}>放弃修改并继续</Button></>}><div className="notice warn">当前页面存在尚未保存的配置草稿。离开、重载、重启或退出会丢失这些修改。</div></Modal><Modal open={confirmQuit} title="退出 RelayProxy" onClose={()=>setConfirmQuit(false)} footer={<><Button onClick={()=>setConfirmQuit(false)}>取消</Button><Button danger onClick={()=>{setConfirmQuit(false);void quitApp()}}>确认退出</Button></>}><div className="notice">退出后将停止当前代理进程和连接。</div></Modal>{toastState&&<div className={cx('toast show',toastState.t==='danger'&&'danger',toastState.t==='warn'&&'warn')}>{toastState.message}</div>}</div>
+ return <div className="app-shell"><aside className="sidebar">
+   <div className="device-sidebar-head"><span className="device-brand"><Icon name="share" size={18}/></span><span>RelayProxy</span></div>
+   <div className="nav-scroll">
+    <button className={cx('device-side-item',page==='fleet'&&'active')} title="我的设备" onClick={()=>requestPage('fleet')}>
+     <Icon name="dashboard" size={17}/><span className="device-side-name">我的设备</span>
+     <span className="device-side-name" style={{flex:'0 0 auto',fontSize:10}}>{devices.length}</span>
+    </button>
+    <div className="device-side-heading">本机</div>
+    <button title={devices[0]?.name||'本机'} className={cx('device-side-item',page==='device'&&selectedDeviceId==='local'&&'active')}
+     onClick={()=>requestDevice('local')}><Icon name="monitor" size={17}/><span className="device-side-name">{devices[0]?.name||'本设备'}</span>
+     <i className={cx('device-side-dot',status.connected&&'online')}/></button>
+    <div className="device-side-heading">远程设备</div>
+    <input type="search" className="device-side-search" value={deviceQuery} onChange={e=>setDeviceQuery(e.target.value)}
+     placeholder="搜索已授权设备…" aria-label="搜索设备"/>
+    {filteredRemotes.map(d=><button key={d.id} title={d.name} className={cx('device-side-item',page==='device'&&selectedDeviceId===d.id&&'active')}
+      onClick={()=>requestDevice(d.id)}><Icon name="devices" size={17}/><span className="device-side-name">{d.name}</span>
+      <i className={cx('device-side-dot',d.online&&'online')}/></button>)}
+    {!filteredRemotes.length&&<div className="device-side-empty">{deviceQuery?'没有匹配的授权设备':'暂无可用的已授权远程设备'}</div>}
+    <div className="device-sidebar-tools">
+     <div className="device-side-heading">全局活动</div>
+     {[[ 'messages','bell','消息'],['monitor','activity','实时监控'],['diagnostics','terminal','诊断与日志']].map(([id,icon,label])=>
+       <button key={id} title={label} className={cx('device-side-item',page===id&&'active')} onClick={()=>requestPage(id)}>
+       <Icon name={icon} size={17}/><span className="device-side-name">{label}</span>
+       {id==='messages'&&unreadMessages>0&&<i className="nav-dot">{unreadMessages>9?'9+':unreadMessages}</i>}
+       </button>)}
+    </div>
+   </div>
+   <div className="sidebar-footer"><button title="设置" className={cx('device-side-item',page==='settings'&&'active')} onClick={()=>requestPage('settings')}>
+    <Icon name="settings" size={17}/><span className="device-side-name">设置</span></button>
+    <div className="connection-mini"><span className={cx('dot',status.connected?'online':'offline')}/>
+     <div><strong>{status.connected?'Server 已连接':'Server 未连接'}</strong><span>{status.connected?((status.latency||0)+' ms'):'—'}</span></div></div>
+   </div></aside><section className="workspace"><header className="topbar"><div className="crumb"><b>{title}</b><span>·</span><span>{(page==='device'||page==='files')?(selectedDevice?.name||status.deviceName||'本设备'):(status.deviceName||config.deviceName||'本设备')}</span></div><div className="top-actions">{dirty&&<Badge tone="blue">未保存</Badge>}{config.restartRequired&&<Badge tone="warn">需重启</Badge>}</div></header><main className="main">{approvalPending&&<div className="notice warn state-banner"><b>设备等待审批。</b> 请在 Relay Server 使用当前身份审批此设备所需能力。</div>}{approvalRejected&&<div className="notice danger state-banner"><b>设备授权不可用。</b> 当前设备可能已被拒绝或撤销，代理、出口与 RDP 能力会受限。</div>}{!loaded&&<div className="notice danger state-banner"><b>配置尚未加载。</b> {configError||'正在连接配置接口…'} <Button quiet onClick={()=>void refreshConfig()}>重试读取</Button></div>}{exitUnavailable&&<div className="notice warn state-banner"><b>已选出口不可用。</b> RelayProxy 不会静默改选其他出口；请在“出口选择”重新选择。 <Button quiet onClick={()=>requestPage('exits')}>重新选择</Button></div>}{content}</main></section><SpeedModal open={speedOpen} exits={exits} initialExit={speedExit} onClose={()=>setSpeedOpen(false)} toast={toast}/><BatchSpeedModal open={batchSpeedOpen} exits={exits} onClose={()=>setBatchSpeedOpen(false)} toast={toast}/><Modal open={!!pendingAction} title="有未保存的修改" onClose={()=>setPendingAction(null)} footer={<><Button onClick={()=>setPendingAction(null)}>继续编辑</Button><Button danger onClick={discardAndContinue}>放弃修改并继续</Button></>}><div className="notice warn">当前页面存在尚未保存的配置草稿。离开、重载、重启或退出会丢失这些修改。</div></Modal><Modal open={confirmQuit} title="退出 RelayProxy" onClose={()=>setConfirmQuit(false)} footer={<><Button onClick={()=>setConfirmQuit(false)}>取消</Button><Button danger onClick={()=>{setConfirmQuit(false);void quitApp()}}>确认退出</Button></>}><div className="notice">退出后将停止当前代理进程和连接。</div></Modal>{toastState&&<div className={cx('toast show',toastState.t==='danger'&&'danger',toastState.t==='warn'&&'warn')}>{toastState.message}</div>}</div>
 }

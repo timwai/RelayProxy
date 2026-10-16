@@ -56,6 +56,7 @@ func (db *DB) ensureRDPSecuritySchema() error {
 		"CREATE INDEX IF NOT EXISTS idx_rdp_security_logs_source ON rdp_security_logs(source_ip, started_at)",
 		"CREATE TABLE IF NOT EXISTS rdp_security_bans (id TEXT PRIMARY KEY, cidr TEXT NOT NULL, ingress_id TEXT NOT NULL DEFAULT '', kind TEXT NOT NULL, reason TEXT NOT NULL DEFAULT '', actor TEXT NOT NULL DEFAULT '', created_at TIMESTAMP NOT NULL, expires_at TIMESTAMP, revoked_at TIMESTAMP)",
 		"CREATE INDEX IF NOT EXISTS idx_rdp_security_bans_active ON rdp_security_bans(revoked_at, expires_at)",
+		"CREATE UNIQUE INDEX IF NOT EXISTS idx_rdp_geo_bans_unique ON rdp_security_bans(cidr) WHERE kind='auto' AND ingress_id='' AND expires_at IS NULL AND revoked_at IS NULL AND reason LIKE 'GEO_NON_CN:%'",
 		"CREATE TABLE IF NOT EXISTS rdp_security_rules (id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled BOOLEAN NOT NULL, threshold INTEGER NOT NULL, window_seconds INTEGER NOT NULL, ban_seconds INTEGER NOT NULL)",
 		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('high_frequency','高频连接防护',1,30,60,900)",
 		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('persistent_scan','持续扫描防护',1,100,300,3600)",

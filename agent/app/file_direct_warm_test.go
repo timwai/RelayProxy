@@ -11,7 +11,7 @@ func TestPrewarmRequiresAuthenticatedFileSharingSession(t *testing.T) {
 	if _, err := agent.PrewarmRemoteFileDirect(context.Background(), "peer", "share"); err == nil {
 		t.Fatal("warmup without files.client capability or Relay session must fail")
 	}
-	for _, target := range [][2]string{{"", "share"}, {"peer", ""}, {"peer", "    "}} {
+	for _, target := range [][2]string{{"", "share"}, {"peer", ""}, {"peer", "    "}, {"host\x00suffix", "share"}, {"peer", "share\x00suffix"}} {
 		if _, err := agent.PrewarmRemoteFileDirect(context.Background(), target[0], target[1]); err == nil {
 			t.Fatalf("invalid warmup target accepted: %q %q", target[0], target[1])
 		}

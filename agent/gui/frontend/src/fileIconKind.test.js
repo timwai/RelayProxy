@@ -25,3 +25,17 @@ test('folder icon and labels override name suffix with predictable fallback',()=
  assert.equal(fileIconKind(null),'file');
  assert.equal(fileIconKind('empty.'),'file');
 });
+
+test('all V4 explorer surfaces reuse the same SVG illustration component',async()=>{
+ const {readFileSync}=await import('node:fs');
+ const explorer=readFileSync(new URL('./FileBrowserV4.jsx',import.meta.url),'utf8');
+ const shares=readFileSync(new URL('./FileSharingPage.jsx',import.meta.url),'utf8');
+ const glyph=readFileSync(new URL('./FileGlyph.jsx',import.meta.url),'utf8');
+ assert.match(explorer,/variant="tree"/);
+ assert.match(explorer,/variant={view}/);
+ assert.match(explorer,/variant="detail"/);
+ assert.match(shares,/<FileGlyph name={share.name} isDir/);
+ assert.match(glyph,/viewBox="0 0 40 40"/);
+ assert.match(glyph,/aria-hidden="true"/);
+ assert.doesNotMatch(glyph,/<img|https?:\/\//);
+});

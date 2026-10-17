@@ -99,8 +99,8 @@ func (s *WailsService) MutateRemoteFile(deviceID, shareID, action, relativePath,
 func (s *WailsService) StartFileDownload(deviceID, shareID, relativePath string) (bridge.FileTransfer, error) {
 	return s.owner.bridge.StartFileDownload(deviceID, shareID, relativePath)
 }
-func (s *WailsService) PrewarmRemoteFileDirect(deviceID,shareID string) (app.FileDirectWarmStatus,error) {
- return s.owner.bridge.PrewarmRemoteFileDirect(deviceID,shareID)
+func (s *WailsService) PrewarmRemoteFileDirect(deviceID, shareID string) (app.FileDirectWarmStatus, error) {
+	return s.owner.bridge.PrewarmRemoteFileDirect(deviceID, shareID)
 }
 
 func (s *WailsService) GetFileTransfers() []bridge.FileTransfer {

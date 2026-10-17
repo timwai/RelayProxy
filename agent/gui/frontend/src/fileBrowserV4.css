@@ -248,3 +248,8 @@ html.file-browser-focus .main>.file-browser-v4{flex:1 1 auto;min-height:0;height
 }
 /* Focus mode is a dedicated full-window explorer, with no outer margins. */
 html.file-browser-focus .main:has(> .file-browser-v4)>.file-browser-v4{margin-top:0}
+
+/* File rows participate in keyboard navigation without creating a second
+   selection toolbar or shifting folder positions. */
+.v4-entry:focus-visible{outline:2px solid var(--brand);outline-offset:-2px;background:color-mix(in srgb,var(--brand) 7%,var(--surface2))}
+.v4-file-scroll>.v4-selection button:focus-visible,.v4-window-link:focus-visible{outline:2px solid var(--brand);outline-offset:2px}

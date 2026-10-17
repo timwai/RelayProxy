@@ -67,3 +67,12 @@ Roll UI changes out incrementally; avoid large UI rewrites that touch networking
 - The Browser Sync management header uses a screen-reader heading with compact inline context/refresh instead of duplicating the large page title already in the top bar.
 - File sharing tabs and actions share the natural flow even under 680px rather than forcing a separate right-justified action row.
 - Validate at 360/768/1024/1280/1440px, including long device names, action toolbar overflow, selected exit warnings, browser zoom 200%, and hover/keyboard behavior.
+
+## Iteration 5: RDP and message configuration under Settings
+
+- Agent `SettingsNavigation` now owns two additional categories: `rdp-settings` (local controller switch / runtime and Server capability status / save and restart) and `message-settings` (popup auto-dismiss duration / Server-owned rule status / preview variants and save).
+- The operational `rdp` page retains authorized-device listing, connect/disconnect, copy local endpoint and active-path diagnostics. A disabled or unapproved controller continues to show a status explanation without in-page configuration controls.
+- The operational `messages` page retains message history, type filters, search, code copy and refresh/clear; popup policy and previews are no longer mixed with history.
+- No config keys or mutation API calls changed: `rdp.enabled` still saves under `rdp`, and `verificationPopupTimeoutSec` still saves under `gui`.
+- Settings navigation is a single horizontally scrollable row with tooltips to prevent new categories from adding vertical page-header rows. Existing page IDs and operational routes stay supported.
+- Regression test `agent/gui/frontend/src/settings-placement.test.js` enforces route presence, operational/configuration separation and preservation of save and preview behavior.

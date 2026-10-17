@@ -102,7 +102,7 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 			fail("device has no write access to this shared folder")
 			return
 		}
-		if err := s.mutateFile(*selected, req); err != nil {
+		if err := s.mutateAuthorizedFile(req.ShareID, authenticatedDeviceID, req); err != nil {
 			fail(err.Error())
 			return
 		}

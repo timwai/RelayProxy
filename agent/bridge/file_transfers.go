@@ -459,46 +459,57 @@ func (m *fileTransferManager) list() []FileTransfer {
 // metadata. Running jobs must be cancelled and observed stopped first.
 // Published downloads and user-selected Save As destinations are never removed.
 func (m *fileTransferManager) clearTransfer(id string) error {
- if m == nil { return errors.New("file transfer manager unavailable") }
- m.mu.Lock()
- defer m.mu.Unlock()
- item := m.records[id]
- if item == nil { return errors.New("transfer task not found") }
- if item.State == "running" { return errors.New("cannot clear a running transfer") }
- previousOrder := append([]string(nil), m.order...)
- delete(m.records,id)
- for i,old := range m.order {
-  if old == id { m.order=append(m.order[:i],m.order[i+1:]...);break }
- }
- if err := m.persistTasksLocked(); err != nil {
-  m.records[id]=item
-  m.order=previousOrder
-  return fmt.Errorf("save cleared transfer: %w",err)
- }
- return nil
+	if m == nil {
+		return errors.New("file transfer manager unavailable")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	item := m.records[id]
+	if item == nil {
+		return errors.New("transfer task not found")
+	}
+	if item.State == "running" {
+		return errors.New("cannot clear a running transfer")
+	}
+	previousOrder := append([]string(nil), m.order...)
+	delete(m.records, id)
+	for i, old := range m.order {
+		if old == id {
+			m.order = append(m.order[:i], m.order[i+1:]...)
+			break
+		}
+	}
+	if err := m.persistTasksLocked(); err != nil {
+		m.records[id] = item
+		m.order = previousOrder
+		return fmt.Errorf("save cleared transfer: %w", err)
+	}
+	return nil
 }
 
 // clearInactiveTransfers leaves active tasks untouched and atomically
 // removes historical records from the in-memory index and resume metadata.
-func (m *fileTransferManager) clearInactiveTransfers() (int,error) {
- if m == nil { return 0,errors.New("file transfer manager unavailable") }
- m.mu.Lock()
- defer m.mu.Unlock()
- oldRecords,oldOrder := m.records,m.order
- newRecords := make(map[string]*fileTransferRecord,len(m.records))
- newOrder := make([]string,0,len(m.order))
- for _,id := range m.order {
-  if item:=m.records[id];item!=nil&&item.State=="running" {
-   newRecords[id]=item
-   newOrder=append(newOrder,id)
-  }
- }
- m.records,m.order=newRecords,newOrder
- if err:=m.persistTasksLocked();err!=nil {
-  m.records,m.order=oldRecords,oldOrder
-  return 0,fmt.Errorf("save cleared transfers: %w",err)
- }
- return len(oldRecords)-len(newRecords),nil
+func (m *fileTransferManager) clearInactiveTransfers() (int, error) {
+	if m == nil {
+		return 0, errors.New("file transfer manager unavailable")
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	oldRecords, oldOrder := m.records, m.order
+	newRecords := make(map[string]*fileTransferRecord, len(m.records))
+	newOrder := make([]string, 0, len(m.order))
+	for _, id := range m.order {
+		if item := m.records[id]; item != nil && item.State == "running" {
+			newRecords[id] = item
+			newOrder = append(newOrder, id)
+		}
+	}
+	m.records, m.order = newRecords, newOrder
+	if err := m.persistTasksLocked(); err != nil {
+		m.records, m.order = oldRecords, oldOrder
+		return 0, fmt.Errorf("save cleared transfers: %w", err)
+	}
+	return len(oldRecords) - len(newRecords), nil
 }
 
 func (m *fileTransferManager) cancelTransfer(id string) error {
@@ -583,11 +594,11 @@ func (b *UIBridge) GetFileTransfers() []FileTransfer {
 }
 
 func (b *UIBridge) ClearFileTransfer(id string) error {
- return b.fileTransfers.clearTransfer(id)
+	return b.fileTransfers.clearTransfer(id)
 }
 
-func (b *UIBridge) ClearInactiveFileTransfers() (int,error) {
- return b.fileTransfers.clearInactiveTransfers()
+func (b *UIBridge) ClearInactiveFileTransfers() (int, error) {
+	return b.fileTransfers.clearInactiveTransfers()
 }
 
 func (b *UIBridge) CancelFileDownload(id string) error {

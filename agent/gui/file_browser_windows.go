@@ -52,7 +52,6 @@ func (a *appWindow) openFileBrowser(deviceID, shareID, relativePath string) {
 		Height:                     960,
 		MinWidth:                   790,
 		MinHeight:                  520,
-		URL:                        "/?" + query.Encode(),
 		InitialPosition:            application.WindowCentered,
 		BackgroundType:             background,
 		Windows:                    winopts,
@@ -69,6 +68,9 @@ func (a *appWindow) openFileBrowser(deviceID, shareID, relativePath string) {
 		}
 		a.fileBrowserMu.Unlock()
 	})
+	// Load the embedded route explicitly after creating the WebView. This
+	// matches Wails v3 multi-window asset loading and avoids blank child views.
+	window.SetURL("/?" + query.Encode())
 	window.Center()
 	window.Show().Focus()
 }

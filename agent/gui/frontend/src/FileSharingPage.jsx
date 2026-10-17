@@ -422,9 +422,12 @@ export default function FileSharingPage({toast}) {
  async function clearInactiveTransfers(){
   try{
    await callJSON('goClearInactiveFileTransfers',null);
-   saveHandles.current.clear();
-   completedSaves.current.clear();
-   completedUploads.current.clear();
+   // Only discard state for records that were removed. Active downloads
+   // still need their live Save As handles and upload-completion bookkeeping.
+   const active=new Set(transfers.filter(t=>t.state==='running').map(t=>t.id));
+   for(const id of saveHandles.current.keys())if(!active.has(id))saveHandles.current.delete(id);
+   for(const id of completedSaves.current)if(!active.has(id))completedSaves.current.delete(id);
+   for(const id of completedUploads.current)if(!active.has(id))completedUploads.current.delete(id);
    setTransferError('');
    await refreshTransfers();
   }catch(e){setTransferError(e.message||String(e))}

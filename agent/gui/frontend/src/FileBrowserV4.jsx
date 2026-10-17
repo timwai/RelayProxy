@@ -14,7 +14,7 @@ const focusParam=()=>new URLSearchParams(window.location.search).has('filesWindo
 const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
 export default function FileBrowserV4({
- peers,device,share,path,shares,entries,loading,error,latency,canWrite,uploads,
+ peers,device,share,path,shares,entries,loading,error,latency,canWrite,treeRevision,
  uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onRefresh,toast
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
@@ -36,16 +36,19 @@ export default function FileBrowserV4({
  const preview=chosen.length===1?chosen[0]:null;
  const rootName=activeShare?.name||'共享文件夹';
  const deviceName=peers.find(x=>x.deviceId===device)?.name||device||'选择设备';
- useEffect(()=>{setSelected([]);setAnchor('');setQuery('');setMenu(null);setVisibleLimit(200)},[device,share,path]);
+ useEffect(()=>{setSelected([]);setAnchor('');setQuery('');setMenu(null);setDialog(null);setVisibleLimit(200)},[device,share,path]);
+ const treeGeneration=useRef(0);
+ useEffect(()=>{treeGeneration.current+=1;setExpanded(new Set());setTreeFolders({})},[treeRevision]);
  useEffect(()=>setVisibleLimit(200),[query,sort,view]);
  useEffect(()=>{document.documentElement.classList.toggle('file-browser-focus',focus);return()=>document.documentElement.classList.remove('file-browser-focus')},[focus]);
  useEffect(()=>{const keyHandler=e=>{
-   if(e.target.closest('input,textarea,select,[contenteditable="true"]'))return;
+   if(!box.current?.contains(e.target)||menu||dialog)return;
+   if(e.target instanceof Element&&e.target.closest('input,textarea,select,[contenteditable="true"]'))return;
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();setSelected(filtered.map(x=>x.name))}
    if(e.key==='F2'&&chosen.length===1&&canWrite){e.preventDefault();requestRename(chosen[0])}
    if((e.key==='Delete'||e.key==='Backspace')&&chosen.length&&canWrite){e.preventDefault();requestRemove(chosen)}
   };document.addEventListener('keydown',keyHandler);return()=>document.removeEventListener('keydown',keyHandler)
- },[chosen.map(x=>x.name).join('|'),canWrite,filtered.map(x=>x.name).join('|')]);
+ },[chosen.map(x=>x.name).join('|'),canWrite,filtered.map(x=>x.name).join('|'),menu,dialog]);
  useEffect(()=>{const close=e=>{if(e.key==='Escape'){if(dialog)setDialog(null);else if(menu)setMenu(null);else if(focus)setFocus(false);else setSelected([])}};
   document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close)},[dialog,menu,focus]);
  useEffect(()=>{const clear=e=>{if(!e.target.closest('.file-v4-context'))setMenu(null)};document.addEventListener('pointerdown',clear);return()=>document.removeEventListener('pointerdown',clear)},[]);
@@ -65,14 +68,14 @@ export default function FileBrowserV4({
  };
  const setAll=e=>setSelected(e.target.checked?filtered.map(x=>x.name):[]);
  const toggleDetail=()=>setDetails(v=>!v);
- const mutate=async(action,oldPath,dest='')=>{
+ const mutate=async(action,oldPath,dest='',scope={device,share,path})=>{
   if(!writable){report('当前共享没有写入权限');return false}
-  try{await onMutate(action,oldPath,dest);setSelected([]);return true}
+  try{await onMutate(action,oldPath,dest,scope);setSelected([]);return true}
   catch(e){report(e.message||String(e));return false}
  };
  const requestRemove=items=>setDialog({kind:'remove',items});
  const requestRename=item=>setDialog({kind:'rename',item,value:item.name});
- const requestCreate=dir=>setDialog({kind:'mkdir',dir,value:'新建文件夹'});
+ const requestCreate=(dir,scope={device,share,path})=>setDialog({kind:'mkdir',dir,scope,value:'新建文件夹'});
  const requestMove=items=>setDialog({kind:'move',items,value:'.'});
  const action=async(type,item,scope)=>{
   setMenu(null);
@@ -107,7 +110,11 @@ export default function FileBrowserV4({
   if(dialog.kind==='mkdir'){
    const name=(dialog.value||'').trim();
    if(!name||name==='.'||name==='..'||name.includes('/')||name.includes('\\')){report('文件夹名称无效');return}
-   if(await mutate('mkdir',join(dialog.dir,name)))setDialog(null);
+   if(await mutate('mkdir',join(dialog.dir,name),'',dialog.scope)){
+    setDialog(null);
+    if(dialog.scope.device!==device||dialog.scope.share!==share||dialog.dir!==path)
+     navigate(dialog.scope.device,dialog.scope.share,dialog.dir);
+   }
   }else if(dialog.kind==='rename'){
    const name=(dialog.value||'').trim();
    if(!name||name.includes('/')||name.includes('\\')||name==='.'||name==='..'){report('名称无效');return}
@@ -138,11 +145,12 @@ export default function FileBrowserV4({
  };
  const newWindow=()=>{
   if(globalThis.wails?.Call?.ByName){
-   if(typeof window.goOpenFileBrowserWindow==='function')void window.goOpenFileBrowserWindow().catch(e=>report('打开独立窗口失败：'+(e.message||e)));
+   if(typeof window.goOpenFileBrowserWindow==='function')void window.goOpenFileBrowserWindow(device||'',share||'',path).catch(e=>report('打开独立窗口失败：'+(e.message||e)));
    else report('独立窗口接口尚未就绪');
    return;
   }
   const url=new URL(window.location.href);url.searchParams.set('page','files');url.searchParams.set('filesWindow','1');
+  if(device&&share){url.searchParams.set('fileDevice',device);url.searchParams.set('fileShare',share);url.searchParams.set('filePath',path)}
   const win=window.open(url.toString(),'relayproxy-files','popup=yes,width=1540,height=960,resizable=yes,scrollbars=yes');
   if(!win)report('窗口被拦截，请允许弹出窗口');
  };
@@ -158,14 +166,23 @@ export default function FileBrowserV4({
   const raw=e.dataTransfer.getData('application/x-relayproxy-files');
   if(raw){
    let payload;try{payload=JSON.parse(raw)}catch{return}
-   if(!sameScope(payload,targetDevice,targetShare)){report('暂不支持跨设备或跨共享移动');return}
+   if(!dragInfo.current||raw!==JSON.stringify(dragInfo.current)
+    ||!sameScope(payload,targetDevice,targetShare)||!sameScope(payload,device,share)){
+    report('暂不支持跨设备、跨共享或来源不明的文件移动');return
+   }
    if(!writable){report('当前共享为只读');return}
    for(const name of payload.names||[]){
     const old=join(payload.path,name),dest=join(targetPath,name);
     if(dest===old||targetPath===old||targetPath.startsWith(old+'/')){report('不能移动到自身或子目录');return}
-    if(!await mutate('move',old,dest))return;
+    if(!await mutate('move',old,dest,'',{device,share,path}))return;
    }
-  }else await uploadAt(e.dataTransfer.files,targetPath,targetShare,targetDevice);
+   }else{
+   const items=Array.from(e.dataTransfer.items||[]);
+   if(items.some(item=>item.kind==='file'&&item.webkitGetAsEntry?.()?.isDirectory)){
+    report('当前只支持拖入文件，请使用系统选择器或先压缩文件夹');return;
+   }
+   await uploadAt(e.dataTransfer.files,targetPath,targetShare,targetDevice);
+  }
  };
  const dragStart=(e,item)=>{
   if(!writable){e.preventDefault();return}
@@ -184,7 +201,9 @@ export default function FileBrowserV4({
   setExpanded(prev=>new Set([...prev,key]));
   if(Object.prototype.hasOwnProperty.call(treeFolders,key))return;
   try{
+   const generation=treeGeneration.current;
    const records=await callJSON('goGetRemoteFileEntries',[],dev,id,dir);
+   if(generation!==treeGeneration.current)return;
    setTreeFolders(prev=>({...prev,[key]:(Array.isArray(records)?records:[]).filter(x=>x.isDir)}));
   }catch(e){setExpanded(prev=>{const next=new Set(prev);next.delete(key);return next});report('读取目录树失败：'+(e.message||e))}
  };
@@ -246,7 +265,7 @@ export default function FileBrowserV4({
      <small>{deviceName} · {canWrite?'读写':'只读'}{error?' · '+error:''}</small></div>
     <div className="v4-head-actions">
      <button className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} title="选择设备"><Icon name="devices"/></button>
-     <button className="btn" onClick={newWindow} title="在浏览器新窗口打开"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>
+     <button className="btn" onClick={newWindow} title="打开独立文件浏览器窗口"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>
      <button className="btn" onClick={()=>setFocus(v=>!v)} title={focus?'退出专注模式':'文件浏览器充满整个窗口'}>
       <Icon name="dashboard"/> <span>{focus?'退出专注':'专注模式'}</span></button>
     </div>
@@ -276,7 +295,12 @@ export default function FileBrowserV4({
    {uploading&&<div className="v4-upload-progress">上传准备：{fmt(uploadStaged)} / {fmt(uploadTotal)} <button className="btn danger" onClick={onCancelUpload}>取消上传准备</button></div>}
    <div className={'v4-file-scroll '+(dropTarget==='background'?'drop-active':'')}
     onContextMenu={e=>showMenu(e,'background')}
-    onDragOver={e=>{if(!e.target.closest('[data-file-name]'))dragOver(e,'background',writable)}}
+    onDragOverCapture={e=>{
+      if(writable&&Array.from(e.dataTransfer.types||[]).includes('Files')){
+       e.preventDefault();e.dataTransfer.dropEffect='copy';
+      }
+     }}
+     onDragOver={e=>{if(!e.target.closest('[data-file-name]'))dragOver(e,'background',writable)}}
     onDragLeave={()=>setDropTarget('')}
     onDrop={e=>handleDrop(e)}>
     {!share?<div className="v4-placeholder">从左侧选择已授权共享目录</div>:
@@ -331,7 +355,7 @@ export default function FileBrowserV4({
        if(key==='open')navigate(target.device,target.share,target.path);
        else if(key==='refresh')onDirectory(target.device,target.share,target.path,{force:true});
        else if(key==='upload'){uploadTarget.current=target;input.current?.click()}
-       else if(key==='mkdir'){navigate(target.device,target.share,target.path);requestCreate(target.path)}
+       else if(key==='mkdir'){requestCreate(target.path,target)}
       }else void action(key,menu.item,menu.target);
     }}>{title}</button>)}</div>}
   {dialog&&<div className="v4-dialog-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setDialog(null)}>

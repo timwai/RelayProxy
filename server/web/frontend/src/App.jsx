@@ -73,7 +73,7 @@ function useDialogFocus(open, dialogRef, onClose){
   const dialog=dialogRef.current,previous=document.activeElement;
   const selector='a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
   const focusable=()=>Array.from(dialog.querySelectorAll(selector)).filter(el=>el.getClientRects().length>0&&!el.closest('[aria-hidden="true"]'));
-  (dialog.querySelector('input:not(:disabled),select:not(:disabled),textarea:not(:disabled)')||focusable()[0]||dialog).focus();
+  (focusable().find(el=>/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))||focusable()[0]||dialog).focus();
   const onKey=e=>{
    if(e.key==='Escape'){e.preventDefault();onCloseRef.current?.();return}
    if(e.key!=='Tab')return;

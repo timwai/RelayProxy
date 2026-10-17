@@ -5,6 +5,10 @@ import (
 	"sync"
 )
 
+// DefaultReplayLimit accommodates a 64 Mbps bandwidth-delay product at one
+// second RTT. Storage is allocated on demand and remains bounded per direction.
+const DefaultReplayLimit = 8 << 20
+
 var ErrReplayLimit = errors.New("resumable stream replay buffer limit reached")
 
 type segment struct {
@@ -28,7 +32,7 @@ type ReplayBuffer struct {
 
 func NewReplayBuffer(limit int) *ReplayBuffer {
 	if limit <= 0 {
-		limit = 512 << 10
+		limit = DefaultReplayLimit
 	}
 	return &ReplayBuffer{limit: limit}
 }

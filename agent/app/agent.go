@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	p2presume "relayproxy/internal/p2p/resume"
 	"runtime"
 	"slices"
 	"strings"
@@ -299,6 +300,8 @@ type Agent struct {
 	divertSrv            *divert.Server
 	divertStage          atomic.Pointer[string]
 	divertError          atomic.Pointer[string]
+	divertMu             sync.Mutex
+	divertEpoch          uint64 // guarded by divertMu
 	ctrlStream           tunnel.TunnelStream
 	readySession         tunnel.TunnelSession
 	epoch                uint64
@@ -475,7 +478,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	})
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
-	a.rawDialer.ConfigureStreamResume(resumeClient, 512<<10)
+	a.rawDialer.ConfigureStreamResume(resumeClient, p2presume.DefaultReplayLimit)
 	a.configureProxyPathProvider()
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
 	a.dialer.SetCustomExits(cfg.CustomExits)
@@ -486,7 +489,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
 			AllowBrowserNetwork: cfg.BrowserNetworkShare,
 			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
-			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: 512 << 10,
+			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: p2presume.DefaultReplayLimit,
 		})
 	}
 	var tunnelTLS *tls.Config
@@ -519,6 +522,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			BlockDoHEndpoints:     engine.BlockDoHEndpoints,
 			ForwardOtherDNS:       engine.ForwardOtherDNS,
 			DNSExitID:             engine.DNSExitID,
+			DNSDirectDomains:      engine.DNSDirectDomains,
 			DNSUpstreams: func() []divert.DNSUpstream {
 				configured := engine.DNSUpstreams()
 				result := make([]divert.DNSUpstream, 0, len(configured))
@@ -532,6 +536,17 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 				return a.handshakeOK.Load()
 			},
 			LocalExitReady: a.dialer.CustomExitReady,
+			RelayIPs: func() []string {
+				sess := a.tunnelMgr.Session()
+				if sess == nil || sess.RemoteAddr() == nil {
+					return nil
+				}
+				host, _, err := net.SplitHostPort(sess.RemoteAddr().String())
+				if err != nil {
+					return nil
+				}
+				return []string{host}
+			},
 			SharedPolicy: func(flow divert.Flow) divert.Decision {
 				d := engine.DecideFlow(routing.Flow{Process: flow.Process, ProcessAliases: flow.ProcessAliases, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
 				return divert.Decision{Action: divert.Action(d.Action), ExitID: d.ExitID, Rule: d.Rule, DatagramRequired: d.DatagramRequired, HandleDirect: d.HandleDirect}
@@ -545,6 +560,48 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		a.setDivertStage("waiting_relay", nil)
 	}
 	return a, nil
+}
+
+// Serialize capture changes independently of Agent.mu: platform shutdown may
+// wait for workers that still need Agent state to cancel their tunnel dials.
+func (a *Agent) syncDivert() {
+	if a.divertSrv == nil {
+		return
+	}
+	a.divertMu.Lock()
+	defer a.divertMu.Unlock()
+	a.mu.RLock()
+	epoch := a.epoch
+	a.mu.RUnlock()
+	if a.divertEpoch != epoch {
+		// Even an already-approved replacement session may have a different
+		// peer IP. Rebuild the kernel bypass instead of reusing the old filter.
+		a.divertSrv.Pause()
+		a.divertEpoch = epoch
+	}
+	if !a.handshakeOK.Load() || a.closed.Load() {
+		a.divertSrv.Pause()
+		a.setDivertStage("waiting_relay", nil)
+		return
+	}
+	if a.divertSrv.Running() {
+		return
+	}
+	a.setDivertStage("starting", nil)
+	if err := a.divertSrv.Start(); err != nil {
+		a.setDivertStage("error", err)
+		log.Printf("[Agent] Transparent proxy not armed: %v", err)
+		return
+	}
+	a.mu.RLock()
+	currentEpoch := a.epoch
+	a.mu.RUnlock()
+	if currentEpoch != epoch || !a.handshakeOK.Load() || a.closed.Load() {
+		a.divertSrv.Pause()
+		a.setDivertStage("waiting_relay", nil)
+		return
+	}
+	a.setDivertStage("running", nil)
 }
 
 func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel.TunnelSession) {
@@ -561,6 +618,16 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	a.epoch++
 	epoch := a.epoch
 	a.handshakeOK.Store(false)
+	if a.divertSrv != nil {
+		// TunnelManager serializes state callbacks. Capture workers may be
+		// finishing a failed dial that also reports session loss to that manager;
+		// wait for them outside the state callback to avoid a lock cycle.
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			a.syncDivert()
+		}()
+	}
 	a.readySession = nil
 	a.approvedMode = ""
 	oldControl := a.ctrlStream
@@ -757,19 +824,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		a.updatePublicDirectInventory(proxyExitsFromProtocol(*accepted.ProxyExits))
 	}
 
-	if a.divertSrv != nil && !a.divertSrv.Running() {
-		a.setDivertStage("starting", nil)
-		log.Printf("[divert] stage=starting relay_ready=true")
-		if err := a.divertSrv.Start(); err != nil {
-			// Transparent proxy startup is best-effort. Never sacrifice the
-			// host's ordinary networking because interception cannot be armed.
-			a.setDivertStage("error", err)
-			log.Printf("[Agent] Transparent proxy not armed: %v", err)
-		} else {
-			a.setDivertStage("running", nil)
-			log.Printf("[divert] stage=running")
-		}
-	}
+	a.syncDivert()
 	log.Printf("[Agent] Device approved. SessionID: %s, Heartbeat: %ds", accepted.SessionID, accepted.HeartbeatSec)
 
 	var p2pManager *rdpp2p.Manager
@@ -1443,14 +1498,10 @@ func (a *Agent) Status() AgentStatus {
 		st.RDPListenAddr = a.rdpConnection.ListenAddr
 		st.RDPTargetID = a.rdpConnection.Target.DeviceID
 		st.RDPUDPEnabled, st.RDPUDPActive, st.RDPUDPReason = a.rdpConnection.UDPStatus()
-		st.RDPPathTCP = "relay"
+		st.RDPPathTCP, st.RDPPathUDP = a.rdpConnection.PathStatus()
 		if st.RDPUDPEnabled {
-			// Without a P2P session the only possible UDP path is the native
-			// QUIC datagram relay. A P2P session overwrites this below with its
-			// independently selected path.
-			st.RDPPathUDP = "relay"
 			if st.RDPUDPActive {
-				st.RDPUDPReason = "UDP 已建立，正在转发 RDP 客户端数据"
+				st.RDPUDPReason = "UDP 已建立，路径：" + st.RDPPathUDP
 			} else if st.RDPUDPReason == "" {
 				st.RDPUDPReason = "UDP 已监听，等待 RDP 客户端发起数据"
 			}
@@ -1463,17 +1514,6 @@ func (a *Agent) Status() AgentStatus {
 	}
 	if !st.RDPUDPEnabled && st.RDPListenAddr != "" && st.RDPUDPReason == "" {
 		st.RDPUDPReason = "当前传输不提供 RDP UDP"
-	}
-	if a.rdpSession != nil {
-		st.RDPPathTCP = a.rdpSession.PathTCP()
-		st.RDPPathUDP = a.rdpSession.PathUDP()
-		if st.RDPUDPEnabled {
-			if st.RDPUDPActive {
-				st.RDPUDPReason = "UDP 已建立，路径：" + st.RDPPathUDP
-			} else {
-				st.RDPUDPReason = "UDP 已监听，等待 RDP 客户端发起数据"
-			}
-		}
 	}
 	st.Connected = a.handshakeOK.Load() && sess != nil
 	a.mu.RUnlock()
@@ -1584,6 +1624,13 @@ func (a *Agent) Status() AgentStatus {
 	if divertSrv != nil {
 		st.DivertDiagnostics = divertSrv.Diagnostics()
 		st.DNSProtection = divertSrv.DNSProtectionStatus()
+		if !st.DivertRunning && st.DivertStage == "running" {
+			st.DivertStage = "error"
+			st.DivertError = st.DivertDiagnostics.LastError
+			if st.DivertError == "" {
+				st.DivertError = "透明代理已停止接管，请检查诊断日志"
+			}
+		}
 	}
 	if state := a.approvalState.Load(); state != nil {
 		st.ApprovalState = *state

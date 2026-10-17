@@ -43,6 +43,7 @@ type Options struct {
 	UDPWriteTimeout       time.Duration
 	SharedPolicy          func(Flow) Decision
 	ProxyReady            func() bool
+	RelayIPs              func() []string // authenticated transport peers, sampled before capture starts
 	LocalExitReady        func(string) bool
 	Traffic               *traffic.Registry
 	DefaultExitID         func() string
@@ -53,6 +54,7 @@ type Options struct {
 	ForwardOtherDNS       func() bool          // opt-in authenticated DoT via proxy for TXT/SRV
 	DNSExitID             func() string        // optional pinned exit for DNS, independent from app flows
 	DNSUpstreams          func() []DNSUpstream // optional custom pinned HTTPS resolvers from active policy
+	DNSDirectDomains      func() []string      // explicit domain suffix exceptions to encrypted/FakeIP DNS
 	DoHBlockedIPs         func() []string      // opt-in fixed HTTPS/443 IP or CIDR denylist
 }
 
@@ -64,18 +66,20 @@ type Server struct {
 	engine            *Engine
 	dialer            Dialer
 	guard             LoopGuard
+	guardMu           sync.RWMutex
 	fakeDNS           *fakeIPDNS
 	dnsLimit          chan struct{} // bound concurrent encrypted resolver requests
 	lastDNSFailureLog atomic.Int64
 
-	ctx         context.Context
-	cancel      context.CancelFunc
-	lifecycleMu sync.Mutex
-	mu          sync.Mutex
-	closed      bool
-	done        chan struct{}
-	wg          sync.WaitGroup
-	interceptor systemInterceptor
+	ctx             context.Context
+	cancel          context.CancelFunc
+	lifecycleMu     sync.Mutex
+	mu              sync.Mutex
+	closed          bool
+	done            chan struct{}
+	wg              sync.WaitGroup
+	interceptor     systemInterceptor
+	lastDiagnostics Diagnostics
 
 	tcpFlows    int
 	connections map[net.Conn]struct{}
@@ -157,6 +161,12 @@ func appendUnique(in []string, add ...string) []string {
 
 func (s *Server) Engine() *Engine { return s.engine }
 
+func (s *Server) loopGuard() LoopGuard {
+	s.guardMu.RLock()
+	defer s.guardMu.RUnlock()
+	return s.guard
+}
+
 // ReloadRules does not acquire PolicyMu. Its owner may hold that lock while
 // publishing several policy engines atomically. Existing flows retain decisions.
 func (s *Server) ReloadRules(cfg Config) error {
@@ -171,6 +181,15 @@ func (s *Server) ReloadRules(cfg Config) error {
 }
 
 func (s *Server) Start() error {
+	return s.start(func(s *Server) (systemInterceptor, error) {
+		if err := Preflight(s.engine.Config()); err != nil {
+			return nil, err
+		}
+		return startPlatformInterceptor(s)
+	})
+}
+
+func (s *Server) start(start func(*Server) (systemInterceptor, error)) error {
 	s.lifecycleMu.Lock()
 	defer s.lifecycleMu.Unlock()
 	s.mu.Lock()
@@ -178,22 +197,85 @@ func (s *Server) Start() error {
 		s.mu.Unlock()
 		return ErrClosed
 	}
-	if s.interceptor != nil {
+	if s.interceptor != nil && s.interceptor.Running() {
 		s.mu.Unlock()
 		return nil
 	}
+	previous := s.interceptor
+	s.interceptor = nil
 	s.mu.Unlock()
-	if err := Preflight(s.engine.Config()); err != nil {
-		return err
+	if previous != nil {
+		previous.Close()
+		s.closeFlows()
 	}
-	interceptor, err := startPlatformInterceptor(s)
+	// Readiness can change while a platform adapter resolves addresses or opens
+	// its capture device. Never publish an interceptor for a lost relay.
+	if s.opts.ProxyReady != nil && !s.opts.ProxyReady() {
+		return errors.New("divert: relay is not ready")
+	}
+	interceptor, err := start(s)
 	if err != nil {
 		return err
 	}
+	if s.opts.ProxyReady != nil && !s.opts.ProxyReady() {
+		interceptor.Close()
+		s.closeFlows()
+		return errors.New("divert: relay lost during startup")
+	}
 	s.mu.Lock()
 	s.interceptor = interceptor
+	s.lastDiagnostics = Diagnostics{}
 	s.mu.Unlock()
 	return nil
+}
+
+// Pause releases OS interception without destroying policy or FakeIP mappings.
+// The agent can Start again after authenticating a replacement relay session.
+func (s *Server) Pause() { s.pause(nil) }
+
+func (s *Server) pause(expected systemInterceptor) {
+	s.lifecycleMu.Lock()
+	defer s.lifecycleMu.Unlock()
+	s.mu.Lock()
+	if s.closed || (expected != nil && s.interceptor != expected) {
+		s.mu.Unlock()
+		return
+	}
+	interceptor := s.interceptor
+	s.interceptor = nil
+	s.mu.Unlock()
+	if interceptor != nil {
+		interceptor.Close()
+		if source, ok := interceptor.(interface{ Diagnostics() Diagnostics }); ok {
+			diagnostics := source.Diagnostics()
+			s.mu.Lock()
+			s.lastDiagnostics = diagnostics
+			s.mu.Unlock()
+		}
+	}
+	s.closeFlows()
+}
+
+func (s *Server) closeFlows() {
+	// Capture workers have stopped, so no new associations from this adapter
+	// can appear after the snapshot. Close old flows before the next Start.
+	s.mu.Lock()
+	connections := make([]net.Conn, 0, len(s.connections))
+	for conn := range s.connections {
+		connections = append(connections, conn)
+	}
+	associations := make([]*udpAssociation, 0, len(s.udp))
+	for _, association := range s.udp {
+		associations = append(associations, association)
+	}
+	clear(s.udp)
+	s.mu.Unlock()
+	for _, association := range associations {
+		association.close()
+	}
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
 }
 
 func (s *Server) Running() bool {
@@ -214,9 +296,10 @@ func (s *Server) ListenAddr() string {
 func (s *Server) Diagnostics() Diagnostics {
 	s.mu.Lock()
 	interceptor := s.interceptor
+	last := s.lastDiagnostics
 	s.mu.Unlock()
 	if interceptor == nil {
-		return Diagnostics{}
+		return last
 	}
 	if source, ok := interceptor.(interface{ Diagnostics() Diagnostics }); ok {
 		return source.Diagnostics()
@@ -320,7 +403,7 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	}
 
 	decision := Decision{Action: ActionDirect, Rule: "loop-guard"}
-	guarded := !fake && s.guard.MustDirectFlow(flow)
+	guarded := !fake && s.loopGuard().MustDirectFlow(flow)
 	if fake && !s.fakeIPEnabled() {
 		decision = Decision{Action: ActionReject, Rule: "fakeip-disabled"}
 	} else if s.opts.DoHBlockedIPs != nil && flow.Port == 443 &&

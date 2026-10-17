@@ -4,9 +4,16 @@ package divert
 
 import (
 	"fmt"
+	"log"
 
 	"golang.org/x/sys/windows"
 )
+
+func recoverWindowsNetworkDNS(reason string) {
+	if err := refreshWindowsSystemDNSCache(); err != nil {
+		log.Printf("[divert] Windows DNS cache reset after %s: %v", reason, err)
+	}
+}
 
 // DnsFlushResolverCache only clears the Windows DNS Client's cache. It does
 // not flush Chromium's host cache or capture an application's private DoH.

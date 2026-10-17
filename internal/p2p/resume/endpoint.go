@@ -470,7 +470,8 @@ func (e *Endpoint) readLoop(transport Transport, generation uint64) {
 		case FrameFIN:
 			e.queueAck()
 			e.inbound.CloseWithError(nil)
-			return
+			// FIN closes only the peer's data direction. Keep consuming ACKs
+			// for our writes (and detect transport loss during half-close).
 		case FrameRST:
 			e.fail(net.ErrClosed)
 			return

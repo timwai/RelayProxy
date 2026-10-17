@@ -265,75 +265,83 @@ func TestInterceptorPrivateListenerNeverLeaksPackets(t *testing.T) {
 }
 
 func TestInterceptorUDPFullReplyPath(t *testing.T) {
-	for _, ipv6 := range []bool{false, true} {
-		t.Run(map[bool]string{false: "ipv4", true: "ipv6"}[ipv6], func(t *testing.T) {
-			target, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
-			if err != nil {
-				t.Fatal(err)
-			}
-			defer target.Close()
-			go func() {
-				buf := make([]byte, 100)
-				n, addr, err := target.ReadFromUDP(buf)
-				if err == nil {
-					_, _ = target.WriteToUDP(append([]byte("reply:"), buf[:n]...), addr)
-					_, _ = target.WriteToUDP([]byte("second"), addr)
-				}
-			}()
-			var calls atomic.Int32
-			dialer := &testDialer{udp: func(ctx context.Context, exit, host string, port uint16) (net.PacketConn, error) {
-				calls.Add(1)
-				if exit != "selected-exit" || port != 443 {
-					return nil, errors.New("lost UDP routing decision")
-				}
-				return net.DialUDP("udp4", nil, target.LocalAddr().(*net.UDPAddr))
-			}}
-			i, device := newTestInterceptor(t, Options{Dialer: dialer, Config: Config{DefaultAction: ActionReject, Rules: []Rule{{Enabled: true, Process: "browser.exe", Action: ActionProxy, ExitID: "selected-exit"}}}})
-			i.server.interceptor = i
-			i.start()
-			data, _ := packetTestFixture(ipv6, ProtoUDP, []byte("request"), false)
-			original, _ := parseIPPacket(data)
-			device.incoming <- capturedTestPacket{data: data, meta: packetMetadata{outbound: true, ifIndex: 55}}
-			for _, expected := range []string{"reply:request", "second"} {
-				response := expectInterceptedPacket(t, device)
-				packet, err := parseIPPacket(response.data)
+	for _, async := range []bool{false, true} {
+		for _, ipv6 := range []bool{false, true} {
+			t.Run(map[bool]string{false: "sync/", true: "deferred/"}[async]+map[bool]string{false: "ipv4", true: "ipv6"}[ipv6], func(t *testing.T) {
+				target, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
 				if err != nil {
 					t.Fatal(err)
 				}
-				if string(packet.Payload) != expected || packet.Source != original.Destination || packet.Destination != original.Source || response.meta.outbound || response.meta.ifIndex != 55 {
-					t.Fatalf("bad UDP reply: %+v %+v", packet, response.meta)
+				defer target.Close()
+				go func() {
+					buf := make([]byte, 100)
+					n, addr, err := target.ReadFromUDP(buf)
+					if err == nil {
+						_, _ = target.WriteToUDP(append([]byte("reply:"), buf[:n]...), addr)
+						_, _ = target.WriteToUDP([]byte("second"), addr)
+					}
+				}()
+				var calls atomic.Int32
+				dialer := &testDialer{udp: func(ctx context.Context, exit, host string, port uint16) (net.PacketConn, error) {
+					calls.Add(1)
+					if exit != "selected-exit" || port != 443 {
+						return nil, errors.New("lost UDP routing decision")
+					}
+					return net.DialUDP("udp4", nil, target.LocalAddr().(*net.UDPAddr))
+				}}
+				i, device := newTestInterceptor(t, Options{Dialer: dialer, Config: Config{DefaultAction: ActionReject, Rules: []Rule{{Enabled: true, Process: "browser.exe", Action: ActionProxy, ExitID: "selected-exit"}}}})
+				if async {
+					i.device = &deferredTestDevice{device}
 				}
-				packetTestAssertChecksums(t, packet.Bytes, packet.TransportOffset, ProtoUDP)
-			}
-			if calls.Load() != 1 {
-				t.Fatal("UDP reply path opened more than one tunnel association")
-			}
-			closed := make(chan struct{})
-			go func() { _ = i.server.Close(); close(closed) }()
-			select {
-			case <-closed:
-			case <-time.After(2 * time.Second):
-				t.Fatal("interceptor close did not cancel workers/UDP replies")
-			}
-			if i.server.Running() {
-				t.Fatal("closed interceptor still running")
-			}
-		})
+				i.server.interceptor = i
+				i.start()
+				data, _ := packetTestFixture(ipv6, ProtoUDP, []byte("request"), false)
+				original, _ := parseIPPacket(data)
+				device.incoming <- capturedTestPacket{data: data, meta: packetMetadata{outbound: true, ifIndex: 55}}
+				for _, expected := range []string{"reply:request", "second"} {
+					response := expectInterceptedPacket(t, device)
+					packet, err := parseIPPacket(response.data)
+					if err != nil {
+						t.Fatal(err)
+					}
+					if string(packet.Payload) != expected || packet.Source != original.Destination || packet.Destination != original.Source || response.meta.outbound || response.meta.ifIndex != 55 {
+						t.Fatalf("bad UDP reply: %+v %+v", packet, response.meta)
+					}
+					packetTestAssertChecksums(t, packet.Bytes, packet.TransportOffset, ProtoUDP)
+				}
+				if calls.Load() != 1 {
+					t.Fatal("UDP reply path opened more than one tunnel association")
+				}
+				closed := make(chan struct{})
+				go func() { _ = i.server.Close(); close(closed) }()
+				select {
+				case <-closed:
+				case <-time.After(2 * time.Second):
+					t.Fatal("interceptor close did not cancel workers/UDP replies")
+				}
+				if i.server.Running() {
+					t.Fatal("closed interceptor still running")
+				}
+			})
+		}
 	}
 }
 
-func TestInterceptorCaptureFailureClosesServer(t *testing.T) {
+func TestInterceptorCaptureFailureReleasesCapture(t *testing.T) {
 	i, device := newTestInterceptor(t, Options{})
 	i.server.interceptor = i
 	i.start()
 	_ = device.Close()
-	select {
-	case <-i.server.done:
-	case <-time.After(2 * time.Second):
-		t.Fatal("capture failure left interception active")
+	deadline := time.Now().Add(2 * time.Second)
+	for i.Running() && time.Now().Before(deadline) {
+		time.Sleep(time.Millisecond)
 	}
+	i.server.Pause()
 	if i.server.Running() {
 		t.Fatal("failed capture still advertised as running")
+	}
+	if i.server.ctx.Err() != nil {
+		t.Fatal("capture failure permanently destroyed the restartable server")
 	}
 }
 

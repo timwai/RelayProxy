@@ -13,9 +13,8 @@ import (
 )
 
 const (
-	bucketWidth    = 250 * time.Millisecond
-	bucketCount    = 8
-	rateFlushBytes = 1024 * 1024
+	bucketWidth = 250 * time.Millisecond
+	bucketCount = 8
 )
 
 type Metadata struct {
@@ -80,6 +79,9 @@ func (m *meter) add(now time.Time, up, down uint64) {
 	m.down += down
 	tick := now.UnixNano() / int64(bucketWidth)
 	b := &m.buckets[tick%bucketCount]
+	if b.tick > tick {
+		return
+	}
 	if b.tick != tick {
 		*b = bucket{tick: tick}
 	}
@@ -110,19 +112,20 @@ type Registry struct {
 	unlistedActive       int
 	recent               []*Record
 	recentHead           int
+	rateMu               sync.Mutex
 	meter                meter
 }
 
 type Record struct {
-	registry               *Registry
-	connection             Connection
-	meter                  meter
-	upload, download       atomic.Uint64
-	pendingUp, pendingDown atomic.Uint64
-	finished               bool
-	listed                 bool
-	pathSource             proxyPathSource
-	downloadIO             *downloadObserver
+	registry         *Registry
+	connection       Connection
+	meter            meter
+	upload, download atomic.Uint64
+	rateMu           sync.Mutex
+	finished         bool
+	listed           bool
+	pathSource       proxyPathSource
+	downloadIO       *downloadObserver
 }
 
 // Implementations must be nonblocking and safe for concurrent reads during
@@ -236,37 +239,26 @@ func (r *Record) add(up, down int) {
 		value := uint64(up)
 		r.upload.Add(value)
 		registry.upload.Add(value)
-		r.pendingUp.Add(value)
 	}
 	if down > 0 {
 		value := uint64(down)
 		r.download.Add(value)
 		registry.download.Add(value)
-		r.pendingDown.Add(value)
 	}
-	if r.pendingUp.Load()+r.pendingDown.Load() >= rateFlushBytes {
-		r.flushRates(registry.now())
+	now := registry.now()
+	var u, d uint64
+	if up > 0 {
+		u = uint64(up)
 	}
-}
-
-func (r *Record) flushRates(now time.Time) {
-	if r == nil {
-		return
+	if down > 0 {
+		d = uint64(down)
 	}
-	registry := r.registry
-	registry.mu.Lock()
-	r.flushRatesLocked(now)
-	registry.mu.Unlock()
-}
-
-func (r *Record) flushRatesLocked(now time.Time) {
-	up := r.pendingUp.Swap(0)
-	down := r.pendingDown.Swap(0)
-	if up == 0 && down == 0 {
-		return
-	}
-	r.meter.add(now, up, down)
-	r.registry.meter.add(now, up, down)
+	r.rateMu.Lock()
+	r.meter.add(now, u, d)
+	r.rateMu.Unlock()
+	registry.rateMu.Lock()
+	registry.meter.add(now, u, d)
+	registry.rateMu.Unlock()
 }
 
 func (r *Record) Finish(state string, err error) {
@@ -280,7 +272,6 @@ func (r *Record) Finish(state string, err error) {
 		return
 	}
 	now := registry.now()
-	r.flushRatesLocked(now)
 	if r.pathSource != nil {
 		r.connection.Path = r.pathSource.ProxyPath()
 		r.pathSource = nil // History must not retain a connection or its dialer.
@@ -335,15 +326,12 @@ func (r *Registry) Snapshot() Snapshot {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := r.now()
-	for _, record := range r.active {
-		record.flushRatesLocked(now)
-	}
-	for _, record := range r.recent {
-		record.flushRatesLocked(now)
-	}
+
 	s := Snapshot{Connections: make([]Connection, 0, len(r.active)+len(r.recent)), Active: len(r.active) + r.unlistedActive,
 		Total: r.total, Omitted: r.omitted, Upload: r.upload.Load(), Download: r.download.Load(), SampledAt: now, RateWindow: 2}
+	r.rateMu.Lock()
 	s.UploadRate, s.DownloadRate = r.meter.rates(now)
+	r.rateMu.Unlock()
 	appendRecord := func(record *Record) {
 		c := record.connection
 		if record.pathSource != nil {
@@ -361,7 +349,9 @@ func (r *Registry) Snapshot() Snapshot {
 		c.Duration = max(0, end.Sub(c.StartedAt).Seconds())
 		c.Upload, c.Download = record.upload.Load(), record.download.Load()
 		if !record.finished {
+			record.rateMu.Lock()
 			c.UploadRate, c.DownloadRate = record.meter.rates(now)
+			record.rateMu.Unlock()
 		}
 		s.Connections = append(s.Connections, c)
 	}

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net"
+	"net/netip"
 )
 
 // serveFakeDNSTCP handles RFC 7766 DNS-over-TCP without using the system
@@ -18,6 +19,10 @@ func (s *Server) serveFakeDNSTCP(ctx context.Context, conn net.Conn) error {
 // serveDNSTCPWithObserver records validated real DNS exchanges before the
 // response becomes visible to its client. The observer must not block.
 func (s *Server) serveDNSTCPWithObserver(ctx context.Context, conn net.Conn, observer func(query, answer []byte)) error {
+	return s.serveDNSTCPAtResolver(ctx, conn, netip.AddrPort{}, observer)
+}
+
+func (s *Server) serveDNSTCPAtResolver(ctx context.Context, conn net.Conn, resolver netip.AddrPort, observer func(query, answer []byte)) error {
 	defer conn.Close()
 	stop := context.AfterFunc(ctx, func() { _ = conn.Close() })
 	defer stop()
@@ -48,11 +53,19 @@ func (s *Server) serveDNSTCPWithObserver(ctx context.Context, conn net.Conn, obs
 		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil) && !s.fakeIPEnabled() && !s.proxyDNSEnabled() {
 			return fmt.Errorf("fake DNS TCP disabled by active routing policy")
 		}
-		answer := s.interceptedDNSReply(ctx, payload, false)
+		direct := s.directDNSQuestion(payload)
+		var answer []byte
+		if direct {
+			answer = realProxyDNSReply(ctx, payload, false, func(ctx context.Context, query []byte) ([]byte, error) {
+				return exchangeDirectDNSTCP(ctx, resolver, query)
+			})
+		} else {
+			answer = s.interceptedDNSReply(ctx, payload, false)
+		}
 		if len(answer) == 0 || len(answer) > 65535 {
 			return fmt.Errorf("fake DNS TCP question cannot be safely answered")
 		}
-		if observer != nil && s.proxyDNSEnabled() {
+		if observer != nil && (s.proxyDNSEnabled() || direct) {
 			observer(payload, answer)
 		}
 		binary.BigEndian.PutUint16(prefix[:], uint16(len(answer)))

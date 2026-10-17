@@ -9,6 +9,8 @@ import (
 	"net/netip"
 	"os/exec"
 	"runtime"
+	"sort"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,12 +43,44 @@ type Connection struct {
 	closeOnce   sync.Once
 	mu          sync.Mutex
 	localUDP    netip.AddrPort
+	tcpPaths    map[string]int
 	udpActive   atomic.Bool
 	udpError    atomic.Value // string; the latest UDP association error
 	onClose     func()
 }
 
 func (c *Connection) Addr() string { return c.ListenAddr }
+
+// PathStatus describes accepted data connections, rather than successful
+// candidates that may subsequently lose a race to the relay.
+func (c *Connection) PathStatus() (tcp, udp string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	paths := make([]string, 0, len(c.tcpPaths))
+	for path := range c.tcpPaths {
+		paths = append(paths, path)
+	}
+	sort.Strings(paths)
+	tcp = strings.Join(paths, " + ")
+	if tcp == "" {
+		tcp = "waiting"
+	}
+	udp = "disabled"
+	if c.UDPEnabled {
+		udp = "waiting"
+		if c.remoteUDP != nil {
+			udp = connectionPath(c.remoteUDP)
+		}
+	}
+	return tcp, udp
+}
+
+func connectionPath(conn any) string {
+	if path, ok := conn.(interface{ RDPPath() string }); ok {
+		return path.RDPPath()
+	}
+	return "relay"
+}
 
 // UDPStatus reports the local UDP listener capability and the state of the
 // most recent remote association. UDPEnabled only means that the same-number
@@ -205,6 +239,21 @@ func (c *Connection) handleTCP(ctx context.Context, local net.Conn, dial func(co
 		return
 	}
 	defer remote.Close()
+	path := connectionPath(remote)
+	c.mu.Lock()
+	if c.tcpPaths == nil {
+		c.tcpPaths = make(map[string]int)
+	}
+	c.tcpPaths[path]++
+	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		c.tcpPaths[path]--
+		if c.tcpPaths[path] == 0 {
+			delete(c.tcpPaths, path)
+		}
+		c.mu.Unlock()
+	}()
 	_, _ = tunnel.Pipe(ctx, local, remote, 10*time.Minute, nil)
 }
 

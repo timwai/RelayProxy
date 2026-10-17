@@ -499,6 +499,7 @@ type RoutingConfigUpdate struct {
 	ForwardOtherDNS       *bool                   `json:"forward_other_dns"`
 	DNSExitID             *string                 `json:"dns_exit_id"`
 	DNSUpstreams          *[]routing.DNSUpstream  `json:"dns_upstreams"`
+	DNSDirectDomains      *[]string               `json:"dns_direct_domains"`
 	DoHBlockedIPs         *[]string               `json:"doh_blocked_ips"`
 	DefaultAction         *string                 `json:"default_action"`
 	Rules                 []routing.Rule          `json:"rules"` // Full replacement
@@ -764,6 +765,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		if in.Routing.DNSUpstreams != nil {
 			cfg.Routing.DNSUpstreams = append([]routing.DNSUpstream(nil), (*in.Routing.DNSUpstreams)...)
+		}
+		if in.Routing.DNSDirectDomains != nil {
+			cfg.Routing.DNSDirectDomains = append([]string(nil), (*in.Routing.DNSDirectDomains)...)
 		}
 		if in.Routing.DoHBlockedIPs != nil {
 			cfg.Routing.DoHBlockedIPs = append([]string(nil), (*in.Routing.DoHBlockedIPs)...)

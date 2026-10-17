@@ -1,7 +1,5 @@
-FROM debian:bookworm-slim
+FROM alpine:3.24
 
-RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates iptables \
-    && rm -rf /var/lib/apt/lists/*
+RUN apk add --no-cache ca-certificates iptables
 
 WORKDIR /data

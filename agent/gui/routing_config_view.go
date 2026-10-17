@@ -31,6 +31,7 @@ func routingConfigView(cfg routing.Config) map[string]any {
 		"forward_other_dns":       cfg.ForwardOtherDNS,
 		"dns_exit_id":             cfg.DNSExitID,
 		"dns_upstreams":           append([]routing.DNSUpstream{}, cfg.DNSUpstreams...),
+		"dns_direct_domains":      append([]string{}, cfg.DNSDirectDomains...),
 		"doh_blocked_ips":         blockedIPs,
 		"default_action":          cfg.DefaultAction,
 		"rules":                   rules,

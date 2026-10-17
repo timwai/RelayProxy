@@ -115,6 +115,12 @@ func (e *Engine) DNSUpstreams() []DNSUpstream {
 	return append([]DNSUpstream(nil), e.config.DNSUpstreams...)
 }
 
+func (e *Engine) DNSDirectDomains() []string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return append([]string(nil), e.config.DNSDirectDomains...)
+}
+
 func (e *Engine) DNSExitID() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

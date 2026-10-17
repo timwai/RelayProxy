@@ -21,7 +21,7 @@ var (
 const (
 	defaultResumeGrace             = 15 * time.Second
 	defaultResumeMaxSessions       = 256
-	defaultResumeReplayLimit       = 2 << 20
+	defaultResumeReplayLimit       = p2presume.DefaultReplayLimit
 	defaultResumeTargetIdleTimeout = 5 * time.Minute
 )
 

@@ -8,7 +8,9 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"os"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/windows"
 )
@@ -29,6 +31,10 @@ type windowsPacketDevice struct {
 	removeFirewall bool
 }
 
+func (*windowsPacketDevice) deferUDPClassification() {}
+
+func (*windowsPacketDevice) packetHandlingTimeout() time.Duration { return networkCaptureTimeout }
+
 func (d *windowsPacketDevice) Receive(buffer []byte) (int, packetMetadata, error) {
 	n, addr, err := d.handle.Recv(buffer)
 	outbound := addr.outbound()
@@ -40,7 +46,11 @@ func (d *windowsPacketDevice) Send(packet []byte, meta packetMetadata) error {
 	addr.setIfIndex(meta.ifIndex, meta.subIfIndex)
 	return d.handle.Send(packet, addr)
 }
-func (d *windowsPacketDevice) Shutdown() error { return d.handle.Shutdown() }
+func (d *windowsPacketDevice) Shutdown() error {
+	// Release the kernel capture before waiting for classification/forwarding
+	// workers. Shutdown(RECV) alone leaves the WinDivert handle open.
+	return d.handle.Close()
+}
 func (d *windowsPacketDevice) PacketDeviceDiagnostics() packetDeviceDiagnostics {
 	state := "ready"
 	if d == nil || d.handle == nil || d.handle.closed.Load() {
@@ -66,7 +76,11 @@ func openWindowsPacketDevice(filter string, tcpPorts []uint16) (packetDevice, er
 	if !windows.GetCurrentProcessToken().IsElevated() {
 		return nil, fmt.Errorf("RelayProxy Network Service 未运行或无法配置 Windows Firewall；请在 Network Service 中执行安装/修复")
 	}
-	if err := installWindowsTransparentFirewallRule(tcpPorts); err != nil {
+	program, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("读取透明代理进程路径失败: %w", err)
+	}
+	if err := installWindowsTransparentFirewallRule(tcpPorts, program); err != nil {
 		return nil, fmt.Errorf("配置透明代理 Windows Firewall 入站规则失败: %w", err)
 	}
 	handle, err := openWinDivert(filter)
@@ -94,8 +108,8 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	}
 	port4 := listeners[0].Addr().(*net.TCPAddr).Port
 	port6 := listeners[1].Addr().(*net.TCPAddr).Port
-	filter := windowsInterceptFilter(port4, port6, s.guard)
-	log.Printf("[divert] Windows interceptor starting: tcp4=%d tcp6=%d relayIPs=%v filter=%s", port4, port6, s.guard.RelayIPs, filter)
+	filter := windowsInterceptFilter(port4, port6, s.loopGuard())
+	log.Printf("[divert] Windows interceptor starting: tcp4=%d tcp6=%d relayIPs=%v filter=%s", port4, port6, s.loopGuard().RelayIPs, filter)
 	device, err := openWindowsPacketDevice(filter, []uint16{uint16(port4), uint16(port6)})
 	if err != nil {
 		for _, listener := range listeners {
@@ -107,6 +121,14 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 		process, err := lookupPacketProcess(protocol, source, destination)
 		return packetProcess{pid: process.PID, path: process.Path, aliases: process.Aliases, services: process.Services}, err
 	})
+	i.onStop = func() {
+		// FakeIP answers cached by the Windows DNS service are unusable after
+		// interception stops. Restore system DNS immediately for ordinary apps
+		// and for the relay's next bootstrap lookup.
+		if err := refreshWindowsSystemDNSCache(); err != nil {
+			log.Printf("[divert] Windows DNS cache reset after capture stopped: %v", err)
+		}
+	}
 	i.start()
 	if shouldRefreshWindowsSystemDNSCache(s.dnsAssociationEnabled(), s.fakeIPEnabled(), s.proxyDNSEnabled()) {
 		// Cached Windows DNS responses predate WinDivert interception. Clearing

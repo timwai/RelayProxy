@@ -83,29 +83,21 @@ func (h *Handler) dialTCP(ctx context.Context, ips []net.IP, port uint16) (net.C
 		}
 		return conn, conn.RemoteAddr().String(), nil
 	}
-	ordered := interleaveIPFamilies(ips)
-	if len(ordered) == 0 {
-		return nil, "", errors.New("no IP addresses to dial")
-	}
-	var errs []error
-	for _, ip := range ordered {
+	conn, ip, err := dialTCPIPsWith(ctx, ips, func(attemptCtx context.Context, ip net.IP) (net.Conn, error) {
 		target := net.JoinHostPort(ip.String(), strconv.Itoa(int(port)))
-		var conn net.Conn
-		var err error
 		switch upstream.Mode {
 		case UpstreamSOCKS5:
-			conn, err = dialSOCKS5(ctx, upstream, 0x01, target)
+			return dialSOCKS5(attemptCtx, upstream, 0x01, target)
 		case UpstreamHTTP, UpstreamHTTPS:
-			conn, err = dialHTTPConnect(ctx, upstream, target)
+			return dialHTTPConnect(attemptCtx, upstream, target)
 		default:
-			err = fmt.Errorf("unsupported exit upstream mode %q", upstream.Mode)
+			return nil, fmt.Errorf("unsupported exit upstream mode %q", upstream.Mode)
 		}
-		if err == nil {
-			return conn, target, nil
-		}
-		errs = append(errs, err)
+	})
+	if err != nil {
+		return nil, "", err
 	}
-	return nil, "", errors.Join(errs...)
+	return conn, net.JoinHostPort(ip.String(), strconv.Itoa(int(port))), nil
 }
 
 func (h *Handler) dialUDP(ctx context.Context, target netip.AddrPort) (net.Conn, error) {
@@ -148,6 +140,8 @@ func dialHTTPConnect(ctx context.Context, cfg UpstreamConfig, target string) (ne
 	if err != nil {
 		return nil, fmt.Errorf("connect exit upstream %s: %w", cfg.Address, err)
 	}
+	stopCancel := interruptProxyHandshake(ctx, conn)
+	defer stopCancel()
 	ok := false
 	defer func() {
 		if !ok {
@@ -183,6 +177,21 @@ func dialHTTPConnect(ctx context.Context, cfg UpstreamConfig, target string) (ne
 	return conn, nil
 }
 
+// Stop waits for an already-started cancellation close. Successful handshakes
+// detach before the race context is canceled; losing handshakes unblock promptly.
+func interruptProxyHandshake(ctx context.Context, conn net.Conn) func() {
+	done := make(chan struct{})
+	stop := context.AfterFunc(ctx, func() {
+		_ = conn.Close()
+		close(done)
+	})
+	return func() {
+		if !stop() {
+			<-done
+		}
+	}
+}
+
 type bufferedConn struct {
 	net.Conn
 	reader *bufio.Reader
@@ -195,6 +204,8 @@ func dialSOCKS5(ctx context.Context, cfg UpstreamConfig, command byte, target st
 	if err != nil {
 		return nil, fmt.Errorf("connect SOCKS5 upstream %s: %w", cfg.Address, err)
 	}
+	stopCancel := interruptProxyHandshake(ctx, conn)
+	defer stopCancel()
 	ok := false
 	defer func() {
 		if !ok {
@@ -409,6 +420,8 @@ func dialSOCKS5UDPTo(ctx context.Context, cfg UpstreamConfig, host string, port 
 	if err != nil {
 		return nil, err
 	}
+	stopCancel := interruptProxyHandshake(ctx, control)
+	defer stopCancel()
 	ok := false
 	defer func() {
 		if !ok {

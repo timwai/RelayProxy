@@ -64,7 +64,7 @@ func (s *Server) validateFakeDirectTarget(route *ClassifiedFlow, raw string) err
 	}
 	flow := route.flow
 	flow.IP = addr.String()
-	if s.guard.MustDirectFlow(flow) {
+	if s.loopGuard().MustDirectFlow(flow) {
 		// The proxy control endpoint and local listeners must never be
 		// accessed through an arbitrary DNS alias (rebinding or a loop).
 		return fmt.Errorf("DIRECT destination conflicts with local/relay loop guard: %s", addr)

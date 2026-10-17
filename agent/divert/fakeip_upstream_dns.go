@@ -44,7 +44,7 @@ func (s *Server) shouldForwardDNS(payload []byte) bool {
 // forwarding is opt-in and fails with SERVFAIL on any transport/auth error.
 func (s *Server) replyFakeDNS(ctx context.Context, payload []byte) []byte {
 	if !s.shouldForwardDNS(payload) {
-		return s.fakeDNS.replyScoped(payload, s.guard.RelayHost, s.guard.RelayIPs, s.dnsExitScope(""), true)
+		return s.fakeDNS.replyScoped(payload, s.loopGuard().RelayHost, s.loopGuard().RelayIPs, s.dnsExitScope(""), true)
 	}
 	var query dnsmessage.Message
 	if err := query.Unpack(payload); err != nil {

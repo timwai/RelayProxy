@@ -453,11 +453,18 @@ func (b *bbrSender) OnPacketSent(
 	b.lastSentPacket = packetNumber
 	b.bytesInFlight = bytesInFlight
 
-	if bytesInFlight == 0 {
+	// quic-go reports flight size after adding this packet. The sampler needs
+	// the preceding flight size to initialize delivery sampling after an idle
+	// period and must not count the new packet twice.
+	priorInFlight := bytesInFlight
+	if isRetransmittable {
+		priorInFlight = max(0, bytesInFlight-bytes)
+	}
+	if isRetransmittable && priorInFlight == 0 {
 		b.exitingQuiescence = true
 	}
 
-	b.sampler.OnPacketSent(sentTime, packetNumber, bytes, bytesInFlight, isRetransmittable)
+	b.sampler.OnPacketSent(sentTime, packetNumber, bytes, priorInFlight, isRetransmittable)
 }
 
 // CanSend implements the SendAlgorithm interface.

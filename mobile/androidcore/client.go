@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	p2presume "relayproxy/internal/p2p/resume"
 	"runtime"
 	"strconv"
 	"strings"
@@ -406,7 +407,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 		handler: exit.NewHandler(exit.HandlerConfig{
 			ACLChecker: checker, ConnectTimeout: 10 * time.Second,
 			ResumeEnabled: true, ResumeGrace: 15 * time.Second,
-			ResumeMaxSessions: 64, ResumeReplayLimit: 256 << 10,
+			ResumeMaxSessions: 64, ResumeReplayLimit: p2presume.DefaultReplayLimit,
 		}),
 		ctx:    ctx,
 		cancel: cancel,
@@ -451,7 +452,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 	c.proxyDialer.ConfigureDirectPolicy(cfg.ProxyPathMode, true)
 	c.proxyDialer.ConfigureStreamResume(
 		*cfg.ProxyP2PEnabled && cfg.ProxyPathMode != "relay_only" && cfg.ProxyPathMode != "p2p_only",
-		512<<10,
+		p2presume.DefaultReplayLimit,
 	)
 	c.configureProxyPathProvider()
 	c.proxyDialer.SetDefaultExitID(cfg.DefaultExitID)

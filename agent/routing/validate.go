@@ -41,6 +41,14 @@ func ValidateConfig(cfg Config) error {
 	if err := ValidateDNSUpstreams(cfg.DNSUpstreams); err != nil {
 		return err
 	}
+	if len(cfg.DNSDirectDomains) > 64 {
+		return fmt.Errorf("routing.dns_direct_domains: maximum 64 domain suffixes")
+	}
+	for index, domain := range cfg.DNSDirectDomains {
+		if !validDNSDirectDomain(domain) {
+			return fmt.Errorf("routing.dns_direct_domains[%d]: use a domain suffix without wildcards, whitespace or an IP address", index)
+		}
+	}
 	if len(cfg.DoHBlockedIPs) > 256 {
 		return fmt.Errorf("routing.doh_blocked_ips: maximum 256 IP/CIDR entries")
 	}
@@ -110,4 +118,25 @@ func ValidateConfig(cfg Config) error {
 		}
 	}
 	return nil
+}
+
+func validDNSDirectDomain(domain string) bool {
+	if domain == "" || len(domain) > 253 || strings.TrimSpace(domain) != domain {
+		return false
+	}
+	domain = strings.TrimSuffix(domain, ".")
+	if _, err := netip.ParseAddr(domain); err == nil {
+		return false
+	}
+	for _, label := range strings.Split(domain, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, c := range label {
+			if !(c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '-') {
+				return false
+			}
+		}
+	}
+	return true
 }

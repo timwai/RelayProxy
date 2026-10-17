@@ -12,9 +12,10 @@ import (
 )
 
 const (
-	defaultDNSCacheTTL     = 30 * time.Second
-	defaultDNSCacheEntries = 2048
-	happyEyeballsDelay     = 250 * time.Millisecond
+	defaultDNSCacheTTL      = 30 * time.Second
+	defaultDNSCacheEntries  = 2048
+	defaultDNSLookupTimeout = 15 * time.Second
+	happyEyeballsDelay      = 250 * time.Millisecond
 )
 
 type dnsCacheEntry struct {
@@ -23,9 +24,11 @@ type dnsCacheEntry struct {
 }
 
 type dnsLookup struct {
-	done chan struct{}
-	ips  []net.IP
-	err  error
+	done    chan struct{}
+	ips     []net.IP
+	err     error
+	cancel  context.CancelFunc
+	waiters int
 }
 
 type dnsCache struct {
@@ -71,21 +74,12 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 
 	c.mu.RLock()
 	entry, ok := c.entries[key]
-	flight := c.inflight[key]
 	c.mu.RUnlock()
 	if ok && now.Before(entry.expiresAt) {
 		// Cache entries are immutable after publication. Callers in this package
 		// treat the returned addresses as read-only, so a cache hit allocates
 		// neither a slice nor per-IP backing bytes.
 		return entry.ips, nil
-	}
-	if flight != nil {
-		select {
-		case <-flight.done:
-			return flight.ips, flight.err
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
 	}
 
 	// Register one lookup per normalized hostname. Browser connection bursts
@@ -97,27 +91,48 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 		c.mu.Unlock()
 		return entry.ips, nil
 	}
-	if flight = c.inflight[key]; flight != nil {
+	if err := ctx.Err(); err != nil {
 		c.mu.Unlock()
-		select {
-		case <-flight.done:
-			return flight.ips, flight.err
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		}
+		return nil, err
 	}
-	flight = &dnsLookup{done: make(chan struct{})}
-	c.inflight[key] = flight
+	flight := c.inflight[key]
+	if flight == nil {
+		// A shared lookup belongs to its waiters, rather than the first caller.
+		// Keep request values but give the resolver a bounded independent lifetime.
+		lookupCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), defaultDNSLookupTimeout)
+		flight = &dnsLookup{done: make(chan struct{}), cancel: cancel}
+		c.inflight[key] = flight
+		go c.resolve(lookupCtx, key, host, flight)
+	}
+	flight.waiters++
 	c.mu.Unlock()
+	defer func() {
+		c.mu.Lock()
+		flight.waiters--
+		if flight.waiters == 0 && c.inflight[key] == flight {
+			delete(c.inflight, key)
+			flight.cancel()
+		}
+		c.mu.Unlock()
+	}()
+	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	case <-flight.done:
+		return flight.ips, flight.err
+	}
+}
 
+func (c *dnsCache) resolve(ctx context.Context, key, host string, flight *dnsLookup) {
+	defer flight.cancel()
 	ips, err := c.lookupIP(ctx, "ip", host)
 	if err == nil && len(ips) > 0 {
 		ips = cloneIPs(ips)
 	}
 
 	c.mu.Lock()
-	if err == nil && len(ips) > 0 {
-		now = time.Now()
+	if c.inflight[key] == flight && err == nil && len(ips) > 0 {
+		now := time.Now()
 		if len(c.entries) >= c.maxEntries {
 			for k, candidate := range c.entries {
 				if !now.Before(candidate.expiresAt) {
@@ -134,11 +149,11 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 		c.entries[key] = dnsCacheEntry{ips: ips, expiresAt: now.Add(c.ttl)}
 	}
 	flight.ips, flight.err = ips, err
-	delete(c.inflight, key)
+	if c.inflight[key] == flight {
+		delete(c.inflight, key)
+	}
 	close(flight.done)
 	c.mu.Unlock()
-
-	return ips, err
 }
 
 func interleaveIPFamilies(ips []net.IP) []net.IP {
@@ -185,9 +200,20 @@ func interleaveIPFamilies(ips []net.IP) []net.IP {
 // Candidates are started incrementally instead of allocating one goroutine and
 // timer per DNS answer up front.
 func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error) {
+	conn, _, err := dialTCPIPsWith(ctx, ips, func(ctx context.Context, ip net.IP) (net.Conn, error) {
+		dialer := net.Dialer{KeepAlive: 30 * time.Second}
+		addr := net.JoinHostPort(ip.String(), strconv.Itoa(int(port)))
+		return dialer.DialContext(ctx, "tcp", addr)
+	})
+	return conn, err
+}
+
+// dialTCPIPsWith also races proxy handshakes, so an unresponsive candidate
+// cannot consume the deadline reserved for the remaining approved addresses.
+func dialTCPIPsWith(ctx context.Context, ips []net.IP, dial func(context.Context, net.IP) (net.Conn, error)) (net.Conn, net.IP, error) {
 	ordered := interleaveIPFamilies(ips)
 	if len(ordered) == 0 {
-		return nil, errors.New("no IP addresses to dial")
+		return nil, nil, errors.New("no IP addresses to dial")
 	}
 
 	raceCtx, cancel := context.WithCancel(ctx)
@@ -195,6 +221,7 @@ func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error
 
 	type dialResult struct {
 		conn net.Conn
+		ip   net.IP
 		err  error
 	}
 	results := make(chan dialResult)
@@ -203,9 +230,7 @@ func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error
 	startDial := func(ip net.IP) {
 		candidate := append(net.IP(nil), ip...)
 		go func() {
-			dialer := net.Dialer{KeepAlive: 30 * time.Second}
-			addr := net.JoinHostPort(candidate.String(), strconv.Itoa(int(port)))
-			conn, err := dialer.DialContext(raceCtx, "tcp", addr)
+			conn, err := dial(raceCtx, candidate)
 			if err != nil {
 				select {
 				case results <- dialResult{err: err}:
@@ -222,7 +247,7 @@ func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error
 				return
 			}
 			select {
-			case results <- dialResult{conn: conn}:
+			case results <- dialResult{conn: conn, ip: candidate}:
 			case <-raceCtx.Done():
 				_ = conn.Close()
 			}
@@ -257,12 +282,12 @@ func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error
 		case <-ctx.Done():
 			won.Store(true)
 			cancel()
-			return nil, ctx.Err()
+			return nil, nil, ctx.Err()
 		case result := <-results:
 			active--
 			if result.conn != nil {
 				cancel()
-				return result.conn, nil
+				return result.conn, result.ip, nil
 			}
 			if result.err != nil && !errors.Is(result.err, context.Canceled) {
 				collected = append(collected, result.err)
@@ -295,7 +320,7 @@ func dialTCPIPs(ctx context.Context, ips []net.IP, port uint16) (net.Conn, error
 	}
 
 	if len(collected) == 0 {
-		return nil, errors.New("all dial attempts failed")
+		return nil, nil, errors.New("all dial attempts failed")
 	}
-	return nil, errors.Join(collected...)
+	return nil, nil, errors.Join(collected...)
 }

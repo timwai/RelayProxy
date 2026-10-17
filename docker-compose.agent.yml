@@ -2,10 +2,11 @@ services:
   relay-agent:
     # The image only supplies CA certificates and iptables/nft compatibility
     # tools. The Agent program and YAML remain on the host mounts below.
+    # Use a statically linked Linux Agent binary (CGO_ENABLED=0) with Alpine.
     build:
       context: ./docker/agent
       dockerfile: Dockerfile
-    image: relayproxy-agent-runtime:bookworm
+    image: relayproxy-agent-runtime:alpine
     container_name: relay-agent
     restart: unless-stopped
     init: true

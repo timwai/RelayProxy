@@ -138,6 +138,25 @@ func replacementRouting() *RoutingConfigUpdate {
 	}}
 }
 
+func TestDNSDirectDomainsSaveReloadAndClear(t *testing.T) {
+	b := newTestBridge(t)
+	for _, domains := range [][]string{{"corp.example"}, {}} {
+		in := ConfigUpdate{Routing: &RoutingConfigUpdate{DNSDirectDomains: &domains}}
+		if _, err := b.SaveConfig(in); err != nil {
+			t.Fatal(err)
+		}
+		saved, err := config.LoadAgentConfig(b.configPath)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, active := range [][]string{saved.Routing.DNSDirectDomains, b.agent.Config().Routing.DNSDirectDomains} {
+			if strings.Join(active, ",") != strings.Join(domains, ",") {
+				t.Fatalf("DNS exception lost between save and apply: %v", active)
+			}
+		}
+	}
+}
+
 func TestInvalidUpdatesPreserveDiskAndRuntime(t *testing.T) {
 	cases := []struct {
 		name string

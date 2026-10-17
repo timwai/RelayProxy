@@ -18,8 +18,9 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 			Mode: routing.ModeRule, DNSMode: routing.DNSModeProxy,
 			FakeIPEnabled: true, BlockDoHEndpoints: true, ForwardOtherDNS: true,
 			DNSExitID: "custom:resolver", DoHBlockedIPs: []string{"1.1.1.1", "9.9.9.9"},
-			DefaultAction: routing.ActionProxy,
-			Rules:         []routing.Rule{{Name: "Use Proxy", Action: routing.ActionProxy, Enabled: true}},
+			DNSDirectDomains: []string{"corp.example"},
+			DefaultAction:    routing.ActionProxy,
+			Rules:            []routing.Rule{{Name: "Use Proxy", Action: routing.ActionProxy, Enabled: true}},
 		},
 		{
 			Mode: routing.ModeGlobalProxy, DNSMode: routing.DNSModeProxy, AutoDetectDNS: true,
@@ -40,7 +41,7 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 		}
 		for _, field := range []string{
 			"mode", "dns_mode", "auto_detect_dns", "dns_association_enabled", "proxy_dns_enabled", "fake_ip_enabled",
-			"block_doh_endpoints", "forward_other_dns", "dns_exit_id", "dns_upstreams",
+			"block_doh_endpoints", "forward_other_dns", "dns_exit_id", "dns_upstreams", "dns_direct_domains",
 			"doh_blocked_ips", "default_action", "rules",
 		} {
 			if _, present := visible[field]; !present {
@@ -62,6 +63,7 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 			update.BlockDoHEndpoints == nil || *update.BlockDoHEndpoints != cfg.BlockDoHEndpoints ||
 			update.ForwardOtherDNS == nil || *update.ForwardOtherDNS != cfg.ForwardOtherDNS ||
 			update.DNSExitID == nil || *update.DNSExitID != cfg.DNSExitID ||
+			update.DNSDirectDomains == nil || !reflect.DeepEqual(*update.DNSDirectDomains, defaultEmpty(cfg.DNSDirectDomains)) ||
 			update.DoHBlockedIPs == nil || !reflect.DeepEqual(*update.DoHBlockedIPs, defaultEmpty(cfg.DoHBlockedIPs)) {
 			t.Fatalf("routing DNS fields lost on read -> save: %+v", update)
 		}

@@ -21,8 +21,8 @@ func (s *Server) interceptedDNSReply(ctx context.Context, query []byte, udp bool
 	}
 	// Relay authentication must bootstrap without relying on its own proxy.
 	// For its configured hostname, use the already verified relay addresses.
-	if isRelayDNSQuestion(query, s.guard.RelayHost) {
-		return s.fakeDNS.replyScoped(query, s.guard.RelayHost, s.guard.RelayIPs, "", false)
+	if isRelayDNSQuestion(query, s.loopGuard().RelayHost) {
+		return s.fakeDNS.replyScoped(query, s.loopGuard().RelayHost, s.loopGuard().RelayIPs, "", false)
 	}
 	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, query []byte) ([]byte, error) {
 		response, err := s.exchangeLimitedProxyDNS(ctx, "", query)

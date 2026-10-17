@@ -941,6 +941,8 @@ type trackedConn struct {
 	once  sync.Once
 }
 
+func (c *trackedConn) RDPPath() string { return "tcp_p2p" }
+
 func (c *trackedConn) Close() error {
 	var err error
 	c.once.Do(func() {
@@ -955,6 +957,8 @@ type trackedPacketConn struct {
 	owner *Session
 	once  sync.Once
 }
+
+func (c *trackedPacketConn) RDPPath() string { return "udp_p2p" }
 
 func (c *trackedPacketConn) Close() error {
 	var err error

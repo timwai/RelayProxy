@@ -1,3 +1,5 @@
+import {splitRuleList} from './ruleLines.js';
+
 // Save only fields owned by each page. Never round-trip unrelated policy
 // fields through the UI defaults: an older GUI must not erase DNS settings
 // when the user merely reorders a routing rule.
@@ -15,6 +17,7 @@ export function dnsPagePatch(r) {
     forward_other_dns:!!r.forward_other_dns,
     dns_exit_id:r.dns_exit_id||'',
     dns_upstreams:Array.isArray(r.dns_upstreams)?r.dns_upstreams:[],
+    dns_direct_domains:splitRuleList(r.dns_direct_domains),
     doh_blocked_ips:Array.isArray(r.doh_blocked_ips)?r.doh_blocked_ips:[],
   };
 }

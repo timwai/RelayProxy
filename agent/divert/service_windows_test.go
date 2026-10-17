@@ -3,8 +3,6 @@
 package divert
 
 import (
-	"bytes"
-	"encoding/binary"
 	"errors"
 	"fmt"
 	"net"
@@ -57,64 +55,6 @@ func TestWindowsProcessWatcherHelperProcess(t *testing.T) {
 	time.Sleep(30 * time.Second)
 }
 
-func TestNetworkFrameRoundTrip(t *testing.T) {
-	var buffer bytes.Buffer
-	want := networkFrame{
-		kind:       networkFrameCapture,
-		flags:      networkFrameFlagOutbound,
-		ifIndex:    17,
-		subIfIndex: 23,
-		payload:    []byte{0x45, 0x00, 0x00, 0x14},
-	}
-	if err := writeNetworkFrame(&buffer, nil, want); err != nil {
-		t.Fatal(err)
-	}
-	got, err := readNetworkFrame(&buffer)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if got.kind != want.kind || got.flags != want.flags ||
-		got.ifIndex != want.ifIndex || got.subIfIndex != want.subIfIndex ||
-		!bytes.Equal(got.payload, want.payload) {
-		t.Fatalf("frame=%+v want=%+v", got, want)
-	}
-}
-
-func TestNetworkFrameRejectsInvalidEnvelope(t *testing.T) {
-	valid := make([]byte, networkFrameHeaderBytes)
-	binary.LittleEndian.PutUint32(valid[0:4], networkPipeMagic)
-	binary.LittleEndian.PutUint16(valid[4:6], networkPipeVersion)
-	binary.LittleEndian.PutUint16(valid[6:8], networkFrameReady)
-
-	for _, test := range []struct {
-		name   string
-		mutate func([]byte)
-	}{
-		{"magic", func(data []byte) { binary.LittleEndian.PutUint32(data[0:4], 0) }},
-		{"version", func(data []byte) { binary.LittleEndian.PutUint16(data[4:6], networkPipeVersion+1) }},
-		{"payload", func(data []byte) { binary.LittleEndian.PutUint32(data[20:24], networkFrameMaxPayload+1) }},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			data := append([]byte(nil), valid...)
-			test.mutate(data)
-			if _, err := readNetworkFrame(bytes.NewReader(data)); err == nil {
-				t.Fatal("invalid network frame was accepted")
-			}
-		})
-	}
-}
-
-func TestNetworkFrameRejectsOversizedWrite(t *testing.T) {
-	err := writeNetworkFrame(
-		&bytes.Buffer{},
-		nil,
-		networkFrame{kind: networkFrameInject, payload: make([]byte, networkFrameMaxPayload+1)},
-	)
-	if err == nil {
-		t.Fatal("oversized network frame write was accepted")
-	}
-}
-
 func TestCurrentWindowsUserSIDIsValid(t *testing.T) {
 	sid, err := currentWindowsUserSID()
 	if err != nil {
@@ -122,6 +62,20 @@ func TestCurrentWindowsUserSIDIsValid(t *testing.T) {
 	}
 	if !strings.HasPrefix(sid, "S-") {
 		t.Fatalf("unexpected SID %q", sid)
+	}
+}
+
+func TestWindowsProcessExecutableMatchesCurrentProgram(t *testing.T) {
+	want, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := windowsProcessExecutable(uint32(os.Getpid()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.EqualFold(filepath.Clean(got), filepath.Clean(want)) {
+		t.Fatalf("firewall program = %q, want %q", got, want)
 	}
 }
 
@@ -378,5 +332,103 @@ func TestWindowsNetworkBrokerLiveNamedPipeRoundTrip(t *testing.T) {
 	case <-brokerDone:
 	case <-time.After(5 * time.Second):
 		t.Fatal("test broker did not stop after wake packet")
+	}
+}
+
+// Exercises the actual overlapped pipe handles and Go runtime poller, without
+// requiring WinDivert or changing the machine firewall/service configuration.
+func TestWindowsNetworkPipeSupportsIndependentInjection(t *testing.T) {
+	sid, err := currentWindowsUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	pipeName := fmt.Sprintf(`\\.\pipe\RelayProxy-Test-Duplex-%d-%d`, os.Getpid(), time.Now().UnixNano())
+	handle, err := createWindowsNetworkPipeNamed(pipeName, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop := make(chan struct{})
+	defer close(stop)
+	device := newTestPacketDevice()
+	done := make(chan error, 1)
+	go func() {
+		if err := connectWindowsNetworkPipe(handle, stop); err != nil {
+			_ = windows.CloseHandle(handle)
+			done <- err
+			return
+		}
+		server := os.NewFile(uintptr(handle), pipeName)
+		defer server.Close()
+		hello, err := readNetworkFrame(server)
+		if err != nil {
+			done <- err
+			return
+		}
+		if hello.kind != networkFrameHello {
+			done <- errors.New("missing hello")
+			return
+		}
+		if err := writeNetworkFrame(server, nil, networkFrame{kind: networkFrameReady}); err != nil {
+			done <- err
+			return
+		}
+		done <- serveNetworkPackets(server, device)
+	}()
+	client, err := connectWindowsServicePipeNamed(pipeName, "outbound", []uint16{45001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = client.Close()
+		select {
+		case <-done:
+		case <-time.After(2 * time.Second):
+			t.Error("pipe workers leaked")
+		}
+	}()
+	if err := client.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+		t.Fatal("pipe is not registered with the runtime poller:", err)
+	}
+	device.incoming <- capturedTestPacket{data: []byte("capture"), meta: packetMetadata{outbound: true}}
+	if _, err := readNetworkFrame(client); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeNetworkFrame(client, nil, networkFrame{kind: networkFrameComplete}); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeNetworkFrame(client, nil, networkFrame{kind: networkFrameInject, payload: []byte("reply")}); err != nil {
+		t.Fatal(err)
+	}
+	select {
+	case packet := <-device.sent:
+		if string(packet.data) != "reply" {
+			t.Fatal("reply corrupted")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("reply waited for a new captured packet")
+	}
+}
+
+func TestWindowsNetworkPipeConnectCanBeCanceled(t *testing.T) {
+	sid, err := currentWindowsUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf(`\\.\pipe\RelayProxy-Test-Cancel-%d-%d`, os.Getpid(), time.Now().UnixNano())
+	handle, err := createWindowsNetworkPipeNamed(name, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer windows.CloseHandle(handle)
+	stop, done := make(chan struct{}), make(chan error, 1)
+	go func() { done <- connectWindowsNetworkPipe(handle, stop) }()
+	close(stop)
+	select {
+	case err := <-done:
+		if !errors.Is(err, windows.ERROR_OPERATION_ABORTED) {
+			t.Fatalf("connect cancel=%v", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("pending pipe connect did not cancel")
 	}
 }

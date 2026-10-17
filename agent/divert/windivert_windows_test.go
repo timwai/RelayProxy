@@ -279,7 +279,11 @@ func TestWinDivertLiveTCPReflection(t *testing.T) {
 	}
 	defer listener.Close()
 	proxyPort := uint16(listener.Addr().(*net.TCPAddr).Port)
-	if err := installWindowsTransparentFirewallRule([]uint16{proxyPort}); err != nil {
+	program, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := installWindowsTransparentFirewallRule([]uint16{proxyPort}, program); err != nil {
 		t.Fatalf("install transparent firewall rule: %v", err)
 	}
 	t.Cleanup(func() { _ = removeWindowsTransparentFirewallRule() })

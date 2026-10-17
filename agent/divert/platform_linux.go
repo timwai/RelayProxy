@@ -352,7 +352,7 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 		}
 		listeners = append(listeners, listener)
 	}
-	device, err := newLinuxPacketDevice(s.guard.RelayIPs, s.fakeIPEnabled() || s.proxyDNSEnabled())
+	device, err := newLinuxPacketDevice(s.loopGuard().RelayIPs, s.fakeIPEnabled() || s.proxyDNSEnabled())
 	if err != nil {
 		for _, listener := range listeners {
 			_ = listener.Close()

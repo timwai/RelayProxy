@@ -4,11 +4,9 @@ package divert
 
 import (
 	"crypto/sha256"
-	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -29,7 +27,7 @@ import (
 const (
 	windowsNetworkServiceName          = "RelayProxyNetwork"
 	windowsNetworkServiceDisplayName   = "RelayProxy Network Service"
-	windowsNetworkPipeName             = `\\.\pipe\RelayProxyNetwork-v4`
+	windowsNetworkPipeName             = `\\.\pipe\RelayProxyNetwork-v5`
 	windowsTransparentFirewallRuleName = "RelayProxy Transparent Proxy"
 
 	networkServiceModeFlagName   = "relayproxy-network-service"
@@ -38,20 +36,6 @@ const (
 
 	networkServiceHelperInstall = "install"
 	networkServiceHelperRemove  = "remove"
-
-	networkPipeMagic   = 0x31504e52 // "RNP1" little-endian
-	networkPipeVersion = 4
-
-	networkFrameHello    = 1
-	networkFrameReady    = 2
-	networkFrameError    = 3
-	networkFrameCapture  = 4
-	networkFrameInject   = 5
-	networkFrameComplete = 6
-
-	networkFrameFlagOutbound = 1 << 17
-	networkFrameHeaderBytes  = 24
-	networkFrameMaxPayload   = 1 << 20
 
 	windowsServiceCaptureReady        = 1
 	windowsServiceCaptureReconnecting = 2
@@ -65,14 +49,6 @@ const (
 	shellExecuteNoAsync        = 0x00000100
 	shellShowHidden            = 0
 )
-
-type networkFrame struct {
-	kind       uint16
-	flags      uint32
-	ifIndex    uint32
-	subIfIndex uint32
-	payload    []byte
-}
 
 type networkHello struct {
 	Filter   string   `json:"filter"`
@@ -104,6 +80,7 @@ type windowsNetworkBroker struct {
 	stop       chan struct{}
 	mu         sync.Mutex
 	pipe       windows.Handle
+	file       *os.File
 }
 
 type networkShellExecuteInfo struct {
@@ -148,6 +125,9 @@ func RunWindowsNetworkService(allowedSID string) error {
 
 func (h *windowsNetworkServiceHandler) Execute(_ []string, requests <-chan svc.ChangeRequest, statuses chan<- svc.Status) (bool, uint32) {
 	statuses <- svc.Status{State: svc.StartPending}
+	// SCM restarts this service after a crash. The old driver handle is gone,
+	// but synthetic answers may still be cached in the Windows DNS service.
+	recoverWindowsNetworkDNS("Network Service startup")
 	broker := &windowsNetworkBroker{allowedSID: h.allowedSID, stop: make(chan struct{}), pipe: windows.InvalidHandle}
 	brokerDone := make(chan error, 1)
 	go func() { brokerDone <- broker.serve() }()
@@ -202,7 +182,7 @@ func (b *windowsNetworkBroker) serve() error {
 			}
 		}
 		b.setPipe(pipe)
-		err = windows.ConnectNamedPipe(pipe, nil)
+		err = connectWindowsNetworkPipe(pipe, b.stop)
 		if err != nil && !errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
 			b.clearPipe(pipe)
 			_ = windows.CloseHandle(pipe)
@@ -220,6 +200,14 @@ func (b *windowsNetworkBroker) serve() error {
 			_ = windows.CloseHandle(pipe)
 			return errors.New("RelayProxy Network Service 无法包装命名管道句柄")
 		}
+		b.mu.Lock()
+		b.file = file
+		select {
+		case <-b.stop:
+			_ = file.Close()
+		default:
+		}
+		b.mu.Unlock()
 		err = serveWindowsNetworkSession(file)
 		b.clearPipe(pipe)
 		_ = file.Close()
@@ -246,6 +234,7 @@ func (b *windowsNetworkBroker) clearPipe(pipe windows.Handle) {
 	b.mu.Lock()
 	if b.pipe == pipe {
 		b.pipe = windows.InvalidHandle
+		b.file = nil
 	}
 	b.mu.Unlock()
 }
@@ -254,33 +243,52 @@ func (b *windowsNetworkBroker) close() {
 	b.stopOnce.Do(func() {
 		close(b.stop)
 
-		// Wake a synchronous ConnectNamedPipe before closing the server handle.
-		// CloseHandle alone is not guaranteed to promptly release a blocking
-		// synchronous connect issued by another goroutine/thread.
-		name, err := windows.UTF16PtrFromString(b.networkPipeName())
-		if err == nil {
-			client, openErr := windows.CreateFile(
-				name,
-				windows.GENERIC_READ|windows.GENERIC_WRITE,
-				0,
-				nil,
-				windows.OPEN_EXISTING,
-				windows.FILE_ATTRIBUTE_NORMAL,
-				0,
-			)
-			if openErr == nil {
-				_ = windows.CloseHandle(client)
-			}
-		}
-
 		b.mu.Lock()
-		pipe := b.pipe
-		b.pipe = windows.InvalidHandle
+		file := b.file
 		b.mu.Unlock()
-		if pipe != windows.InvalidHandle {
-			_ = windows.CloseHandle(pipe)
+		if file != nil {
+			_ = file.Close()
 		}
+		// A pending overlapped connect observes stop and cancels its own IO;
+		// serve owns the raw handle until it is wrapped by os.NewFile.
 	})
+}
+
+func connectWindowsNetworkPipe(pipe windows.Handle, stop <-chan struct{}) error {
+	event, err := windows.CreateEvent(nil, 1, 0, nil)
+	if err != nil {
+		return err
+	}
+	defer windows.CloseHandle(event)
+	overlap := windows.Overlapped{HEvent: event}
+	err = windows.ConnectNamedPipe(pipe, &overlap)
+	if err == nil || errors.Is(err, windows.ERROR_PIPE_CONNECTED) {
+		return nil
+	}
+	if !errors.Is(err, windows.ERROR_IO_PENDING) {
+		return err
+	}
+	for {
+		select {
+		case <-stop:
+			_ = windows.CancelIoEx(pipe, &overlap)
+			var n uint32
+			_ = windows.GetOverlappedResult(pipe, &overlap, &n, true)
+			return windows.ERROR_OPERATION_ABORTED
+		default:
+		}
+		state, err := windows.WaitForSingleObject(event, 100)
+		if err != nil {
+			_ = windows.CancelIoEx(pipe, &overlap)
+			var n uint32
+			_ = windows.GetOverlappedResult(pipe, &overlap, &n, true)
+			return err
+		}
+		if state == windows.WAIT_OBJECT_0 {
+			var n uint32
+			return windows.GetOverlappedResult(pipe, &overlap, &n, false)
+		}
+	}
 }
 
 func createWindowsNetworkPipe(allowedSID string) (windows.Handle, error) {
@@ -303,7 +311,7 @@ func createWindowsNetworkPipeNamed(pipeName, allowedSID string) (windows.Handle,
 	}
 	pipe, err := windows.CreateNamedPipe(
 		name,
-		pipeAccessDuplex,
+		pipeAccessDuplex|windows.FILE_FLAG_OVERLAPPED,
 		pipeRejectRemoteClients,
 		1,
 		networkFrameMaxPayload,
@@ -380,8 +388,32 @@ func watchWindowsNetworkClientExit(file *os.File, onExit func()) func() {
 	return stop
 }
 
+func windowsNetworkClientExecutable(file *os.File) (string, error) {
+	var pid uint32
+	if err := windows.GetNamedPipeClientProcessId(windows.Handle(file.Fd()), &pid); err != nil {
+		return "", err
+	}
+	return windowsProcessExecutable(pid)
+}
+
+func windowsProcessExecutable(pid uint32) (string, error) {
+	process, err := windows.OpenProcess(windows.PROCESS_QUERY_LIMITED_INFORMATION, false, pid)
+	if err != nil {
+		return "", err
+	}
+	defer windows.CloseHandle(process)
+	buffer := make([]uint16, 32768)
+	size := uint32(len(buffer))
+	if err := windows.QueryFullProcessImageName(process, 0, &buffer[0], &size); err != nil {
+		return "", err
+	}
+	return windows.UTF16ToString(buffer[:size]), nil
+}
+
 func serveWindowsNetworkSession(file *os.File) error {
+	helloTimer := time.AfterFunc(networkCaptureTimeout, func() { _ = file.Close() })
 	hello, err := readNetworkFrame(file)
+	helloTimer.Stop()
 	if err != nil {
 		return err
 	}
@@ -405,7 +437,11 @@ func serveWindowsNetworkSession(file *os.File) error {
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(err.Error())})
 		return err
 	}
-	if err := installWindowsTransparentFirewallRule(ports); err != nil {
+	program, err := windowsNetworkClientExecutable(file)
+	if err != nil {
+		return fmt.Errorf("读取透明代理客户端进程路径失败: %w", err)
+	}
+	if err := installWindowsTransparentFirewallRule(ports, program); err != nil {
 		message := "配置透明代理 Windows Firewall 入站规则失败: " + err.Error()
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(message)})
 		return errors.New(message)
@@ -417,7 +453,12 @@ func serveWindowsNetworkSession(file *os.File) error {
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(err.Error())})
 		return err
 	}
-	defer handle.Close()
+	defer func() {
+		_ = handle.Close()
+		// Cleanup belongs to the privileged broker, not just the Agent's
+		// graceful Close path: kill, pipe failure and watchdog expiry all land here.
+		recoverWindowsNetworkDNS("Network Service capture stopped")
+	}()
 
 	// The broker can be blocked indefinitely in WinDivertRecv while the Agent
 	// has already closed its pipe and exited. Track the actual pipe client
@@ -425,61 +466,24 @@ func serveWindowsNetworkSession(file *os.File) error {
 	// so the deferred Close releases WinDivert and the next Agent can attach
 	// immediately without waiting for an unrelated network packet.
 	stopClientWatch := watchWindowsNetworkClientExit(file, func() {
-		_ = handle.Shutdown()
+		_ = handle.Close()
 	})
 	defer stopClientWatch()
 
 	var writeMu sync.Mutex
+	// Capture is already open while Ready is being written. A client that
+	// stops reading here must not retain the driver before the packet watchdog starts.
+	readyTimer := time.AfterFunc(networkCaptureTimeout, func() {
+		_ = handle.Close()
+		_ = file.Close()
+	})
 	if err := writeNetworkFrame(file, &writeMu, networkFrame{kind: networkFrameReady}); err != nil {
+		readyTimer.Stop()
 		return err
 	}
+	readyTimer.Stop()
 
-	// This pipe is intentionally synchronous. Never block on ReadFile while a
-	// second goroutine tries to WriteFile on the same handle: that can deadlock
-	// a full-duplex named pipe and blackhole every packet already diverted from
-	// the host. Process one capture transaction at a time instead:
-	//   Recv -> Capture -> zero/more Inject -> Complete -> next Recv.
-	buffer := make([]byte, 40+65535)
-	for {
-		n, captured, err := handle.Recv(buffer)
-		if err != nil {
-			return err
-		}
-		flags := uint32(0)
-		if captured.outbound() {
-			flags |= networkFrameFlagOutbound
-		}
-		if err := writeNetworkFrame(file, &writeMu, networkFrame{
-			kind:       networkFrameCapture,
-			flags:      flags,
-			ifIndex:    captured.ifIndex(),
-			subIfIndex: captured.subIfIndex(),
-			payload:    append([]byte(nil), buffer[:n]...),
-		}); err != nil {
-			return err
-		}
-
-		for {
-			frame, err := readNetworkFrame(file)
-			if err != nil {
-				return err
-			}
-			switch frame.kind {
-			case networkFrameInject:
-				var addr windivertAddress
-				addr.setOutbound(frame.flags&networkFrameFlagOutbound != 0)
-				addr.setIfIndex(frame.ifIndex, frame.subIfIndex)
-				if err := handle.Send(frame.payload, addr); err != nil {
-					return err
-				}
-			case networkFrameComplete:
-				goto nextCapture
-			default:
-				return fmt.Errorf("RelayProxy Network Service 收到未知事务帧 %d", frame.kind)
-			}
-		}
-	nextCapture:
-	}
+	return serveNetworkPackets(file, &windowsPacketDevice{handle: handle})
 }
 
 func normalizeWindowsTransparentFirewallPorts(input []uint16) ([]uint16, error) {
@@ -545,10 +549,13 @@ func removeWindowsTransparentFirewallRule() error {
 	)
 }
 
-func installWindowsTransparentFirewallRule(input []uint16) error {
+func installWindowsTransparentFirewallRule(input []uint16, program string) error {
 	ports, err := normalizeWindowsTransparentFirewallPorts(input)
 	if err != nil {
 		return err
+	}
+	if !filepath.IsAbs(program) || strings.ContainsAny(program, "\r\n") {
+		return errors.New("透明代理 Windows Firewall 必须限定到客户端程序的绝对路径")
 	}
 	// A single broker session is supported. Delete a stale rule left by an
 	// unclean service termination before publishing the current random ports.
@@ -562,74 +569,9 @@ func installWindowsTransparentFirewallRule(input []uint16) error {
 		"name="+windowsTransparentFirewallRuleName,
 		"dir=in", "action=allow", "protocol=TCP",
 		"localport="+strings.Join(values, ","),
+		"program="+program,
 		"profile=any", "edge=no",
 	)
-}
-
-func writeNetworkFrame(writer io.Writer, mu *sync.Mutex, frame networkFrame) error {
-	if len(frame.payload) > networkFrameMaxPayload {
-		return fmt.Errorf("RelayProxy Network Service frame payload too large: %d", len(frame.payload))
-	}
-	if mu != nil {
-		mu.Lock()
-		defer mu.Unlock()
-	}
-	header := make([]byte, networkFrameHeaderBytes)
-	binary.LittleEndian.PutUint32(header[0:4], networkPipeMagic)
-	binary.LittleEndian.PutUint16(header[4:6], networkPipeVersion)
-	binary.LittleEndian.PutUint16(header[6:8], frame.kind)
-	binary.LittleEndian.PutUint32(header[8:12], frame.flags)
-	binary.LittleEndian.PutUint32(header[12:16], frame.ifIndex)
-	binary.LittleEndian.PutUint32(header[16:20], frame.subIfIndex)
-	binary.LittleEndian.PutUint32(header[20:24], uint32(len(frame.payload)))
-	if err := writeNetworkBytes(writer, header); err != nil {
-		return err
-	}
-	return writeNetworkBytes(writer, frame.payload)
-}
-
-func writeNetworkBytes(writer io.Writer, data []byte) error {
-	for len(data) > 0 {
-		n, err := writer.Write(data)
-		if err != nil {
-			return err
-		}
-		if n <= 0 || n > len(data) {
-			return io.ErrShortWrite
-		}
-		data = data[n:]
-	}
-	return nil
-}
-
-func readNetworkFrame(reader io.Reader) (networkFrame, error) {
-	header := make([]byte, networkFrameHeaderBytes)
-	if _, err := io.ReadFull(reader, header); err != nil {
-		return networkFrame{}, err
-	}
-	if binary.LittleEndian.Uint32(header[0:4]) != networkPipeMagic {
-		return networkFrame{}, errors.New("RelayProxy Network Service frame magic mismatch")
-	}
-	if binary.LittleEndian.Uint16(header[4:6]) != networkPipeVersion {
-		return networkFrame{}, errors.New("RelayProxy Network Service protocol version mismatch")
-	}
-	length := binary.LittleEndian.Uint32(header[20:24])
-	if length > networkFrameMaxPayload {
-		return networkFrame{}, fmt.Errorf("RelayProxy Network Service frame payload exceeds limit: %d", length)
-	}
-	frame := networkFrame{
-		kind:       binary.LittleEndian.Uint16(header[6:8]),
-		flags:      binary.LittleEndian.Uint32(header[8:12]),
-		ifIndex:    binary.LittleEndian.Uint32(header[12:16]),
-		subIfIndex: binary.LittleEndian.Uint32(header[16:20]),
-	}
-	if length != 0 {
-		frame.payload = make([]byte, int(length))
-		if _, err := io.ReadFull(reader, frame.payload); err != nil {
-			return networkFrame{}, err
-		}
-	}
-	return frame, nil
 }
 
 func connectWindowsServicePipe(filter string, tcpPorts []uint16) (*os.File, error) {
@@ -650,7 +592,7 @@ func connectWindowsServicePipeNamed(pipeName, filter string, tcpPorts []uint16) 
 			0,
 			nil,
 			windows.OPEN_EXISTING,
-			windows.FILE_ATTRIBUTE_NORMAL,
+			windows.FILE_ATTRIBUTE_NORMAL|windows.FILE_FLAG_OVERLAPPED,
 			0,
 		)
 		if lastErr == nil {
@@ -784,6 +726,8 @@ func (d *windowsServicePacketDevice) reconnect(expected *os.File) error {
 	return fmt.Errorf("RelayProxy Network Service 自动重连失败: %w", lastErr)
 }
 
+func (*windowsServicePacketDevice) deferUDPClassification() {}
+
 func (d *windowsServicePacketDevice) Receive(buffer []byte) (int, packetMetadata, error) {
 	for attempt := 0; attempt < 2; attempt++ {
 		file := d.currentFile()
@@ -828,10 +772,8 @@ func (d *windowsServicePacketDevice) writeTransactionFrame(frame networkFrame) e
 	if file == nil {
 		return errors.New("RelayProxy Network Service packet device is closed")
 	}
-	// A capture transaction belongs to the current pipe instance. Never retry an
-	// Inject/Complete frame on a freshly reconnected session: the new broker is
-	// waiting for a different capture and replaying the old verdict would
-	// desynchronize the protocol.
+	// Do not retry a partly written frame on a reconnected pipe. That could
+	// duplicate an injection or complete a capture from the wrong session.
 	return writeNetworkFrame(file, &d.writeMu, frame)
 }
 

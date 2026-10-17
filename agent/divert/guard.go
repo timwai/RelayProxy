@@ -33,16 +33,8 @@ func (g LoopGuard) MustDirect(process, dstHost string, dstPort uint16) bool {
 		}
 	}
 	host := strings.TrimSpace(dstHost)
-	relay := g.RelayHost != "" && sameHost(host, g.RelayHost)
-	for _, ip := range g.RelayIPs {
-		relay = relay || sameHost(host, ip)
-	}
-	if relay {
-		for _, p := range g.RelayPorts {
-			if int(dstPort) == p {
-				return true
-			}
-		}
+	if g.relayDestination(host, dstPort) {
+		return true
 	}
 	dst := net.JoinHostPort(host, strconv.Itoa(int(dstPort)))
 	for _, lp := range g.LocalProxy {
@@ -65,6 +57,21 @@ func (g LoopGuard) MustDirect(process, dstHost string, dstPort uint16) bool {
 				if pi, err2 := strconv.Atoi(p); err2 == nil && pi == int(dstPort) {
 					return true
 				}
+			}
+		}
+	}
+	return false
+}
+
+func (g LoopGuard) relayDestination(host string, port uint16) bool {
+	relay := g.RelayHost != "" && sameHost(host, g.RelayHost)
+	for _, ip := range g.RelayIPs {
+		relay = relay || sameHost(host, ip)
+	}
+	if relay {
+		for _, p := range g.RelayPorts {
+			if int(port) == p {
+				return true
 			}
 		}
 	}

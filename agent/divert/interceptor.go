@@ -24,6 +24,12 @@ type packetDevice interface {
 	Close() error
 }
 
+// deferredUDPDevice removes captures immediately and can inject copied UDP
+// packets later. Verdict-based devices must classify before Finalize instead.
+type deferredUDPDevice interface {
+	deferUDPClassification()
+}
+
 type packetDeviceDiagnostics struct {
 	Backend    string
 	State      string
@@ -93,6 +99,7 @@ type tcpRedirect struct {
 }
 
 type interceptedUDP struct {
+	packet  *ipPacket
 	route   *ClassifiedFlow
 	payload []byte
 	meta    packetMetadata
@@ -126,12 +133,14 @@ type packetInterceptor struct {
 	cancel             context.CancelFunc
 	running            atomic.Bool
 	closeOnce          sync.Once
+	onStop             func()
 	wg                 sync.WaitGroup
 	mu                 sync.Mutex
 	tcp                map[FlowKey]*tcpRedirect
 	reverse            map[FlowKey]*tcpRedirect
 	ports              map[bool]uint16 // false: IPv4, true: IPv6
 	udpQueues          []chan interceptedUDP
+	udpClassifyQueues  []chan interceptedUDP
 	logMu              sync.Mutex
 	lastLog            time.Time
 	dns                *dnsAssociations
@@ -164,7 +173,8 @@ func newPacketInterceptor(s *Server, device packetDevice, listeners []net.Listen
 		ctx: ctx, cancel: cancel, tcp: make(map[FlowKey]*tcpRedirect),
 		reverse: make(map[FlowKey]*tcpRedirect),
 		ports:   make(map[bool]uint16), udpQueues: make([]chan interceptedUDP, 8),
-		dns: newDNSAssociations(),
+		dns:               newDNSAssociations(),
+		udpClassifyQueues: make([]chan interceptedUDP, 8),
 	}
 	for _, listener := range listeners {
 		addr := listener.Addr().(*net.TCPAddr).AddrPort()
@@ -172,12 +182,19 @@ func newPacketInterceptor(s *Server, device packetDevice, listeners []net.Listen
 	}
 	for n := range i.udpQueues {
 		i.udpQueues[n] = make(chan interceptedUDP, 64)
+		i.udpClassifyQueues[n] = make(chan interceptedUDP, 64)
 	}
 	return i
 }
 
 func (i *packetInterceptor) start() {
 	i.running.Store(true)
+	if _, async := i.device.(deferredUDPDevice); async {
+		for _, queue := range i.udpClassifyQueues {
+			i.wg.Add(1)
+			go i.classifyDatagrams(queue)
+		}
+	}
 	for _, queue := range i.udpQueues {
 		i.wg.Add(1)
 		go i.forwardDatagrams(queue)
@@ -238,6 +255,16 @@ func (i *packetInterceptor) report(err error) {
 
 func (i *packetInterceptor) receive() {
 	defer i.wg.Done()
+	var handlingTimer *time.Timer
+	var handlingTimeout time.Duration
+	if device, ok := i.device.(interface{ packetHandlingTimeout() time.Duration }); ok {
+		handlingTimeout = device.packetHandlingTimeout()
+	}
+	defer func() {
+		if handlingTimer != nil {
+			handlingTimer.Stop()
+		}
+	}()
 	borrowed, canBorrow := i.device.(borrowedPacketDevice)
 	var buffer []byte
 	if !canBorrow {
@@ -266,6 +293,17 @@ func (i *packetInterceptor) receive() {
 		if i.ctx.Err() != nil {
 			return
 		}
+		if handlingTimeout > 0 {
+			if handlingTimer == nil {
+				handlingTimer = time.AfterFunc(handlingTimeout, func() {
+					message := errNetworkCaptureTimeout.Error()
+					i.lastError.Store(&message)
+					i.failOpen()
+				})
+			} else {
+				handlingTimer.Reset(handlingTimeout)
+			}
+		}
 		i.captured.Add(1)
 		if i.firstCaptureLogged.CompareAndSwap(false, true) {
 			log.Printf("[divert] first captured packet: outbound=%v bytes=%d if=%d/%d", meta.outbound, len(data), meta.ifIndex, meta.subIfIndex)
@@ -278,7 +316,14 @@ func (i *packetInterceptor) receive() {
 		if len(data) == 0 {
 			i.report(errors.New("invalid captured packet length"))
 			if finalizer, ok := i.device.(packetFinalizer); ok {
-				i.report(finalizer.Finalize(meta))
+				if err := finalizer.Finalize(meta); err != nil {
+					i.report(err)
+					i.failOpen()
+					return
+				}
+			}
+			if handlingTimer != nil {
+				handlingTimer.Stop()
 			}
 			continue
 		}
@@ -287,7 +332,16 @@ func (i *packetInterceptor) receive() {
 		if finalizer, ok := i.device.(packetFinalizer); ok {
 			finalizeErr = finalizer.Finalize(meta)
 		}
+		if handlingTimer != nil {
+			handlingTimer.Stop()
+		}
 		joinedErr := errors.Join(handleErr, finalizeErr)
+		if finalizeErr != nil {
+			// A missing completion can stall the service's next capture forever.
+			i.report(joinedErr)
+			i.failOpen()
+			return
+		}
 		if i.disableOnInjectionError(handleErr) {
 			i.report(joinedErr)
 			return
@@ -315,12 +369,24 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		return i.inject(data, meta)
 	}
 	i.parsed.Add(1)
+	// The transport that carries PROXY traffic cannot itself wait for process
+	// attribution or enter a proxy forwarding queue. Protect it even when an
+	// OS lookup misses, capture queues are full, or DNS interception is active.
+	if packet.Destination.Port() != 53 && !i.server.fakeIPDestination(packet.Destination.Addr()) &&
+		i.server.loopGuard().relayDestination(packet.Destination.Addr().String(), packet.Destination.Port()) {
+		i.direct.Add(1)
+		return i.sendPacket(packet, meta)
+	}
 	// Capture DNS/53 before loopback, private DNS and process bypasses.
 	// FakeIP returns synthetic addresses; proxy DNS returns genuine ones
 	// from authenticated DoT. Pure DNS association observes without takeover.
 	fakeMode, realMode := i.server.fakeIPEnabled(), i.server.proxyDNSEnabled()
 	if (fakeMode || realMode) && packet.Destination.Port() == 53 {
 		if packet.Protocol == ProtoUDP {
+			if i.server.directDNSQuestion(packet.Payload) {
+				i.direct.Add(1)
+				return i.sendPacket(packet, meta)
+			}
 			return i.interceptDNSUDP(packet, meta, realMode)
 		}
 		return i.outboundTCP(packet, meta)
@@ -356,47 +422,68 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 			return i.returnTCP(packet, meta)
 		}
 	}
-	if (!fakeDestination && localOnlyPacket(packet)) || privateDNSPacket(packet) || relayDNSPacket(packet, i.server.guard.RelayHost) {
+	if (!fakeDestination && localOnlyPacket(packet)) || privateDNSPacket(packet) || relayDNSPacket(packet, i.server.loopGuard().RelayHost) {
 		i.direct.Add(1)
 		return i.sendPacket(packet, meta)
 	}
 	if packet.Protocol == ProtoTCP {
 		return i.outboundTCP(packet, meta)
 	}
+	if _, async := i.device.(deferredUDPDevice); async {
+		// The receive buffer is reused immediately after this method returns.
+		copied, err := parseIPPacket(append([]byte(nil), packet.Bytes...))
+		if err != nil {
+			return err
+		}
+		return i.queueUDPOn(i.udpClassifyQueues, FlowKey{Protocol: packet.Protocol, Source: packet.Source, Destination: packet.Destination}, interceptedUDP{packet: &copied, meta: meta})
+	}
 	process, lookupErr := i.lookup(packet.Protocol, packet.Source, packet.Destination)
 	if lookupErr != nil {
-		// Process attribution is supplemental metadata, not a prerequisite for
-		// target-based policy. Windows kernel/service traffic (notably SMB) can
-		// appear in WinDivert before OWNER_PID tables expose a stable owner.
-		// Keep the original five-tuple and classify by target/port/protocol.
 		process = packetProcess{}
 	}
+	route, err := i.classifyUDP(packet, meta, process)
+	if err != nil || route == nil {
+		return err
+	}
+	return i.queueUDP(route.Key(), interceptedUDP{route: route, payload: append([]byte(nil), packet.Payload...), meta: meta})
+}
+
+func (i *packetInterceptor) queueUDP(key FlowKey, job interceptedUDP) error {
+	return i.queueUDPOn(i.udpQueues, key, job)
+}
+
+func (i *packetInterceptor) queueUDPOn(queues []chan interceptedUDP, key FlowKey, job interceptedUDP) error {
+	queue := queues[flowQueue(key, len(queues))]
+	select {
+	case queue <- job:
+		return nil
+	case <-i.ctx.Done():
+		return i.ctx.Err()
+	default:
+		return errors.New("UDP interception queue is full; datagram dropped")
+	}
+}
+
+func (i *packetInterceptor) classifyUDP(packet ipPacket, meta packetMetadata, process packetProcess) (*ClassifiedFlow, error) {
+	fakeMode, realMode := i.server.fakeIPEnabled(), i.server.proxyDNSEnabled()
+	fakeDestination := i.server.fakeIPDestination(packet.Destination.Addr())
 	flow := i.flowMetadata(packet, process)
-	if !fakeDestination && i.server.guard.MustDirectFlow(flow) {
+	if !fakeDestination && i.server.loopGuard().MustDirectFlow(flow) {
 		i.direct.Add(1)
-		return i.sendPacket(packet, meta)
+		return nil, i.sendPacket(packet, meta)
 	}
 	route, err := i.server.ClassifyFlow(flow)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	i.classified.Add(1)
 	switch route.Decision().Action {
 	case ActionDirect:
 		i.direct.Add(1)
 		if !route.Decision().HandleDirect {
-			return i.sendPacket(packet, meta)
+			return nil, i.sendPacket(packet, meta)
 		}
-		queue := i.udpQueues[flowQueue(route.Key(), len(i.udpQueues))]
-		job := interceptedUDP{route: route, payload: append([]byte(nil), packet.Payload...), meta: meta}
-		select {
-		case queue <- job:
-			return nil
-		case <-i.ctx.Done():
-			return i.ctx.Err()
-		default:
-			return errors.New("UDP interception queue is full; datagram dropped")
-		}
+		return route, nil
 	case ActionReject:
 		// In observational (real-IP) DNS mode, a default-block routing
 		// policy must not accidentally blackhole the resolver needed to
@@ -405,26 +492,17 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 		// intercepted before reaching this branch.
 		if localDNSDefaultRejectPassthrough(packet, route.Decision(), fakeMode, realMode, i.server.dnsAssociationEnabled()) {
 			i.direct.Add(1)
-			return i.sendPacket(packet, meta)
+			return nil, i.sendPacket(packet, meta)
 		}
 		i.reject.Add(1)
-		return nil
+		return nil, nil
 	case ActionProxy:
 		i.proxy.Add(1)
 		// Hashing the whole tuple keeps each association ordered while a slow
 		// tunnel dial cannot block the packet capture loop or TCP handshakes.
-		queue := i.udpQueues[flowQueue(route.Key(), len(i.udpQueues))]
-		job := interceptedUDP{route: route, payload: append([]byte(nil), packet.Payload...), meta: meta}
-		select {
-		case queue <- job:
-			return nil
-		case <-i.ctx.Done():
-			return i.ctx.Err()
-		default:
-			return errors.New("UDP interception queue is full; datagram dropped")
-		}
+		return route, nil
 	default:
-		return errors.New("invalid interception action")
+		return nil, errors.New("invalid interception action")
 	}
 }
 
@@ -575,7 +653,21 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 			process = packetProcess{}
 		}
 		metadata := i.flowMetadata(p, process)
-		if !i.server.fakeIPDestination(p.Destination.Addr()) && i.server.guard.MustDirectFlow(metadata) {
+		if !i.server.fakeIPDestination(p.Destination.Addr()) && i.server.loopGuard().MustDirectFlow(metadata) {
+			// Only this Agent creates local TCP resolver connections for explicit
+			// DNS exceptions. Remember its SYN so subsequent ACK/data are not
+			// mistaken for a pre-existing plaintext DNS session and dropped.
+			if p.Destination.Port() == 53 && metadata.ProcessID == i.server.loopGuard().SelfPID &&
+				i.server.opts.DNSDirectDomains != nil && len(i.server.opts.DNSDirectDomains()) != 0 {
+				route := &ClassifiedFlow{owner: i.server, key: key, flow: metadata,
+					decision: Decision{Action: ActionDirect, Rule: "local-dns-resolver"}}
+				i.mu.Lock()
+				_, err := i.registerTCP(route, p.TCPSequence, meta)
+				i.mu.Unlock()
+				if err != nil {
+					return err
+				}
+			}
 			i.direct.Add(1)
 			return i.sendPacket(p, meta)
 		}
@@ -762,7 +854,7 @@ func (i *packetInterceptor) failOpen() {
 		// Close the device first so WinDivert releases the host network even if
 		// the Server has not yet published this interceptor during startup.
 		i.Close()
-		_ = i.server.Close()
+		i.server.pause(i)
 	}()
 }
 
@@ -804,6 +896,9 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 		case <-i.ctx.Done():
 			return
 		case job := <-queue:
+			if i.ctx.Err() != nil {
+				return
+			}
 			meta := job.meta
 			meta.outbound = false
 			if i.server.dnsAssociationEnabled() {
@@ -851,7 +946,7 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 		if err != nil {
 			if i.ctx.Err() == nil {
 				i.report(fmt.Errorf("TCP interceptor stopped: %w", err))
-				go i.server.Close()
+				i.failOpen()
 			}
 			return
 		}
@@ -876,7 +971,7 @@ func (i *packetInterceptor) acceptTCP(listener net.Listener) {
 				// TCP DNS answers must populate the same conservative
 				// IP-to-name cache used by intercepted UDP DNS, before the
 				// client is allowed to establish its first connection.
-				err = i.server.serveDNSTCPWithObserver(i.ctx, conn, func(query, answer []byte) {
+				err = i.server.serveDNSTCPAtResolver(i.ctx, conn, flow.original.Destination, func(query, answer []byte) {
 					i.observeInterceptedDNSTCP(flow.route.key, query, answer)
 				})
 			} else {
@@ -940,6 +1035,11 @@ func (i *packetInterceptor) Close() {
 	i.closeOnce.Do(func() {
 		i.running.Store(false)
 		i.cancel()
+		// Release the capture device before waiting for any flow or worker.
+		_ = i.device.Shutdown()
+		if i.onStop != nil {
+			i.onStop()
+		}
 		for _, listener := range i.listeners {
 			_ = listener.Close()
 		}
@@ -953,7 +1053,6 @@ func (i *packetInterceptor) Close() {
 			}
 		}
 		i.mu.Unlock()
-		_ = i.device.Shutdown()
 		i.wg.Wait()
 		_ = i.device.Close()
 	})

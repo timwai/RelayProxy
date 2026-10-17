@@ -311,11 +311,13 @@ func TestWSSLargeEncryptedSnapshotCrossesOldFrameLimit(t *testing.T) {
 	env.Signature = base64.RawURLEncoding.EncodeToString(sig)
 	sendWSSControl(t, a, map[string]any{"type": "SESSION_SNAPSHOT", "requestId": "big",
 		"envelope": env})
-	if resp := readWSSControl(t, a); resp["status"] != "RELAYED" {
-		t.Fatalf("large signed session not relayed: %v", resp["type"])
-	}
+	// Drain the receiver before waiting for the sender's receipt. The server
+	// acknowledges only after delivery; large frames can fill the send buffer.
 	if resp := readWSSControl(t, b); resp["type"] != "SESSION_SNAPSHOT" {
 		t.Fatalf("large signed session not delivered: %v", resp["type"])
+	}
+	if resp := readWSSControl(t, a); resp["status"] != "RELAYED" {
+		t.Fatalf("large signed session not relayed: %v", resp["type"])
 	}
 }
 

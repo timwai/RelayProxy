@@ -22,3 +22,12 @@ test('Server narrow layouts place page help and buttons together, not at opposit
  assert.match(css,/#root \.page-head\.page-actions-toolbar>\.head-actions\{flex:0 1 auto;margin-left:0;justify-content:flex-start;width:auto/);
  assert.match(css,/#root \.page-head\.page-actions-toolbar>\.head-actions>\.btn\{flex:0 0 auto\}/);
 });
+
+test('Browser Sync uses a compact inline context row instead of a second large page header',()=>{
+ const jsx=read('./BrowserSync.jsx');
+ assert.match(jsx,/className="page-head page-actions-toolbar browser-sync-toolbar"/);
+ assert.match(jsx,/<h1 className="sr-only">浏览器同步<\/h1>/);
+ assert.match(jsx,/className="page-context-help"/);
+ assert.match(jsx,/className="head-actions"/);
+ assert.doesNotMatch(jsx,/<div><h1>浏览器同步<\/h1>/);
+});

@@ -69,7 +69,10 @@ export default function FileBrowserV4({
  const setAll=e=>setSelected(e.target.checked?filtered.map(x=>x.name):[]);
  const toggleDetail=()=>setDetails(v=>!v);
  const mutate=async(action,oldPath,dest='',scope={device,share,path})=>{
-  if(!writable){report('当前共享没有写入权限');return false}
+  const permission=peers.find(p=>p.deviceId===scope.device)?.shares?.find(item=>item.id===scope.share)?.permission;
+   if(permission!=='read_write'||uploading||(scope.device===device&&scope.share===share&&loading)){
+    report('当前目标共享没有可用的写入权限');return false
+   }
   try{await onMutate(action,oldPath,dest,scope);setSelected([]);return true}
   catch(e){report(e.message||String(e));return false}
  };

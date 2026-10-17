@@ -783,3 +783,22 @@ html[data-theme="dark"] #root{color-scheme:dark}
 @media(prefers-reduced-motion:reduce){
  #root #app .sidebar,#root #app .mobile-nav-overlay{transition:none!important}
 }
+
+/* Page-level actions share the global title bar where there is room.
+   On smaller layouts, help text and controls flow from the left together,
+   never with a blank column reserved before right-aligned buttons. */
+#root .page-head.page-actions-toolbar{justify-content:flex-start;gap:8px 12px}
+#root .page-head.page-actions-toolbar>.page-context-help{flex:0 1 auto;max-width:min(480px,100%);min-width:0}
+#root .page-head.page-actions-toolbar>.head-actions{flex:0 1 auto;margin-left:0;justify-content:flex-start;width:auto;max-width:100%}
+#root .page-head.page-actions-toolbar>.head-actions>.btn{flex:0 0 auto}
+#root .page-head.page-head-portal-placeholder{position:absolute;width:1px;height:1px;min-height:0;margin:0;padding:0;overflow:hidden}
+#root .topbar-right{min-width:0}
+#root .topbar-page-actions{display:flex;align-items:center;min-width:0;max-width:100%;overflow-x:auto;scrollbar-width:thin}
+#root .topbar-page-actions .head-actions{display:flex;align-items:center;justify-content:flex-start;flex-wrap:nowrap;gap:6px;min-width:max-content;max-width:none}
+#root .topbar-page-actions .actions{display:flex;align-items:center;flex-wrap:nowrap;gap:6px}
+#root .topbar-page-actions .btn{white-space:nowrap;flex:0 0 auto;min-height:32px;padding:0 10px;font-size:12px}
+@media(max-width:760px){
+ #root .page-head.page-actions-toolbar>.page-context-help{flex:0 1 auto;max-width:100%}
+ #root .page-head.page-actions-toolbar>.head-actions{width:auto;max-width:100%;justify-content:flex-start;margin-left:0}
+ #root .page-head.page-actions-toolbar>.head-actions>.btn{flex:0 0 auto}
+}

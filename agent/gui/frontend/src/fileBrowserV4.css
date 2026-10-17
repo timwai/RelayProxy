@@ -121,3 +121,6 @@ html.file-browser-focus .main>*+*{margin-top:0}
 .v4-tree-branch{margin-left:12px;padding-left:7px;border-left:1px solid var(--line)}
 .v4-tree-loading{color:var(--subtle);font-size:11px;padding:6px 8px}
 .v4-tree-folder .v4-nested{padding-left:5px}
+
+.v4-load-more{display:block;margin:14px auto;padding:9px 18px;border:1px solid var(--line2);background:var(--surface2);border-radius:9px;color:var(--brand);font-weight:650}
+.v4-load-more:hover{background:var(--surface3)}

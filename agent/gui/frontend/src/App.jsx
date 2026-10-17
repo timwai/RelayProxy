@@ -595,7 +595,7 @@ function SettingsNavigation({page,onGoto}){
    <span><strong>常规设置</strong><small>外观、启动与客户端维护</small></span>
   </button>
   {SETTINGS_SECTIONS.map(([id,icon,label,description])=>
-   <button key={id} className={'settings-nav-item '+(page===id?'active':'')} onClick={()=>onGoto(id)}>
+   <button key={id} type="button" title={description} aria-current={page===id?'page':undefined} className={'settings-nav-item '+(page===id?'active':'')} onClick={()=>onGoto(id)}>
     <span className="settings-nav-icon"><Icon name={icon}/></span>
     <span><strong>{label}</strong><small>{description}</small></span>
    </button>)}

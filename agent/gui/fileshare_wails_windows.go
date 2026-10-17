@@ -85,7 +85,7 @@ func (s *WailsService) GetRemoteFileEntries(deviceID, shareID, relativePath stri
 	return s.owner.bridge.GetRemoteFileEntries(deviceID, shareID, relativePath)
 }
 func (s *WailsService) MutateRemoteFile(deviceID, shareID, action, relativePath, destination string) error {
- return s.owner.bridge.MutateRemoteFile(deviceID, shareID, action, relativePath, destination)
+	return s.owner.bridge.MutateRemoteFile(deviceID, shareID, action, relativePath, destination)
 }
 
 func (s *WailsService) StartFileDownload(deviceID, shareID, relativePath string) (bridge.FileTransfer, error) {

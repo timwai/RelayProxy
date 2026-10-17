@@ -113,3 +113,11 @@ html.file-browser-focus .main>*+*{margin-top:0}
  .v4-entry-size,.v4-column-head>span:nth-child(3){display:none}
  .v4-file-list.grid{grid-template-columns:repeat(2,minmax(0,1fr))}
 }
+
+.v4-tree-folder{display:flex;align-items:center;gap:1px;min-width:0}
+.v4-tree-folder>.v4-share,.v4-tree-folder>.v4-nested{flex:1;min-width:0}
+.v4-tree-expand{width:20px;height:28px;display:grid;place-items:center;border:0;background:transparent;color:var(--muted);flex:0 0 auto}
+.v4-tree-expand:hover{color:var(--brand)}
+.v4-tree-branch{margin-left:12px;padding-left:7px;border-left:1px solid var(--line)}
+.v4-tree-loading{color:var(--subtle);font-size:11px;padding:6px 8px}
+.v4-tree-folder .v4-nested{padding-left:5px}

@@ -35,7 +35,7 @@ export default function FileBrowserV4({
  const chosen=entries.filter(x=>selected.includes(x.name));
  const preview=chosen.length===1?chosen[0]:null;
  const runningTransfers=transfers.filter(item=>item.state==='running');
- const recentTransfers=runningTransfers.length?runningTransfers.slice(0,3):transfers.slice(0,3);
+ const recentTransfers=runningTransfers.length?runningTransfers.slice(-3).reverse():transfers.slice(-3).reverse();
  const transferLabel={running:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',paused:'已暂停'};
  const rootName=activeShare?.name||'共享文件夹';
  const deviceName=peers.find(x=>x.deviceId===device)?.name||device||'选择设备';
@@ -43,6 +43,7 @@ export default function FileBrowserV4({
  const treeGeneration=useRef(0);
  useEffect(()=>{treeGeneration.current+=1;setExpanded(new Set());setTreeFolders({})},[treeRevision]);
  useEffect(()=>setVisibleLimit(200),[query,sort,view]);
+ useEffect(()=>{setSelected([]);setAnchor('')},[query]);
  useEffect(()=>{document.documentElement.classList.toggle('file-browser-focus',focus);return()=>document.documentElement.classList.remove('file-browser-focus')},[focus]);
  useEffect(()=>{const keyHandler=e=>{
    if(!box.current?.contains(e.target)||menu||dialog)return;

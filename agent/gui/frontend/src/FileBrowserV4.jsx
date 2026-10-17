@@ -14,7 +14,7 @@ const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
 export default function FileBrowserV4({
  peers,device,share,path,shares,entries,loading,error,latency,canWrite,uploads,
- uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onRefresh,toast
+ uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onRefresh,toast
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
  const [selected,setSelected]=useState([]),[anchor,setAnchor]=useState(''),[details,setDetails]=useState(false);
@@ -22,7 +22,7 @@ export default function FileBrowserV4({
  const [menu,setMenu]=useState(null),[dialog,setDialog]=useState(null),[dropTarget,setDropTarget]=useState('');
  const [treeWidth,setTreeWidth]=useState(248),[detailWidth,setDetailWidth]=useState(286);
  const [expanded,setExpanded]=useState(new Set());
- const box=useRef(null),input=useRef(null),menuRef=useRef(null),dragInfo=useRef(null);
+ const box=useRef(null),input=useRef(null),menuRef=useRef(null),dragInfo=useRef(null),uploadTarget=useRef(null),touchTimer=useRef(null);
  const writable=!!canWrite&&!loading&&!uploading;
  const activeShare=shares.find(x=>x.id===share);
  const filtered=[...entries].filter(x=>x.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>{
@@ -37,6 +37,13 @@ export default function FileBrowserV4({
  const deviceName=peers.find(x=>x.deviceId===device)?.name||device||'选择设备';
  useEffect(()=>{setSelected([]);setAnchor('');setQuery('');setMenu(null)},[device,share,path]);
  useEffect(()=>{document.documentElement.classList.toggle('file-browser-focus',focus);return()=>document.documentElement.classList.remove('file-browser-focus')},[focus]);
+ useEffect(()=>{const keyHandler=e=>{
+   if(e.target.closest('input,textarea,select,[contenteditable="true"]'))return;
+   if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();setSelected(filtered.map(x=>x.name))}
+   if(e.key==='F2'&&chosen.length===1&&canWrite){e.preventDefault();requestRename(chosen[0])}
+   if((e.key==='Delete'||e.key==='Backspace')&&chosen.length&&canWrite){e.preventDefault();requestRemove(chosen)}
+  };document.addEventListener('keydown',keyHandler);return()=>document.removeEventListener('keydown',keyHandler)
+ },[chosen.map(x=>x.name).join('|'),canWrite,filtered.map(x=>x.name).join('|')]);
  useEffect(()=>{const close=e=>{if(e.key==='Escape'){if(dialog)setDialog(null);else if(menu)setMenu(null);else if(focus)setFocus(false);else setSelected([])}};
   document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close)},[dialog,menu,focus]);
  useEffect(()=>{const clear=e=>{if(!e.target.closest('.file-v4-context'))setMenu(null)};document.addEventListener('pointerdown',clear);return()=>document.removeEventListener('pointerdown',clear)},[]);
@@ -69,7 +76,7 @@ export default function FileBrowserV4({
   setMenu(null);
   if(type==='refresh'){onRefresh();return}
   if(type==='details'){toggleDetail();return}
-  if(type==='upload'){input.current?.click();return}
+  if(type==='upload'){uploadTarget.current=scope||{path,share,device};input.current?.click();return}
   if(type==='mkdir'){requestCreate(scope?.path??path);return}
   if(type==='open'){if(item?.isDir)navigate(device,share,join(path,item.name));else setDetails(true);return}
   if(type==='name'){if(item?.name){try{await navigator.clipboard.writeText(item.name);report('已复制文件名')}catch{report('复制失败')}}return}
@@ -222,14 +229,14 @@ export default function FileBrowserV4({
     <button className={'btn '+(details?'primary':'')} onClick={toggleDetail} title="文件详情"><Icon name="file"/><span className="v4-optional">详情</span></button>
     {canWrite&&<><button className="btn" onClick={()=>requestCreate(path)} disabled={loading}>＋ 文件夹</button>
      <button className="btn primary" onClick={()=>input.current?.click()} disabled={loading||uploading}>↑ 上传</button></>}
-    <input type="file" multiple ref={input} hidden onChange={e=>{void uploadAt(e.target.files);e.target.value=''}}/>
+    <input type="file" multiple ref={input} hidden onChange={e=>{const files=Array.from(e.target.files||[]);const t=uploadTarget.current;uploadTarget.current=null;void uploadAt(files,t?.path??path,t?.share??share,t?.device??device);e.target.value=''}}/>
    </div>
    {selected.length>0&&<div className="v4-selection"><b>已选 {selected.length} 项</b>
     <button onClick={()=>setSelected([])}>取消选择</button>
     <button onClick={()=>{for(const x of chosen.filter(x=>!x.isDir))void onDownload(x)}}>下载文件</button>
     {canWrite&&<><button onClick={()=>requestMove(chosen)}>移动</button><button onClick={()=>requestRemove(chosen)}>删除</button></>}
    </div>}
-   {uploading&&<div className="v4-upload-progress">上传准备：{fmt(uploadStaged)} / {fmt(uploadTotal)}</div>}
+   {uploading&&<div className="v4-upload-progress">上传准备：{fmt(uploadStaged)} / {fmt(uploadTotal)} <button className="btn danger" onClick={onCancelUpload}>取消上传准备</button></div>}
    <div className={'v4-file-scroll '+(dropTarget==='background'?'drop-active':'')}
     onContextMenu={e=>showMenu(e,'background')}
     onDragOver={e=>{if(!e.target.closest('[data-file-name]'))dragOver(e,'background',writable)}}
@@ -243,9 +250,12 @@ export default function FileBrowserV4({
       filtered.slice(0,5000).map(entry=><div key={entry.name} data-file-name={entry.name}
        className={'v4-entry '+(selected.includes(entry.name)?'selected ':'')+(dropTarget==='file-'+entry.name?'drop-active':'')}
        tabIndex={0} draggable={writable}
-       onClick={e=>clickFile(e,entry)} onDoubleClick={()=>entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}
+       onClick={e=>clickFile(e,entry)}
+       onTouchStart={e=>{touchTimer.current=setTimeout(()=>{const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>{},stopPropagation:()=>{},clientX:r.left+25,clientY:r.top+25},'file',entry)},650)}}
+       onTouchEnd={()=>clearTimeout(touchTimer.current)} onTouchMove={()=>clearTimeout(touchTimer.current)}
+       onDoubleClick={()=>entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}
        onContextMenu={e=>showMenu(e,'file',entry)}
-       onKeyDown={e=>{if(e.key==='Enter')entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true);if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({...e,clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
+       onKeyDown={e=>{if(e.key==='Enter')entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true);if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>e.preventDefault(),stopPropagation:()=>e.stopPropagation(),clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
        onDragStart={e=>dragStart(e,entry)}
        onDragOver={entry.isDir?e=>dragOver(e,'file-'+entry.name,writable):undefined}
        onDragLeave={()=>setDropTarget('')}
@@ -282,7 +292,7 @@ export default function FileBrowserV4({
       if(menu.kind==='tree'){const target=menu.target;setMenu(null);
        if(key==='open')navigate(target.device,target.share,target.path);
        else if(key==='refresh')onDirectory(target.device,target.share,target.path,{force:true});
-       else if(key==='upload'){navigate(target.device,target.share,target.path);input.current?.click()}
+       else if(key==='upload'){uploadTarget.current=target;input.current?.click()}
        else if(key==='mkdir'){navigate(target.device,target.share,target.path);requestCreate(target.path)}
       }else void action(key,menu.item,menu.target);
     }}>{title}</button>)}</div>}

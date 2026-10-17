@@ -228,6 +228,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/file-shares/peers", w.fileSharePeers)
 	mux.HandleFunc("GET /api/file-shares/candidates", w.fileShareCandidates)
 	mux.HandleFunc("GET /api/file-shares/direct-status", w.fileDirectStatus)
+	mux.HandleFunc("POST /api/file-shares/prewarm", w.prewarmRemoteFileDirect)
 	mux.HandleFunc("GET /api/file-shares/remote", w.fileShareRemoteShares)
 	mux.HandleFunc("GET /api/file-shares/entries", w.fileShareRemoteEntries)
 	mux.HandleFunc("POST /api/file-shares/mutate", w.mutateRemoteFile)
@@ -632,6 +633,7 @@ const webBridgeJS = `(function () {
   }
   window.goGetFileShareCandidates = function () { return request('/api/file-shares/candidates'); };
   window.goGetFileDirectStatus = function () { return request('/api/file-shares/direct-status'); };
+  window.goPrewarmRemoteFileDirect = function (deviceId, shareId) { return json('/api/file-shares/prewarm', 'POST', {deviceId:deviceId, shareId:shareId}); };
   window.goGetFileSharePeers = function () { return request('/api/file-shares/peers'); };
   window.goGetRemoteFileShares = function (deviceId) { return request('/api/file-shares/remote?deviceId=' + encodeURIComponent(deviceId)); };
   window.goGetRemoteFileEntries = function (deviceId, shareId, relativePath) { return request('/api/file-shares/entries?deviceId=' + encodeURIComponent(deviceId) + '&shareId=' + encodeURIComponent(shareId) + '&path=' + encodeURIComponent(relativePath)); };

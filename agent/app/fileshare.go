@@ -173,7 +173,7 @@ func (a *Agent) openRemoteFile(ctx context.Context, targetDeviceID string, req p
 			log.Printf("[FileBrowse] action=%s relay_request_ms=%d", req.Action, time.Since(start).Milliseconds())
 		}
 	}()
-	if fileSharePrefersDirect(req.Action) {
+	if fileSharePrefersDirect(req.Action) && !a.fileDirectRecentlyUnreachable(targetDeviceID, req.ShareID) {
 		if direct, response, directErr := a.tryFileDirect(ctx, targetDeviceID, req); directErr == nil {
 			return &fileTransportStream{TunnelStream: direct, path: fileTransferPath(direct)}, response, nil
 		}

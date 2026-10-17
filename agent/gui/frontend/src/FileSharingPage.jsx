@@ -17,6 +17,7 @@ export default function FileSharingPage({toast}) {
  const [state,setState]=useState(null);
  const [tab,setTab]=useState(new URLSearchParams(window.location.search).has('filesWindow')?'remote':'local');
  const [directStatus,setDirectStatus]=useState(null);
+ const [warmStatus,setWarmStatus]=useState('');
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  const [editor,setEditor]=useState(null);
@@ -70,6 +71,33 @@ export default function FileSharingPage({toast}) {
  const [uploading,setUploading]=useState(false);
  const [uploadStaged,setUploadStaged]=useState(0);
  const [uploadTotal,setUploadTotal]=useState(0);
+ // Preflight starts after the peer and share have been verified. Poll only
+ // while a previous short-lived probe is in flight; never start file bytes.
+ useEffect(()=>{
+  const peer=peersRef.current.find(p=>p.deviceId===remoteDevice);
+  if(!remoteDevice||!remoteShare||!peer?.shares?.some(x=>x.id===remoteShare)){
+   setWarmStatus('');return;
+  }
+  let active=true,timer=null,attempts=0;
+  setWarmStatus('直连预探测中');
+  const probe=async()=>{
+   try{
+    const result=await callJSON('goPrewarmRemoteFileDirect',null,remoteDevice,remoteShare);
+    if(!active)return;
+    if(result?.state==='warming'){
+     if(++attempts<14)timer=setTimeout(()=>void probe(),650);
+     else setWarmStatus('直连预探测超时，可用 Relay');
+     return;
+    }
+    if(result?.state==='ready'){
+     const label=({'p2p_quic':'P2P QUIC','direct_quic':'QUIC','direct_tls':'TLS'})[result.path]||'直连';
+     setWarmStatus(label+' 路径已预探测');
+    }else setWarmStatus('Relay 回退可用');
+   }catch(e){if(active)setWarmStatus('Relay 回退可用')}
+  };
+  void probe();
+  return()=>{active=false;if(timer!==null)clearTimeout(timer)};
+ },[remoteDevice,remoteShare]);
  const canUpload=remoteShares.some(s=>s.id===remoteShare&&s.permission==='read_write');
  const currentShare=remoteShares.find(s=>s.id===remoteShare);
  const visibleFiles=remoteEntries.filter(e=>e.name.toLowerCase().includes(fileQuery.toLowerCase())).sort((a,b)=>{
@@ -562,7 +590,7 @@ export default function FileSharingPage({toast}) {
   {tab==='remote'&&<FileBrowserV4
     peers={peers} device={remoteDevice} share={remoteShare} path={remotePath} shares={remoteShares}
     entries={remoteEntries} loading={remoteLoading} error={remoteError} latency={browseLatency}
-    canWrite={canUpload} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
+    canWrite={canUpload} warmStatus={warmStatus} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
     transfers={transfers} treeRevision={treeRevision} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
     onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
     onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onClearTransfer={clearTransfer} onClearInactiveTransfers={clearInactiveTransfers} onOpenTransfers={()=>setTab('transfers')} onCancelUpload={()=>{uploadCancelRef.current=true}}

@@ -334,6 +334,9 @@ type Agent struct {
 	fileShareStore       *fileshare.FileStore
 	fileDirect           *fileDirectRuntime
 	fileP2PRendezvous    string
+	fileWarmMu           sync.Mutex
+	fileWarmHints        map[string]fileDirectWarmHint
+	fileWarmSlots        chan struct{}
 	rdpConnectMu         sync.Mutex
 }
 

@@ -14,6 +14,7 @@
   window.goGetFileShares = () => invoke('GetFileShares');
   window.goGetFileShareCandidates = () => invoke('GetFileShareCandidates');
   window.goGetFileDirectStatus = () => invoke('GetFileDirectStatus');
+  window.goPrewarmRemoteFileDirect = (deviceID, shareID) => invoke('PrewarmRemoteFileDirect', deviceID, shareID);
   window.goGetFileSharePeers = () => invoke('GetFileSharePeers');
   window.goGetRemoteFileShares = deviceID => invoke('GetRemoteFileShares', deviceID);
   window.goGetRemoteFileEntries = (deviceID, shareID, relativePath) => invoke('GetRemoteFileEntries', deviceID, shareID, relativePath);

@@ -15,7 +15,7 @@ const focusParam=()=>new URLSearchParams(window.location.search).has('filesWindo
 const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
 export default function FileBrowserV4({
- peers,device,share,path,shares,entries,loading,error,latency,canWrite,treeRevision,
+ peers,device,share,path,shares,entries,loading,error,latency,canWrite,warmStatus,treeRevision,
  uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onCancelTransfer,onResumeTransfer,onClearTransfer,onClearInactiveTransfers,onOpenTransfers,onRefresh,toast
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
@@ -163,6 +163,12 @@ export default function FileBrowserV4({
   }
   return url.toString();
  };
+ const returnToAppURL=()=>{
+  const url=new URL(window.location.href);
+  for(const field of ['filesWindow','fileDevice','fileShare','filePath'])url.searchParams.delete(field);
+  url.searchParams.set('page','files');
+  return url.toString();
+ };
  const openNativeWindow=()=>{
   if(typeof window.goOpenFileBrowserWindow!=='function'){
    report('独立窗口接口不可用');return;
@@ -278,13 +284,14 @@ export default function FileBrowserV4({
   <div className="v4-main">
    <div className="v4-head">
     <div className="v4-head-title"><div className="eyebrow">REMOTE FILE EXPLORER</div><h2>{rootName}</h2>
-     <small>{deviceName} · {canWrite?'读写':'只读'}{error?' · '+error:''}</small></div>
+     <small>{deviceName} · {canWrite?'读写':'只读'}{warmStatus?' · '+warmStatus:''}{error?' · '+error:''}</small></div>
     <div className="v4-head-actions">
      <button className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} title="选择设备"><Icon name="devices"/></button>
-     {globalThis.wails?.Call?.ByName?
-      <button className="btn" onClick={openNativeWindow} title="打开独立文件浏览器窗口"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>:
-      <a className="btn v4-window-link" href={newWindowURL()} target="_blank" rel="noopener noreferrer"
-       title="在浏览器的新标签页或窗口打开文件管理器"><Icon name="monitor"/> <span className="v4-optional">独立页面</span></a>}
+     {hasBridge('goOpenFileBrowserWindow')&&
+      <button className="btn" onClick={openNativeWindow} title="通过 Wails 打开原生独立文件浏览器"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>}
+     <a className="btn v4-window-link" href={focus?returnToAppURL():newWindowURL()}
+      title={focus?'返回当前浏览器的管理界面':'在当前页面进入独立文件浏览器，不触发弹窗拦截'}>
+      <Icon name="monitor"/> <span className="v4-optional">{focus?'返回主界面':'独立页面'}</span></a>
      <button className="btn" onClick={()=>setFocus(v=>!v)} title={focus?'退出专注模式':'文件浏览器充满整个窗口'}>
       <Icon name="dashboard"/> <span>{focus?'退出专注':'专注模式'}</span></button>
     </div>
@@ -334,10 +341,10 @@ export default function FileBrowserV4({
       filtered.slice(0,visibleLimit).map(entry=><div key={entry.name} data-file-name={entry.name}
        className={'v4-entry '+(selected.includes(entry.name)?'selected ':'')+(dropTarget==='file-'+entry.name?'drop-active':'')}
        tabIndex={0} draggable={writable}
-       onClick={e=>entry.isDir?navigate(device,share,join(path,entry.name)):clickFile(e,entry)}
+       onClick={e=>clickFile(e,entry)}
        onTouchStart={e=>{const r=e.currentTarget.getBoundingClientRect();touchTimer.current=setTimeout(()=>{showMenu({preventDefault:()=>{},stopPropagation:()=>{},clientX:r.left+25,clientY:r.top+25},'file',entry)},650)}}
        onTouchEnd={()=>clearTimeout(touchTimer.current)} onTouchMove={()=>clearTimeout(touchTimer.current)}
-       onDoubleClick={e=>{if(!entry.isDir)setDetails(true);else e.preventDefault()}}
+       onDoubleClick={()=>entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}
        onContextMenu={e=>showMenu(e,'file',entry)}
        onKeyDown={e=>{if(e.key==='Enter')entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true);if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>e.preventDefault(),stopPropagation:()=>e.stopPropagation(),clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
        onDragStart={e=>dragStart(e,entry)} onDragEnd={()=>{dragInfo.current=null;setDropTarget('')}}

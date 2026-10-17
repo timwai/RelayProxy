@@ -1,4 +1,6 @@
-.file-share-tabs{display:flex;gap:6px;border-bottom:1px solid var(--line);padding:0 2px 9px;margin-bottom:17px}
+.file-share-header{display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap;border-bottom:1px solid var(--line);margin-bottom:12px;padding:0 0 8px}
+.file-share-header-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
+.file-share-tabs{display:flex;gap:4px;align-items:center;min-width:0;flex-wrap:wrap}
 .file-share-tabs button{border:0;background:transparent;color:var(--muted);padding:9px 15px;border-radius:9px;font-weight:700}
 .file-share-tabs button.selected{background:color-mix(in srgb,var(--brand) 12%,var(--surface2));color:var(--brand)}
 .file-share-item{display:flex;align-items:center;gap:12px;border-top:1px solid var(--line);padding:14px 0;min-width:0;flex-wrap:wrap}
@@ -129,3 +131,10 @@
 
 /* Render large folders in bounded batches instead of thousands of DOM rows. */
 .file-browser-more{display:flex;justify-content:center;padding:14px 12px;border-top:1px solid var(--line)}
+
+@media(max-width:680px){
+ .file-share-header{align-items:stretch;gap:6px}
+ .file-share-tabs{flex:1 1 100%;overflow-x:auto;flex-wrap:nowrap}
+ .file-share-tabs button{white-space:nowrap;padding:8px 10px}
+ .file-share-header-actions{width:100%;justify-content:flex-end}
+}

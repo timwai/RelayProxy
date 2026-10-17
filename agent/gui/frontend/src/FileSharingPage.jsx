@@ -49,6 +49,17 @@ export default function FileSharingPage({toast}) {
  const directoryInflight=useRef(new Map());
  const navigationSerial=useRef(0);
  const [browseLatency,setBrowseLatency]=useState('');
+ const [treeRevision,setTreeRevision]=useState(0);
+ const uploadBusyRef=useRef(false);
+ const liveFolderRef=useRef({device:'',share:'',path:'.'});
+ const initialWindowTarget=useRef((()=>{
+  const params=new URLSearchParams(window.location.search);
+  if(!params.has('filesWindow'))return null;
+  const device=params.get('fileDevice'),share=params.get('fileShare'),path=params.get('filePath')||'.';
+  if(!device||!share||path.startsWith('/')||path.includes('\\')||path.split('/').includes('..'))return null;
+  return {device,share,path};
+ })());
+ useEffect(()=>{liveFolderRef.current={device:remoteDevice,share:remoteShare,path:remotePath}},[remoteDevice,remoteShare,remotePath]);
  useEffect(()=>{selectedRemote.current={device:remoteDevice,share:remoteShare}},[remoteDevice,remoteShare]);
 
  const [transfers,setTransfers]=useState([]);
@@ -66,12 +77,8 @@ export default function FileSharingPage({toast}) {
   return a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'});
  });
  const activeDownloads=transfers.filter(t=>t.state==='running').length;
- async function uploadOneFile(file,targetDir,targetShare,targetDevice){
-  if(!file||!targetDevice||!targetShare||uploading)return;
-  if(!peersRef.current.find(p=>p.deviceId===targetDevice)?.shares?.some(x=>x.id===targetShare&&x.permission==='read_write'))throw new Error('共享目录没有写入权限');
+ async function uploadOneFile(file,targetDir,targetShare,targetDevice,completed){
   if(file.size>20*1024**3)throw new Error('单文件上传不能超过 20 GiB');
-  uploadCancelRef.current=false;
-  setUploading(true);setUploadStaged(0);setUploadTotal(file.size);setRemoteError('');
   let sessionId='';
   try{
    const destination=targetDir==='.'?file.name:targetDir+'/'+file.name;
@@ -90,43 +97,65 @@ export default function FileSharingPage({toast}) {
     });
     const result=await callJSON('goAppendFileUploadChunk',null,sessionId,encoded);
     if(!result||typeof result.done!=='number')throw new Error('上传暂存失败');
-    setUploadStaged(result.done);
-    if(uploadCancelRef.current)throw new Error('已取消上传准备');
+    setUploadStaged(completed+result.done);
    }
    if(uploadCancelRef.current)throw new Error('已取消上传准备');
    const task=await callJSON('goCommitFileUpload',null,sessionId);
    if(!task?.id)throw new Error('未能开始远程上传');
    sessionId='';
-   // Upload may alter any cached listing for this host; the next browse
-   // must re-fetch with its current permission and directory contents.
-   directoryCache.current.clearDevice(targetDevice);
-   toast?.('上传任务已提交，正在将文件传输到远程设备');
-   if(targetDevice===remoteDevice&&targetShare===remoteShare&&targetDir===remotePath) void openRemoteDir(targetDevice,targetShare,targetDir,{force:true});
   }catch(e){
-   setRemoteError(e.message||String(e));
    if(sessionId)try{await callJSON('goDiscardFileUpload',null,sessionId)}catch{}
    throw e;
-  }finally{setUploading(false);uploadCancelRef.current=false}
+  }
  }
 
  async function uploadFiles(files,dir=remotePath,share=remoteShare,device=remoteDevice){
   const chosen=Array.from(files||[]);
-  if(!chosen.length||uploading)return;
+  if(!chosen.length)return;
+  if(uploadBusyRef.current)throw new Error('已有上传任务正在准备，请完成后重试');
   const authorized=peersRef.current.find(p=>p.deviceId===device)?.shares?.some(s=>s.id===share&&s.permission==='read_write');
   if(!authorized)throw new Error('目标共享没有写入权限');
-  for(const file of chosen){
-   if(uploadCancelRef.current)throw new Error('已取消后续上传');
-   await uploadOneFile(file,dir,share,device);
+  uploadBusyRef.current=true;
+  uploadCancelRef.current=false;
+  setUploading(true);setUploadStaged(0);
+  setUploadTotal(chosen.reduce((bytes,file)=>bytes+file.size,0));
+  setRemoteError('');
+  let completed=0;
+  try{
+   for(const file of chosen){
+    if(uploadCancelRef.current)throw new Error('已取消后续上传');
+    await uploadOneFile(file,dir,share,device,completed);
+    completed+=file.size;
+    setUploadStaged(completed);
+   }
+   directoryCache.current.clearDevice(device);
+   setTreeRevision(n=>n+1);
+   toast?.('已提交 '+chosen.length+' 个上传任务');
+   const live=liveFolderRef.current;
+   if(live.device===device&&live.share===share&&live.path===dir)
+    await openRemoteDir(device,share,dir,{force:true});
+  }catch(e){setRemoteError(e.message||String(e));throw e}
+  finally{
+   uploadBusyRef.current=false;
+   uploadCancelRef.current=false;
+   setUploading(false);
   }
  }
- async function mutateRemote(action,src,dst=''){
+
+ async function mutateRemote(action,src,dst='',scope=null){
   if(!['mkdir','move','remove'].includes(action))throw new Error('操作不受支持');
-  if(!remoteDevice||!remoteShare||!peersRef.current.find(p=>p.deviceId===remoteDevice)?.shares?.some(s=>s.id===remoteShare&&s.permission==='read_write'))
+  const target=scope||liveFolderRef.current;
+  const targetDevice=target.device,targetShare=target.share;
+  if(!targetDevice||!targetShare||!peersRef.current.find(p=>p.deviceId===targetDevice)?.shares?.some(s=>s.id===targetShare&&s.permission==='read_write'))
    throw new Error('共享目录未授权写入');
-  await callJSON('goMutateRemoteFile',null,remoteDevice,remoteShare,action,src,dst);
-  directoryCache.current.clearDevice(remoteDevice);
-  await openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true});
+  await callJSON('goMutateRemoteFile',null,targetDevice,targetShare,action,src,dst);
+  directoryCache.current.clearDevice(targetDevice);
+  setTreeRevision(n=>n+1);
+  const live=liveFolderRef.current;
+  if(live.device===targetDevice&&live.share===targetShare)
+   await openRemoteDir(live.device,live.share,live.path,{force:true});
  }
+
  const refreshDirectStatus=useCallback(async()=>{
   try{setDirectStatus(await callJSON('goGetFileDirectStatus',null))}
   catch{setDirectStatus(null)}
@@ -156,8 +185,14 @@ export default function FileSharingPage({toast}) {
      }
     }
    }
+   if(JSON.stringify(peersRef.current)!==JSON.stringify(result))setTreeRevision(n=>n+1);
    peersRef.current=result;
    setPeers(result);
+   const initial=initialWindowTarget.current;
+   if(initial&&result.find(p=>p.deviceId===initial.device)?.shares?.some(x=>x.id===initial.share)){
+    initialWindowTarget.current=null;
+    void openRemoteDir(initial.device,initial.share,initial.path);
+   }
    const selected=selectedRemote.current;
    if(selected.device){
     const current=result.find(peer=>peer.deviceId===selected.device);
@@ -246,6 +281,7 @@ export default function FileSharingPage({toast}) {
   if(!verified)return;
   selectedRemote.current={device:id,share:''};
   const seq=++navigationSerial.current;
+  liveFolderRef.current={device:id,share:'',path:'.'};
   setRemoteDevice(id);setRemoteShare('');setRemoteShares([]);setRemotePath('.');setRemoteEntries([]);setSelectedFile(null);setFileQuery('');setVisibleLimit(200);
   setRemoteError('');setBrowseLatency('');
   const cached=verified.shares||directoryCache.current.get(id,'','');
@@ -273,6 +309,7 @@ export default function FileSharingPage({toast}) {
   if(!verified||!verified.shares.some(share=>share.id===shareID))return;
   selectedRemote.current={device:deviceID,share:shareID};
   const seq=++navigationSerial.current;
+  liveFolderRef.current={device:deviceID,share:shareID,path:dir};
   setRemoteDevice(deviceID);setRemoteShare(shareID);setRemotePath(dir);
   setSelectedFile(null);setFileQuery('');setVisibleLimit(200);setRemoteError('');setBrowseLatency('');
   const cached=force?null:directoryCache.current.get(deviceID,shareID,dir);
@@ -476,7 +513,7 @@ export default function FileSharingPage({toast}) {
     peers={peers} device={remoteDevice} share={remoteShare} path={remotePath} shares={remoteShares}
     entries={remoteEntries} loading={remoteLoading} error={remoteError} latency={browseLatency}
     canWrite={canUpload} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
-    transfers={transfers} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
+    transfers={transfers} treeRevision={treeRevision} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
     onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote} onCancelUpload={()=>{uploadCancelRef.current=true}}
     onRefresh={()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}}
     toast={toast}/>}

@@ -30,7 +30,7 @@ const (
 )
 
 // PrewarmRemoteFileDirect is intentionally limited to a verified share root.
-// It proves reachability with a normal authorized directory-list request,
+// It proves reachability with a cheap authorized shared-inventory request,
 // exercises P2P punch/direct TLS/QUIC without transferring file contents,
 // and caches only a short-lived outcome. A failed warmup is not an ACL grant.
 func (a *Agent) PrewarmRemoteFileDirect(ctx context.Context, deviceID, shareID string) (FileDirectWarmStatus,error) {
@@ -66,17 +66,25 @@ func (a *Agent) PrewarmRemoteFileDirect(ctx context.Context, deviceID, shareID s
  defer func(){<-slots}()
  probeCtx,cancel:=context.WithTimeout(ctx,10*time.Second)
  defer cancel()
- stream,_,err:=a.tryFileDirectMode(probeCtx,deviceID,protocol.FileShareRequest{
-  Action:protocol.FileShareListDir,ShareID:shareID,Path:".",
+ stream,response,err:=a.tryFileDirectMode(probeCtx,deviceID,protocol.FileShareRequest{
+  Action:protocol.FileShareListShares,
  },true)
+ // Verify that the requested share is still visible under the authenticated
+ // peer ACL; never infer permission from a successful transport handshake.
+ authorized:=false
+ if err==nil {
+  for _,share:=range response.Shares {
+   if share.ID==shareID{authorized=true;break}
+  }
+ }
  result:=FileDirectWarmStatus{State:"relay"}
  ttl:=fileDirectWarmFailureTTL
- if err==nil {
+ if err==nil&&authorized {
   result.State="ready"
   result.Path=fileTransferPath(stream)
   ttl=fileDirectWarmReadyTTL
-  _=stream.Close()
  }
+ if stream!=nil {_=stream.Close()}
  if probeCtx.Err()!=nil&&ctx.Err()!=nil {
   a.forgetFileWarm(key,epoch)
   return FileDirectWarmStatus{},ctx.Err()

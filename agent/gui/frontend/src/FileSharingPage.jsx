@@ -189,8 +189,10 @@ export default function FileSharingPage({toast}) {
    peersRef.current=result;
    setPeers(result);
    const initial=initialWindowTarget.current;
-   if(initial&&result.find(p=>p.deviceId===initial.device)?.shares?.some(x=>x.id===initial.share)){
+   const authorizedPeer=initial&&result.find(p=>p.deviceId===initial.device);
+   if(authorizedPeer?.shares?.some(x=>x.id===initial.share)){
     initialWindowTarget.current=null;
+    setRemoteShares(authorizedPeer.shares);
     void openRemoteDir(initial.device,initial.share,initial.path);
    }
    const selected=selectedRemote.current;

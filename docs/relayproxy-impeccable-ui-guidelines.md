@@ -47,3 +47,14 @@ Roll UI changes out incrementally; avoid large UI rewrites that touch networking
 - Server data tables expose `scope="col"`, keyboard scrolling and sticky column headers. Large data sets receive a bounded viewport while horizontally wide diagnostics remain scrollable.
 - Source assertions cover these invariants. Browser / Wails acceptance should additionally check 768px, 1280px, 1920px, dark mode, high DPI, vertical resize, ongoing transfers and keyboard scrolling.
 - Related risk: Windows UI CI can fail in unrelated WinDivert firewall live integration tests if Windows Defender Firewall rejects test rule creation; do not treat that as a passing UI acceptance nor change firewall protections during a UI-only review.
+
+## Iteration 3: themes, narrow windows and keyboard accessibility
+
+- Give compact Agent and Server sidebar destinations explicit accessible names, hover titles and `aria-current="page"` markers, especially where labels are hidden and only icons remain.
+- Keep Server theme selection available from the mobile drawer with a clearly named group and pressed state. The top-bar picker stays on desktop.
+- Remove closed mobile navigation from the tab order using responsive CSS visibility, and return focus after Escape or navigation.
+- Set native input `color-scheme` for light/dark modes and use `100dvh` where supported without dropping the existing `100vh` fallback in Wails.
+- Keyboard file browsing: Space selects a focused file row; Enter opens a folder or shows file details. Checkboxes and per-file menus remain separate controls. Focused file rows have visible outlines.
+- Reuse one Agent `useDialogFocus` hook in both the main app and file-operation dialogs; ensure move, rename, create and delete confirmations have semantic labels and focus restoration.
+- Responsive and accessibility source tests live next to the two React frontends.
+- UI-only PR CI does not prove dark-mode contrast, VoiceOver/NVDA operation or a Wails window has been rendered; acceptance should include visual checks and real keyboard traversal before merge.

@@ -210,3 +210,80 @@ func TestDownloadOriginalFilenameAndSafeDuplicate(t *testing.T) {
 		t.Fatalf("cancelled download published a file: %v", err)
 	}
 }
+
+func TestClearTransferHistoryKeepsActiveTasksAndPublishedFiles(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("USERPROFILE", home)
+	configPath := filepath.Join(t.TempDir(), "agent.yaml")
+	downloadDir := filepath.Join(home, "Downloads", "RelayProxy")
+	if err := os.MkdirAll(downloadDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	completedID := "a1b2c3d4e5f678900123456789abcdef"
+	pausedID := "b1b2c3d4e5f678900123456789abcdef"
+	runningID := "c1b2c3d4e5f678900123456789abcdef"
+	completedPath := filepath.Join(downloadDir, "report.txt")
+	if err := os.WriteFile(completedPath, []byte("keep my download"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	partialPath := filepath.Join(downloadDir, ".relayproxy-download-"+pausedID+".partial")
+	if err := os.WriteFile(partialPath, []byte("resume me"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	m := newFileTransferManager(&app.Agent{})
+	if err := m.initTaskPersistence(configPath); err != nil {
+		t.Fatal(err)
+	}
+	m.mu.Lock()
+	m.records[completedID] = &fileTransferRecord{FileTransfer: FileTransfer{
+		ID: completedID, State: "completed", Direction: "download",
+		DeviceID: "other", ShareID: "share", RelativePath: "report.txt",
+		FileName: "report.txt", Destination: completedPath,
+	}}
+	m.records[pausedID] = &fileTransferRecord{FileTransfer: FileTransfer{
+		ID: pausedID, State: "paused", Direction: "download",
+		DeviceID: "other", ShareID: "share", RelativePath: "unfinished.txt",
+		FileName: "unfinished.txt",
+	}}
+	m.records[runningID] = &fileTransferRecord{FileTransfer: FileTransfer{
+		ID: runningID, State: "running", Direction: "upload", FileName: "busy.txt",
+	}}
+	m.order = []string{runningID, pausedID, completedID}
+	if err := m.persistTasksLocked(); err != nil {
+		m.mu.Unlock()
+		t.Fatal(err)
+	}
+	m.mu.Unlock()
+	if err := m.clearTransfer(runningID); err == nil {
+		t.Fatal("removed a running task")
+	}
+	if err := m.clearTransfer(pausedID); err != nil {
+		t.Fatalf("failed to clear paused task: %v", err)
+	}
+	if err := m.clearTransfer(pausedID); err == nil {
+		t.Fatal("cleared a missing task")
+	}
+	if got := m.list(); len(got) != 2 || got[0].ID != runningID || got[1].ID != completedID {
+		t.Fatalf("clearing changed unrelated order or active task: %+v", got)
+	}
+	if removed, err := m.clearInactiveTransfers(); err != nil || removed != 1 {
+		t.Fatalf("clear inactive count: %d, error: %v", removed, err)
+	}
+	if got := m.list(); len(got) != 1 || got[0].ID != runningID {
+		t.Fatalf("running task lost: %+v", got)
+	}
+	if got, err := os.ReadFile(completedPath); err != nil || string(got) != "keep my download" {
+		t.Fatalf("clearing history removed the downloaded file: %q %v", got, err)
+	}
+	if got, err := os.ReadFile(partialPath); err != nil || string(got) != "resume me" {
+		t.Fatalf("clearing records must not delete partial file content: %q %v", got, err)
+	}
+	restored := newFileTransferManager(&app.Agent{})
+	if err := restored.initTaskPersistence(configPath); err != nil {
+		t.Fatal(err)
+	}
+	if got := restored.list(); len(got) != 0 {
+		t.Fatalf("cleared tasks unexpectedly recovered after restart: %+v", got)
+	}
+}

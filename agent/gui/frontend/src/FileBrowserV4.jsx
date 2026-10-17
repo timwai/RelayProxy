@@ -1,6 +1,6 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Icon} from './icons.jsx';
-import {callJSON} from './bridge.js';
+import {call,callJSON,hasBridge} from './bridge.js';
 import './fileBrowserV4.css';
 
 const join=(dir,name)=>dir==='.'?name:dir+'/'+name;
@@ -90,7 +90,7 @@ export default function FileBrowserV4({
   if(type==='upload'){uploadTarget.current=scope||{path,share,device};input.current?.click();return}
   if(type==='mkdir'){requestCreate(scope?.path??path);return}
   if(type==='open'){if(item?.isDir)navigate(device,share,join(path,item.name));else setDetails(true);return}
-  if(type==='name'){if(item?.name){try{await navigator.clipboard.writeText(item.name);report('已复制文件名')}catch{report('复制失败')}}return}
+  if(type==='name'){if(item?.name){try{if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',item.name);else await navigator.clipboard.writeText(item.name);report('已复制文件名')}catch{report('复制失败')}}return}
   if(type==='download'){for(const entry of item?([item]):chosen.filter(x=>!x.isDir))await onDownload(entry);return}
   if(type==='rename'){requestRename(item);return}
   if(type==='move'){requestMove(chosen.length?chosen:[item]);return}
@@ -295,7 +295,11 @@ export default function FileBrowserV4({
    </div>
    {selected.length>0&&<div className="v4-selection"><b>已选 {selected.length} 项</b>
     <button onClick={()=>setSelected([])}>取消选择</button>
-    <button onClick={()=>{for(const x of chosen.filter(x=>!x.isDir))void onDownload(x)}}>下载文件</button>
+    <button onClick={async()=>{
+     const files=chosen.filter(x=>!x.isDir);
+     if(files.length>20&&!window.confirm('依次下载 '+files.length+' 个文件，需要逐个选择保存位置。确定继续吗？'))return;
+     for(const x of files)await onDownload(x);
+    }}>下载文件</button>
     {canWrite&&<><button onClick={()=>requestMove(chosen)}>移动</button><button onClick={()=>requestRemove(chosen)}>删除</button></>}
    </div>}
    {uploading&&<div className="v4-upload-progress">上传准备：{fmt(uploadStaged)} / {fmt(uploadTotal)} <button className="btn danger" onClick={onCancelUpload}>取消上传准备</button></div>}
@@ -323,7 +327,7 @@ export default function FileBrowserV4({
        onDoubleClick={()=>entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}
        onContextMenu={e=>showMenu(e,'file',entry)}
        onKeyDown={e=>{if(e.key==='Enter')entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true);if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>e.preventDefault(),stopPropagation:()=>e.stopPropagation(),clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
-       onDragStart={e=>dragStart(e,entry)}
+       onDragStart={e=>dragStart(e,entry)} onDragEnd={()=>{dragInfo.current=null;setDropTarget('')}}
        onDragOver={entry.isDir?e=>dragOver(e,'file-'+entry.name,writable):undefined}
        onDragLeave={()=>setDropTarget('')}
        onDrop={entry.isDir?e=>handleDrop(e,join(path,entry.name)):undefined}>

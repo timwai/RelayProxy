@@ -3,7 +3,9 @@
 .file-share-tabs button.selected{background:color-mix(in srgb,var(--brand) 12%,var(--surface2));color:var(--brand)}
 .file-share-item{display:flex;align-items:center;gap:12px;border-top:1px solid var(--line);padding:14px 0;min-width:0;flex-wrap:wrap}
 .file-share-item:first-of-type{border-top:0}
-.file-share-folder{width:42px;height:42px;border:1px solid var(--line);border-radius:12px;background:var(--surface3);display:grid;place-items:center;font-size:22px;color:var(--brand);flex:0 0 auto}
+.file-share-folder{width:46px;height:46px;border:1px solid color-mix(in srgb,var(--brand) 13%,var(--line));border-radius:13px;background:color-mix(in srgb,var(--brand) 7%,var(--surface2));display:grid;place-items:center;flex:0 0 auto}
+.file-share-folder>.v4-file-glyph{width:40px;height:40px;min-width:40px;background:transparent}
+.file-share-folder>.v4-file-glyph>svg{width:37px;height:37px}
 .file-share-detail{flex:1 1 180px;min-width:0}
 .file-share-detail b{display:block;font-size:13px}
 .file-share-detail .mono{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}

@@ -61,6 +61,32 @@ func (w *WebServer) fileShareRemoteEntries(rw http.ResponseWriter, r *http.Reque
 	writeWebJSON(rw, entries)
 }
 
+func (w *WebServer) mutateRemoteFile(rw http.ResponseWriter, r *http.Request) {
+	if !w.fileShareRemoteAccessAllowed(rw) {
+		return
+	}
+	var request struct {
+		DeviceID    string `json:"deviceId"`
+		ShareID     string `json:"shareId"`
+		Action      string `json:"action"`
+		Path        string `json:"path"`
+		Destination string `json:"destination"`
+	}
+	r.Body = http.MaxBytesReader(rw, r.Body, 8<<10)
+	decoder := json.NewDecoder(r.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&request); err != nil {
+		http.Error(rw, "invalid mutation request", http.StatusBadRequest)
+		return
+	}
+	if err := w.bridge.MutateRemoteFile(strings.TrimSpace(request.DeviceID),
+		strings.TrimSpace(request.ShareID), request.Action, request.Path, request.Destination); err != nil {
+		http.Error(rw, err.Error(), http.StatusBadRequest)
+		return
+	}
+	writeWebJSON(rw, map[string]bool{"ok": true})
+}
+
 func (w *WebServer) startFileDownload(rw http.ResponseWriter, r *http.Request) {
 	if !w.fileShareRemoteAccessAllowed(rw) {
 		return

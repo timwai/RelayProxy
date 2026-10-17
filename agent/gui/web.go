@@ -230,6 +230,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/file-shares/direct-status", w.fileDirectStatus)
 	mux.HandleFunc("GET /api/file-shares/remote", w.fileShareRemoteShares)
 	mux.HandleFunc("GET /api/file-shares/entries", w.fileShareRemoteEntries)
+	mux.HandleFunc("POST /api/file-shares/mutate", w.mutateRemoteFile)
 	mux.HandleFunc("GET /api/file-transfers", w.listFileDownloads)
 	mux.HandleFunc("GET /api/file-transfers/{id}/file", w.serveCompletedFileDownload)
 	mux.HandleFunc("POST /api/file-dialogs/folder", w.chooseLocalShareFolder)
@@ -632,6 +633,7 @@ const webBridgeJS = `(function () {
   window.goGetFileSharePeers = function () { return request('/api/file-shares/peers'); };
   window.goGetRemoteFileShares = function (deviceId) { return request('/api/file-shares/remote?deviceId=' + encodeURIComponent(deviceId)); };
   window.goGetRemoteFileEntries = function (deviceId, shareId, relativePath) { return request('/api/file-shares/entries?deviceId=' + encodeURIComponent(deviceId) + '&shareId=' + encodeURIComponent(shareId) + '&path=' + encodeURIComponent(relativePath)); };
+  window.goMutateRemoteFile = function (deviceId, shareId, action, relativePath, destination) { return json('/api/file-shares/mutate', 'POST', {deviceId:deviceId, shareId:shareId, action:action, path:relativePath, destination:destination}); };
   window.goBeginFileUpload = function (deviceID, shareID, relativePath, size) { return json('/api/file-uploads', 'POST', {deviceId:deviceID, shareId:shareID, path:relativePath, size:size}); };
   window.goAppendFileUploadChunk = function (id, chunk) { return json('/api/file-uploads/' + encodeURIComponent(id) + '/chunks', 'POST', {chunk:chunk}); };
   window.goCommitFileUpload = function (id) { return json('/api/file-uploads/' + encodeURIComponent(id) + '/commit', 'POST', {}); };

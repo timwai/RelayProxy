@@ -59,6 +59,7 @@ func (a *appWindow) openConnections() {
 }
 
 func (a *appWindow) closeConnections() {
+	a.closeFileBrowser()
 	if a == nil {
 		return
 	}

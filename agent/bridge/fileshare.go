@@ -60,6 +60,12 @@ func (b *UIBridge) GetRemoteFileEntries(deviceID, shareID, relativePath string) 
 	return entries, err
 }
 
+func (b *UIBridge) MutateRemoteFile(deviceID, shareID, action, relativePath, destination string) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	return b.agent.MutateRemoteFile(ctx, deviceID, shareID, action, relativePath, destination)
+}
+
 func (b *UIBridge) GetFileShareCandidates() ([]protocol.FileShareCandidate, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()

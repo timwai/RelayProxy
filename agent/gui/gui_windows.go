@@ -62,6 +62,9 @@ type appWindow struct {
 	monitorMu sync.Mutex
 	monitor   *application.WebviewWindow
 
+	fileBrowserMu sync.Mutex
+	fileBrowser   *application.WebviewWindow
+
 	verification *application.WebviewWindow
 
 	verificationMu    sync.Mutex

@@ -130,7 +130,7 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			}
 			waitAgentReady(t, host)
 			waitAgentReady(t, client)
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 			defer cancel()
 			peers, err := client.FileSharePeers(ctx)
 			if err != nil || len(peers) != 1 || peers[0].DeviceID != "files-host" {
@@ -268,6 +268,27 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			if err != nil || !bytes.Equal(onHost, uploadData) {
 				t.Fatalf("remote upload invalid: %v", err)
 			}
+			// Exercise V4 file management over the real two-Agent authenticated
+			// transport, rather than only using a standalone FileStore test.
+			if err := client.MutateRemoteFile(ctx, "files-host", shares[0].ID, protocol.FileShareMkdir, "managed", ""); err != nil {
+				t.Fatalf("authorized remote mkdir: %v", err)
+			}
+			if err := client.MutateRemoteFile(ctx, "files-host", shares[0].ID, protocol.FileShareMove, "written.bin", "managed/written.bin"); err != nil {
+				t.Fatalf("authorized remote move: %v", err)
+			}
+			managed, err := client.RemoteFileList(ctx, "files-host", shares[0].ID, "managed")
+			if err != nil || len(managed) != 1 || managed[0].Name != "written.bin" {
+				t.Fatalf("remote managed folder listing: %+v err=%v", managed, err)
+			}
+			if err := client.MutateRemoteFile(ctx, "files-host", shares[0].ID, protocol.FileShareRemove, "managed", ""); err == nil {
+				t.Fatal("recursive directory deletion must not be allowed")
+			}
+			if err := client.MutateRemoteFile(ctx, "files-host", shares[0].ID, protocol.FileShareRemove, "managed/written.bin", ""); err != nil {
+				t.Fatalf("authorized remote file removal: %v", err)
+			}
+			if err := client.MutateRemoteFile(ctx, "files-host", shares[0].ID, protocol.FileShareRemove, "managed", ""); err != nil {
+				t.Fatalf("authorized empty directory removal: %v", err)
+			}
 			// ACL revocation is enforced by the host even with a live Relay.
 			updated, err := store.Load()
 			if err != nil {
@@ -287,6 +308,9 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			}
 			if _, err := client.RemoteFileList(ctx, "files-host", shares[0].ID, "."); err == nil {
 				t.Fatal("revoked folder ACL still allowed remote access")
+			}
+			if err := client.MutateRemoteFile(ctx, "files-host", shares[0].ID, protocol.FileShareMkdir, "denied", ""); err == nil {
+				t.Fatal("revoked writer still allowed remote directory creation")
 			}
 		})
 	}

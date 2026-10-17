@@ -218,3 +218,46 @@ func TestFileShareDownloadResumeValidatesPrefix(t *testing.T) {
 		t.Fatal("unapproved device accessed a partial file")
 	}
 }
+
+func TestFileMutationRequiresReadWriteAndRevocation(t *testing.T) {
+	dir := t.TempDir()
+	store, err := New(filepath.Join(t.TempDir(), "agent.yaml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	state, err := store.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+	state.Enabled = true
+	state.Shares = []Share{{Name: "test", RootPath: dir, Enabled: true,
+		Permissions: map[string]Permission{"reader": PermissionRead, "writer": PermissionReadWrite}}}
+	state, err = store.Save(state)
+	if err != nil {
+		t.Fatal(err)
+	}
+	id := state.Shares[0].ID
+	req := protocol.FileShareRequest{Action: protocol.FileShareMkdir, ShareID: id, Path: "created"}
+	for _, who := range []string{"reader", "unknown", ""} {
+		result, _ := fileShareTestRequest(t, store, who, req)
+		if result.Success {
+			t.Fatalf("mutation accepted from %q", who)
+		}
+	}
+	result, _ := fileShareTestRequest(t, store, "writer", req)
+	if !result.Success {
+		t.Fatalf("authorized writer rejected: %+v", result)
+	}
+	state.Shares[0].Permissions["writer"] = PermissionNone
+	if _, err := store.Save(state); err != nil {
+		t.Fatal(err)
+	}
+	result, _ = fileShareTestRequest(t, store, "writer",
+		protocol.FileShareRequest{Action: protocol.FileShareRemove, ShareID: id, Path: "created"})
+	if result.Success {
+		t.Fatal("revoked writer deleted directory")
+	}
+	if _, err := os.Stat(filepath.Join(dir, "created")); err != nil {
+		t.Fatal("revoked writer changed filesystem:", err)
+	}
+}

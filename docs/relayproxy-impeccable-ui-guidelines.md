@@ -58,3 +58,12 @@ Roll UI changes out incrementally; avoid large UI rewrites that touch networking
 - Reuse one Agent `useDialogFocus` hook in both the main app and file-operation dialogs; ensure move, rename, create and delete confirmations have semantic labels and focus restoration.
 - Responsive and accessibility source tests live next to the two React frontends.
 - UI-only PR CI does not prove dark-mode contrast, VoiceOver/NVDA operation or a Wails window has been rendered; acceptance should include visual checks and real keyboard traversal before merge.
+
+## Iteration 4: page actions without wasted full-width rows
+
+- Agent page-level actions mount in the existing 44px title bar on windows at least 1100px wide. Dirty/restart indicators remain present; action controls remain clickable in the Wails drag region.
+- Below that threshold, controls stay in a compact, left-aligned page toolbar rather than a right-aligned band with unused space.
+- Server page-level actions mount into the existing title bar on wide consoles (at least 1380px). Narrow layouts keep short context text and actions together from the left, wrapping only if necessary.
+- The Browser Sync management header uses a screen-reader heading with compact inline context/refresh instead of duplicating the large page title already in the top bar.
+- File sharing tabs and actions share the natural flow even under 680px rather than forcing a separate right-justified action row.
+- Validate at 360/768/1024/1280/1440px, including long device names, action toolbar overflow, selected exit warnings, browser zoom 200%, and hover/keyboard behavior.

@@ -11,6 +11,30 @@ import (
 	"relayproxy/internal/protocol"
 )
 
+// mutateAuthorizedFile serializes the final authorization check with
+// management Save. Revocation and share-root edits cannot race between
+// the earlier Serve lookup and the filesystem mutation.
+func (s *FileStore) mutateAuthorizedFile(shareID, authenticatedDeviceID string, req protocol.FileShareRequest) error {
+	fileMu.Lock()
+	defer fileMu.Unlock()
+	state, err := s.load()
+	if err != nil {
+		return errors.New("unable to verify current sharing policy")
+	}
+	if !state.Enabled || authenticatedDeviceID == "" {
+		return errors.New("file sharing is disabled or unauthorized")
+	}
+	for _, share := range state.Shares {
+		if share.ID == shareID && share.Enabled {
+			if share.Permissions[authenticatedDeviceID] != PermissionReadWrite {
+				return errors.New("device has no write access to this shared folder")
+			}
+			return s.mutateFile(share, req)
+		}
+	}
+	return errors.New("shared folder is unavailable")
+}
+
 // mutateFile is called only after Serve authenticated the device and checked
 // the current share's read_write ACL. os.Root keeps every operation beneath the
 // configured share even when intermediate directories are symlinks.

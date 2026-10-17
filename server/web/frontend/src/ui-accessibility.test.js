@@ -17,6 +17,7 @@ test('Server console preserves semantic h1 but does not repeat the visible page 
 test('Server modal can be fully used from keyboard',()=>{
  const jsx=read('./App.jsx');
  assert.match(jsx,/useDialogFocus\(!!dialog,ref,close\)/);
+ assert.match(jsx,/<Action onClick={close} aria-label="关闭对话框">✕<\/Action>/);
  assert.match(jsx,/role="dialog" aria-modal="true" aria-label=\{dialog\.title\}/);
  assert.match(jsx,/e\.key==='Escape'/);
  assert.match(jsx,/e\.key!=='Tab'/);

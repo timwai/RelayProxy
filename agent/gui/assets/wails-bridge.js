@@ -29,6 +29,8 @@
   window.goChooseAndResumeFileDownload = id => invoke('ChooseAndResumeFileDownload', id);
   window.goGetFileTransfers = () => invoke('GetFileTransfers');
   window.goCancelFileDownload = id => invoke('CancelFileDownload', id);
+  window.goClearFileTransfer = id => invoke('ClearFileTransfer', id);
+  window.goClearInactiveFileTransfers = () => invoke('ClearInactiveFileTransfers');
   window.goResumeFileDownload = id => invoke('ResumeFileDownload', id);
   window.goSaveFileShares = state => invoke('SaveFileShares', state);
   window.goGetStatus = () => invoke('GetStatus');

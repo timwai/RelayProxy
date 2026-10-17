@@ -16,7 +16,7 @@ const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
 export default function FileBrowserV4({
  peers,device,share,path,shares,entries,loading,error,latency,canWrite,treeRevision,
- uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onCancelTransfer,onResumeTransfer,onOpenTransfers,onRefresh,toast
+ uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onCancelTransfer,onResumeTransfer,onClearTransfer,onClearInactiveTransfers,onOpenTransfers,onRefresh,toast
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
  const [selected,setSelected]=useState([]),[anchor,setAnchor]=useState(''),[details,setDetails]=useState(false),[visibleLimit,setVisibleLimit]=useState(200);
@@ -153,16 +153,22 @@ export default function FileBrowserV4({
   const stop=()=>{node.removeEventListener('pointermove',move);node.removeEventListener('pointerup',stop);node.removeEventListener('pointercancel',stop)};
   node.addEventListener('pointermove',move);node.addEventListener('pointerup',stop);node.addEventListener('pointercancel',stop);
  };
- const newWindow=()=>{
-  if(globalThis.wails?.Call?.ByName){
-   if(typeof window.goOpenFileBrowserWindow==='function')void window.goOpenFileBrowserWindow(device||'',share||'',path).catch(e=>report('打开独立窗口失败：'+(e.message||e)));
-   else report('独立窗口接口尚未就绪');
-   return;
+ const newWindowURL=()=>{
+  const url=new URL(window.location.href);
+  url.searchParams.set('page','files');url.searchParams.set('filesWindow','1');
+  if(device&&share){
+   url.searchParams.set('fileDevice',device);
+   url.searchParams.set('fileShare',share);
+   url.searchParams.set('filePath',path);
   }
-  const url=new URL(window.location.href);url.searchParams.set('page','files');url.searchParams.set('filesWindow','1');
-  if(device&&share){url.searchParams.set('fileDevice',device);url.searchParams.set('fileShare',share);url.searchParams.set('filePath',path)}
-  const win=window.open(url.toString(),'relayproxy-files','popup=yes,width=1540,height=960,resizable=yes,scrollbars=yes');
-  if(!win)report('窗口被拦截，请允许弹出窗口');
+  return url.toString();
+ };
+ const openNativeWindow=()=>{
+  if(typeof window.goOpenFileBrowserWindow!=='function'){
+   report('独立窗口接口不可用');return;
+  }
+  void window.goOpenFileBrowserWindow(device||'',share||'',path)
+   .catch(e=>report('打开独立窗口失败：'+(e.message||e)));
  };
  const uploadAt=async(files,dir=path,id=share,dev=device)=>{
   setDropTarget('');
@@ -275,7 +281,10 @@ export default function FileBrowserV4({
      <small>{deviceName} · {canWrite?'读写':'只读'}{error?' · '+error:''}</small></div>
     <div className="v4-head-actions">
      <button className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} title="选择设备"><Icon name="devices"/></button>
-     <button className="btn" onClick={newWindow} title="打开独立文件浏览器窗口"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>
+     {globalThis.wails?.Call?.ByName?
+      <button className="btn" onClick={openNativeWindow} title="打开独立文件浏览器窗口"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>:
+      <a className="btn v4-window-link" href={newWindowURL()} target="_blank" rel="noopener noreferrer"
+       title="在浏览器的新标签页或窗口打开文件管理器"><Icon name="monitor"/> <span className="v4-optional">独立页面</span></a>}
      <button className="btn" onClick={()=>setFocus(v=>!v)} title={focus?'退出专注模式':'文件浏览器充满整个窗口'}>
       <Icon name="dashboard"/> <span>{focus?'退出专注':'专注模式'}</span></button>
     </div>
@@ -297,15 +306,6 @@ export default function FileBrowserV4({
      <button className="btn primary" onClick={()=>input.current?.click()} disabled={loading||uploading}>↑ 上传</button></>}
     <input type="file" multiple ref={input} hidden onChange={e=>{const files=Array.from(e.target.files||[]);const t=uploadTarget.current;uploadTarget.current=null;void uploadAt(files,t?.path??path,t?.share??share,t?.device??device);e.target.value=''}}/>
    </div>
-   {selected.length>0&&<div className="v4-selection"><b>已选 {selected.length} 项</b>
-    <button onClick={()=>setSelected([])}>取消选择</button>
-    <button onClick={async()=>{
-     const files=chosen.filter(x=>!x.isDir);
-     if(files.length>20&&!window.confirm('依次下载 '+files.length+' 个文件，需要逐个选择保存位置。确定继续吗？'))return;
-     for(const x of files)await onDownload(x);
-    }}>下载文件</button>
-    {canWrite&&<><button onClick={()=>requestMove(chosen)}>移动</button><button onClick={()=>requestRemove(chosen)}>删除</button></>}
-   </div>}
    {uploading&&<div className="v4-upload-progress">上传准备：{fmt(uploadStaged)} / {fmt(uploadTotal)} <button className="btn danger" onClick={onCancelUpload}>取消上传准备</button></div>}
    <div className={'v4-file-scroll '+(dropTarget==='background'?'drop-active':'')}
     onContextMenu={e=>showMenu(e,'background')}
@@ -317,6 +317,15 @@ export default function FileBrowserV4({
      onDragOver={e=>{if(!e.target.closest('[data-file-name]'))dragOver(e,'background',writable)}}
     onDragLeave={()=>setDropTarget('')}
     onDrop={e=>handleDrop(e)}>
+   {selected.length>0&&<div className="v4-selection"><b>已选 {selected.length} 项</b>
+    <button onClick={()=>setSelected([])}>取消选择</button>
+    {chosen.some(x=>!x.isDir)&&<button onClick={async()=>{
+     const files=chosen.filter(x=>!x.isDir);
+     if(files.length>20&&!window.confirm('依次下载 '+files.length+' 个文件，需要逐个选择保存位置。确定继续吗？'))return;
+     for(const x of files)await onDownload(x);
+    }}>下载文件</button>}
+    {canWrite&&<><button onClick={()=>requestMove(chosen)}>移动</button><button onClick={()=>requestRemove(chosen)}>删除</button></>}
+   </div>}
     {!share?<div className="v4-placeholder">从左侧选择已授权共享目录</div>:
     <div className={'v4-file-list '+(view==='grid'?'grid':'list')}>
      {view==='list'&&<div className="v4-column-head"><input type="checkbox" checked={filtered.length>0&&selected.length===filtered.length} onChange={setAll} aria-label="全选"/>
@@ -325,10 +334,10 @@ export default function FileBrowserV4({
       filtered.slice(0,visibleLimit).map(entry=><div key={entry.name} data-file-name={entry.name}
        className={'v4-entry '+(selected.includes(entry.name)?'selected ':'')+(dropTarget==='file-'+entry.name?'drop-active':'')}
        tabIndex={0} draggable={writable}
-       onClick={e=>clickFile(e,entry)}
+       onClick={e=>entry.isDir?navigate(device,share,join(path,entry.name)):clickFile(e,entry)}
        onTouchStart={e=>{const r=e.currentTarget.getBoundingClientRect();touchTimer.current=setTimeout(()=>{showMenu({preventDefault:()=>{},stopPropagation:()=>{},clientX:r.left+25,clientY:r.top+25},'file',entry)},650)}}
        onTouchEnd={()=>clearTimeout(touchTimer.current)} onTouchMove={()=>clearTimeout(touchTimer.current)}
-       onDoubleClick={()=>entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}
+       onDoubleClick={e=>{if(!entry.isDir)setDetails(true);else e.preventDefault()}}
        onContextMenu={e=>showMenu(e,'file',entry)}
        onKeyDown={e=>{if(e.key==='Enter')entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true);if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>e.preventDefault(),stopPropagation:()=>e.stopPropagation(),clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
        onDragStart={e=>dragStart(e,entry)} onDragEnd={()=>{dragInfo.current=null;setDropTarget('')}}
@@ -353,7 +362,10 @@ export default function FileBrowserV4({
       <span>{runningTransfers.length?runningTransfers.length+' 项进行中':transfers.length+' 项记录'}</span>
       <span aria-hidden="true">{dockOpen?'⌄':'⌃'}</span>
      </button>
-     <button type="button" className="btn quiet" onClick={onOpenTransfers}>查看全部</button>
+     <div className="v4-dock-actions">
+      {transfers.some(t=>t.state!=='running')&&<button type="button" className="btn quiet" onClick={onClearInactiveTransfers}>清除已结束</button>}
+      <button type="button" className="btn quiet" onClick={onOpenTransfers}>查看全部</button>
+     </div>
     </div>
     {dockOpen&&<div className="v4-transfer-list">{recentTransfers.length?recentTransfers.map(task=>{
      const total=Math.max(0,Number(task.total)||0),done=Math.max(0,Number(task.done)||0);
@@ -369,6 +381,7 @@ export default function FileBrowserV4({
       {task.state==='running'&&<button type="button" className="btn quiet" onClick={()=>onCancelTransfer?.(task.id)}>暂停</button>}
       {task.direction==='download'&&(task.state==='paused'||task.state==='failed')&&
        <button type="button" className="btn quiet" onClick={()=>onResumeTransfer?.(task.id)}>继续</button>}
+      {task.state!=='running'&&<button type="button" className="btn quiet" title="只清除任务记录，不删除已下载文件" onClick={()=>onClearTransfer?.(task.id)}>清除</button>}
      </div>
     }):<div className="v4-transfer-empty">暂无传输任务，上传和下载将在这里显示进度。</div>}</div>}
    </section>

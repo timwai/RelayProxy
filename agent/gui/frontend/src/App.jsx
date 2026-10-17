@@ -51,7 +51,9 @@ function Button({children,primary,danger,quiet,className,...p}){return <button c
 function Badge({children,tone:t='neutral'}){return <span className={cx('badge',t)}>{children}</span>}
 function Switch({checked,onChange,disabled,label}){return <button type="button" className={cx('switch',checked&&'on')} role="switch" aria-checked={!!checked} aria-label={label} disabled={disabled} onClick={()=>onChange&&onChange(!checked)}><span/></button>}
 function Card({title,eyebrow,action,children,className}){return <section className={cx('card',className)}>{(title||eyebrow||action)&&<div className="card-head"><div>{eyebrow&&<div className="eyebrow">{eyebrow}</div>}{title&&<h2>{title}</h2>}</div>{action}</div>}{children}</section>}
-function PageHead({title,desc,actions}){return <div className="page-head"><div><h1>{title}</h1>{desc&&<p>{desc}</p>}</div>{actions&&<div className="actions">{actions}</div>}</div>}
+// The compact top bar already names the active page. Do not repeat a large
+// title and description before its content; actions get their own toolbar.
+function PageHead({actions}){return actions?<div className="page-head page-actions-toolbar"><div className="actions">{actions}</div></div>:null}
 function Field({label,help,children,className}){return <label className={cx('field',className)}><span>{label}</span>{children}{help&&<small>{help}</small>}</label>}
 const Input=p=><input className="control" {...p}/>;
 const Select=p=><select className="control" {...p}/>;

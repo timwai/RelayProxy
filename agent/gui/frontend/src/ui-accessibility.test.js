@@ -12,12 +12,18 @@ test('all Agent dialogs expose their title and a named close control',()=>{
 });
 
 test('Agent modal traps keyboard focus and restores the trigger after closing',()=>{
- const app=read('./App.jsx');
+ const app=read('./App.jsx'),focus=read('./useDialogFocus.js');
  assert.match(app,/useDialogFocus\(open,ref,onClose\)/);
- assert.match(app,/e\.key==='Escape'/);
- assert.match(app,/e\.key!=='Tab'/);
- assert.match(app,/e\.shiftKey&&\(active===first\|\|!dialog\.contains\(active\)\)/);
- assert.match(app,/previous instanceof HTMLElement&&previous\.isConnected/);
+ assert.match(focus,/e\.key==='Escape'/);
+ assert.match(focus,/e\.key!=='Tab'/);
+ assert.match(focus,/e\.shiftKey&&\(active===first\|\|!dialog\.contains\(active\)\)/);
+ assert.match(focus,/previous instanceof HTMLElement&&previous\.isConnected/);
+});
+test('file operation dialogs reuse the focus hook and label their heading',()=>{
+ const explorer=read('./FileBrowserV4.jsx');
+ assert.match(explorer,/useDialogFocus\(!!dialog,dialogRef,\(\)=>setDialog\(null\)\)/);
+ assert.match(explorer,/aria-modal="true" aria-labelledby="v4-file-dialog-title"/);
+ assert.match(explorer,/<h3 id="v4-file-dialog-title">/);
 });
 
 test('compact type tokens keep secondary content readable',()=>{

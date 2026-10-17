@@ -224,3 +224,8 @@ html[data-theme="dark"] .v4-glyph-folder{
  .v4-file-scroll>.v4-selection{top:8px;right:8px;max-width:calc(100% - 16px);padding:6px}
  .v4-dock-actions{gap:2px}
 }
+
+/* Standalone mode must hide the entire file-sharing tab/action header,
+   not only the old .file-share-tabs child. */
+html.file-browser-focus .main>.file-share-header{display:none}
+html.file-browser-focus .main>.file-browser-v4{flex:1 1 auto;min-height:0;height:100%}

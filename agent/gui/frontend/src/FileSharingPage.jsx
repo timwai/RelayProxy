@@ -374,8 +374,8 @@ export default function FileSharingPage({toast}) {
     if(!task?.id)throw new Error('未能创建下载任务');
     saveHandles.current.set(task.id,saveHandle);
    }
-   toast?.('下载任务已创建');
-   setTab('transfers');
+   toast?.('下载任务已创建，可在下方传输面板查看进度');
+   void refreshTransfers();
   }catch(e){setRemoteError(e.message||String(e))}
  }
  async function chooseShareFolder(){
@@ -516,7 +516,8 @@ export default function FileSharingPage({toast}) {
     entries={remoteEntries} loading={remoteLoading} error={remoteError} latency={browseLatency}
     canWrite={canUpload} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
     transfers={transfers} treeRevision={treeRevision} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
-    onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote} onCancelUpload={()=>{uploadCancelRef.current=true}}
+    onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
+    onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onOpenTransfers={()=>setTab('transfers')} onCancelUpload={()=>{uploadCancelRef.current=true}}
     onRefresh={()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}}
     toast={toast}/>}
   {tab==='transfers'&&<section className="card">

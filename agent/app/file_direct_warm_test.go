@@ -43,18 +43,24 @@ func TestFileWarmHintsAreScopedToDeviceShareAndSessionEpoch(t *testing.T) {
 }
 
 func TestFileWarmPathHintNeedsFreshCurrentSessionAndExpiry(t *testing.T) {
- agent:=&Agent{epoch:3,fileWarmHints:map[string]fileDirectWarmHint{
-  "host\x00share":{state:"ready",path:"direct_tls",epoch:3,until:time.Now().Add(time.Minute)},
-  "host\x00other":{state:"relay",epoch:3,until:time.Now().Add(time.Minute)},
-  "old\x00share":{state:"ready",path:"direct_quic",epoch:2,until:time.Now().Add(time.Minute)},
-  "expired\x00share":{state:"ready",path:"direct_quic",epoch:3,until:time.Now().Add(-time.Minute)},
- }}
- if got:=agent.fileDirectWarmPath("host","share");got!="direct_tls"{t.Fatalf("valid path hint: %q",got)}
- for _,scope:=range [][2]string{{"host","other"},{"old","share"},{"expired","share"}}{
-  if got:=agent.fileDirectWarmPath(scope[0],scope[1]);got!=""{t.Fatalf("untrusted hint %v: %q",scope,got)}
- }
- agent.mu.Lock()
- agent.epoch=4
- agent.mu.Unlock()
- if got:=agent.fileDirectWarmPath("host","share");got!=""{t.Fatalf("reconnected session reused stale path: %q",got)}
+	agent := &Agent{epoch: 3, fileWarmHints: map[string]fileDirectWarmHint{
+		"host\x00share":    {state: "ready", path: "direct_tls", epoch: 3, until: time.Now().Add(time.Minute)},
+		"host\x00other":    {state: "relay", epoch: 3, until: time.Now().Add(time.Minute)},
+		"old\x00share":     {state: "ready", path: "direct_quic", epoch: 2, until: time.Now().Add(time.Minute)},
+		"expired\x00share": {state: "ready", path: "direct_quic", epoch: 3, until: time.Now().Add(-time.Minute)},
+	}}
+	if got := agent.fileDirectWarmPath("host", "share"); got != "direct_tls" {
+		t.Fatalf("valid path hint: %q", got)
+	}
+	for _, scope := range [][2]string{{"host", "other"}, {"old", "share"}, {"expired", "share"}} {
+		if got := agent.fileDirectWarmPath(scope[0], scope[1]); got != "" {
+			t.Fatalf("untrusted hint %v: %q", scope, got)
+		}
+	}
+	agent.mu.Lock()
+	agent.epoch = 4
+	agent.mu.Unlock()
+	if got := agent.fileDirectWarmPath("host", "share"); got != "" {
+		t.Fatalf("reconnected session reused stale path: %q", got)
+	}
 }

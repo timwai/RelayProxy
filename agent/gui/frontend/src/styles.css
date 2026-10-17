@@ -120,3 +120,19 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 /* Make the matched policy identifiable independently from the exit path. */
 .rule-hit{display:inline-block;max-width:100%;overflow-wrap:anywhere;padding:4px 8px;border:1px solid var(--line);border-radius:7px;background:var(--surface3);font-weight:700;font-size:11px}
 .rule-hit.muted{font-weight:400;color:var(--muted)}
+
+/* Settings category navigation: collapses rarely used sidebar routes into
+   a discoverable, responsive settings overview. */
+.settings-navigation{display:grid;grid-template-columns:repeat(auto-fit,minmax(154px,1fr));gap:8px;margin-bottom:13px}
+.settings-nav-item{display:flex;gap:9px;align-items:center;min-width:0;text-align:left;border:1px solid var(--line);border-radius:11px;background:var(--surface2);padding:9px;color:var(--text)}
+.settings-nav-item:hover{background:var(--surface3);border-color:var(--line2)}
+.settings-nav-item.active{background:color-mix(in srgb,var(--brand) 9%,var(--surface2));border-color:color-mix(in srgb,var(--brand) 40%,var(--line));color:var(--brand)}
+.settings-nav-icon{flex:0 0 auto;display:grid;place-items:center;width:28px;height:28px;border-radius:8px;background:color-mix(in srgb,var(--brand) 10%,transparent)}
+.settings-nav-item>span:last-child{min-width:0;display:flex;flex-direction:column;gap:2px}
+.settings-nav-item strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.settings-nav-item small{font-size:9px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:640px){
+ .settings-navigation{display:flex;overflow-x:auto;gap:6px;scrollbar-width:thin}
+ .settings-nav-item{flex:0 0 130px}
+ .settings-nav-item small{display:none}
+}

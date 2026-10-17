@@ -1,5 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Icon} from './icons.jsx';
+import FileGlyph from './FileGlyph.jsx';
+import {fileIconLabel} from './fileIconKind.js';
 import {call,callJSON,hasBridge} from './bridge.js';
 import {planSameShareMoves,contextSelection} from './fileBrowserV4Ops.js';
 import './fileBrowserV4.css';
@@ -9,7 +11,6 @@ const parent=dir=>dir==='.'?'.':(dir.includes('/')?dir.slice(0,dir.lastIndexOf('
 const fmt=n=>{const bytes=Number(n)||0;return bytes<1024?bytes+' B':bytes<1048576?(bytes/1024).toFixed(1)+' KiB':bytes<1073741824?(bytes/1048576).toFixed(1)+' MiB':(bytes/1073741824).toFixed(2)+' GiB'};
 const date=n=>n?new Date(n>1e12?n:n*1000).toLocaleString():'—';
 const ext=name=>(name.split('.').pop()||'').toLowerCase();
-const iconName=name=>['png','jpg','jpeg','svg','gif'].includes(ext(name))?'image':['mp4','mov','mkv'].includes(ext(name))?'film':['zip','7z','rar','gz'].includes(ext(name))?'archive':'file';
 const focusParam=()=>new URLSearchParams(window.location.search).has('filesWindow');
 const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
@@ -233,7 +234,7 @@ export default function FileBrowserV4({
       onDragOver={e=>dragOver(e,'tree-'+next,acceptTarget(dev,id))}
       onDragLeave={()=>setDropTarget('')}
       onDrop={e=>handleDrop(e,next,id,dev)}>
-      <Icon name="folder" size={13}/><span>{entry.name}</span></button>
+      <FileGlyph name={entry.name} isDir variant="tree"/><span>{entry.name}</span></button>
     </div>
     {depth<16?renderTreeBranch(dev,id,next,depth+1):null}
    </div>
@@ -258,7 +259,7 @@ export default function FileBrowserV4({
         onDragOver={e=>dragOver(e,'share-'+s.id,acceptTarget(d.deviceId,s.id))}
         onDragLeave={()=>setDropTarget('')}
         onDrop={e=>handleDrop(e,'.',s.id,d.deviceId)}>
-        <Icon name="folder"/><span>{s.name}</span><small>{s.permission==='read_write'?'读写':'只读'}</small>
+        <FileGlyph name={s.name} isDir variant="tree"/><span>{s.name}</span><small>{s.permission==='read_write'?'读写':'只读'}</small>
        </button></div>
        {renderTreeBranch(d.deviceId,s.id,'.')}
       </div>)}</div>}
@@ -336,7 +337,7 @@ export default function FileBrowserV4({
        onDrop={entry.isDir?e=>handleDrop(e,join(path,entry.name)):undefined}>
        <input type="checkbox" checked={selected.includes(entry.name)} aria-label={'选择 '+entry.name}
         onClick={e=>e.stopPropagation()} onChange={e=>clickFile({ctrlKey:true},entry)}/>
-       <span className={'v4-entry-icon '+(entry.isDir?'folder':'')}><Icon name={entry.isDir?'folder':iconName(entry.name)} size={21}/></span>
+       <FileGlyph name={entry.name} isDir={entry.isDir} variant={view}/>
        <span className="v4-entry-name" title={entry.name}>{entry.name}</span>
        <span className="v4-entry-size">{entry.isDir?'—':fmt(entry.size)}</span>
        <span className="v4-entry-date">{date(entry.modTime)}</span>
@@ -378,8 +379,8 @@ export default function FileBrowserV4({
     onPointerDown={e=>resize(e,'detail')} onDoubleClick={()=>setDetailWidth(286)}
     onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();setDetailWidth(v=>within(v+(e.key==='ArrowLeft'?16:-16),230,420))}}}/>
    <aside className="v4-details"><div className="v4-detail-head"><strong>文件详情</strong><button className="btn quiet" onClick={()=>setDetails(false)}>关闭</button></div>
-    {preview?<div className="v4-detail-content"><span className="v4-detail-icon"><Icon name={preview.isDir?'folder':iconName(preview.name)} size={42}/></span><h3>{preview.name}</h3>
-     <div className="v4-detail-line"><span>类型</span><b>{preview.isDir?'文件夹':ext(preview.name).toUpperCase()}</b></div>
+    {preview?<div className="v4-detail-content"><span className="v4-detail-icon"><FileGlyph name={preview.name} isDir={preview.isDir} variant="detail"/></span><h3>{preview.name}</h3>
+     <div className="v4-detail-line"><span>类型</span><b>{fileIconLabel(preview.name,preview.isDir)}{!preview.isDir&&ext(preview.name)?' · '+ext(preview.name).toUpperCase():''}</b></div>
      <div className="v4-detail-line"><span>大小</span><b>{preview.isDir?'—':fmt(preview.size)}</b></div>
      <div className="v4-detail-line"><span>修改时间</span><b>{date(preview.modTime)}</b></div>
      <div className="v4-detail-line"><span>访问权限</span><b>{canWrite?'读写':'只读'}</b></div>

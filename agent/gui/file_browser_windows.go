@@ -20,6 +20,13 @@ func (a *appWindow) openFileBrowser(deviceID, shareID, relativePath string) {
 		window := a.fileBrowser
 		a.fileBrowserMu.Unlock()
 		window.Show().Focus()
+		if deviceID != "" && shareID != "" {
+			if relativePath == "" {
+				relativePath = "."
+			}
+			window.ExecJS("window.relayOpenFileShare && window.relayOpenFileShare(" +
+				jsonString(deviceID) + "," + jsonString(shareID) + "," + jsonString(relativePath) + ")")
+		}
 		return
 	}
 

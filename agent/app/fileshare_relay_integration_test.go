@@ -198,6 +198,16 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			}); err != nil || directPath != "direct_quic" {
 				t.Fatalf("expected authenticated QUIC direct file transport; path=%q err=%v", directPath, err)
 			}
+			// Warm the selected authorized share before any further download.
+			// Preflight uses a separate one-time ticket and only lists the ACL-
+			// filtered share inventory; subsequent file bytes reauthenticate.
+			warm, err := client.PrewarmRemoteFileDirect(ctx, "files-host", shares[0].ID)
+			if err != nil || warm.State != "ready" || warm.Path != "direct_quic" {
+				t.Fatalf("authorized direct prewarm: %+v err=%v", warm, err)
+			}
+			if got := client.fileDirectWarmPath("files-host", shares[0].ID); got != "direct_quic" {
+				t.Fatalf("prewarmed path not available to real transfer: %q", got)
+			}
 			// Disable only the QUIC listener to confirm an unavailable UDP
 			// path still works over the independent TLS/TCP direct listener.
 			// This is not a simulated NAT punching success.

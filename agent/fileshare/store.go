@@ -55,6 +55,7 @@ const MaxConcurrentHostedFileStreams int32 = 6
 type FileStore struct {
 	Path              string
 	activeFileStreams atomic.Int32
+	mutateMu          sync.Mutex
 	uploadMu          sync.Mutex
 	uploads           map[string]*partialFileUpload
 }

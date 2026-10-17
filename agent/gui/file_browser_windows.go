@@ -3,13 +3,15 @@
 package gui
 
 import (
+	"net/url"
+
 	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/wailsapp/wails/v3/pkg/events"
 )
 
 // A dedicated resizable WebView shares the Agent's existing authenticated
 // Wails services; no extra public listener or filesystem access is introduced.
-func (a *appWindow) openFileBrowser() {
+func (a *appWindow) openFileBrowser(deviceID, shareID, relativePath string) {
 	if a == nil || a.app == nil {
 		return
 	}
@@ -21,6 +23,15 @@ func (a *appWindow) openFileBrowser() {
 		return
 	}
 
+	query := url.Values{"page": {"files"}, "filesWindow": {"1"}}
+	if deviceID != "" && shareID != "" {
+		if relativePath == "" {
+			relativePath = "."
+		}
+		query.Set("fileDevice", deviceID)
+		query.Set("fileShare", shareID)
+		query.Set("filePath", relativePath)
+	}
 	background := application.BackgroundTypeSolid
 	winopts := application.WindowsWindow{}
 	if supportsMicaBackdrop() {
@@ -34,7 +45,7 @@ func (a *appWindow) openFileBrowser() {
 		Height:                     960,
 		MinWidth:                   790,
 		MinHeight:                  520,
-		URL:                        "/?page=files&filesWindow=1",
+		URL:                        "/?" + query.Encode(),
 		InitialPosition:            application.WindowCentered,
 		BackgroundType:             background,
 		Windows:                    winopts,

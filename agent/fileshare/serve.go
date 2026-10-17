@@ -97,6 +97,18 @@ func (s *FileStore) Serve(ctx context.Context, stream tunnel.TunnelStream, authe
 		s.serveUpload(ctx, stream, req, *selected, authenticatedDeviceID)
 		return
 	}
+	if req.Action == protocol.FileShareMkdir || req.Action == protocol.FileShareMove || req.Action == protocol.FileShareRemove {
+        if permission != PermissionReadWrite {
+            fail("device has no write access to this shared folder")
+            return
+        }
+        if err:=s.mutateFile(*selected,req);err!=nil {
+            fail(err.Error())
+            return
+        }
+        _ = protocol.WriteJSON(stream,protocol.FileShareResponse{Success:true})
+        return
+    }
 	if req.Action != protocol.FileShareListDir && req.Action != protocol.FileShareDownload {
 		fail("unsupported file sharing operation")
 		return

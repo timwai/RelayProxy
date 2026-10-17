@@ -5,6 +5,7 @@ import {createDirectoryCache} from './fileBrowserCache.js';
 import {onlyVerifiedFilePeers} from './fileShareVisibility.js';
 import './fileSharing.css';
 import FileBrowserV4 from './FileBrowserV4.jsx';
+import FileGlyph from './FileGlyph.jsx';
 
 const formatFileBytes=n=>{const num=Math.max(0,Number(n)||0);if(num<1024)return num.toFixed(0)+' B';const units=['KiB','MiB','GiB','TiB'];const power=Math.min(4,Math.floor(Math.log(num)/Math.log(1024)));return (num/1024**power).toFixed(1)+' '+units[power-1]};
 const blank=()=>({id:'',name:'',rootPath:'',enabled:true,permissions:{}});
@@ -520,7 +521,7 @@ export default function FileSharingPage({toast}) {
    {!state&&<div className="empty">正在读取本机文件共享配置…</div>}
    {state&&shares.length===0&&<div className="empty">还没有共享文件夹。添加本机目录后，再为设备设置只读或读写权限。</div>}
    {shares.map(share=><div className="file-share-item" key={share.id}>
-    <div className="file-share-folder">▱</div>
+    <div className="file-share-folder"><FileGlyph name={share.name} isDir/></div>
     <div className="grow file-share-detail"><b>{share.name}</b><div className="mono mini" title={share.rootPath}>{share.rootPath}</div><div className="mini">{countPermissions(share)} 台设备已授权 · {share.enabled?'目录已启用':'目录已停用'}</div></div>
     <span className={'badge '+(share.enabled?'ok':'neutral')}>{share.enabled?'已启用':'已停用'}</span>
     <button type="button" role="switch" aria-label={'启用 '+share.name} aria-checked={share.enabled} className={'switch '+(share.enabled?'on':'')} disabled={busy} onClick={()=>commit(s=>({...s,shares:s.shares.map(v=>v.id===share.id?{...v,enabled:!v.enabled}:v)}))}><span/></button>

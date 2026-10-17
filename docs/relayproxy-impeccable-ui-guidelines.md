@@ -38,3 +38,12 @@ This guide applies the design reasoning from [Impeccable](https://github.com/pba
 ## Change management
 
 Roll UI changes out incrementally; avoid large UI rewrites that touch networking logic. A passing source-level test is not a substitute for manual browser and Wails interaction acceptance.
+
+## Iteration 2: information density (2026-10-17)
+
+- Remote file browser takes the remaining content height; main chrome and tab controls do not reserve an arbitrary 255px deduction.
+- The transfer dock is initially collapsed and expands when active transfer count becomes nonzero. Users can collapse it again manually.
+- Agent monitoring renders the first 100 matching connections, supports incremental loading, and keeps table headers visible inside a keyboard-scrollable region. Filtering resets the visible limit.
+- Server data tables expose `scope="col"`, keyboard scrolling and sticky column headers. Large data sets receive a bounded viewport while horizontally wide diagnostics remain scrollable.
+- Source assertions cover these invariants. Browser / Wails acceptance should additionally check 768px, 1280px, 1920px, dark mode, high DPI, vertical resize, ongoing transfers and keyboard scrolling.
+- Related risk: Windows UI CI can fail in unrelated WinDivert firewall live integration tests if Windows Defender Firewall rejects test rule creation; do not treat that as a passing UI acceptance nor change firewall protections during a UI-only review.

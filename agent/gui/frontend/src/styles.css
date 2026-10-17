@@ -170,3 +170,17 @@ html[data-theme="dark"]{color-scheme:dark}
 a:focus-visible,.nav-item:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
 .nav-item[aria-current="page"]{font-weight:750}
 @supports(height:100dvh){.app-shell,.workspace{height:100dvh}}
+
+/* Page actions join the existing title bar instead of occupying an
+   otherwise empty, right-aligned row above every screen. */
+.topbar .crumb{flex:0 1 auto;min-width:0;max-width:40%;white-space:nowrap}
+.topbar .crumb span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.top-actions{min-width:0;margin-left:auto}
+.topbar-page-actions{display:flex;align-items:center;min-width:0;max-width:100%;-webkit-app-region:no-drag}
+.topbar-page-actions .page-action-buttons{display:flex;align-items:center;flex-wrap:nowrap;gap:6px;min-width:0;max-width:100%;overflow-x:auto;scrollbar-width:thin}
+.topbar-page-actions .page-action-buttons>.btn{flex:0 0 auto;min-height:32px;padding:0 10px;font-size:12px;white-space:nowrap}
+.page-head.page-actions-inline{justify-content:flex-start;margin:0 0 10px}
+.page-head.page-actions-inline>.page-action-buttons{justify-content:flex-start;flex:0 1 auto;min-width:0;max-width:100%;flex-wrap:wrap}
+@media(max-width:820px){
+ .page-head.page-actions-inline>.page-action-buttons{justify-content:flex-start;overflow-x:visible;flex-wrap:wrap}
+}

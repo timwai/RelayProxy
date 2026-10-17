@@ -192,3 +192,38 @@ a:focus-visible,.nav-item:focus-visible{outline:2px solid var(--brand);outline-o
 .settings-nav-item small{display:none}
 .settings-nav-icon{flex:0 0 auto}
 @media(max-width:640px){.settings-nav-item{flex:0 0 auto;min-width:0}}
+
+/* Unified single-choice dropdowns: Settings, routing/DNS, monitoring,
+   file sharing permissions and the Wails file explorer use the same target.
+   Leave native multi-select listboxes and checkbox controls untouched. */
+:root{--select-chevron:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23475569'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E")}
+html[data-theme="dark"]{--select-chevron:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23cbd5e1'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E")}
+select:not([multiple]):not([size]){
+ box-sizing:border-box;
+ min-height:44px;
+ height:44px;
+ max-width:100%;
+ padding:0 38px 0 13px;
+ border:1px solid var(--line2);
+ border-radius:10px;
+ background-color:var(--surface2);
+ background-image:var(--select-chevron);
+ background-repeat:no-repeat;
+ background-position:right 12px center;
+ background-size:16px 16px;
+ appearance:none;
+ -webkit-appearance:none;
+ color:var(--text);
+ font-size:14px;
+ font-weight:550;
+ line-height:1.35;
+ cursor:pointer;
+ text-overflow:ellipsis;
+}
+select:not([multiple]):not([size]):hover:not(:disabled){border-color:var(--brand);background-color:var(--surface3)}
+select:not([multiple]):not([size]):focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-color:var(--brand)}
+select:not([multiple]):not([size]):disabled{cursor:not-allowed;opacity:.55}
+select:not([multiple]):not([size]) option{background:var(--surface2);color:var(--text)}
+@media(max-width:640px){
+ select:not([multiple]):not([size]){min-height:48px;height:48px;font-size:14px}
+}

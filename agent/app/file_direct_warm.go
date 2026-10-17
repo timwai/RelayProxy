@@ -36,7 +36,8 @@ const (
 func (a *Agent) PrewarmRemoteFileDirect(ctx context.Context, deviceID, shareID string) (FileDirectWarmStatus, error) {
 	deviceID = strings.TrimSpace(deviceID)
 	shareID = strings.TrimSpace(shareID)
-	if deviceID == "" || shareID == "" || len(deviceID) > protocol.MaxStringLen || len(shareID) > protocol.MaxStringLen {
+	if deviceID == "" || shareID == "" || len(deviceID) > protocol.MaxStringLen || len(shareID) > protocol.MaxStringLen ||
+		strings.ContainsRune(deviceID, 0) || strings.ContainsRune(shareID, 0) {
 		return FileDirectWarmStatus{}, errors.New("invalid file direct warmup target")
 	}
 	if _, _, err := a.fileSharingSession(); err != nil {

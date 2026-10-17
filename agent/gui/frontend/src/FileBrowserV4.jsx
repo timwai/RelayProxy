@@ -18,7 +18,7 @@ export default function FileBrowserV4({
  uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onRefresh,toast
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
- const [selected,setSelected]=useState([]),[anchor,setAnchor]=useState(''),[details,setDetails]=useState(false);
+ const [selected,setSelected]=useState([]),[anchor,setAnchor]=useState(''),[details,setDetails]=useState(false),[visibleLimit,setVisibleLimit]=useState(200);
  const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false);
  const [menu,setMenu]=useState(null),[dialog,setDialog]=useState(null),[dropTarget,setDropTarget]=useState('');
  const [treeWidth,setTreeWidth]=useState(248),[detailWidth,setDetailWidth]=useState(286);
@@ -36,7 +36,8 @@ export default function FileBrowserV4({
  const preview=chosen.length===1?chosen[0]:null;
  const rootName=activeShare?.name||'共享文件夹';
  const deviceName=peers.find(x=>x.deviceId===device)?.name||device||'选择设备';
- useEffect(()=>{setSelected([]);setAnchor('');setQuery('');setMenu(null)},[device,share,path]);
+ useEffect(()=>{setSelected([]);setAnchor('');setQuery('');setMenu(null);setVisibleLimit(200)},[device,share,path]);
+ useEffect(()=>setVisibleLimit(200),[query,sort,view]);
  useEffect(()=>{document.documentElement.classList.toggle('file-browser-focus',focus);return()=>document.documentElement.classList.remove('file-browser-focus')},[focus]);
  useEffect(()=>{const keyHandler=e=>{
    if(e.target.closest('input,textarea,select,[contenteditable="true"]'))return;
@@ -283,7 +284,7 @@ export default function FileBrowserV4({
      {view==='list'&&<div className="v4-column-head"><input type="checkbox" checked={filtered.length>0&&selected.length===filtered.length} onChange={setAll} aria-label="全选"/>
       <span>名称</span><span>大小</span><span>修改时间</span><span></span></div>}
      {loading?<div className="v4-placeholder">正在加载目录…</div>:filtered.length===0?<div className="v4-placeholder">{query?'无匹配文件':'当前目录为空，可拖入文件上传'}</div>:
-      filtered.slice(0,5000).map(entry=><div key={entry.name} data-file-name={entry.name}
+      filtered.slice(0,visibleLimit).map(entry=><div key={entry.name} data-file-name={entry.name}
        className={'v4-entry '+(selected.includes(entry.name)?'selected ':'')+(dropTarget==='file-'+entry.name?'drop-active':'')}
        tabIndex={0} draggable={writable}
        onClick={e=>clickFile(e,entry)}
@@ -305,6 +306,7 @@ export default function FileBrowserV4({
        <button className="v4-more" title="更多操作" onClick={e=>{e.stopPropagation();showMenu(e,'file',entry)}}>⋯</button>
       </div>)}
     </div>}
+    {filtered.length>visibleLimit&&<button className="v4-load-more" onClick={()=>setVisibleLimit(n=>n+200)}>显示更多（剩余 {filtered.length-visibleLimit} 项）</button>}
    </div>
    <div className="v4-status"><span>{filtered.length} 个项目 · {canWrite?'可读写':'只读访问'}</span>
     <span>{latency?'目录读取 '+latency+' · ':''}传输中 {transfers.filter(x=>x.state==='running').length} 项</span></div>

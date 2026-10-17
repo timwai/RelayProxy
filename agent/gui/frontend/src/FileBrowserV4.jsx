@@ -287,11 +287,11 @@ export default function FileBrowserV4({
      <small>{deviceName} · {canWrite?'读写':'只读'}{warmStatus?' · '+warmStatus:''}{error?' · '+error:''}</small></div>
     <div className="v4-head-actions">
      <button className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} title="选择设备"><Icon name="devices"/></button>
-     {hasBridge('goOpenFileBrowserWindow')?
-      <button className="btn" onClick={openNativeWindow} title="打开独立文件浏览器窗口"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>:
-      <a className="btn v4-window-link" href={focus?returnToAppURL():newWindowURL()}
-       title={focus?'返回当前浏览器的管理界面':'在当前页面进入独立文件浏览器，不触发浏览器弹窗'}>
-       <Icon name="monitor"/> <span className="v4-optional">{focus?'返回主界面':'独立页面'}</span></a>}
+     {hasBridge('goOpenFileBrowserWindow')&&
+      <button className="btn" onClick={openNativeWindow} title="通过 Wails 打开原生独立文件浏览器"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>}
+     <a className="btn v4-window-link" href={focus?returnToAppURL():newWindowURL()}
+      title={focus?'返回当前浏览器的管理界面':'在当前页面进入独立文件浏览器，不触发弹窗拦截'}>
+      <Icon name="monitor"/> <span className="v4-optional">{focus?'返回主界面':'独立页面'}</span></a>
      <button className="btn" onClick={()=>setFocus(v=>!v)} title={focus?'退出专注模式':'文件浏览器充满整个窗口'}>
       <Icon name="dashboard"/> <span>{focus?'退出专注':'专注模式'}</span></button>
     </div>

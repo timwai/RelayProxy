@@ -135,7 +135,11 @@ export default function FileBrowserV4({
   node.addEventListener('pointermove',move);node.addEventListener('pointerup',stop);node.addEventListener('pointercancel',stop);
  };
  const newWindow=()=>{
-  if(globalThis.wails?.Call?.ByName){report('桌面版请使用专注模式；原生独立窗口需单独接入');return}
+  if(globalThis.wails?.Call?.ByName){
+   if(typeof window.goOpenFileBrowserWindow==='function')void window.goOpenFileBrowserWindow().catch(e=>report('打开独立窗口失败：'+(e.message||e)));
+   else report('独立窗口接口尚未就绪');
+   return;
+  }
   const url=new URL(window.location.href);url.searchParams.set('page','files');url.searchParams.set('filesWindow','1');
   const win=window.open(url.toString(),'relayproxy-files','popup=yes,width=1540,height=960,resizable=yes,scrollbars=yes');
   if(!win)report('窗口被拦截，请允许弹出窗口');

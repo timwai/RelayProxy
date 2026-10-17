@@ -1,5 +1,6 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Icon} from './icons.jsx';
+import {callJSON} from './bridge.js';
 import './fileBrowserV4.css';
 
 const join=(dir,name)=>dir==='.'?name:dir+'/'+name;
@@ -21,7 +22,7 @@ export default function FileBrowserV4({
  const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false);
  const [menu,setMenu]=useState(null),[dialog,setDialog]=useState(null),[dropTarget,setDropTarget]=useState('');
  const [treeWidth,setTreeWidth]=useState(248),[detailWidth,setDetailWidth]=useState(286);
- const [expanded,setExpanded]=useState(new Set());
+ const [expanded,setExpanded]=useState(new Set()),[treeFolders,setTreeFolders]=useState({});
  const box=useRef(null),input=useRef(null),menuRef=useRef(null),dragInfo=useRef(null),uploadTarget=useRef(null),touchTimer=useRef(null);
  const writable=!!canWrite&&!loading&&!uploading;
  const activeShare=shares.find(x=>x.id===share);
@@ -175,6 +176,41 @@ export default function FileBrowserV4({
  };
  const dragOver=(e,key,permit)=>{e.preventDefault();e.stopPropagation();e.dataTransfer.dropEffect=permit?'move':'none';setDropTarget(permit?key:'')};
  const acceptTarget=(dev,id)=>!!peers.find(p=>p.deviceId===dev)?.shares?.some(s=>s.id===id&&s.permission==='read_write');
+ const treeKey=(dev,id,dir)=>JSON.stringify([dev,id,dir]);
+ const toggleTree=async(dev,id,dir)=>{
+  const key=treeKey(dev,id,dir);
+  if(expanded.has(key)){setExpanded(prev=>{const next=new Set(prev);next.delete(key);return next});return}
+  setExpanded(prev=>new Set([...prev,key]));
+  if(Object.prototype.hasOwnProperty.call(treeFolders,key))return;
+  try{
+   const records=await callJSON('goGetRemoteFileEntries',[],dev,id,dir);
+   setTreeFolders(prev=>({...prev,[key]:(Array.isArray(records)?records:[]).filter(x=>x.isDir)}));
+  }catch(e){setExpanded(prev=>{const next=new Set(prev);next.delete(key);return next});report('读取目录树失败：'+(e.message||e))}
+ };
+ const renderTreeBranch=(dev,id,dir,depth=0)=>{
+  const key=treeKey(dev,id,dir);
+  if(!expanded.has(key))return null;
+  const rows=treeFolders[key];
+  if(!rows)return <div className="v4-tree-loading">读取目录中…</div>;
+  if(rows.length===0)return null;
+  return <div className="v4-tree-branch">{rows.map(entry=>{
+   const next=join(dir,entry.name),opened=expanded.has(treeKey(dev,id,next));
+   return <div key={next}>
+    <div className="v4-tree-folder">
+     <button className="v4-tree-expand" aria-label={'展开 '+entry.name} onClick={()=>void toggleTree(dev,id,next)}>{opened?'⌄':'›'}</button>
+     <button className={'v4-nested '+(share===id&&path===next?'active':'')}
+      onClick={()=>navigate(dev,id,next)}
+      onContextMenu={e=>showMenu(e,'tree',null,{path:next,share:id,device:dev,permission:peers.find(p=>p.deviceId===dev)?.shares.find(x=>x.id===id)?.permission})}
+      onDragOver={e=>dragOver(e,'tree-'+next,acceptTarget(dev,id))}
+      onDragLeave={()=>setDropTarget('')}
+      onDrop={e=>handleDrop(e,next,id,dev)}>
+      <Icon name="folder" size={13}/><span>{entry.name}</span></button>
+    </div>
+    {depth<16?renderTreeBranch(dev,id,next,depth+1):null}
+   </div>
+  })}</div>
+ };
+
  return <section className={'file-browser-v4 '+(details?'has-details ':'')+(treeOpen?'tree-open ':'')} ref={box}
   style={{'--file-tree-width':treeWidth+'px','--file-detail-width':detailWidth+'px'}} aria-label="远程文件浏览器">
   <aside className="v4-tree">
@@ -183,24 +219,20 @@ export default function FileBrowserV4({
     {peers.map(d=><div className="v4-device" key={d.deviceId}>
      <button className={'v4-device-row '+(device===d.deviceId?'active':'')} onClick={()=>openDevice(d.deviceId)}>
       <Icon name="devices" size={17}/><span>{d.name||d.deviceId}</span><small>{d.shares.length} 个共享</small></button>
-     {device===d.deviceId&&<div className="v4-shares">{d.shares.map(s=><button key={s.id}
-       className={'v4-share '+(share===s.id?'active':'')}
-       onClick={()=>navigate(d.deviceId,s.id,'.')}
-       onContextMenu={e=>showMenu(e,'tree',null,{path:'.',share:s.id,device:d.deviceId,permission:s.permission})}
-       onDragOver={e=>dragOver(e,'share-'+s.id,acceptTarget(d.deviceId,s.id))}
-       onDragLeave={()=>setDropTarget('')}
-       onDrop={e=>handleDrop(e,'.',s.id,d.deviceId)}>
-       <Icon name="folder"/><span>{s.name}</span><small>{s.permission==='read_write'?'读写':'只读'}</small>
-       </button>)}{share&&path!=='.'&&<div className="v4-tree-path">
-        {path.split('/').map((part,i,parts)=>{
-         const dir=parts.slice(0,i+1).join('/');
-         return <button key={dir} className={'v4-nested '+(path===dir?'active':'')}
-          onClick={()=>navigate(device,share,dir)}
-          onContextMenu={e=>showMenu(e,'tree',null,{path:dir,share,device,permission:activeShare?.permission})}
-          onDragOver={e=>dragOver(e,'tree-'+dir,writable)}
-          onDragLeave={()=>setDropTarget('')}
-          onDrop={e=>handleDrop(e,dir)}><Icon name="folder" size={13}/>{part}</button>
-        })}</div>}</div>}
+     {device===d.deviceId&&<div className="v4-shares">{d.shares.map(s=><div key={s.id}>
+      <div className="v4-tree-folder">
+       <button className="v4-tree-expand" aria-label={'展开 '+s.name} onClick={()=>void toggleTree(d.deviceId,s.id,'.')}>
+        {expanded.has(treeKey(d.deviceId,s.id,'.'))?'⌄':'›'}</button>
+       <button className={'v4-share '+(share===s.id?'active':'')}
+        onClick={()=>navigate(d.deviceId,s.id,'.')}
+        onContextMenu={e=>showMenu(e,'tree',null,{path:'.',share:s.id,device:d.deviceId,permission:s.permission})}
+        onDragOver={e=>dragOver(e,'share-'+s.id,acceptTarget(d.deviceId,s.id))}
+        onDragLeave={()=>setDropTarget('')}
+        onDrop={e=>handleDrop(e,'.',s.id,d.deviceId)}>
+        <Icon name="folder"/><span>{s.name}</span><small>{s.permission==='read_write'?'读写':'只读'}</small>
+       </button></div>
+       {renderTreeBranch(d.deviceId,s.id,'.')}
+      </div>)}</div>}
     </div>)}
    </div><div className="v4-tree-foot"><Icon name="shield" size={15}/>仅显示共享所有者实际授权的目录</div>
   </aside>

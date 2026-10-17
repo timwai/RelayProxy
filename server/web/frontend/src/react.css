@@ -802,3 +802,35 @@ html[data-theme="dark"] #root{color-scheme:dark}
  #root .page-head.page-actions-toolbar>.head-actions{width:auto;max-width:100%;justify-content:flex-start;margin-left:0}
  #root .page-head.page-actions-toolbar>.head-actions>.btn{flex:0 0 auto}
 }
+
+/* Shared dropdown spec for dashboard filters, admin dialogs, Server Settings
+   and Browser Sync approval controls. Listboxes with size/multiple are native. */
+#root{--select-chevron:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23475569'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E")}
+html[data-theme="dark"] #root{--select-chevron:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23cbd5e1'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E")}
+#root select:not([multiple]):not([size]){
+ box-sizing:border-box;
+ min-height:44px;
+ height:44px;
+ max-width:100%;
+ padding:0 38px 0 13px;
+ border:1px solid var(--line2);
+ border-radius:10px;
+ background-color:var(--surface2);
+ background-image:var(--select-chevron);
+ background-repeat:no-repeat;
+ background-position:right 12px center;
+ background-size:16px 16px;
+ appearance:none;
+ -webkit-appearance:none;
+ color:var(--text);
+ font-size:14px;
+ font-weight:550;
+ line-height:1.35;
+ cursor:pointer;
+ text-overflow:ellipsis;
+}
+#root select:not([multiple]):not([size]):hover:not(:disabled){border-color:var(--brand);background-color:var(--surface3)}
+#root select:not([multiple]):not([size]):focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-color:var(--brand)}
+#root select:not([multiple]):not([size]):disabled{cursor:not-allowed;opacity:.55}
+#root select:not([multiple]):not([size]) option{background:var(--surface2);color:var(--text)}
+@media(max-width:640px){#root select:not([multiple]):not([size]){min-height:48px;height:48px;font-size:14px}}

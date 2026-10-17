@@ -409,6 +409,26 @@ export default function FileSharingPage({toast}) {
   try{await callJSON('goCancelFileDownload',null,id);await refreshTransfers()}
   catch(e){setTransferError(e.message||String(e))}
  }
+ async function clearTransfer(id){
+  try{
+   await callJSON('goClearFileTransfer',null,id);
+   saveHandles.current.delete(id);
+   completedSaves.current.delete(id);
+   completedUploads.current.delete(id);
+   setTransferError('');
+   await refreshTransfers();
+  }catch(e){setTransferError(e.message||String(e))}
+ }
+ async function clearInactiveTransfers(){
+  try{
+   await callJSON('goClearInactiveFileTransfers',null);
+   saveHandles.current.clear();
+   completedSaves.current.clear();
+   completedUploads.current.clear();
+   setTransferError('');
+   await refreshTransfers();
+  }catch(e){setTransferError(e.message||String(e))}
+ }
  async function resumeDownload(id){
   const item=transfers.find(t=>t.id===id);
   if(!item)return;
@@ -495,10 +515,17 @@ export default function FileSharingPage({toast}) {
  const shares=state?.shares||[];
  const active=shares.filter(s=>s.enabled).length;
  return <>
-  <div className="page-head"><div><h1>文件共享</h1><p>在授权设备之间共享本地文件夹，按设备分别控制读写权限。</p></div><div className="actions"><button className="btn" onClick={refresh} disabled={busy}>刷新</button>{tab==='local'&&<button className="btn primary" onClick={()=>edit(null)} disabled={!state||busy}>＋ 添加共享文件夹</button>}</div></div>
+
   {error&&<div className="notice danger file-share-error" role="alert">{error}</div>}
-  <div className="file-share-tabs" role="tablist" aria-label="文件共享页面">
-   {[[ 'local','我的共享'],['remote','其他设备'],['transfers','传输任务']].map(([id,title])=><button type="button" key={id} role="tab" aria-selected={tab===id} className={tab===id?'selected':''} onClick={()=>setTab(id)}>{title}</button>)}
+  <div className="file-share-header">
+   <div className="file-share-tabs" role="tablist" aria-label="文件共享页面">
+    {[[ 'local','我的共享'],['remote','其他设备'],['transfers','传输任务']].map(([id,title])=><button type="button" key={id} role="tab" aria-selected={tab===id} className={tab===id?'selected':''} onClick={()=>setTab(id)}>{title}</button>)}
+   </div>
+   <div className="file-share-header-actions">
+    <button className="btn quiet" onClick={tab==='transfers'?refreshTransfers:tab==='remote'?()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}:refresh} disabled={busy}>刷新</button>
+    {tab==='local'&&<button className="btn primary" onClick={()=>edit(null)} disabled={!state||busy}>＋ 添加共享文件夹</button>}
+    {tab==='transfers'&&transfers.some(x=>x.state!=='running')&&<button className="btn" onClick={clearInactiveTransfers}>清除已结束</button>}
+   </div>
   </div>
   {tab==='local'&&<>
    <div className="cards-3">
@@ -535,11 +562,11 @@ export default function FileSharingPage({toast}) {
     canWrite={canUpload} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
     transfers={transfers} treeRevision={treeRevision} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
     onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
-    onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onOpenTransfers={()=>setTab('transfers')} onCancelUpload={()=>{uploadCancelRef.current=true}}
+    onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onClearTransfer={clearTransfer} onClearInactiveTransfers={clearInactiveTransfers} onOpenTransfers={()=>setTab('transfers')} onCancelUpload={()=>{uploadCancelRef.current=true}}
     onRefresh={()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}}
     toast={toast}/>}
   {tab==='transfers'&&<section className="card">
-   <div className="card-head"><div><div className="eyebrow">TRANSFERS</div><h2>传输任务</h2></div><button className="btn" onClick={refreshTransfers}>刷新</button></div>
+   
    {transferError&&<div className="notice danger" role="alert">{transferError}</div>}
    <div className="mini">下载保存至本机 Downloads/RelayProxy；上传到共享端当前目录。优先尝试文件专用 QUIC 直连，其次 TCP/TLS，均不可用时回退 Relay；不要求授予代理或 RDP 权限。</div>
    {transfers.length===0?<div className="empty">暂无传输任务。在“其他设备”中选择文件下载，或在读写目录内上传文件。</div>:
@@ -556,6 +583,7 @@ export default function FileSharingPage({toast}) {
      }}>保存到浏览器下载目录</button>}
      {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>{item.direction==='download'?'暂停下载':'取消上传'}</button>}
      {item.direction==='download'&&(item.state==='paused'||item.state==='failed')&&<button className="btn primary" onClick={()=>resumeDownload(item.id)}>继续下载</button>}
+      {item.state!=='running'&&<button className="btn" title="只清除传输记录，不删除下载的文件" onClick={()=>clearTransfer(item.id)}>清除记录</button>
     </div>)}
   </section>}
   {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>

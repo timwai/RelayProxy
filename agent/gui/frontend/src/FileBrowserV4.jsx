@@ -15,7 +15,7 @@ const focusParam=()=>new URLSearchParams(window.location.search).has('filesWindo
 const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
 export default function FileBrowserV4({
- peers,device,share,path,shares,entries,loading,error,latency,canWrite,treeRevision,
+ peers,device,share,path,shares,entries,loading,error,latency,canWrite,warmStatus,treeRevision,
  uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onCancelTransfer,onResumeTransfer,onClearTransfer,onClearInactiveTransfers,onOpenTransfers,onRefresh,toast
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
@@ -284,7 +284,7 @@ export default function FileBrowserV4({
   <div className="v4-main">
    <div className="v4-head">
     <div className="v4-head-title"><div className="eyebrow">REMOTE FILE EXPLORER</div><h2>{rootName}</h2>
-     <small>{deviceName} · {canWrite?'读写':'只读'}{error?' · '+error:''}</small></div>
+     <small>{deviceName} · {canWrite?'读写':'只读'}{warmStatus?' · '+warmStatus:''}{error?' · '+error:''}</small></div>
     <div className="v4-head-actions">
      <button className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} title="选择设备"><Icon name="devices"/></button>
      {hasBridge('goOpenFileBrowserWindow')?

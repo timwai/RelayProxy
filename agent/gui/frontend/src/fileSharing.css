@@ -138,3 +138,11 @@
  .file-share-tabs button{white-space:nowrap;padding:8px 10px}
  .file-share-header-actions{width:100%;justify-content:flex-end}
 }
+
+/* Keep the file-sharing tabs and their actions in one compact, left-to-right
+   flow; when they wrap, buttons start at the left instead of leaving a gap. */
+@media(max-width:680px){
+ .file-share-header{align-items:center;justify-content:flex-start;gap:6px 10px}
+ .file-share-tabs{flex:0 1 auto;max-width:100%;min-width:0;flex-wrap:nowrap}
+ .file-share-header-actions{flex:0 1 auto;width:auto;max-width:100%;justify-content:flex-start}
+}

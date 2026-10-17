@@ -351,6 +351,16 @@ export default function FileSharingPage({toast}) {
   }
  }
  refreshActiveDirRef.current=openRemoteDir;
+ useEffect(()=>{
+  window.relayOpenFileShare=(deviceID,shareID,dir='.')=>{
+   const peer=peersRef.current.find(p=>p.deviceId===deviceID);
+   if(!peer?.shares?.some(s=>s.id===shareID))return;
+   setRemoteShares(peer.shares);
+   setTab('remote');
+   void openRemoteDir(deviceID,shareID,dir);
+  };
+  return()=>{delete window.relayOpenFileShare};
+ },[peers]);
  async function beginDownload(entry){
   const relativePath=remotePath==='.'?entry.name:remotePath+'/'+entry.name;
   setRemoteError('');

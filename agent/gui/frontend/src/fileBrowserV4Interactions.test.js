@@ -23,6 +23,10 @@ test('standalone explorer uses same tab, avoiding popup blockers',()=>{
  assert.match(jsx,/href={focus\?returnToAppURL\(\):newWindowURL\(\)}/);
  assert.match(jsx,/hasBridge\('goOpenFileBrowserWindow'\)/);
  assert.match(jsx,/window\.goOpenFileBrowserWindow/);
+ assert.match(jsx,/hasBridge\('goOpenFileBrowserWindow'\)&&/);
+ assert.match(jsx,/<a className="btn v4-window-link"/);
+ const win=read('../../file_browser_windows.go');
+ assert.match(win,/window\.SetURL\("\/\?" \+ query\.Encode\(\)\)/);
  assert.doesNotMatch(jsx,/<a[^>]+target="_blank"/);
  assert.doesNotMatch(jsx,/window\.open\(/);
  const css=read('./fileBrowserV4.css');

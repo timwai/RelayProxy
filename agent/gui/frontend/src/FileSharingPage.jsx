@@ -71,20 +71,32 @@ export default function FileSharingPage({toast}) {
  const [uploading,setUploading]=useState(false);
  const [uploadStaged,setUploadStaged]=useState(0);
  const [uploadTotal,setUploadTotal]=useState(0);
- // Start a bounded, authenticated direct-path probe while users browse,
- // not when they click Download. Fresh credentials are still used for bytes.
+ // Preflight starts after the peer and share have been verified. Poll only
+ // while a previous short-lived probe is in flight; never start file bytes.
  useEffect(()=>{
   const peer=peersRef.current.find(p=>p.deviceId===remoteDevice);
   if(!remoteDevice||!remoteShare||!peer?.shares?.some(x=>x.id===remoteShare)){
    setWarmStatus('');return;
   }
-  let active=true;
+  let active=true,timer=null,attempts=0;
   setWarmStatus('直连预探测中');
-  void callJSON('goPrewarmRemoteFileDirect',null,remoteDevice,remoteShare)
-   .then(result=>{
-    if(active)setWarmStatus(result?.state==='ready'?'直连路径已预探测':result?.state==='warming'?'直连预探测中':'可用 Relay 回退');
-   }).catch(()=>{if(active)setWarmStatus('可用 Relay 回退')});
-  return()=>{active=false};
+  const probe=async()=>{
+   try{
+    const result=await callJSON('goPrewarmRemoteFileDirect',null,remoteDevice,remoteShare);
+    if(!active)return;
+    if(result?.state==='warming'){
+     if(++attempts<14)timer=setTimeout(()=>void probe(),650);
+     else setWarmStatus('直连预探测超时，可用 Relay');
+     return;
+    }
+    if(result?.state==='ready'){
+     const label=({'p2p_quic':'P2P QUIC','direct_quic':'QUIC','direct_tls':'TLS'})[result.path]||'直连';
+     setWarmStatus(label+' 路径已预探测');
+    }else setWarmStatus('Relay 回退可用');
+   }catch(e){if(active)setWarmStatus('Relay 回退可用')}
+  };
+  void probe();
+  return()=>{active=false;if(timer!==null)clearTimeout(timer)};
  },[remoteDevice,remoteShare]);
  const canUpload=remoteShares.some(s=>s.id===remoteShare&&s.permission==='read_write');
  const currentShare=remoteShares.find(s=>s.id===remoteShare);

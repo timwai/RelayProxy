@@ -52,6 +52,7 @@ export default function FileSharingPage({toast}) {
  const [treeRevision,setTreeRevision]=useState(0);
  const uploadBusyRef=useRef(false);
  const liveFolderRef=useRef({device:'',share:'',path:'.'});
+ const refreshActiveDirRef=useRef(null);
  const initialWindowTarget=useRef((()=>{
   const params=new URLSearchParams(window.location.search);
   if(!params.has('filesWindow'))return null;
@@ -236,6 +237,11 @@ export default function FileSharingPage({toast}) {
     if(task.direction==='upload'&&task.state==='completed'&&!completedUploads.current.has(task.id)){
      completedUploads.current.add(task.id);
      directoryCache.current.clearDevice(task.deviceId);
+     setTreeRevision(n=>n+1);
+     const live=liveFolderRef.current;
+     const taskDir=task.relativePath?.includes('/')?task.relativePath.slice(0,task.relativePath.lastIndexOf('/')):'.';
+     if(live.device===task.deviceId&&live.share===task.shareId&&live.path===taskDir)
+      void refreshActiveDirRef.current?.(live.device,live.share,live.path,{force:true});
     }
     if(task.direction!=='download'||task.state!=='completed'||completedSaves.current.has(task.id))continue;
     const entry=saveHandles.current.get(task.id);
@@ -344,6 +350,7 @@ export default function FileSharingPage({toast}) {
    if(seq===navigationSerial.current)setRemoteLoading(false);
   }
  }
+ refreshActiveDirRef.current=openRemoteDir;
  async function beginDownload(entry){
   const relativePath=remotePath==='.'?entry.name:remotePath+'/'+entry.name;
   setRemoteError('');

@@ -76,3 +76,12 @@ Roll UI changes out incrementally; avoid large UI rewrites that touch networking
 - No config keys or mutation API calls changed: `rdp.enabled` still saves under `rdp`, and `verificationPopupTimeoutSec` still saves under `gui`.
 - Settings navigation is a single horizontally scrollable row with tooltips to prevent new categories from adding vertical page-header rows. Existing page IDs and operational routes stay supported.
 - Regression test `agent/gui/frontend/src/settings-placement.test.js` enforces route presence, operational/configuration separation and preservation of save and preview behavior.
+
+## Iteration 6: unified native select sizing
+
+- All **single-choice** HTML `select` controls in Agent (Wails / Web UI) and Server Web use a consistent `44px` minimum target, `48px` below `640px`, `14px` text, clearly visible caret and 10px radius.
+- The universal selector `select:not([multiple]):not([size])` intentionally excludes multi-select listboxes, preserving native list behavior.
+- The chevron switches from dark to light stroke with `html[data-theme="dark"]`; hover, focus-visible, disabled and option colors follow existing design tokens.
+- Covered screens include Agent routing / DNS selectors, settings, file sharing permissions, file-browser sorting, monitoring; Server filters, configuration groups, RDP/security dialogs and Browser Sync approval.
+- The dropdown menu itself can be drawn by the OS / embedded WebView; the visual skin and height of OS-owned expanded options are not controllable via CSS. Manual acceptance should exercise macOS and Windows native Wails builds plus desktop and mobile browsers.
+- Regression tests: `agent/gui/frontend/src/select-style.test.js` and `server/web/frontend/src/select-style.test.js`. No backing config schemas or select `onChange` handlers changed.

@@ -18,7 +18,7 @@
   window.goGetRemoteFileShares = deviceID => invoke('GetRemoteFileShares', deviceID);
   window.goGetRemoteFileEntries = (deviceID, shareID, relativePath) => invoke('GetRemoteFileEntries', deviceID, shareID, relativePath);
   window.goMutateRemoteFile = (deviceID, shareID, action, relativePath, destination) => invoke('MutateRemoteFile', deviceID, shareID, action, relativePath, destination);
-  window.goOpenFileBrowserWindow = () => invoke('OpenFileBrowserWindow');
+  window.goOpenFileBrowserWindow = (deviceID, shareID, path) => invoke('OpenFileBrowserWindow', deviceID, shareID, path);
   window.goBeginFileUpload = (deviceID, shareID, relativePath, size) => invoke('BeginFileUpload', deviceID, shareID, relativePath, size);
   window.goAppendFileUploadChunk = (id, chunk) => invoke('AppendFileUploadChunk', id, chunk);
   window.goCommitFileUpload = id => invoke('CommitFileUpload', id);

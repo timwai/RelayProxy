@@ -766,3 +766,20 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
 #root .table-wrap tbody td{padding-block:11px}
 #root .table-wrap td .table-action{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
 @media(max-width:760px){#root .table-wrap{max-height:min(62dvh,580px)}}
+
+/* At compact widths the left drawer must not leave offscreen tabbable controls.
+   Theme choice moves from the crowded top bar into the mobile drawer. */
+#root{color-scheme:light}
+html[data-theme="dark"] #root{color-scheme:dark}
+#root .nav-item[aria-current="page"]{font-weight:750}
+#root .mobile-theme-controls{display:none}
+@media(max-width:760px){
+ #root #app .sidebar{visibility:hidden;pointer-events:none}
+ #root #app.mobile-nav-open .sidebar{visibility:visible;pointer-events:auto}
+ #root .mobile-theme-controls{display:flex;gap:4px;align-items:center;justify-content:space-between;margin-bottom:12px;padding:4px;background:var(--surface3);border:1px solid var(--line);border-radius:11px}
+ #root .mobile-theme-controls button{flex:1;min-height:40px;border:0;background:transparent;color:var(--muted);border-radius:8px;font-size:12px}
+ #root .mobile-theme-controls button.active{background:var(--surface2);color:var(--text);font-weight:750;box-shadow:0 2px 6px rgba(0,0,0,.07)}
+}
+@media(prefers-reduced-motion:reduce){
+ #root #app .sidebar,#root #app .mobile-nav-overlay{transition:none!important}
+}

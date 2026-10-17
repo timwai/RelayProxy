@@ -743,3 +743,17 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
  #root .browser-sync-refined .browser-sync-audit-actions{width:100%}
  #root .browser-sync-refined .browser-sync-audit-actions .btn{flex:1;min-width:110px}
 }
+
+/* Each console page keeps one semantic heading; the existing top bar is the
+   visible title. Descriptive context and actions share one compact row. */
+#root .page-head.page-actions-toolbar{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px 16px;min-height:36px;margin-bottom:14px}
+#root .page-head.page-actions-toolbar>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+#root .page-head.page-actions-toolbar>.page-context-help{flex:1 1 260px;min-width:0;margin:0;font-size:12px;line-height:1.45;color:var(--muted)}
+#root .page-head.page-actions-toolbar>.head-actions{flex:0 1 auto;margin-left:auto;max-width:100%}
+#root .dialog-header .btn{width:40px;height:40px;min-height:40px}
+@media(max-width:760px){
+ #root .page-head.page-actions-toolbar{flex-direction:row;align-items:center;gap:10px}
+ #root .page-head.page-actions-toolbar>.page-context-help{flex:1 1 100%}
+ #root .page-head.page-actions-toolbar>.head-actions{width:100%;margin-left:0;justify-content:flex-start}
+ #root .dialog-header .btn{width:44px;height:44px;min-height:44px}
+}

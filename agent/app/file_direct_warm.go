@@ -133,12 +133,14 @@ func (a *Agent) fileDirectRecentlyUnreachable(deviceID, shareID string) bool {
 // A successful preflight is only a transport-order hint. The next request
 // always performs independent, Server-issued one-time ticket authentication.
 func (a *Agent) fileDirectWarmPath(deviceID, shareID string) string {
- a.mu.RLock()
- epoch:=a.epoch
- a.mu.RUnlock()
- a.fileWarmMu.Lock()
- hint,ok:=a.fileWarmHints[deviceID+"\x00"+shareID]
- a.fileWarmMu.Unlock()
- if !ok||hint.epoch!=epoch||hint.state!="ready"||time.Now().After(hint.until){return ""}
- return hint.path
+	a.mu.RLock()
+	epoch := a.epoch
+	a.mu.RUnlock()
+	a.fileWarmMu.Lock()
+	hint, ok := a.fileWarmHints[deviceID+"\x00"+shareID]
+	a.fileWarmMu.Unlock()
+	if !ok || hint.epoch != epoch || hint.state != "ready" || time.Now().After(hint.until) {
+		return ""
+	}
+	return hint.path
 }

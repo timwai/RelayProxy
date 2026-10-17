@@ -27,6 +27,15 @@ func (a *Agent) tryFileDirect(ctx context.Context, hostID string, req protocol.F
 }
 
 func (a *Agent) tryFileDirectMode(ctx context.Context, hostID string, req protocol.FileShareRequest, allowPunch bool) (tunnel.TunnelStream, protocol.FileShareResponse, error) {
+	warmPath := ""
+	if fileDirectNeedsPunch(req.Action) {
+		warmPath = a.fileDirectWarmPath(hostID, req.ShareID)
+		// Previously authenticated direct QUIC/TLS reachability lets the
+		// download avoid retrying a slow P2P rendezvous first.
+		if warmPath == "direct_quic" || warmPath == "direct_tls" {
+			allowPunch = false
+		}
+	}
 	session, _, err := a.fileSharingSession()
 	if err != nil {
 		return nil, protocol.FileShareResponse{}, err
@@ -99,7 +108,7 @@ func (a *Agent) tryFileDirectMode(ctx context.Context, hostID string, req protoc
 	// Sequentially trying up to 16 unreachable UDP candidates could otherwise
 	// consume the entire ticket before the TCP path gets a chance.
 	// Independent, short stage budgets keep the Relay path responsive.
-	if len(offer.UDPEndpoints) > 0 {
+	if len(offer.UDPEndpoints) > 0 && warmPath != "direct_tls" {
 		quicCtx, cancelQUIC := fileDirectStageContext(ctx, offer.ExpiresAt, 4*time.Second)
 		stream, response, quicErr := a.tryFileQUIC(quicCtx, offer, req)
 		cancelQUIC()

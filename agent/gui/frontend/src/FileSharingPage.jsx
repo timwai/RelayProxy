@@ -233,11 +233,11 @@ export default function FileSharingPage({toast}) {
   };
  },[tab,refreshPeers]);
  useEffect(()=>{
-  if(tab==='transfers')void refreshTransfers();
+  if(tab==='transfers'||tab==='remote')void refreshTransfers();
   // A browser-selected Save As handle must still be fulfilled when the
   // user switches between the remote explorer and transfers tabs.
   const timer=setInterval(()=>{
-   if(tab==='transfers'||saveHandles.current.size>0)void refreshTransfers();
+   if(tab==='transfers'||tab==='remote'||saveHandles.current.size>0)void refreshTransfers();
   },900);
   return ()=>clearInterval(timer);
  },[tab,refreshTransfers]);

@@ -20,7 +20,7 @@ export default function FileBrowserV4({
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
  const [selected,setSelected]=useState([]),[anchor,setAnchor]=useState(''),[details,setDetails]=useState(false),[visibleLimit,setVisibleLimit]=useState(200);
- const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false),[dockOpen,setDockOpen]=useState(true);
+ const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false),[dockOpen,setDockOpen]=useState(false);
  const [menu,setMenu]=useState(null),[dialog,setDialog]=useState(null),[dropTarget,setDropTarget]=useState('');
  const [treeWidth,setTreeWidth]=useState(248),[detailWidth,setDetailWidth]=useState(286);
  const [expanded,setExpanded]=useState(new Set()),[treeFolders,setTreeFolders]=useState({});
@@ -37,6 +37,9 @@ export default function FileBrowserV4({
  const preview=chosen.length===1?chosen[0]:null;
  const runningTransfers=transfers.filter(item=>item.state==='running');
  const recentTransfers=runningTransfers.length?runningTransfers.slice(-3).reverse():transfers.slice(-3).reverse();
+ // Keep the file viewport large while idle; reveal progress when a transfer starts.
+ // Users may still collapse the dock during a running transfer.
+ useEffect(()=>{if(runningTransfers.length>0)setDockOpen(true)},[runningTransfers.length]);
  const transferLabel={running:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',paused:'已暂停'};
  const rootName=activeShare?.name||'共享文件夹';
  const deviceName=peers.find(x=>x.deviceId===device)?.name||device||'选择设备';

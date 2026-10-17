@@ -136,3 +136,14 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
  .settings-nav-item{flex:0 0 130px}
  .settings-nav-item small{display:none}
 }
+
+/* Impeccable typography pass: keep dense data layouts, but make secondary
+   labels legible without forcing every card to grow taller. */
+:root{--ui-body-size:14px;--ui-caption-size:12px;--ui-label-size:11px}
+body{font-size:var(--ui-body-size)}
+.mini{font-size:var(--ui-caption-size)}
+.eyebrow,.group-name{font-size:var(--ui-label-size);letter-spacing:.09em}
+.badge{font-size:11px}
+.btn.quiet{font-size:12px}
+.modal-head .close{width:40px;height:40px;flex:none}
+@media(max-width:820px){.modal-head .close{width:44px;height:44px}}

@@ -85,7 +85,9 @@ func (s *WailsService) GetRemoteFileEntries(deviceID, shareID, relativePath stri
 	return s.owner.bridge.GetRemoteFileEntries(deviceID, shareID, relativePath)
 }
 func (s *WailsService) OpenFileBrowserWindow() string {
-	if s == nil || s.owner == nil { return "unavailable" }
+	if s == nil || s.owner == nil {
+		return "unavailable"
+	}
 	s.owner.openFileBrowser()
 	return "ok"
 }

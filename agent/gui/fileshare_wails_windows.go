@@ -103,10 +103,10 @@ func (s *WailsService) GetFileTransfers() []bridge.FileTransfer {
 	return s.owner.bridge.GetFileTransfers()
 }
 func (s *WailsService) ClearFileTransfer(id string) error {
- return s.owner.bridge.ClearFileTransfer(id)
+	return s.owner.bridge.ClearFileTransfer(id)
 }
-func (s *WailsService) ClearInactiveFileTransfers() (int,error) {
- return s.owner.bridge.ClearInactiveFileTransfers()
+func (s *WailsService) ClearInactiveFileTransfers() (int, error) {
+	return s.owner.bridge.ClearInactiveFileTransfers()
 }
 func (s *WailsService) CancelFileDownload(id string) error {
 	return s.owner.bridge.CancelFileDownload(id)

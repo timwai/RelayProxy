@@ -586,7 +586,7 @@ export default function FileSharingPage({toast}) {
      }}>保存到浏览器下载目录</button>}
      {item.state==='running'&&<button className="btn danger" onClick={()=>cancelTransfer(item.id)}>{item.direction==='download'?'暂停下载':'取消上传'}</button>}
      {item.direction==='download'&&(item.state==='paused'||item.state==='failed')&&<button className="btn primary" onClick={()=>resumeDownload(item.id)}>继续下载</button>}
-      {item.state!=='running'&&<button className="btn" title="只清除传输记录，不删除下载的文件" onClick={()=>clearTransfer(item.id)}>清除记录</button>
+      {item.state!=='running'&&<button className="btn" title="只清除传输记录，不删除下载的文件" onClick={()=>clearTransfer(item.id)}>清除记录</button>}
     </div>)}
   </section>}
   {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>

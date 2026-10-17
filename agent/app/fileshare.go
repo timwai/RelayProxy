@@ -255,14 +255,16 @@ func (a *Agent) RemoteFileList(ctx context.Context, deviceID, shareID, relativeP
 // DownloadRemoteFile preserves the original, zero-offset streaming API.
 // MutateRemoteFile executes only on the authenticated host and never takes an absolute path.
 func (a *Agent) MutateRemoteFile(ctx context.Context, deviceID, shareID, action, relativePath, destination string) error {
- if action != protocol.FileShareMkdir && action != protocol.FileShareMove && action != protocol.FileShareRemove {
-  return errors.New("unsupported file mutation")
- }
- stream, _, err := a.openRemoteFile(ctx, deviceID, protocol.FileShareRequest{
-  Action: action, ShareID: shareID, Path: relativePath, Destination: destination,
- })
- if err != nil { return err }
- return stream.Close()
+	if action != protocol.FileShareMkdir && action != protocol.FileShareMove && action != protocol.FileShareRemove {
+		return errors.New("unsupported file mutation")
+	}
+	stream, _, err := a.openRemoteFile(ctx, deviceID, protocol.FileShareRequest{
+		Action: action, ShareID: shareID, Path: relativePath, Destination: destination,
+	})
+	if err != nil {
+		return err
+	}
+	return stream.Close()
 }
 
 func (a *Agent) DownloadRemoteFile(ctx context.Context, deviceID, shareID, relativePath string, dst io.Writer, progress func(int64, int64)) (int64, error) {

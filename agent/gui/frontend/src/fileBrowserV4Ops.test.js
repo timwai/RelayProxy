@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {validRemotePath,planSameShareMoves} from './fileBrowserV4Ops.js';
+import {validRemotePath,planSameShareMoves,contextSelection} from './fileBrowserV4Ops.js';
 const active={device:'host-1',share:'shared-A',path:'work'};
 const source={...active,names:['notes.txt','design']};
 test('same-share moves resolve relative paths without changing the selected device',()=>{
@@ -24,4 +24,11 @@ test('rejects malformed paths, duplicate names, self and nested-folder moves',()
  assert.throws(()=>planSameShareMoves(source,active,active,true),/不能/);
  assert.throws(()=>planSameShareMoves({...source,names:['same','same']},active,{...active,path:'archive'},true),/重复/);
  assert.throws(()=>planSameShareMoves({...source,names:['a/b']},active,{...active,path:'archive'},true),/名称/);
+});
+
+test('right click outside selected group targets only the clicked file',()=>{
+ const entries=[{name:'keep.txt'},{name:'other.txt'},{name:'new.txt'}];
+ assert.deepEqual(contextSelection(entries[2],['keep.txt','other.txt'],entries).map(x=>x.name),['new.txt']);
+ assert.deepEqual(contextSelection(entries[0],['keep.txt','other.txt'],entries).map(x=>x.name),['keep.txt','other.txt']);
+ assert.deepEqual(contextSelection(entries[2],['missing.txt'],entries).map(x=>x.name),['new.txt']);
 });

@@ -26,7 +26,7 @@ function Field({label,value,onChange,onBlur,type='text',placeholder='',options=[
 }
 function Select({value,onChange,items=[],placeholder='请选择',disabled=false}){return <select className="input" disabled={disabled} value={value||''} onChange={e=>onChange(e.target.value)}><option value="">{placeholder}</option>{items.map(x=><option key={x.id} value={x.id}>{x.name||x.deviceName||x.id}</option>)}</select>}
 function Table({columns,items,render,empty='暂无数据'}){return <div className="table-wrap"><table><thead><tr>{columns.map((col,i)=><th key={i}>{col}</th>)}</tr></thead><tbody>{items.length?items.map((item,i)=><tr key={item.id||item.sourceIp||i}>{render(item,i)}</tr>):<tr><td colSpan={columns.length}><div className="empty-state">{empty}</div></td></tr>}</tbody></table></div>}
-function Head({title,desc,actions}){return <div className="page-head"><div><h1>{title}</h1>{desc&&<p>{desc}</p>}</div>{actions&&<div className="head-actions">{actions}</div>}</div>}
+function Head({title,desc,actions}){return <div className="page-head page-actions-toolbar"><h1 className="sr-only">{title}</h1>{desc&&<p className="page-context-help">{desc}</p>}{actions&&<div className="head-actions">{actions}</div>}</div>}
 function Panel({title,desc,actions,children,className=''}){return <section className={'card page-section '+className}><div className="card-title-area"><div><h2>{title}</h2>{desc&&<p className="section-description">{desc}</p>}</div>{actions}</div>{children}</section>}
 function DeviceAuthSummary({name,id,platform,arch,identity,state,requested=false}) {
  const online=state==='online';
@@ -65,7 +65,29 @@ function Caps({value,onChange,allowed=allCapabilities}) {
  </div>;
 }
 
-function Dialog({dialog,close}){const ref=useRef(null);useEffect(()=>{if(!dialog)return;const onKey=e=>{if(e.key==='Escape')close()};document.addEventListener('keydown',onKey);return()=>document.removeEventListener('keydown',onKey)},[dialog,close]);if(!dialog)return null;return <div className="dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section ref={ref} role="dialog" aria-modal="true" aria-label={dialog.title} className={'dialog-window '+(dialog.wide?'wide':'')}><header className="dialog-header"><h2>{dialog.title}</h2><Action onClick={close}>✕</Action></header><div className="modal-content-scroll">{dialog.body}</div></section></div>}
+// Keep keyboard focus inside a modal, and restore the triggering control on exit.
+function useDialogFocus(open, dialogRef, onClose){
+ const onCloseRef=useRef(onClose);onCloseRef.current=onClose;
+ useEffect(()=>{
+  if(!open||!dialogRef.current)return;
+  const dialog=dialogRef.current,previous=document.activeElement;
+  const selector='a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
+  const focusable=()=>Array.from(dialog.querySelectorAll(selector)).filter(el=>el.getClientRects().length>0&&!el.closest('[aria-hidden="true"]'));
+  (dialog.querySelector('input:not(:disabled),select:not(:disabled),textarea:not(:disabled)')||focusable()[0]||dialog).focus();
+  const onKey=e=>{
+   if(e.key==='Escape'){e.preventDefault();onCloseRef.current?.();return}
+   if(e.key!=='Tab')return;
+   const items=focusable();
+   if(!items.length){e.preventDefault();dialog.focus();return}
+   const first=items[0],last=items[items.length-1],active=document.activeElement;
+   if(e.shiftKey&&(active===first||!dialog.contains(active))){e.preventDefault();last.focus()}
+   else if(!e.shiftKey&&(active===last||!dialog.contains(active))){e.preventDefault();first.focus()}
+  };
+  document.addEventListener('keydown',onKey);
+  return()=>{document.removeEventListener('keydown',onKey);if(previous instanceof HTMLElement&&previous.isConnected)previous.focus()};
+ },[open,dialogRef]);
+}
+function Dialog({dialog,close}){const ref=useRef(null);useDialogFocus(!!dialog,ref,close);if(!dialog)return null;return <div className="dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={dialog.title} className={'dialog-window '+(dialog.wide?'wide':'')}><header className="dialog-header"><h2>{dialog.title}</h2><Action onClick={close}><span aria-label="关闭对话框" role="img">✕</span></Action></header><div className="modal-content-scroll">{dialog.body}</div></section></div>}
 function Login({onLogin,error}){
  const [username,setUser]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[localError,setLocalError]=useState('');

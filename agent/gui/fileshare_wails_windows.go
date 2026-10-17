@@ -84,6 +84,10 @@ func (s *WailsService) GetRemoteFileShares(deviceID string) ([]protocol.FileShar
 func (s *WailsService) GetRemoteFileEntries(deviceID, shareID, relativePath string) ([]protocol.FileShareEntry, error) {
 	return s.owner.bridge.GetRemoteFileEntries(deviceID, shareID, relativePath)
 }
+func (s *WailsService) MutateRemoteFile(deviceID, shareID, action, relativePath, destination string) error {
+ return s.owner.bridge.MutateRemoteFile(deviceID, shareID, action, relativePath, destination)
+}
+
 func (s *WailsService) StartFileDownload(deviceID, shareID, relativePath string) (bridge.FileTransfer, error) {
 	return s.owner.bridge.StartFileDownload(deviceID, shareID, relativePath)
 }

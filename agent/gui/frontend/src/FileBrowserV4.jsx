@@ -1,7 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Icon} from './icons.jsx';
 import {call,callJSON,hasBridge} from './bridge.js';
-import {planSameShareMoves} from './fileBrowserV4Ops.js';
+import {planSameShareMoves,contextSelection} from './fileBrowserV4Ops.js';
 import './fileBrowserV4.css';
 
 const join=(dir,name)=>dir==='.'?name:dir+'/'+name;
@@ -44,6 +44,7 @@ export default function FileBrowserV4({
  useEffect(()=>{treeGeneration.current+=1;setExpanded(new Set());setTreeFolders({})},[treeRevision]);
  useEffect(()=>setVisibleLimit(200),[query,sort,view]);
  useEffect(()=>{setSelected([]);setAnchor('')},[query]);
+ useEffect(()=>{setSelected([]);setAnchor('');setMenu(null)},[entries]);
  useEffect(()=>{document.documentElement.classList.toggle('file-browser-focus',focus);return()=>document.documentElement.classList.remove('file-browser-focus')},[focus]);
  useEffect(()=>{const keyHandler=e=>{
    if(!box.current?.contains(e.target)||menu||dialog)return;
@@ -62,8 +63,9 @@ export default function FileBrowserV4({
  const openDevice=id=>{setTreeOpen(false);onDevice(id)};
  const showMenu=(e,kind,item=null,target=null)=>{
   e.preventDefault();e.stopPropagation();
+  const targets=kind==='file'&&item?contextSelection(item,selected,entries):[];
   if(kind==='file'&&item&&!selected.includes(item.name)){setSelected([item.name]);setAnchor(item.name)}
-  setMenu({key:Date.now()+'-'+Math.random(),kind,item,target,x:e.clientX||10,y:e.clientY||10});
+  setMenu({key:Date.now()+'-'+Math.random(),kind,item,target,targets,x:e.clientX||10,y:e.clientY||10});
  };
  const clickFile=(e,item)=>{
   if(e.ctrlKey||e.metaKey){setSelected(prev=>prev.includes(item.name)?prev.filter(x=>x!==item.name):[...prev,item.name]);setAnchor(item.name)}
@@ -84,7 +86,7 @@ export default function FileBrowserV4({
  const requestRename=item=>setDialog({kind:'rename',item,value:item.name});
  const requestCreate=(dir,scope={device,share,path})=>setDialog({kind:'mkdir',dir,scope,value:'新建文件夹'});
  const requestMove=items=>setDialog({kind:'move',items,value:'.'});
- const action=async(type,item,scope)=>{
+ const action=async(type,item,scope,targets=null)=>{
   setMenu(null);
   if(type==='refresh'){onRefresh();return}
   if(type==='details'){toggleDetail();return}
@@ -94,8 +96,8 @@ export default function FileBrowserV4({
   if(type==='name'){if(item?.name){try{if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',item.name);else await navigator.clipboard.writeText(item.name);report('已复制文件名')}catch{report('复制失败')}}return}
   if(type==='download'){for(const entry of item?([item]):chosen.filter(x=>!x.isDir))await onDownload(entry);return}
   if(type==='rename'){requestRename(item);return}
-  if(type==='move'){requestMove(chosen.length?chosen:[item]);return}
-  if(type==='remove'){requestRemove(chosen.length?chosen:[item]);return}
+  if(type==='move'){requestMove(targets||chosen);return}
+  if(type==='remove'){requestRemove(targets||chosen);return}
  };
  const itemsForMenu=()=>{
   if(!menu)return [];
@@ -393,7 +395,7 @@ export default function FileBrowserV4({
        else if(key==='refresh')onDirectory(target.device,target.share,target.path,{force:true});
        else if(key==='upload'){uploadTarget.current=target;input.current?.click()}
        else if(key==='mkdir'){requestCreate(target.path,target)}
-      }else void action(key,menu.item,menu.target);
+      }else void action(key,menu.item,menu.target,menu.targets);
     }}>{title}</button>)}</div>}
   {dialog&&<div className="v4-dialog-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setDialog(null)}>
    <div className="v4-dialog" role="dialog" aria-modal="true">

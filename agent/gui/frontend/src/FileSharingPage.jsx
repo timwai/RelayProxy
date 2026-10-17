@@ -4,6 +4,7 @@ import {Icon} from './icons.jsx';
 import {createDirectoryCache} from './fileBrowserCache.js';
 import {onlyVerifiedFilePeers} from './fileShareVisibility.js';
 import './fileSharing.css';
+import FileBrowserV4 from './FileBrowserV4.jsx';
 
 const formatFileBytes=n=>{const num=Math.max(0,Number(n)||0);if(num<1024)return num.toFixed(0)+' B';const units=['KiB','MiB','GiB','TiB'];const power=Math.min(4,Math.floor(Math.log(num)/Math.log(1024)));return (num/1024**power).toFixed(1)+' '+units[power-1]};
 const blank=()=>({id:'',name:'',rootPath:'',enabled:true,permissions:{}});
@@ -13,7 +14,7 @@ const countPermissions=share=>Object.values(share.permissions||{}).filter(v=>v==
 
 export default function FileSharingPage({toast}) {
  const [state,setState]=useState(null);
- const [tab,setTab]=useState('local');
+ const [tab,setTab]=useState(new URLSearchParams(window.location.search).has('filesWindow')?'remote':'local');
  const [directStatus,setDirectStatus]=useState(null);
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
@@ -65,18 +66,16 @@ export default function FileSharingPage({toast}) {
   return a.name.localeCompare(b.name,undefined,{numeric:true,sensitivity:'base'});
  });
  const activeDownloads=transfers.filter(t=>t.state==='running').length;
- async function uploadSelectedFile(event){
-  const file=event.target.files?.[0];
-  event.target.value='';
-  if(!file||!remoteDevice||!remoteShare||uploading)return;
+ async function uploadOneFile(file,targetDir,targetShare,targetDevice){
+  if(!file||!targetDevice||!targetShare||uploading)return;
   if(!canUpload){setRemoteError('共享目录没有写入权限');return}
   if(file.size>20*1024**3){setRemoteError('单文件上传不能超过 20 GiB');return}
   uploadCancelRef.current=false;
   setUploading(true);setUploadStaged(0);setUploadTotal(file.size);setRemoteError('');
   let sessionId='';
   try{
-   const destination=remotePath==='.'?file.name:remotePath+'/'+file.name;
-   const stage=await callJSON('goBeginFileUpload',null,remoteDevice,remoteShare,destination,file.size);
+   const destination=targetDir==='.'?file.name:targetDir+'/'+file.name;
+   const stage=await callJSON('goBeginFileUpload',null,targetDevice,targetShare,destination,file.size);
    if(!stage?.id)throw new Error('未能建立文件上传任务');
    sessionId=stage.id;
    const chunkSize=128*1024;
@@ -100,15 +99,30 @@ export default function FileSharingPage({toast}) {
    sessionId='';
    // Upload may alter any cached listing for this host; the next browse
    // must re-fetch with its current permission and directory contents.
-   directoryCache.current.clearDevice(remoteDevice);
+   directoryCache.current.clearDevice(targetDevice);
    toast?.('上传任务已提交，正在将文件传输到远程设备');
-   setTab('transfers');
+   if(targetDevice===remoteDevice&&targetShare===remoteShare&&targetDir===remotePath) void openRemoteDir(targetDevice,targetShare,targetDir,{force:true});
   }catch(e){
    setRemoteError(e.message||String(e));
    if(sessionId)try{await callJSON('goDiscardFileUpload',null,sessionId)}catch{}
   }finally{setUploading(false);uploadCancelRef.current=false}
  }
 
+ async function uploadFiles(files,dir=remotePath,share=remoteShare,device=remoteDevice){
+  const chosen=Array.from(files||[]);
+  if(!chosen.length||uploading)return;
+  const authorized=peersRef.current.find(p=>p.deviceId===device)?.shares?.some(s=>s.id===share&&s.permission==='read_write');
+  if(!authorized)throw new Error('目标共享没有写入权限');
+  for(const file of chosen)await uploadOneFile(file,dir,share,device);
+ }
+ async function mutateRemote(action,src,dst=''){
+  if(!['mkdir','move','remove'].includes(action))throw new Error('操作不受支持');
+  if(!remoteDevice||!remoteShare||!peersRef.current.find(p=>p.deviceId===remoteDevice)?.shares?.some(s=>s.id===remoteShare&&s.permission==='read_write'))
+   throw new Error('共享目录未授权写入');
+  await callJSON('goMutateRemoteFile',null,remoteDevice,remoteShare,action,src,dst);
+  directoryCache.current.clearDevice(remoteDevice);
+  await openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true});
+ }
  const refreshDirectStatus=useCallback(async()=>{
   try{setDirectStatus(await callJSON('goGetFileDirectStatus',null))}
   catch{setDirectStatus(null)}
@@ -454,70 +468,14 @@ export default function FileSharingPage({toast}) {
    </div>)}
    </section>
   </>}
-  {tab==='remote'&&<>
-   {remoteError&&<div className="notice danger" role="alert">{remoteError}</div>}
-   <section className="file-browser">
-    <aside className="file-browser-sidebar">
-     <div className="file-browser-aside-title"><span>已授权设备</span><button type="button" className="btn quiet" onClick={refreshPeers} title="刷新设备"><Icon name="activity"/></button></div>
-     {peers.length===0&&<div className="file-browser-aside-empty">暂无在线共享设备。请先在 Server 审批文件访问能力。</div>}
-     {peers.map(peer=><div key={peer.deviceId} className="file-browser-device-group">
-      <button type="button" className={'file-browser-device '+(remoteDevice===peer.deviceId?'active':'')} onClick={()=>openRemoteDevice(peer.deviceId)}>
-       <span className="file-browser-device-mark"><Icon name="devices" size={17}/></span>
-       <span className="file-browser-device-label"><strong>{peer.name||peer.deviceId}</strong><small>{peer.deviceId}</small></span>
-       <span className="file-browser-online-dot" title="在线"/>
-      </button>
-      {remoteDevice===peer.deviceId&&<div className="file-browser-shares">
-       {remoteLoading&&!remoteShares.length&&<span className="mini">正在读取共享目录…</span>}
-       {remoteShares.map(share=><button type="button" key={share.id} className={'file-browser-share '+(remoteShare===share.id?'active':'')} onClick={()=>openRemoteDir(remoteDevice,share.id,'.')}>
-        <Icon name="folder"/><span>{share.name}</span><small>{share.permission==='read_write'?'读写':'只读'}</small>
-       </button>)}
-       {!remoteLoading&&remoteShares.length===0&&<div className="mini">未授权共享文件夹</div>}
-      </div>}
-     </div>)}
-     <div className="file-browser-aside-bottom"><Icon name="shield" size={16}/><span>共享目录权限由设备与 Server 双重校验</span></div>
-    </aside>
-    <div className="file-browser-content">
-     <div className="file-browser-header">
-      <div><div className="eyebrow">REMOTE FILE EXPLORER</div><h2>{currentShare?.name||'远程文件浏览器'}</h2><div className="mini">{remoteDevice?(peers.find(p=>p.deviceId===remoteDevice)?.name||remoteDevice):'选择设备并打开已授权的共享文件夹'}</div></div>
-      <div className="file-share-upload-actions">
-       {remoteShare&&canUpload&&<label className={'btn primary '+(uploading?'disabled':'')} title="使用系统文件选择器上传文件"><Icon name="folder"/> 上传文件<input aria-label="选择要上传的文件" type="file" disabled={uploading||remoteLoading} onChange={uploadSelectedFile} style={{display:'none'}}/></label>}
-       {remoteShare&&<button className="btn" onClick={()=>openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})} disabled={remoteLoading||uploading}><Icon name="activity"/> 刷新</button>}
-      </div>
-     </div>
-     {remoteShare&&<div className="file-browser-tools">
-      <nav aria-label="文件夹路径" className="file-browser-crumbs">
-       <button type="button" onClick={()=>openRemoteDir(remoteDevice,remoteShare,'.')} disabled={remoteLoading}><Icon name="folder"/> {currentShare?.name||'根目录'}</button>
-       {remotePath!=='.'&&remotePath.split('/').map((part,i,parts)=><React.Fragment key={i}><span className="file-browser-separator">/</span><button type="button" onClick={()=>openRemoteDir(remoteDevice,remoteShare,parts.slice(0,i+1).join('/'))} disabled={remoteLoading}>{part}</button></React.Fragment>)}
-      </nav>
-      <div className="file-browser-filters">
-       <input aria-label="搜索当前目录" className="control file-browser-search" type="search" placeholder="搜索此文件夹…" value={fileQuery} onChange={e=>{setFileQuery(e.target.value);setVisibleLimit(200)}}/>
-       <select aria-label="排序方式" className="control file-browser-sort" value={fileSort} onChange={e=>setFileSort(e.target.value)}><option value="name">按名称</option><option value="size">按大小</option><option value="time">按时间</option></select>
-       <button className="btn" aria-label="切换文件视图" title="切换列表／网格" onClick={()=>setViewMode(v=>v==='list'?'grid':'list')}>{viewMode==='list'?'▦':'☰'}</button>
-      </div>
-     </div>}
-     {uploading&&<div className="file-share-upload-staging" role="status"><div className="file-share-upload-staging-title"><span>上传准备：{formatFileBytes(uploadStaged)} / {formatFileBytes(uploadTotal)} · {uploadTotal?Math.floor(uploadStaged/uploadTotal*100):100}%</span><button type="button" className="btn danger" onClick={()=>{uploadCancelRef.current=true}}>取消</button></div><div className="file-share-task-track"><div style={{width:(uploadTotal?Math.min(100,uploadStaged/uploadTotal*100):100)+'%'}}/></div></div>}
-     {!remoteShare?<div className="file-browser-placeholder"><span className="file-browser-placeholder-icon"><Icon name="folder" size={34}/></span><h3>选择设备与共享文件夹</h3><p>左侧显示 Server 已批准且在线的文件共享设备。</p></div>:
-     <>
-      <div className="file-browser-table-head"><span>名称</span><span>大小</span><span>修改时间</span><span>操作</span></div>
-      {remoteLoading&&<div className="empty">正在加载文件…</div>}
-      {!remoteLoading&&visibleFiles.length===0&&<div className="empty">{fileQuery?'没有匹配的文件':'此文件夹为空'}</div>}
-      {!remoteLoading&&<div className={'file-browser-files '+(viewMode==='grid'?'grid-view':'list-view')}>
-       {visibleFiles.slice(0,visibleLimit).map(entry=><div key={entry.name} className={'file-browser-file '+(selectedFile===entry.name?'selected':'')} onClick={()=>entry.isDir?openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name):setSelectedFile(entry.name)}>
-        <span className={'file-browser-file-icon '+(entry.isDir?'directory':'document')}><Icon name={entry.isDir?'folder':'file'} size={19}/></span>
-        <span className="file-browser-file-name"><strong title={entry.name}>{entry.name}</strong><small>{entry.isDir?'文件夹':'文件'}</small></span>
-        <span className="file-browser-file-size">{entry.isDir?'—':formatFileBytes(entry.size)}</span>
-        <span className="file-browser-file-date">{entry.modTime?new Date(entry.modTime>1e12?entry.modTime:entry.modTime*1000).toLocaleDateString():'—'}</span>
-        <button type="button" className={'btn '+(entry.isDir?'':'primary')} onClick={e=>{e.stopPropagation();entry.isDir?openRemoteDir(remoteDevice,remoteShare,remotePath==='.'?entry.name:remotePath+'/'+entry.name):beginDownload(entry)}} disabled={remoteLoading}>{entry.isDir?'打开':'下载'}</button>
-       </div>)}
-      </div>}
-      {!remoteLoading&&visibleFiles.length>visibleLimit&&<div className="file-browser-more">
-       <button className="btn" type="button" onClick={()=>setVisibleLimit(n=>n+200)}>显示更多（剩余 {visibleFiles.length-visibleLimit} 项）</button>
-      </div>}
-      <div className="file-browser-status"><span>{visibleFiles.length} 个项目 · {currentShare?.permission==='read_write'?'可读取和上传':'只读访问'}</span><span>{browseLatency?'目录读取 '+browseLatency+' · ':''}{activeDownloads?'正在传输 '+activeDownloads+' 项 · ':''}传输采用已授权的加密通道</span></div>
-     </>}
-    </div>
-   </section>
-  </>}
+  {tab==='remote'&&<FileBrowserV4
+    peers={peers} device={remoteDevice} share={remoteShare} path={remotePath} shares={remoteShares}
+    entries={remoteEntries} loading={remoteLoading} error={remoteError} latency={browseLatency}
+    canWrite={canUpload} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
+    transfers={transfers} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
+    onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
+    onRefresh={()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}}
+    toast={toast}/>}
   {tab==='transfers'&&<section className="card">
    <div className="card-head"><div><div className="eyebrow">TRANSFERS</div><h2>传输任务</h2></div><button className="btn" onClick={refreshTransfers}>刷新</button></div>
    {transferError&&<div className="notice danger" role="alert">{transferError}</div>}

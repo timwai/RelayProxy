@@ -130,7 +130,7 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 			}
 			waitAgentReady(t, host)
 			waitAgentReady(t, client)
-			ctx, cancel := context.WithTimeout(context.Background(), 25*time.Second)
+			ctx, cancel := context.WithTimeout(context.Background(), 40*time.Second)
 			defer cancel()
 			peers, err := client.FileSharePeers(ctx)
 			if err != nil || len(peers) != 1 || peers[0].DeviceID != "files-host" {

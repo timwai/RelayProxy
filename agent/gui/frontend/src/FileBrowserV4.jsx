@@ -255,7 +255,7 @@ export default function FileBrowserV4({
        className={'v4-entry '+(selected.includes(entry.name)?'selected ':'')+(dropTarget==='file-'+entry.name?'drop-active':'')}
        tabIndex={0} draggable={writable}
        onClick={e=>clickFile(e,entry)}
-       onTouchStart={e=>{touchTimer.current=setTimeout(()=>{const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>{},stopPropagation:()=>{},clientX:r.left+25,clientY:r.top+25},'file',entry)},650)}}
+       onTouchStart={e=>{const r=e.currentTarget.getBoundingClientRect();touchTimer.current=setTimeout(()=>{showMenu({preventDefault:()=>{},stopPropagation:()=>{},clientX:r.left+25,clientY:r.top+25},'file',entry)},650)}}
        onTouchEnd={()=>clearTimeout(touchTimer.current)} onTouchMove={()=>clearTimeout(touchTimer.current)}
        onDoubleClick={()=>entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}
        onContextMenu={e=>showMenu(e,'file',entry)}

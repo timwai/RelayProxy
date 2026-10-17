@@ -24,3 +24,12 @@ export function planSameShareMoves(source,current,target,locallyInitiated){
   return {source:from,destination:to};
  });
 }
+
+// A context menu targets the clicked entry. Existing multi-selection is
+// retained only if the entry already belongs to that selection.
+export function contextSelection(clicked,selectedNames,entries){
+ if(!clicked||typeof clicked.name!=='string')return [];
+ const names=Array.isArray(selectedNames)&&selectedNames.includes(clicked.name)
+  ?new Set(selectedNames):new Set([clicked.name]);
+ return (Array.isArray(entries)?entries:[]).filter(x=>names.has(x.name));
+}

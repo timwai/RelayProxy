@@ -131,6 +131,22 @@ func (w *WebServer) resumeFileDownload(rw http.ResponseWriter, r *http.Request) 
 	writeWebJSON(rw, map[string]bool{"ok": true})
 }
 
+func (w *WebServer) clearFileTransfer(rw http.ResponseWriter, r *http.Request) {
+ if !w.fileShareRemoteAccessAllowed(rw) { return }
+ if err := w.bridge.ClearFileTransfer(r.PathValue("id")); err != nil {
+  http.Error(rw, err.Error(), http.StatusBadRequest)
+  return
+ }
+ writeWebJSON(rw, map[string]bool{"ok":true})
+}
+
+func (w *WebServer) clearInactiveFileTransfers(rw http.ResponseWriter, r *http.Request) {
+ if !w.fileShareRemoteAccessAllowed(rw) { return }
+ count,err := w.bridge.ClearInactiveFileTransfers()
+ if err!=nil { http.Error(rw,err.Error(),http.StatusInternalServerError);return }
+ writeWebJSON(rw,map[string]int{"cleared":count})
+}
+
 func (w *WebServer) cancelFileDownload(rw http.ResponseWriter, r *http.Request) {
 	if !w.fileShareRemoteAccessAllowed(rw) {
 		return

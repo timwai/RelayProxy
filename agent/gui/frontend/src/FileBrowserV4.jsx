@@ -1,6 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Icon} from './icons.jsx';
 import {call,callJSON,hasBridge} from './bridge.js';
+import {planSameShareMoves} from './fileBrowserV4Ops.js';
 import './fileBrowserV4.css';
 
 const join=(dir,name)=>dir==='.'?name:dir+'/'+name;
@@ -9,7 +10,6 @@ const fmt=n=>{const bytes=Number(n)||0;return bytes<1024?bytes+' B':bytes<104857
 const date=n=>n?new Date(n>1e12?n:n*1000).toLocaleString():'—';
 const ext=name=>(name.split('.').pop()||'').toLowerCase();
 const iconName=name=>['png','jpg','jpeg','svg','gif'].includes(ext(name))?'image':['mp4','mov','mkv'].includes(ext(name))?'film':['zip','7z','rar','gz'].includes(ext(name))?'archive':'file';
-const sameScope=(drag,device,share)=>drag&&drag.device===device&&drag.share===share;
 const focusParam=()=>new URLSearchParams(window.location.search).has('filesWindow');
 const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
@@ -171,16 +171,16 @@ export default function FileBrowserV4({
   e.preventDefault();e.stopPropagation();setDropTarget('');
   const raw=e.dataTransfer.getData('application/x-relayproxy-files');
   if(raw){
-   let payload;try{payload=JSON.parse(raw)}catch{return}
-   if(!dragInfo.current||raw!==JSON.stringify(dragInfo.current)
-    ||!sameScope(payload,targetDevice,targetShare)||!sameScope(payload,device,share)){
-    report('暂不支持跨设备、跨共享或来源不明的文件移动');return
-   }
+   let payload;try{payload=JSON.parse(raw)}catch{report('拖拽数据无效');return}
+   let plan;
+   try{
+    plan=planSameShareMoves(payload,{device,share,path},
+     {device:targetDevice,share:targetShare,path:targetPath},
+     !!dragInfo.current&&raw===JSON.stringify(dragInfo.current));
+   }catch(err){report(err.message||String(err));return}
    if(!writable){report('当前共享为只读');return}
-   for(const name of payload.names||[]){
-    const old=join(payload.path,name),dest=join(targetPath,name);
-    if(dest===old||targetPath===old||targetPath.startsWith(old+'/')){report('不能移动到自身或子目录');return}
-    if(!await mutate('move',old,dest,'',{device,share,path}))return;
+   for(const step of plan){
+    if(!await mutate('move',step.source,step.destination,{device,share,path}))return;
    }
    }else{
    const items=Array.from(e.dataTransfer.items||[]);

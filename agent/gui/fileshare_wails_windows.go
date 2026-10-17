@@ -84,11 +84,11 @@ func (s *WailsService) GetRemoteFileShares(deviceID string) ([]protocol.FileShar
 func (s *WailsService) GetRemoteFileEntries(deviceID, shareID, relativePath string) ([]protocol.FileShareEntry, error) {
 	return s.owner.bridge.GetRemoteFileEntries(deviceID, shareID, relativePath)
 }
-func (s *WailsService) OpenFileBrowserWindow() string {
+func (s *WailsService) OpenFileBrowserWindow(deviceID, shareID, relativePath string) string {
 	if s == nil || s.owner == nil {
 		return "unavailable"
 	}
-	s.owner.openFileBrowser()
+	s.owner.openFileBrowser(deviceID, shareID, relativePath)
 	return "ok"
 }
 

@@ -24,6 +24,8 @@ const SETTINGS_SECTIONS=[
  ['proxy','swap','本机代理','SOCKS5、HTTP、透明代理'],
  ['routing','split','分流规则','规则与订阅'],
  ['dns','shield','DNS 与防泄漏','DNS 策略与接管'],
+ ['rdp-settings','monitor','远程桌面设置','控制端启用与授权状态'],
+ ['message-settings','bell','消息设置','弹窗策略与测试预览'],
  ['exitshare','share','本机出口共享','共享本机网络出口'],
  ['diagnostics','terminal','诊断与日志','诊断工具与日志']
 ];
@@ -490,32 +492,48 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  </>;
 }
 
-function RDPPage({status,config,setv,save,dirty,targets,refreshTargets,refreshStatus,toast}){
+function RDPPage({status,config,targets,refreshTargets,refreshStatus,toast}){
  const[busy,setBusy]=useState('');
  const desiredEnabled=config.rdp?.enabled!==false,runtimeEnabled=config.runtime?.rdp?.enabled!==false;
  const controllerApproved=arr(status.approvedCapabilities).includes('rdp.controller');
- const saveRDP=async()=>{await save({rdp:{enabled:desiredEnabled}})};
- const restart=async()=>{try{const r=parseMutation(await call('goRestart'));if(!r.ok)throw new Error(r.message||'重启客户端失败')}catch(e){toast(e.message,'danger')}};
  const connect=async id=>{setBusy(id);try{const r=parseMutation(await call('goConnectRDP',id,true));if(!r.ok)throw new Error(r.message||'RDP 连接失败');toast('RDP 本地入口已建立');await refreshStatus()}catch(e){toast(e.message,'danger')}finally{setBusy('')}};
  const disconnect=async()=>{try{const r=parseMutation(await call('goDisconnectRDP'));if(!r.ok)throw new Error(r.message||'RDP 断开失败');await refreshStatus();toast('RDP 已断开')}catch(e){toast(e.message,'danger')}};
  const copy=async text=>{if(!text)return;if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',String(text));else await navigator.clipboard.writeText(String(text));toast('已复制 RDP 本地入口')};
  const activeTarget=targets.find(x=>(x.deviceId||x.id)===status.rdpTargetId),activeName=activeTarget?.name||status.rdpTargetId;
  return <><PageHead title="远程桌面" desc="仅显示 Server 授权的 RDP 目标，并优先建立 P2P TCP / UDP 辅助路径。" actions={<Button onClick={refreshTargets}>刷新设备</Button>}/>
- <Card title="RDP 客户端能力" eyebrow="CONTROLLER"><Setting title="启用远程桌面" desc="关闭时 Agent 不会向 Server 申请 rdp.controller，因此授权设备列表会为空。"><Switch checked={desiredEnabled} onChange={v=>setv('rdp.enabled',v)} label="启用远程桌面"/></Setting><Setting title="当前运行状态" desc={runtimeEnabled?'Agent 正在申请 RDP 能力':'当前进程未启用 RDP；保存后需要重启客户端'}><Badge tone={runtimeEnabled?'ok':'neutral'}>{runtimeEnabled?'已启用':'未启用'}</Badge></Setting><Setting title="Server 控制端授权" desc={status.connected?(controllerApproved?'当前会话已获得 rdp.controller':'当前会话没有 rdp.controller；请检查 Server 设备能力审批'):'连接 Server 后才能确认当前授权'}><Badge tone={controllerApproved?'ok':status.connected?'warn':'neutral'}>{controllerApproved?'已授权':status.connected?'未授权':'未连接'}</Badge></Setting>{dirty&&<SaveBar dirty label="保存 RDP 设置" hint="RDP 开关属于启动设置；保存后需重启客户端重新申请 Server 能力。" onSave={saveRDP}/>} {!dirty&&config.restartRequired&&arr(config.restartFields).some(x=>String(x).includes('RDP'))&&<div className="actions end top-gap"><Button primary onClick={restart}>重启客户端应用 RDP 设置</Button></div>}</Card>
+
  {!desiredEnabled&&<div className="notice warn"><b>RDP 已在本机配置中关闭。</b> 开启并保存、重启后，Agent 才会重新申请 rdp.controller 并获取已授权设备。</div>}
  {desiredEnabled&&runtimeEnabled&&status.connected&&!controllerApproved&&<div className="notice warn"><b>Server 未授予当前设备 rdp.controller。</b> 请在 Server 设备授权中启用“RDP 控制端”；授权变更后 Agent 会重新连接并刷新列表。</div>}
  {status.rdpTargetId&&<Card title="当前 RDP 会话" eyebrow="ACTIVE SESSION"><div className="rdp-session"><div className="identity-icon">▣</div><div className="grow"><strong>{activeName}</strong><div className="mono mini">{status.rdpTargetId}</div></div><Badge tone="ok">已连接</Badge></div><div className="setting top-gap"><div className="grow"><b>本地入口</b><div className="mono mini">{status.rdpListenAddr||'准备中'}</div></div><Button quiet disabled={!status.rdpListenAddr} onClick={()=>copy(status.rdpListenAddr)}>复制地址</Button></div><div className="cards-3 compact top-gap"><div><div className="mini">TCP Path</div><strong>{rdpPathLabel(status.rdpPathTcp)}</strong></div><div><div className="mini">UDP Path</div><strong>{rdpPathLabel(status.rdpPathUdp)}</strong></div><div><div className="mini">UDP</div><strong>{status.rdpUdpActive?'Active':status.rdpUdpEnabled?'Ready':'Off'}</strong></div></div>{status.rdpUdpReason&&<div className={cx('notice','top-gap',!status.rdpUdpEnabled&&'warn')}>{status.rdpUdpReason}</div>}<div className="actions end top-gap"><Button danger onClick={disconnect}>断开会话</Button></div></Card>}
  <Card title="已授权设备" eyebrow={targets.length+' TARGETS'}><div className="target-list">{targets.map(x=>{const id=x.deviceId||x.id,active=id===status.rdpTargetId;return <div className="target-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{x.name||id}</strong><div className="mono mini">{id}</div></div>{active&&<Badge tone="blue">当前会话</Badge>}<Badge tone={x.online?'ok':'neutral'}>{x.online?'在线':'离线'}</Badge><Button primary disabled={!x.online||!!busy||active} onClick={()=>connect(id)}>{active?'已连接':busy===id?'连接中…':'连接'}</Button></div>})}{!targets.length&&<div className="empty">{!desiredEnabled?'本机 RDP 功能已关闭。':!runtimeEnabled?'RDP 设置等待重启生效。':status.connected&&!controllerApproved?'当前设备未获得 Server 的 rdp.controller 授权。':'当前没有 Server 授权的 RDP 目标设备。'}</div>}</div></Card></>
 }
 
-function MessagesPage({messages,refresh,clear,toast,config,setv,save}){
- const[filter,setFilter]=useState('all'),[query,setQuery]=useState(''),[preview,setPreview]=useState('');
+function RDPSettingsPage({status,config,setv,save,dirty,toast,onGoto}){
+ const desiredEnabled=config.rdp?.enabled!==false,runtimeEnabled=config.runtime?.rdp?.enabled!==false;
+ const controllerApproved=arr(status.approvedCapabilities).includes('rdp.controller');
+ const saveRDP=async()=>{await save({rdp:{enabled:desiredEnabled}})};
+ const restart=async()=>{try{const r=parseMutation(await call('goRestart'));if(!r.ok)throw new Error(r.message||'重启客户端失败')}catch(e){toast(e.message,'danger')}};
+ return <><PageHead title="远程桌面设置" actions={<Button onClick={()=>onGoto('rdp')}>返回远程桌面</Button>}/>
+ <Card title="RDP 客户端能力" eyebrow="CONTROLLER"><Setting title="启用远程桌面" desc="关闭时 Agent 不会向 Server 申请 rdp.controller，因此授权设备列表会为空。"><Switch checked={desiredEnabled} onChange={v=>setv('rdp.enabled',v)} label="启用远程桌面"/></Setting><Setting title="当前运行状态" desc={runtimeEnabled?'Agent 正在申请 RDP 能力':'当前进程未启用 RDP；保存后需要重启客户端'}><Badge tone={runtimeEnabled?'ok':'neutral'}>{runtimeEnabled?'已启用':'未启用'}</Badge></Setting><Setting title="Server 控制端授权" desc={status.connected?(controllerApproved?'当前会话已获得 rdp.controller':'当前会话没有 rdp.controller；请检查 Server 设备能力审批'):'连接 Server 后才能确认当前授权'}><Badge tone={controllerApproved?'ok':status.connected?'warn':'neutral'}>{controllerApproved?'已授权':status.connected?'未授权':'未连接'}</Badge></Setting>{dirty&&<SaveBar dirty label="保存 RDP 设置" hint="RDP 开关属于启动设置；保存后需重启客户端重新申请 Server 能力。" onSave={saveRDP}/>} {!dirty&&config.restartRequired&&arr(config.restartFields).some(x=>String(x).includes('RDP'))&&<div className="actions end top-gap"><Button primary onClick={restart}>重启客户端应用 RDP 设置</Button></div>}</Card>
+ </>;
+}
+
+function MessagesPage({messages,refresh,clear,toast}){
+ const[filter,setFilter]=useState('all'),[query,setQuery]=useState('');
  const classified=m=>({code:!!m.verificationCode||m.messageType==='verification_code'||m.popupType==='verification_code',important:m.messageType==='important'||m.popupType==='important'});
  const q=query.trim().toLowerCase();
  const filtered=messages.filter(m=>{const type=classified(m),typeOK=filter==='all'||(filter==='code'&&type.code)||(filter==='important'&&type.important)||(filter==='normal'&&!type.code&&!type.important);if(!typeOK)return false;if(!q)return true;return [m.title,m.content,m.source,m.verificationCode,m.messageType,m.popupType,m.messageRule,m.verificationRule].some(v=>String(v||'').toLowerCase().includes(q))});
  const copy=async t=>{if(!t)return;if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',String(t));else await navigator.clipboard.writeText(String(t));toast('已复制')};
- const timeout=Number(config?.verificationPopupTimeoutSec??15);
  return <><PageHead title="消息中心" desc="验证码、普通消息与重要提醒；匹配规则由 Server 管理，Agent 负责展示、弹窗和历史。" actions={<><Button onClick={refresh}>刷新</Button><Button danger onClick={clear}>清空历史</Button></>}/>
+ <div className="filter-bar"><div className="segment">{[['all','全部'],['code','验证码'],['normal','普通消息'],['important','重要提醒']].map(x=><button className={filter===x[0]?'active':''} key={x[0]} onClick={()=>setFilter(x[0])}>{x[1]}</button>)}</div><div className="message-search"><Input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索标题、内容、来源、规则或验证码"/><span className="mini">{filtered.length} 条</span></div></div>
+ <div className="message-list">{filtered.slice().reverse().map((m,i)=>{const type=classified(m),code=type.code,important=type.important,msgType=m.messageType||m.popupType||(code?'verification_code':important?'important':'message'),rule=m.messageRule||m.verificationRule||'未标注规则';return <article className={cx('message-card',important&&'important')} key={m.id||i}><div className={cx('message-icon',code?'code':important?'important':'')}>{code?'#':important?'!':'✦'}</div><div className="grow"><div className="row between"><strong>{m.title||(code?'验证码':important?'重要消息':'消息')}</strong><div className="actions"><Badge tone={code?'ok':important?'danger':'blue'}>{code?'验证码':important?'重要':'通知'}</Badge><Badge tone={m.popup?'ok':'neutral'}>{m.popup?'弹窗':'仅历史'}</Badge></div></div><div className="mini">{[m.source||'RelayProxy',rule,fmtTime(m.createdAt)].filter(Boolean).join(' · ')}</div><div className="chips top-gap"><span className="chip mono">{msgType}</span>{m.popupType&&m.popupType!==msgType&&<span className="chip mono">compat · {m.popupType}</span>}</div><p>{m.content||''}</p>{m.verificationCode&&<button className="code-box" onClick={()=>copy(m.verificationCode)}>{m.verificationCode}<small>点击复制</small></button>}</div></article>})}{!filtered.length&&<Card><div className="empty">{messages.length?'没有符合当前筛选条件的消息。':'暂无消息。'}</div></Card>}</div>
+ </>
+}
+
+function MessageSettingsPage({config,setv,save,onGoto}){
+ const[preview,setPreview]=useState('');
+ const timeout=Number(config?.verificationPopupTimeoutSec??15);
+ return <><PageHead title="消息设置" actions={<Button onClick={()=>onGoto('messages')}>返回消息中心</Button>}/>
  <div className="cards-2">
   <Card title="弹窗策略" eyebrow="LOCAL PRESENTATION">
    <Setting title="消息弹窗自动关闭" desc="0 表示不自动关闭；支持的桌面端会使用系统原生弹窗。"><div className="row"><Input type="number" min="0" max="3600" value={timeout} onChange={e=>setv('verificationPopupTimeoutSec',Number(e.target.value))}/><span className="mini">秒</span></div></Setting>
@@ -524,9 +542,8 @@ function MessagesPage({messages,refresh,clear,toast,config,setv,save}){
   </Card>
   <Card title="测试弹窗" eyebrow="PREVIEW"><div className="actions"><Button onClick={()=>setPreview('verification')}>验证码</Button><Button onClick={()=>setPreview('message')}>普通消息</Button><Button onClick={()=>setPreview('important')}>重要提醒</Button></div><div className="notice top-gap">弹窗通过图标、Badge、按钮和轻量边框区分消息类型，具体呈现由当前平台负责。</div></Card>
  </div>
- <div className="filter-bar"><div className="segment">{[['all','全部'],['code','验证码'],['normal','普通消息'],['important','重要提醒']].map(x=><button className={filter===x[0]?'active':''} key={x[0]} onClick={()=>setFilter(x[0])}>{x[1]}</button>)}</div><div className="message-search"><Input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索标题、内容、来源、规则或验证码"/><span className="mini">{filtered.length} 条</span></div></div>
- <div className="message-list">{filtered.slice().reverse().map((m,i)=>{const type=classified(m),code=type.code,important=type.important,msgType=m.messageType||m.popupType||(code?'verification_code':important?'important':'message'),rule=m.messageRule||m.verificationRule||'未标注规则';return <article className={cx('message-card',important&&'important')} key={m.id||i}><div className={cx('message-icon',code?'code':important?'important':'')}>{code?'#':important?'!':'✦'}</div><div className="grow"><div className="row between"><strong>{m.title||(code?'验证码':important?'重要消息':'消息')}</strong><div className="actions"><Badge tone={code?'ok':important?'danger':'blue'}>{code?'验证码':important?'重要':'通知'}</Badge><Badge tone={m.popup?'ok':'neutral'}>{m.popup?'弹窗':'仅历史'}</Badge></div></div><div className="mini">{[m.source||'RelayProxy',rule,fmtTime(m.createdAt)].filter(Boolean).join(' · ')}</div><div className="chips top-gap"><span className="chip mono">{msgType}</span>{m.popupType&&m.popupType!==msgType&&<span className="chip mono">compat · {m.popupType}</span>}</div><p>{m.content||''}</p>{m.verificationCode&&<button className="code-box" onClick={()=>copy(m.verificationCode)}>{m.verificationCode}<small>点击复制</small></button>}</div></article>})}{!filtered.length&&<Card><div className="empty">{messages.length?'没有符合当前筛选条件的消息。':'暂无消息。'}</div></Card>}</div>
- <Modal open={!!preview} title={preview==='verification'?'验证码弹窗':preview==='important'?'重要提醒弹窗':'普通消息弹窗'} onClose={()=>setPreview('')} footer={<Button primary onClick={()=>setPreview('')}>关闭预览</Button>}><PopupPreview type={preview}/></Modal></>
+
+ <Modal open={!!preview} title={preview==='verification'?'验证码弹窗':preview==='important'?'重要提醒弹窗':'普通消息弹窗'} onClose={()=>setPreview('')} footer={<Button primary onClick={()=>setPreview('')}>关闭预览</Button>}><PopupPreview type={preview}/></Modal></>;
 }
 
 function MonitorPage({connections: snapshot,history,refresh,clear,openNative}){
@@ -594,7 +611,7 @@ function SettingsPage({config,setv,save,toast,onReload,onRestart,onQuit,onGoto,d
  return <><SettingsNavigation page="settings" onGoto={onGoto}/><PageHead title="设置" desc="主题、窗口行为、开机自启与客户端维护。"/>
  {config.restartRequired&&<div className="notice warn">以下设置需要重启客户端后生效：{arr(config.restartFields).join('、')||'启动参数'}。</div>}
  {config.reloadPending&&<div className="notice warn">配置文件中的策略与当前运行状态不同，可重新读取并应用。</div>}
- <div className="cards-2"><Card title="外观与窗口" eyebrow="APPEARANCE"><Setting title="主题" desc="跟随当前操作系统的外观设置"><Select value={config.theme||'system'} onChange={e=>setv('theme',e.target.value)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></Select></Setting><Setting title="关闭时最小化到托盘" desc="关闭主窗口后 Agent 保持运行"><Switch checked={!!config.minimizeToTray} onChange={v=>setv('minimizeToTray',v)}/></Setting><Setting title="消息弹窗" desc="自动关闭时长与弹窗预览在消息中心配置"><Button quiet onClick={()=>onGoto('messages')}>前往消息中心 ›</Button></Setting><div className="actions end top-gap"><Button primary onClick={()=>save({gui:{theme:config.theme,minimizeToTray:config.minimizeToTray}})}>保存界面设置</Button></div></Card>
+ <div className="cards-2"><Card title="外观与窗口" eyebrow="APPEARANCE"><Setting title="主题" desc="跟随当前操作系统的外观设置"><Select value={config.theme||'system'} onChange={e=>setv('theme',e.target.value)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></Select></Setting><Setting title="关闭时最小化到托盘" desc="关闭主窗口后 Agent 保持运行"><Switch checked={!!config.minimizeToTray} onChange={v=>setv('minimizeToTray',v)}/></Setting><div className="actions end top-gap"><Button primary onClick={()=>save({gui:{theme:config.theme,minimizeToTray:config.minimizeToTray}})}>保存界面设置</Button></div></Card>
  <Card title="启动与文件" eyebrow="APPLICATION"><Setting title="开机自启" desc="启动能力及所需权限由当前操作系统决定"><Switch checked={!!config.isAutostart} onChange={auto}/></Setting><Setting title="配置文件" desc={config.configPath||'未指定'}><Button onClick={()=>call('goOpenConfigDir')}>打开目录</Button></Setting><Setting title="版本" desc="RelayProxy Agent"><span className="mono">{config.version||'dev'}</span></Setting><div className="actions top-gap"><Button onClick={onReload}>重新读取并应用</Button><Button onClick={onRestart}>重启客户端</Button><Button danger onClick={onQuit}>退出</Button></div></Card></div>
  {windowsServiceAvailable&&<Card title="Windows 网络服务" eyebrow="NETWORK SERVICE"><div className="setting"><div className="grow"><b>服务状态</b><div className="mini">{service?.message||'透明代理由低权限 GUI 与 SYSTEM 网络服务协作完成。'}</div></div><Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'就绪':service?.running?'运行中':service?.installed?'已安装':'未安装'}</Badge></div>{service&&<div className="service-grid"><div><span>安装</span><b>{service.installed?'是':'否'}</b></div><div><span>运行</span><b>{service.running?'是':'否'}</b></div><div><span>自动启动</span><b>{service.autoStartKnown?(service.autoStart?'是':'否'):'未知'}</b></div><div><span>版本匹配</span><b>{service.versionMatch?'是':'否'}</b></div><div><span>恢复策略</span><b>{service.recoveryKnown?(service.recoveryEnabled?'已启用':'未启用'):'未知'}</b></div><div><span>PID</span><b className="mono">{service.pid||'—'}</b></div>{service.binaryPath&&<div className="service-path"><span>程序路径</span><b className="mono">{service.binaryPath}</b></div>}</div>}{dirty&&<div className="notice warn top-gap">存在未保存配置时暂不允许卸载 Network Service，避免原生侧关闭透明代理后导致草稿 revision 失效。</div>}<div className="actions top-gap"><Button onClick={()=>act('goRepairNetworkService','网络服务修复完成')}>修复服务</Button><Button danger disabled={dirty} onClick={()=>window.confirm('卸载 RelayProxy Windows 网络服务？此操作会同时关闭已保存的系统透明代理配置。')&&act('goUninstallNetworkService','网络服务已卸载')}>卸载服务</Button></div></Card>}</>
 }
@@ -696,8 +713,10 @@ export default function App(){
  else if(page==='routing')content=<RoutingPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;
  else if(page==='dns')content=<DNSPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃 DNS 设置草稿')}}/>;
  else if(page==='files')content=<FileSharingPage toast={toast}/>;
- else if(page==='rdp')content=<RDPPage status={status} config={config} setv={setv} save={save} dirty={dirty} targets={targets} refreshTargets={refreshTargets} refreshStatus={refreshStatus} toast={toast}/>;
- else if(page==='messages')content=<MessagesPage messages={messages} refresh={refreshMessages} clear={clearMessages} toast={toast} config={config} setv={setv} save={save}/>;
+ else if(page==='rdp')content=<RDPPage status={status} config={config} targets={targets} refreshTargets={refreshTargets} refreshStatus={refreshStatus} toast={toast}/>;
+ else if(page==='rdp-settings')content=<RDPSettingsPage status={status} config={config} setv={setv} save={save} dirty={dirty} toast={toast} onGoto={requestPage}/>;
+ else if(page==='messages')content=<MessagesPage messages={messages} refresh={refreshMessages} clear={clearMessages} toast={toast}/>;
+ else if(page==='message-settings')content=<MessageSettingsPage config={config} setv={setv} save={save} onGoto={requestPage}/>;
  else if(page==='monitor')content=<MonitorPage connections={connections} history={history} refresh={refreshConnections} clear={clearConnections} openNative={()=>call('goOpenConnections')}/>;
  else if(page==='diagnostics')content=<DiagnosticsPage diagnostics={diagnostics} logs={logs} refreshDiagnostics={refreshDiagnostics} clearLogs={clearLogs} copyLogs={copyLogs}/>;
  else content=<SettingsPage config={config} setv={setv} save={save} toast={toast} dirty={dirty} onGoto={requestPage} onConfigRefresh={async()=>{await refreshConfig();await refreshStatus()}} onRefreshCapabilities={refreshNetworkCapabilities} onReload={()=>requestLifecycle('reload')} onRestart={()=>requestLifecycle('restart')} onQuit={()=>requestLifecycle('quit')}/>;

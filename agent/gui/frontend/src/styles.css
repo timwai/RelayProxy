@@ -162,3 +162,11 @@ body{font-size:var(--ui-body-size)}
  .conn-table{max-height:min(62dvh,560px)}
 }
 @media(max-width:500px){.monitor-filters{grid-template-columns:1fr}.monitor-filters>.control:first-child{grid-column:auto}}
+
+/* Desktop WebView and browser consistency: native controls follow RelayProxy's
+   selected appearance, and standalone links get the same focus treatment. */
+:root{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
+a:focus-visible,.nav-item:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.nav-item[aria-current="page"]{font-weight:750}
+@supports(height:100dvh){.app-shell,.workspace{height:100dvh}}

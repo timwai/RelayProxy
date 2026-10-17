@@ -757,3 +757,12 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
  #root .page-head.page-actions-toolbar>.head-actions{width:100%;margin-left:0;justify-content:flex-start}
  #root .dialog-header .btn{width:44px;height:44px;min-height:44px}
 }
+
+/* Operational data tables: sticky labels, keyboard scrolling, measured
+   vertical density. Preserve horizontal scrolling for wide diagnostics. */
+#root .table-wrap{max-width:100%;max-height:min(68dvh,720px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+#root .table-wrap:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+#root .table-wrap thead th{position:sticky;top:0;z-index:2;background:var(--surface3);box-shadow:0 1px 0 var(--line);padding-block:11px}
+#root .table-wrap tbody td{padding-block:11px}
+#root .table-wrap td .table-action{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+@media(max-width:760px){#root .table-wrap{max-height:min(62dvh,580px)}}

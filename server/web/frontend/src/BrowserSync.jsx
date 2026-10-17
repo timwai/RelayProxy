@@ -196,9 +196,10 @@ export function BrowserSyncAdmin({identities=[]}){
   const eventText={device_approved:'设备批准',device_revoked:'设备撤销',device_deleted:'设备删除',
     rule_paused:'规则暂停',rule_resumed:'规则恢复',rule_revoked:'规则撤销',delivery_result:'同步结果',audit_cleared:'审计清理'};
   return <section className="browser-sync-admin browser-sync-refined">
-    <div className="page-head">
-      <div><h1>浏览器同步</h1><p>设备授权、配对规则与同步运行记录</p></div>
-      <div className="form-actions"><button className="btn" type="button"
+    <div className="page-head page-actions-toolbar browser-sync-toolbar">
+      <h1 className="sr-only">浏览器同步</h1>
+      <p className="page-context-help">设备授权、配对规则与同步运行记录</p>
+      <div className="head-actions"><button className="btn" type="button"
         onClick={()=>refresh()} disabled={loading||!!busy}>刷新</button></div>
     </div>
     {notice&&<div className="config-help" role="status">{notice}</div>}

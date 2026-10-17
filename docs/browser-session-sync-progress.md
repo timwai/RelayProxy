@@ -516,3 +516,10 @@ Cookie、Local/Session Storage 应用采用冲突预检、仅删除当前规则�
 - **2026-10-13 连接复用安全加固（PR #200）**：`server-api.js` 对已认证 WSS 的每次控制消息复用前重新读取原子身份并与连接的设备 ID 比较；轮换则关闭旧 Socket、拒绝复用并走新身份认证（未经 Server 批准不得自动获得权限）。20 秒保活周期也核查身份并主动断开失配/读取失败的旧连接，以避免数据库丢失后无控制请求时旧 WSS 无限保留。此轮追加提交须重新跑 UI/Chromium 与 Go CI，仍需真实浏览器核对私钥丢失时现有推送、配对和重新审批的端到端行为。
 
 - **补充旧会话推送边界**：入站 `SESSION_SNAPSHOT`、`SYNC_REQUEST`、`SYNC_ACK` 在调用会话处理器之前也检查当前设备原子身份，失配或读取失败立即断开旧 WSS，不继续应用旧设备授权下的入站会话操作。最新提交需要重新核验自动化检查与真实 Chrome 场景。
+
+### 2026-10-18 · PR #213 Browser Sync Server 管理页工具栏去重（仅 UI）
+
+- **关联范围 / 受影响 ID：** Server Web `BrowserSyncAdmin` 的标题及刷新入口呈现方式；P0/P1/P2 的会话同步能力条目、状态和发布门槛 **均未改变**。这不是新增同步能力，不标记任何 P0 验收完成。
+- **代码证据：** `server/web/frontend/src/BrowserSync.jsx` 将 `<div className="page-head">` 中的大标题改为只供辅助技术读取的 `h1.sr-only`；说明文案和原有刷新按钮进入 `page-actions-toolbar`，不再在页面正文重复显示主标题。原有 `refresh()`、`loading||!!busy` 禁用条件未修改。
+- **回归证据：** `server/web/frontend/src/page-actions-layout.test.js` 约束页面工具栏与可访问标题；Agent / Server React UI CI 使用 `npm test` + `npm run build`。本次提交之后的最终 HEAD CI 仍以 GitHub Actions 的实际结果为准，不能提前宣告全部通过。
+- **安全 / 功能不变：** 未变更设备注册/审批、身份隔离、配对规则、Cookie/Local/Session Storage/IndexedDB 同步、E2EE/WSS、ACK/撤销、网络出口绑定、后台实时刷新或权限策略。

@@ -1,6 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Icon} from './icons.jsx';
 import FileGlyph from './FileGlyph.jsx';
+import useDialogFocus from './useDialogFocus.js';
 import {fileIconLabel} from './fileIconKind.js';
 import {call,callJSON,hasBridge} from './bridge.js';
 import {planSameShareMoves,contextSelection} from './fileBrowserV4Ops.js';
@@ -20,11 +21,12 @@ export default function FileBrowserV4({
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
  const [selected,setSelected]=useState([]),[anchor,setAnchor]=useState(''),[details,setDetails]=useState(false),[visibleLimit,setVisibleLimit]=useState(200);
- const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false),[dockOpen,setDockOpen]=useState(true);
+ const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false),[dockOpen,setDockOpen]=useState(false);
  const [menu,setMenu]=useState(null),[dialog,setDialog]=useState(null),[dropTarget,setDropTarget]=useState('');
  const [treeWidth,setTreeWidth]=useState(248),[detailWidth,setDetailWidth]=useState(286);
  const [expanded,setExpanded]=useState(new Set()),[treeFolders,setTreeFolders]=useState({});
- const box=useRef(null),input=useRef(null),menuRef=useRef(null),dragInfo=useRef(null),uploadTarget=useRef(null),touchTimer=useRef(null);
+ const box=useRef(null),input=useRef(null),menuRef=useRef(null),dialogRef=useRef(null),dragInfo=useRef(null),uploadTarget=useRef(null),touchTimer=useRef(null);
+ useDialogFocus(!!dialog,dialogRef,()=>setDialog(null));
  const writable=!!canWrite&&!loading&&!uploading;
  const activeShare=shares.find(x=>x.id===share);
  const filtered=[...entries].filter(x=>x.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>{
@@ -37,6 +39,9 @@ export default function FileBrowserV4({
  const preview=chosen.length===1?chosen[0]:null;
  const runningTransfers=transfers.filter(item=>item.state==='running');
  const recentTransfers=runningTransfers.length?runningTransfers.slice(-3).reverse():transfers.slice(-3).reverse();
+ // Keep the file viewport large while idle; reveal progress when a transfer starts.
+ // Users may still collapse the dock during a running transfer.
+ useEffect(()=>{if(runningTransfers.length>0)setDockOpen(true)},[runningTransfers.length]);
  const transferLabel={running:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',paused:'已暂停'};
  const rootName=activeShare?.name||'共享文件夹';
  const deviceName=peers.find(x=>x.deviceId===device)?.name||device||'选择设备';
@@ -334,19 +339,20 @@ export default function FileBrowserV4({
     {canWrite&&<><button onClick={()=>requestMove(chosen)}>移动</button><button onClick={()=>requestRemove(chosen)}>删除</button></>}
    </div>}
     {!share?<div className="v4-placeholder">从左侧选择已授权共享目录</div>:
-    <div className={'v4-file-list '+(view==='grid'?'grid':'list')}>
+    <div className={'v4-file-list '+(view==='grid'?'grid':'list')} role="list" aria-label="共享目录文件">
      {view==='list'&&<div className="v4-column-head"><input type="checkbox" checked={filtered.length>0&&selected.length===filtered.length} onChange={setAll} aria-label="全选"/>
       <span>名称</span><span>大小</span><span>修改时间</span><span></span></div>}
      {loading?<div className="v4-placeholder">正在加载目录…</div>:filtered.length===0?<div className="v4-placeholder">{query?'无匹配文件':'当前目录为空，可拖入文件上传'}</div>:
       filtered.slice(0,visibleLimit).map(entry=><div key={entry.name} data-file-name={entry.name}
        className={'v4-entry '+(selected.includes(entry.name)?'selected ':'')+(dropTarget==='file-'+entry.name?'drop-active':'')}
+       role="listitem" aria-label={(entry.isDir?'文件夹 ':'文件 ')+entry.name}
        tabIndex={0} draggable={writable}
        onClick={e=>clickFile(e,entry)}
        onTouchStart={e=>{const r=e.currentTarget.getBoundingClientRect();touchTimer.current=setTimeout(()=>{showMenu({preventDefault:()=>{},stopPropagation:()=>{},clientX:r.left+25,clientY:r.top+25},'file',entry)},650)}}
        onTouchEnd={()=>clearTimeout(touchTimer.current)} onTouchMove={()=>clearTimeout(touchTimer.current)}
        onDoubleClick={()=>entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}
        onContextMenu={e=>showMenu(e,'file',entry)}
-       onKeyDown={e=>{if(e.key==='Enter')entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true);if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>e.preventDefault(),stopPropagation:()=>e.stopPropagation(),clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
+       onKeyDown={e=>{if(e.target!==e.currentTarget)return;if(e.key===' '){e.preventDefault();clickFile(e,entry)}if(e.key==='Enter'){e.preventDefault();entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>e.preventDefault(),stopPropagation:()=>e.stopPropagation(),clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
        onDragStart={e=>dragStart(e,entry)} onDragEnd={()=>{dragInfo.current=null;setDropTarget('')}}
        onDragOver={entry.isDir?e=>dragOver(e,'file-'+entry.name,writable):undefined}
        onDragLeave={()=>setDropTarget('')}
@@ -357,7 +363,7 @@ export default function FileBrowserV4({
        <span className="v4-entry-name" title={entry.name}>{entry.name}</span>
        <span className="v4-entry-size">{entry.isDir?'—':fmt(entry.size)}</span>
        <span className="v4-entry-date">{date(entry.modTime)}</span>
-       <button className="v4-more" title="更多操作" onClick={e=>{e.stopPropagation();showMenu(e,'file',entry)}}>⋯</button>
+       <button className="v4-more" title="更多操作" aria-label={'更多操作：'+entry.name} onClick={e=>{e.stopPropagation();showMenu(e,'file',entry)}}>⋯</button>
       </div>)}
     </div>}
     {filtered.length>visibleLimit&&<button className="v4-load-more" onClick={()=>setVisibleLimit(n=>n+200)}>显示更多（剩余 {filtered.length-visibleLimit} 项）</button>}
@@ -419,8 +425,8 @@ export default function FileBrowserV4({
       }else void action(key,menu.item,menu.target,menu.targets);
     }}>{title}</button>)}</div>}
   {dialog&&<div className="v4-dialog-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setDialog(null)}>
-   <div className="v4-dialog" role="dialog" aria-modal="true">
-    <h3>{({mkdir:'新建文件夹',rename:'重命名',move:'移动文件',remove:'确认删除'})[dialog.kind]}</h3>
+   <div ref={dialogRef} tabIndex={-1} className="v4-dialog" role="dialog" aria-modal="true" aria-labelledby="v4-file-dialog-title">
+    <h3 id="v4-file-dialog-title">{({mkdir:'新建文件夹',rename:'重命名',move:'移动文件',remove:'确认删除'})[dialog.kind]}</h3>
     {dialog.kind==='remove'?<p>将删除所选 {dialog.items.length} 项。非空文件夹无法删除，删除操作不可撤销。</p>:
      <><p>{dialog.kind==='move'?'请输入同一共享下的目标相对目录（根目录使用 .）':'请输入新名称'}</p>
       <input autoFocus value={dialog.value||''} onChange={e=>setDialog(d=>({...d,value:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&void confirmDialog()}/></>}

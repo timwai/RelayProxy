@@ -129,7 +129,7 @@ export default function FileBrowserV4({
    if(!name||name.includes('/')||name.includes('\\')||name==='.'||name==='..'){report('名称无效');return}
    if(await mutate('move',join(path,dialog.item.name),join(path,name)))setDialog(null);
   }else if(dialog.kind==='remove'){
-   if(!window.confirm('确定删除选中的 '+dialog.items.length+' 项吗？非空文件夹不能直接删除。'))return;
+   // This dialog is already an explicit confirmation; do not stack a native confirm.
    for(const item of dialog.items){if(!await mutate('remove',join(path,item.name)))return}
    setDialog(null);
   }else if(dialog.kind==='move'){
@@ -400,11 +400,11 @@ export default function FileBrowserV4({
   {dialog&&<div className="v4-dialog-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setDialog(null)}>
    <div className="v4-dialog" role="dialog" aria-modal="true">
     <h3>{({mkdir:'新建文件夹',rename:'重命名',move:'移动文件',remove:'确认删除'})[dialog.kind]}</h3>
-    {dialog.kind==='remove'?<p>删除 {dialog.items.length} 项。非空文件夹无法直接删除，操作无法撤销。</p>:
+    {dialog.kind==='remove'?<p>将删除所选 {dialog.items.length} 项。非空文件夹无法删除，删除操作不可撤销。</p>:
      <><p>{dialog.kind==='move'?'请输入同一共享下的目标相对目录（根目录使用 .）':'请输入新名称'}</p>
       <input autoFocus value={dialog.value||''} onChange={e=>setDialog(d=>({...d,value:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&void confirmDialog()}/></>}
     <div className="v4-dialog-actions"><button className="btn" onClick={()=>setDialog(null)}>取消</button>
-     <button className={'btn '+(dialog.kind==='remove'?'danger':'primary')} onClick={()=>void confirmDialog()}>确定</button></div>
+     <button className={'btn '+(dialog.kind==='remove'?'danger':'primary')} onClick={()=>void confirmDialog()}>{dialog.kind==='remove'?'确认删除':'确定'}</button></div>
    </div></div>}
  </section>;
 }

@@ -4,6 +4,7 @@ import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavaila
 import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolChoice,protocolsFromChoice,ruleListText,splitRuleList} from './ruleLines.js';
 import {Icon} from './icons.jsx';
 import FileSharingPage from './FileSharingPage.jsx';
+import useDialogFocus from './useDialogFocus.js';
 import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
 import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
@@ -73,27 +74,6 @@ const SPARK_POINTS=24;
 function Spark({series}){const pts=arr(series).slice(-SPARK_POINTS),max=Math.max(0,...pts);if(!pts.length)return <div className="spark idle" aria-hidden="true"/>;return <div className="spark" title={'最近 '+pts.length+' 次采样'}>{pts.map((v,i)=><i key={i} style={{height:(max>0?Math.max(8,Math.round(v/max*100)):8)+'%'}}/>)}</div>}
 function Metric({label,value,hint,series}){return <div className="metric"><div className="eyebrow">{label}</div><div className="metric-value">{value}</div><div className="mini">{hint}</div>{series&&<Spark series={series}/>}</div>}
 function SaveBar({dirty,label,onSave,hint,children}){return <div className={cx('save-bar',dirty&&'dirty')}><div className="grow"><b>{dirty?'存在未保存的修改':'所有修改已保存'}</b>{hint&&<div className="mini">{hint}</div>}</div>{children}<Button primary onClick={onSave}>{label}</Button></div>}
-function useDialogFocus(open, dialogRef, onClose){
- const onCloseRef=useRef(onClose);onCloseRef.current=onClose;
- useEffect(()=>{
-  if(!open||!dialogRef.current)return;
-  const dialog=dialogRef.current,previous=document.activeElement;
-  const selector='a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
-  const focusable=()=>Array.from(dialog.querySelectorAll(selector)).filter(el=>el.getClientRects().length>0&&!el.closest('[aria-hidden="true"]'));
-  (focusable().find(el=>/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))||focusable()[0]||dialog).focus();
-  const onKey=e=>{
-   if(e.key==='Escape'){e.preventDefault();onCloseRef.current?.();return}
-   if(e.key!=='Tab')return;
-   const items=focusable();
-   if(!items.length){e.preventDefault();dialog.focus();return}
-   const first=items[0],last=items[items.length-1],active=document.activeElement;
-   if(e.shiftKey&&(active===first||!dialog.contains(active))){e.preventDefault();last.focus()}
-   else if(!e.shiftKey&&(active===last||!dialog.contains(active))){e.preventDefault();first.focus()}
-  };
-  document.addEventListener('keydown',onKey);
-  return()=>{document.removeEventListener('keydown',onKey);if(previous instanceof HTMLElement&&previous.isConnected)previous.focus()};
- },[open,dialogRef]);
-}
 function Modal({open,title,children,footer,onClose,wide}){
  const ref=useRef(null);useDialogFocus(open,ref,onClose);
  if(!open)return null;

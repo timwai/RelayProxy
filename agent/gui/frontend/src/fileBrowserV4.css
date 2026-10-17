@@ -124,3 +124,22 @@ html.file-browser-focus .main>*+*{margin-top:0}
 
 .v4-load-more{display:block;margin:14px auto;padding:9px 18px;border:1px solid var(--line2);background:var(--surface2);border-radius:9px;color:var(--brand);font-weight:650}
 .v4-load-more:hover{background:var(--surface3)}
+
+/* Transfer activity remains visible without leaving the remote explorer. */
+.v4-transfer-dock{border-top:1px solid var(--line);background:var(--surface2);flex:0 0 auto;min-height:0}
+.v4-transfer-bar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:6px 14px;background:var(--surface3)}
+.v4-dock-toggle{display:flex;align-items:center;gap:8px;border:0;background:transparent;color:var(--text);font-weight:700;font-size:11px;padding:5px 0}
+.v4-dock-toggle>span:first-of-type{font-weight:500;color:var(--muted)}
+.v4-transfer-list{overflow:auto;max-height:188px;padding:3px 11px}
+.v4-transfer-row{display:flex;align-items:center;gap:10px;min-height:45px;padding:6px;border-bottom:1px solid var(--line)}
+.v4-transfer-row:last-child{border-bottom:0}
+.v4-transfer-kind{font-weight:800;font-size:18px;color:var(--brand);width:25px;text-align:center}
+.v4-transfer-data{min-width:0;flex:1;display:flex;flex-direction:column;gap:5px}
+.v4-transfer-name{display:flex;align-items:center;justify-content:space-between;gap:10px;min-width:0}
+.v4-transfer-name strong{font-size:11px;white-space:nowrap;text-overflow:ellipsis;overflow:hidden}
+.v4-transfer-name span{font-size:10px;color:var(--muted);white-space:nowrap}
+.v4-transfer-track{height:4px;border-radius:999px;background:var(--surface3);overflow:hidden}
+.v4-transfer-track>div{height:100%;background:var(--brand);border-radius:inherit;transition:width .2s}
+.v4-transfer-speed{font-size:10px;color:var(--muted);white-space:nowrap;min-width:53px;text-align:right}
+.v4-transfer-empty{color:var(--muted);font-size:11px;padding:10px}
+@media(max-width:500px){.v4-transfer-list{max-height:140px}.v4-transfer-name{flex-direction:column;align-items:flex-start;gap:2px}.v4-transfer-speed{display:none}}

@@ -15,11 +15,11 @@ const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
 export default function FileBrowserV4({
  peers,device,share,path,shares,entries,loading,error,latency,canWrite,treeRevision,
- uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onRefresh,toast
+ uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onCancelTransfer,onResumeTransfer,onOpenTransfers,onRefresh,toast
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
  const [selected,setSelected]=useState([]),[anchor,setAnchor]=useState(''),[details,setDetails]=useState(false),[visibleLimit,setVisibleLimit]=useState(200);
- const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false);
+ const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false),[dockOpen,setDockOpen]=useState(true);
  const [menu,setMenu]=useState(null),[dialog,setDialog]=useState(null),[dropTarget,setDropTarget]=useState('');
  const [treeWidth,setTreeWidth]=useState(248),[detailWidth,setDetailWidth]=useState(286);
  const [expanded,setExpanded]=useState(new Set()),[treeFolders,setTreeFolders]=useState({});
@@ -34,6 +34,9 @@ export default function FileBrowserV4({
  });
  const chosen=entries.filter(x=>selected.includes(x.name));
  const preview=chosen.length===1?chosen[0]:null;
+ const runningTransfers=transfers.filter(item=>item.state==='running');
+ const recentTransfers=runningTransfers.length?runningTransfers.slice(0,3):transfers.slice(0,3);
+ const transferLabel={running:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',paused:'已暂停'};
  const rootName=activeShare?.name||'共享文件夹';
  const deviceName=peers.find(x=>x.deviceId===device)?.name||device||'选择设备';
  useEffect(()=>{setSelected([]);setAnchor('');setQuery('');setMenu(null);setDialog(null);setVisibleLimit(200)},[device,share,path]);
@@ -335,6 +338,32 @@ export default function FileBrowserV4({
     </div>}
     {filtered.length>visibleLimit&&<button className="v4-load-more" onClick={()=>setVisibleLimit(n=>n+200)}>显示更多（剩余 {filtered.length-visibleLimit} 项）</button>}
    </div>
+   <section className="v4-transfer-dock" aria-label="文件传输任务">
+    <div className="v4-transfer-bar">
+     <button type="button" className="v4-dock-toggle" aria-expanded={dockOpen} onClick={()=>setDockOpen(v=>!v)}>
+      <Icon name="activity" size={15}/> 传输任务
+      <span>{runningTransfers.length?runningTransfers.length+' 项进行中':transfers.length+' 项记录'}</span>
+      <span aria-hidden="true">{dockOpen?'⌄':'⌃'}</span>
+     </button>
+     <button type="button" className="btn quiet" onClick={onOpenTransfers}>查看全部</button>
+    </div>
+    {dockOpen&&<div className="v4-transfer-list">{recentTransfers.length?recentTransfers.map(task=>{
+     const total=Math.max(0,Number(task.total)||0),done=Math.max(0,Number(task.done)||0);
+     const progress=total?Math.min(100,done/total*100):0;
+     return <div key={task.id} className="v4-transfer-row">
+      <span className="v4-transfer-kind">{task.direction==='upload'?'↑':'↓'}</span>
+      <div className="v4-transfer-data">
+       <div className="v4-transfer-name"><strong title={task.fileName}>{task.fileName||'文件传输'}</strong>
+        <span>{transferLabel[task.state]||task.state} · {fmt(done)} / {total?fmt(total):'未知大小'}</span></div>
+       <div className="v4-transfer-track"><div style={{width:progress+'%'}}/></div>
+      </div>
+      <span className="v4-transfer-speed">{task.state==='running'?fmt(task.speed||0)+'/s':(progress?Math.round(progress)+'%':'—')}</span>
+      {task.state==='running'&&<button type="button" className="btn quiet" onClick={()=>onCancelTransfer?.(task.id)}>暂停</button>}
+      {task.direction==='download'&&(task.state==='paused'||task.state==='failed')&&
+       <button type="button" className="btn quiet" onClick={()=>onResumeTransfer?.(task.id)}>继续</button>}
+     </div>
+    }):<div className="v4-transfer-empty">暂无传输任务，上传和下载将在这里显示进度。</div>}</div>}
+   </section>
    <div className="v4-status"><span>{filtered.length} 个项目 · {canWrite?'可读写':'只读访问'}</span>
     <span>{latency?'目录读取 '+latency+' · ':''}传输中 {transfers.filter(x=>x.state==='running').length} 项</span></div>
   </div>

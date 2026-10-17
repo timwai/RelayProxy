@@ -1,4 +1,4 @@
-.file-browser-v4{--file-tree-width:248px;--file-detail-width:286px;display:grid;grid-template-columns:var(--file-tree-width) 6px minmax(0,1fr);border:1px solid var(--line);background:var(--surface2);min-height:560px;height:clamp(560px,calc(100vh - 255px),1200px);border-radius:16px;overflow:hidden;position:relative;isolation:isolate}
+.file-browser-v4{--file-tree-width:248px;--file-detail-width:286px;display:grid;grid-template-columns:var(--file-tree-width) 6px minmax(0,1fr);border:1px solid var(--line);background:var(--surface2);min-height:480px;height:clamp(480px,calc(100dvh - 172px),1200px);border-radius:16px;overflow:hidden;position:relative;isolation:isolate}
 .file-browser-v4.has-details{grid-template-columns:var(--file-tree-width) 6px minmax(0,1fr) 6px var(--file-detail-width)}
 .file-browser-v4 button{font-family:inherit}
 .v4-tree{grid-column:1;grid-row:1;background:var(--surface3);display:flex;flex-direction:column;min-height:0;overflow:hidden}
@@ -229,3 +229,22 @@ html[data-theme="dark"] .v4-glyph-folder{
    not only the old .file-share-tabs child. */
 html.file-browser-focus .main>.file-share-header{display:none}
 html.file-browser-focus .main>.file-browser-v4{flex:1 1 auto;min-height:0;height:100%}
+
+/* Occupy the actual file workspace instead of subtracting a guessed 255px.
+   Status banners and the file-sharing tab row retain their natural height. */
+.main:has(> .file-browser-v4){display:flex;flex-direction:column;overflow:hidden;scrollbar-gutter:auto}
+.main:has(> .file-browser-v4)>.file-browser-v4{flex:1 1 auto;min-height:0;height:auto;max-height:none;margin-top:12px}
+.main:has(> .file-browser-v4)>.file-share-header{flex:0 0 auto}
+.file-browser-v4 .v4-head{padding:10px 14px}
+.file-browser-v4 .v4-head h2{font-size:17px;margin:0 0 2px;letter-spacing:-.2px}
+.file-browser-v4 .v4-tools{padding:6px 12px}
+.file-browser-v4 .v4-toolbar{padding:7px 12px}
+@media(max-width:900px){
+ .main:has(> .file-browser-v4)>.file-browser-v4{min-height:0}
+}
+@media(max-width:500px){
+ .file-browser-v4 .v4-head{padding:9px 10px}
+ .file-browser-v4 .v4-tools,.file-browser-v4 .v4-toolbar{padding:6px 8px}
+}
+/* Focus mode is a dedicated full-window explorer, with no outer margins. */
+html.file-browser-focus .main:has(> .file-browser-v4)>.file-browser-v4{margin-top:0}

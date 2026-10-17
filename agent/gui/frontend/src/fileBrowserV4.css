@@ -210,7 +210,7 @@ html[data-theme="dark"] .v4-glyph-folder{
 /* File selection floats above entries instead of changing their y-position. */
 .v4-main{position:relative}
 .v4-file-scroll>.v4-selection{
- position:absolute;z-index:5;top:12px;right:13px;left:auto;
+ position:absolute;z-index:5;bottom:12px;top:auto;right:13px;left:auto;
  max-width:calc(100% - 26px);
  display:flex;align-items:center;gap:7px;flex-wrap:wrap;
  padding:8px 10px;border:1px solid var(--line2);border-radius:11px;
@@ -221,7 +221,7 @@ html[data-theme="dark"] .v4-glyph-folder{
 .v4-window-link:hover{color:var(--text);background:var(--surface3)}
 .v4-dock-actions{display:flex;gap:5px;align-items:center;flex-wrap:wrap;justify-content:flex-end}
 @media(max-width:500px){
- .v4-file-scroll>.v4-selection{top:8px;right:8px;max-width:calc(100% - 16px);padding:6px}
+ .v4-file-scroll>.v4-selection{bottom:8px;top:auto;right:8px;max-width:calc(100% - 16px);padding:6px}
  .v4-dock-actions{gap:2px}
 }
 

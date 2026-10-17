@@ -248,7 +248,6 @@ func TestFileMutationRequiresReadWriteAndRevocation(t *testing.T) {
 	if !result.Success {
 		t.Fatalf("authorized writer rejected: %+v", result)
 	}
-	state.Revision++
 	state.Shares[0].Permissions["writer"] = PermissionNone
 	if _, err := store.Save(state); err != nil {
 		t.Fatal(err)

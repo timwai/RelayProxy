@@ -17,6 +17,7 @@ export default function FileSharingPage({toast}) {
  const [state,setState]=useState(null);
  const [tab,setTab]=useState(new URLSearchParams(window.location.search).has('filesWindow')?'remote':'local');
  const [directStatus,setDirectStatus]=useState(null);
+ const [warmStatus,setWarmStatus]=useState('');
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  const [editor,setEditor]=useState(null);
@@ -70,6 +71,21 @@ export default function FileSharingPage({toast}) {
  const [uploading,setUploading]=useState(false);
  const [uploadStaged,setUploadStaged]=useState(0);
  const [uploadTotal,setUploadTotal]=useState(0);
+ // Start a bounded, authenticated direct-path probe while users browse,
+ // not when they click Download. Fresh credentials are still used for bytes.
+ useEffect(()=>{
+  const peer=peersRef.current.find(p=>p.deviceId===remoteDevice);
+  if(!remoteDevice||!remoteShare||!peer?.shares?.some(x=>x.id===remoteShare)){
+   setWarmStatus('');return;
+  }
+  let active=true;
+  setWarmStatus('直连预探测中');
+  void callJSON('goPrewarmRemoteFileDirect',null,remoteDevice,remoteShare)
+   .then(result=>{
+    if(active)setWarmStatus(result?.state==='ready'?'直连路径已预探测':result?.state==='warming'?'直连预探测中':'可用 Relay 回退');
+   }).catch(()=>{if(active)setWarmStatus('可用 Relay 回退')});
+  return()=>{active=false};
+ },[remoteDevice,remoteShare]);
  const canUpload=remoteShares.some(s=>s.id===remoteShare&&s.permission==='read_write');
  const currentShare=remoteShares.find(s=>s.id===remoteShare);
  const visibleFiles=remoteEntries.filter(e=>e.name.toLowerCase().includes(fileQuery.toLowerCase())).sort((a,b)=>{
@@ -562,7 +578,7 @@ export default function FileSharingPage({toast}) {
   {tab==='remote'&&<FileBrowserV4
     peers={peers} device={remoteDevice} share={remoteShare} path={remotePath} shares={remoteShares}
     entries={remoteEntries} loading={remoteLoading} error={remoteError} latency={browseLatency}
-    canWrite={canUpload} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
+    canWrite={canUpload} warmStatus={warmStatus} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
     transfers={transfers} treeRevision={treeRevision} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
     onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
     onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onClearTransfer={clearTransfer} onClearInactiveTransfers={clearInactiveTransfers} onOpenTransfers={()=>setTab('transfers')} onCancelUpload={()=>{uploadCancelRef.current=true}}

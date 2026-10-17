@@ -72,10 +72,10 @@ func (b *UIBridge) GetFileShareCandidates() ([]protocol.FileShareCandidate, erro
 	return b.agent.FileShareCandidates(ctx)
 }
 
-func (b *UIBridge) PrewarmRemoteFileDirect(deviceID,shareID string) (app.FileDirectWarmStatus,error) {
- ctx,cancel:=context.WithTimeout(context.Background(),12*time.Second)
- defer cancel()
- return b.agent.PrewarmRemoteFileDirect(ctx,deviceID,shareID)
+func (b *UIBridge) PrewarmRemoteFileDirect(deviceID, shareID string) (app.FileDirectWarmStatus, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 12*time.Second)
+	defer cancel()
+	return b.agent.PrewarmRemoteFileDirect(ctx, deviceID, shareID)
 }
 
 func (b *UIBridge) GetFileDirectStatus() app.FileDirectStatus {

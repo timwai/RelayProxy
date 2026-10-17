@@ -21,7 +21,10 @@ test('theme switching stays available in mobile drawer',()=>{
 
 test('closed mobile nav is hidden from keyboard and Escape restores focus',()=>{
  const app=read('./App.jsx'),css=read('./react.css');
- assert.match(app,/if\(!mobileNavOpen\)return;const previous=document.activeElement/);
+ assert.match(app,/if\(!mobileNavOpen\)return;\s*const previous=document.activeElement/);
+ assert.match(app,/if\(e.key!=='Tab'\)return/);
+ assert.match(app,/last.focus\(\)/);
+ assert.match(app,/role="navigation" aria-label="Server 主导航"/);
  assert.match(app,/if\(e.key==='Escape'\)\{e.preventDefault\(\);setMobileNavOpen\(false\)\}/);
  assert.match(app,/if\(previous instanceof HTMLElement&&previous.isConnected\)previous.focus\(\)/);
  assert.match(css,/#root #app \.sidebar\{visibility:hidden;pointer-events:none\}/);

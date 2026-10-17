@@ -68,8 +68,8 @@ export default function FileSharingPage({toast}) {
  const activeDownloads=transfers.filter(t=>t.state==='running').length;
  async function uploadOneFile(file,targetDir,targetShare,targetDevice){
   if(!file||!targetDevice||!targetShare||uploading)return;
-  if(!canUpload){setRemoteError('共享目录没有写入权限');return}
-  if(file.size>20*1024**3){setRemoteError('单文件上传不能超过 20 GiB');return}
+  if(!peersRef.current.find(p=>p.deviceId===targetDevice)?.shares?.some(x=>x.id===targetShare&&x.permission==='read_write'))throw new Error('共享目录没有写入权限');
+  if(file.size>20*1024**3)throw new Error('单文件上传不能超过 20 GiB');
   uploadCancelRef.current=false;
   setUploading(true);setUploadStaged(0);setUploadTotal(file.size);setRemoteError('');
   let sessionId='';
@@ -105,6 +105,7 @@ export default function FileSharingPage({toast}) {
   }catch(e){
    setRemoteError(e.message||String(e));
    if(sessionId)try{await callJSON('goDiscardFileUpload',null,sessionId)}catch{}
+   throw e;
   }finally{setUploading(false);uploadCancelRef.current=false}
  }
 
@@ -113,7 +114,10 @@ export default function FileSharingPage({toast}) {
   if(!chosen.length||uploading)return;
   const authorized=peersRef.current.find(p=>p.deviceId===device)?.shares?.some(s=>s.id===share&&s.permission==='read_write');
   if(!authorized)throw new Error('目标共享没有写入权限');
-  for(const file of chosen)await uploadOneFile(file,dir,share,device);
+  for(const file of chosen){
+   if(uploadCancelRef.current)throw new Error('已取消后续上传');
+   await uploadOneFile(file,dir,share,device);
+  }
  }
  async function mutateRemote(action,src,dst=''){
   if(!['mkdir','move','remove'].includes(action))throw new Error('操作不受支持');
@@ -473,7 +477,7 @@ export default function FileSharingPage({toast}) {
     entries={remoteEntries} loading={remoteLoading} error={remoteError} latency={browseLatency}
     canWrite={canUpload} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
     transfers={transfers} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
-    onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
+    onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote} onCancelUpload={()=>{uploadCancelRef.current=true}}
     onRefresh={()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}}
     toast={toast}/>}
   {tab==='transfers'&&<section className="card">

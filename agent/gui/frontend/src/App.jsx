@@ -219,6 +219,31 @@ function CustomExitManager({config,save,toast,dirty}){
  </>;
 }
 
+function ActiveProxyPath({status,config,exits,onGoto}){
+ const connected=!!status.connected;
+ const currentId=status.selectedExit||config.defaultExitId||'';
+ const name=exitName([...exits,...arr(config.customExits)],currentId);
+ const {path,directReady,p2pReady,relay}=proxyPathStatus(status);
+ const udp=Number(status.nativeUdp?.associations||0);
+ return <Card title="当前代理出口 · 链路诊断" eyebrow="ACTIVE PROXY PATH" action={<Button quiet onClick={()=>onGoto('diagnostics')}>完整诊断 ›</Button>}>
+  <div className="device-path-summary">
+   <div className="grow"><div className="mini">运行态出口</div><strong>{connected?name:'Relay 未连接'}</strong><div className="mini">这里只展示当前代理会话的路径，不代表其他设备的实际链路。</div></div>
+   <Badge tone={connected?'blue':'neutral'}>{connected?path:'Offline'}</Badge>
+   <span className="mini">{connected&&status.latency!=null?'Server RTT '+status.latency+' ms':'暂无实时数据'}</span>
+  </div>
+  <details className="details device-path-details">
+   <summary>展开路径、UPnP 与 UDP 状态</summary>
+   <div className="device-path-grid">
+    <Setting title="Public Direct" desc={connected?(status.directEndpoint||'等待已验证端点'):'未连接'}><Badge tone={directReady?'ok':'neutral'}>{connected?(directReady?'Ready':status.directState||'Idle'):'Offline'}</Badge></Setting>
+    <Setting title="P2P QUIC" desc={connected?(status.p2pCandidateSummary||'等待候选路径'):'未连接'}><Badge tone={p2pReady?'ok':'neutral'}>{connected?(p2pReady?'Ready':status.p2pState||'Idle'):'Offline'}</Badge></Setting>
+    <Setting title="Relay 回退" desc="当前代理会话的中继状态"><Badge tone={relay?'warn':'neutral'}>{!connected?'Offline':relay?'Active':'Standby'}</Badge></Setting>
+    <Setting title="本机 UPnP" desc={status.upnpError||status.upnpAddress||'网关映射成功不代表公网可达'}><Badge tone={status.upnpState==='MAPPED'?'ok':status.upnpState==='FAILED'||status.upnpState==='DEGRADED'?'danger':status.upnpState==='CGNAT'?'warn':'neutral'}>{status.upnpState||'DISABLED'}</Badge></Setting>
+    <Setting title="Native UDP" desc="本机当前活动的数据报 Association">{udp?udp+' 个':'空闲'}</Setting>
+   </div>
+  </details>
+ </Card>;
+}
+
 function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,onGoto,onFiles,onConnectRDP,onRefresh}){
  const [query,setQuery]=useState(''),[detail,setDetail]=useState('');
  const devices=useMemo(()=>buildDeviceCenter({proxyExits:exits,rdpTargets:targets,filePeers}),[exits,targets,filePeers]);
@@ -264,6 +289,7 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
  </div>
  {!filtered.length&&<Card><div className="empty">{devices.length?'没有符合搜索条件的设备。':'暂无已授权的远程设备。请检查 Server 授权、RDP 权限或文件目录 ACL。'}</div></Card>}
  {arr(config.customExits).length>0&&<Card title="本机自定义代理" eyebrow="LOCAL PROXIES" action={<Button onClick={()=>onGoto('proxy')}>管理配置</Button>}><div className="device-center-local-list">{arr(config.customExits).map(x=><div className="device-center-local-row" key={x.id}><Icon name="swap" size={16}/><div className="grow"><strong>{x.name||x.id}</strong><div className="mini mono">{x.protocol?.toUpperCase()||'SOCKS5'} · {x.address}</div></div><Badge tone={x.enabled?'ok':'neutral'}>{x.enabled?'已启用':'已停用'}</Badge></div>)}</div><div className="mini">本机自定义代理不是远程设备；可在网络配置中管理，并在分流规则中指定为出口。</div></Card>}
+ <ActiveProxyPath status={status} config={config} exits={exits} onGoto={onGoto}/>
  <Modal open={!!selected} title={selected?.name||'设备详情'} onClose={()=>setDetail('')} footer={<Button onClick={()=>setDetail('')}>关闭</Button>}>
   {selected&&<div className="stack">
    <Setting title="设备 ID"><span className="mono mini">{selected.id}</span></Setting>
@@ -271,7 +297,9 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
    <Setting title="代理出口">{selected.proxy?'已授权':'未提供'}</Setting>
    <Setting title="远程桌面">{selected.rdp?'目标已授权':'未提供'}</Setting>
    <Setting title="共享目录">{selected.shares.length?selected.shares.length+' 个已验证的授权目录':'未提供'}</Setting>
-   {selected.proxy&&<div className="notice">{proxyMeta(selected).publicPath?.available?'此设备提供公网直连候选，但实际路径取决于连接时协商。':'当前没有可确认的公网直连端点。'}{proxyMeta(selected).verified.length?' · '+proxyMeta(selected).verified.length+' 个已验证端点':''}。这里不使用其他出口的全局路径数据。</div>}
+   {selected.proxy&&<div className="notice">{proxyMeta(selected).publicPath?.available?'此设备提供公网直连候选，但实际路径取决于连接时协商。':'当前没有可确认的公网直连端点。'}{proxyMeta(selected).verified.length?' · '+proxyMeta(selected).verified.length+' 个已验证端点':''}。仅显示本设备报告的候选能力，不套用其他出口的运行态路径。</div>}
+   {selected.proxy&&status.connected&&status.selectedExit===selected.id&&<Setting title="当前代理实际路径" desc="仅在 Agent 报告此设备为当前出口时展示"><Badge tone="blue">{proxyPathStatus(status).path}</Badge></Setting>}
+   {selected.proxy&&<div className="actions top-gap"><Button disabled={!status.connected||selected.proxy.online===false} onClick={()=>{setDetail('');onSpeed(selected.id)}}>测试此设备出口 ›</Button></div>}
    {!!selected.shares.length&&<div className="device-center-share-list">{selected.shares.map(s=><div key={s.id} className="device-center-share"><Icon name="folder" size={15}/><span className="grow">{s.name||s.id}</span><Badge>{s.permission==='read_write'?'读写':'只读'}</Badge></div>)}</div>}
   </div>}
  </Modal>

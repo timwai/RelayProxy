@@ -580,6 +580,7 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 		&cfg.SystemProxy.AutoFollow,
 		&cfg.SystemProxy.HTTP,
 		&cfg.SystemProxy.SOCKS5,
+		&cfg.SystemProxy.ProxyIPLiterals,
 		&cfg.Proxy.SOCKS5.Enabled,
 		&cfg.Proxy.HTTP.Enabled,
 		&cfg.RDP.Enabled,

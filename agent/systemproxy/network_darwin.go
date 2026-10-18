@@ -28,7 +28,7 @@ func runWrite(args ...string) error {
 		return nil
 	}
 	failure := strings.ToLower(string(out))
-	if !strings.Contains(failure, "admin") && !strings.Contains(failure, "privilege") && !strings.Contains(failure, "permission") {
+	if !strings.Contains(failure, "admin") && !strings.Contains(failure, "privilege") && !strings.Contains(failure, "permission") && !strings.Contains(failure, "root") && !strings.Contains(failure, "not authorized") && !strings.Contains(failure, "not permitted") {
 		return fmt.Errorf("networksetup %s: %s: %w", args[0], strings.TrimSpace(string(out)), err)
 	}
 	// Admin authorization is requested only for this fixed executable and escaped arguments.

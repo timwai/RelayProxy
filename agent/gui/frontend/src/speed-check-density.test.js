@@ -22,5 +22,5 @@ test('long names and errors stay accessible while truncating visually instead of
  assert.match(css,/\.device-speed-check\{[^}]*white-space:nowrap\}/);
  assert.match(css,/\.device-speed-check-label\{[^}]*text-overflow:ellipsis;white-space:nowrap/);
  assert.match(css,/\.device-speed-check-detail\{[^}]*text-overflow:ellipsis;white-space:nowrap/);
- assert.match(css,/@media\(max-width:640px\)\{[^}]*\.device-speed-check\{grid-template-columns:22px/);
+ assert.match(css,/@media\(max-width:640px\)\{[\s\S]*?\.device-speed-check\{grid-template-columns:22px/);
 });

@@ -245,7 +245,7 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
   return {publicPath,verified};
  };
  const rdpEnabled=config.rdp?.enabled!==false&&config.runtime?.rdp?.enabled!==false&&arr(status.approvedCapabilities).includes('rdp.controller');
- return <><PageHead actions={<><Button onClick={()=>onGoto('routing')}>分流规则与默认出口</Button><Button onClick={onRefresh}>刷新设备</Button><Button onClick={onSpeedAll}>批量测速</Button></>}/>
+ return <><PageHead actions={<><Button onClick={()=>onGoto('routing')}>分流规则与默认出口</Button><Button onClick={onRefresh}>刷新设备</Button><Button disabled={!status.connected||!exits.some(x=>x.online!==false)} onClick={onSpeedAll}>批量测速</Button></>}/>
  <div className="device-center-intro">
   <div><strong>已授权设备</strong><span className="mini">按设备查看可用能力。卡片只提供操作，不修改全局代理出口。</span></div>
   <div className="device-center-filter"><Input aria-label="搜索设备名称或 ID" placeholder="搜索设备名称 / ID" value={query} onChange={e=>setQuery(e.target.value)}/><span className="mini">{filtered.length} 台</span></div>
@@ -741,6 +741,11 @@ export default function App(){
  // until settings are actually available instead of freezing on empty defaults.
  useEffect(()=>{if(loaded)return;const timer=setInterval(()=>{void refreshConfig()},3000);return()=>clearInterval(timer)},[loaded,refreshConfig]);
  useEffect(()=>{pageRef.current=page;sessionStorage.setItem('relayproxy-react-page',page);if(page==='exits'){refreshExits();refreshTargets();refreshFilePeers()}if(page==='rdp')refreshTargets();if(page==='messages'){setUnreadMessages(0);refreshMessages()}if(page==='monitor')refreshConnections();if(page==='diagnostics'){refreshDiagnostics();refreshLogs()}},[page,refreshExits,refreshTargets,refreshFilePeers,refreshMessages,refreshConnections,refreshDiagnostics,refreshLogs]);
+ useEffect(()=>{
+  if(page!=='exits')return;
+  const timer=setInterval(()=>void refreshFilePeers(),5000);
+  return()=>{clearInterval(timer);setFilePeers([])};
+ },[page,refreshFilePeers]);
  useEffect(()=>theme(config.theme||'system'),[config.theme,theme]);
 
  const setv=useCallback((path,value,markDirty=true)=>{setConfig(prev=>{const next=structuredClone(prev),keys=path.split('.');let o=next;for(let i=0;i<keys.length-1;i++){o[keys[i]]=o[keys[i]]&&typeof o[keys[i]]==='object'?o[keys[i]]:{};o=o[keys[i]]}o[keys[keys.length-1]]=value;return next});if(markDirty)setDirty(true)},[]);

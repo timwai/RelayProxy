@@ -288,8 +288,8 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
   })}
  </div>
  {!filtered.length&&<Card><div className="empty">{devices.length?'没有符合搜索条件的设备。':'暂无已授权的远程设备。请检查 Server 授权、RDP 权限或文件目录 ACL。'}</div></Card>}
- {arr(config.customExits).length>0&&<Card title="本机自定义代理" eyebrow="LOCAL PROXIES" action={<Button onClick={()=>onGoto('proxy')}>管理配置</Button>}><div className="device-center-local-list">{arr(config.customExits).map(x=><div className="device-center-local-row" key={x.id}><Icon name="swap" size={16}/><div className="grow"><strong>{x.name||x.id}</strong><div className="mini mono">{x.protocol?.toUpperCase()||'SOCKS5'} · {x.address}</div></div><Badge tone={x.enabled?'ok':'neutral'}>{x.enabled?'已启用':'已停用'}</Badge></div>)}</div><div className="mini">本机自定义代理不是远程设备；可在网络配置中管理，并在分流规则中指定为出口。</div></Card>}
  <ActiveProxyPath status={status} config={config} exits={exits} onGoto={onGoto}/>
+ {arr(config.customExits).length>0&&<Card title="本机自定义代理" eyebrow="LOCAL PROXIES" action={<Button onClick={()=>onGoto('proxy')}>管理配置</Button>}><div className="device-center-local-list">{arr(config.customExits).map(x=><div className="device-center-local-row" key={x.id}><Icon name="swap" size={16}/><div className="grow"><strong>{x.name||x.id}</strong><div className="mini mono">{x.protocol?.toUpperCase()||'SOCKS5'} · {x.address}</div></div><Badge tone={x.enabled?'ok':'neutral'}>{x.enabled?'已启用':'已停用'}</Badge></div>)}</div><div className="mini">本机自定义代理不是远程设备；可在网络配置中管理，并在分流规则中指定为出口。</div></Card>}
  <Modal open={!!selected} title={selected?.name||'设备详情'} onClose={()=>setDetail('')} footer={<Button onClick={()=>setDetail('')}>关闭</Button>}>
   {selected&&<div className="stack">
    <Setting title="设备 ID"><span className="mono mini">{selected.id}</span></Setting>

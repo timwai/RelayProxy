@@ -30,20 +30,24 @@ test('Device Center no longer owns a global current-exit path diagnostic card',(
  assert.match(rdp,/UDP Path/);
 });
 
-test('per-device speed dialog owns measured link modes and separates local gateway state',()=>{
+test('per-device speed dialog is fixed to card target and checks real link evidence one row at a time',()=>{
  assert.match(speed,/function DeviceSpeedLinkDetails\(/);
- assert.match(speed,/deviceSpeedLinkEvidence\(exitID,matched,result\)/);
- assert.match(speed,/Public Direct/);
- assert.match(speed,/P2P QUIC/);
- assert.match(speed,/Relay/);
- assert.match(speed,/上行实际路径/);
- assert.match(speed,/下行实际路径/);
+ assert.match(speed,/deviceSpeedChecks\(\{exitID,exit:matched,connected:online,phase,result,revealCount\}\)/);
+ assert.match(speed,/role="listitem" className=\{'device-speed-check is-'\+row\.state\}/);
+ assert.match(speed,/className="device-speed-check-icon"/);
+ assert.match(speed,/const exitID=initialExit\|\|''/);
+ assert.match(speed,/当前测速设备（由设备卡片指定）/);
+ assert.doesNotMatch(speed,/label="测试设备 \/ 代理出口"/);
+ assert.doesNotMatch(speed,/onChange=\{e=>changeExit\(e\.target\.value\)\}/);
+ assert.match(speed,/phase!=='reviewing'/);
+ assert.match(speed,/setTimeout\(\(\)=>setRevealCount\(n=>n\+1\),190\)/);
+ assert.match(speed,/measurement\.exitId!==requested/);
+ assert.match(speed,/Public Direct|链路逐项检查/);
  assert.match(speed,/本机 UPnP 映射/);
  assert.match(speed,/本机 Native UDP/);
  assert.match(speed,/status\?\.rdpTargetId===exitID/);
- assert.match(speed,/measurement\.exitId!==requested/);
  assert.match(speed,/title="出口双向测速 · 设备链路信息"/);
- assert.match(css,/\.device-speed-path-list\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
+ assert.match(css,/\.device-speed-check-list\{display:flex;flex-direction:column/);
 });
  
 test('compact overview maintains low-height behavior on small screens',()=>{

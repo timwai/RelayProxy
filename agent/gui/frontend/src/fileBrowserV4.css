@@ -33,11 +33,11 @@
 .v4-crumbs{display:flex;align-items:center;min-width:0;flex:1;overflow-x:auto;white-space:nowrap;gap:6px;scrollbar-width:thin}
 .v4-crumbs button{border:0;background:transparent;color:var(--brand);font-weight:650;padding:5px;white-space:nowrap}
 .v4-crumbs span{color:var(--subtle)}
-.v4-toolbar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.v4-toolbar>input{min-width:110px;flex:1 1 140px;max-width:400px;background:var(--surface3);border:1px solid var(--line2);border-radius:9px;padding:9px 10px;outline:0}
+.v4-toolbar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:nowrap;min-width:0;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin}
+.v4-toolbar>input{min-width:120px;flex:1 0 150px;max-width:400px;background:var(--surface3);border:1px solid var(--line2);border-radius:9px;padding:9px 10px;outline:0}
 .v4-toolbar>input:focus{border-color:var(--brand)}
-.v4-toolbar>select{max-width:110px;min-width:82px;background:var(--surface2);border:1px solid var(--line2);border-radius:9px;padding:8px 6px}
-.v4-view{display:flex;border:1px solid var(--line2);border-radius:9px;padding:3px;gap:2px}
+.v4-toolbar>select{flex:0 0 auto;max-width:110px;min-width:82px;background:var(--surface2);border:1px solid var(--line2);border-radius:9px;padding:8px 6px}
+.v4-view{display:flex;flex:0 0 auto;border:1px solid var(--line2);border-radius:9px;padding:3px;gap:2px}
 .v4-view button{border:0;background:transparent;border-radius:6px;width:29px;height:27px;color:var(--muted)}
 .v4-view button.active{color:var(--brand);background:color-mix(in srgb,var(--brand) 12%,var(--surface2))}
 .v4-selection{padding:9px 15px;display:flex;align-items:center;flex-wrap:wrap;gap:10px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--brand) 7%,var(--surface2));font-size:11px}
@@ -349,4 +349,14 @@ html.file-browser-focus .main:has(> .file-browser-v4)>.file-browser-v4{margin-to
  .v4-unified-pathbar .v4-crumbs .v4-peer-trigger{max-width:170px;min-height:38px}
  .v4-path-actions>.btn{min-height:38px;min-width:38px}
  .v4-main .v4-peer-popover{top:auto!important;bottom:8px;left:8px!important;right:8px;width:auto;max-height:min(420px,70%)}
+}
+
+/* The file search, sort, view and write actions never create a second toolbar
+   row. At small widths users can scroll the controls without scrolling files. */
+.v4-toolbar>.btn{flex:0 0 auto;white-space:nowrap}
+.v4-toolbar:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+@media(max-width:640px){
+ .v4-toolbar{gap:6px}
+ .v4-toolbar>input{flex-basis:135px;min-width:115px}
+ .v4-toolbar>select{min-width:78px}
 }

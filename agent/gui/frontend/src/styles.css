@@ -356,3 +356,32 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .monitor-stats-disclosure>summary:hover{background:var(--surface3)}
 .monitor-stats-disclosure>.cards-4{padding:12px}
 @media(max-width:760px){.message-filter-compact{flex-wrap:wrap}.message-type-filter{flex:1 1 100%}.message-filter-compact .message-search{flex:1 1 100%}.monitor-stats-disclosure>summary{padding:11px}}
+
+/* Device-owned speed modal: the target is fixed by the card; only verified
+   evidence gets a tick. Rows resolve progressively after the single RPC. */
+.device-speed-target{display:flex;align-items:end;justify-content:space-between;gap:16px;flex-wrap:wrap;padding:2px 0 12px;border-bottom:1px solid var(--line)}
+.device-speed-target-identity{display:flex;align-items:center;gap:12px;min-width:0;flex:1 1 250px}
+.device-speed-target-identity>svg{flex:0 0 auto;color:var(--brand)}
+.device-speed-target-identity>div{display:flex;flex-direction:column;gap:3px;min-width:0}
+.device-speed-target-identity strong{font-size:15px;overflow-wrap:anywhere}
+.device-speed-target-identity .mono{overflow-wrap:anywhere}
+.device-speed-target>.field{flex:0 0 175px;min-width:140px}
+.device-speed-check-list{display:flex;flex-direction:column;gap:0;border:1px solid var(--line);background:var(--surface2);border-radius:10px;overflow:hidden}
+.device-speed-check{display:flex;align-items:center;gap:12px;min-height:51px;padding:10px 12px;border-bottom:1px solid var(--line);transition:background .16s ease}
+.device-speed-check:last-child{border-bottom:0}
+.device-speed-check-icon{width:25px;height:25px;flex:0 0 25px;border-radius:50%;display:grid;place-items:center;background:var(--surface3);border:1px solid var(--line);color:var(--muted);font-size:15px;font-weight:750}
+.device-speed-check.is-checked .device-speed-check-icon{background:color-mix(in srgb,#16a34a 12%,var(--surface2));border-color:color-mix(in srgb,#16a34a 34%,var(--line));color:#16a34a}
+.device-speed-check.is-progress .device-speed-check-icon{border-color:var(--brand);color:var(--brand);animation:device-link-check-spin 1.2s linear infinite}
+.device-speed-check.is-failed .device-speed-check-icon{background:color-mix(in srgb,#dc2626 10%,var(--surface2));color:#dc2626;border-color:color-mix(in srgb,#dc2626 30%,var(--line))}
+.device-speed-check.is-candidate .device-speed-check-icon{color:var(--brand);border-color:var(--brand)}
+.device-speed-check-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}
+.device-speed-check-main strong{font-size:12px;font-weight:700}
+.device-speed-check-main .mini{line-height:1.45;overflow-wrap:anywhere}
+.device-speed-check-state{flex:0 0 auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.device-speed-check.is-checked .device-speed-check-state{color:#16a34a;font-weight:750}
+.device-speed-check.is-progress .device-speed-check-state{color:var(--brand);font-weight:750}
+.device-speed-check.is-failed .device-speed-check-state{color:#dc2626;font-weight:750}
+.device-speed-check-note{padding:4px 0}
+@keyframes device-link-check-spin{to{transform:rotate(360deg)}}
+@media(prefers-reduced-motion:reduce){.device-speed-check,.device-speed-check-icon{animation:none!important;transition:none!important}}
+@media(max-width:640px){.device-speed-target>.field{flex:1 1 100%}.device-speed-check{gap:9px;padding:9px}.device-speed-check-icon{flex-basis:24px;width:24px;height:24px}}

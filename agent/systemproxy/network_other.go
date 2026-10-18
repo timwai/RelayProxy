@@ -18,5 +18,9 @@ func (unsupportedBackend) Write(service, kind string, state ProxyState) error {
 }
 func (unsupportedBackend) Validate(service string) error { return fmt.Errorf("macOS-only backend") }
 
-func (unsupportedBackend) ReadBypass(service string) ([]string,error) {return nil,fmt.Errorf("macOS-only backend")}
-func (unsupportedBackend) WriteBypass(service string, patterns []string) error {return fmt.Errorf("macOS-only backend")}
+func (unsupportedBackend) ReadBypass(service string) ([]string, error) {
+	return nil, fmt.Errorf("macOS-only backend")
+}
+func (unsupportedBackend) WriteBypass(service string, patterns []string) error {
+	return fmt.Errorf("macOS-only backend")
+}

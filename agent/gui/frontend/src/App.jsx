@@ -305,7 +305,7 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
 function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilities,toast}){
  const sys=config.systemProxy||EMPTY.systemProxy,sysStatus=config.systemProxyStatus||{},isMac=config.platform==='darwin';
  const s=config.socks5||EMPTY.socks5,h=config.http||EMPTY.http,rs=config.runtime?.socks5||s,rh=config.runtime?.http||h,caps=config.networkCapabilities||{},[service,setService]=useState(null),[repairing,setRepairing]=useState(false);
- const windowsCaptureAvailable=hasBridge('goGetNetworkServiceStatus');
+ const windowsCaptureAvailable=config.platform==='windows'&&hasBridge('goGetNetworkServiceStatus');
  const refreshService=useCallback(async()=>{if(!hasBridge('goGetNetworkServiceStatus'))return null;try{const x=await callJSON('goGetNetworkServiceStatus',{});setService(x||{});return x}catch{return null}},[]);
  useEffect(()=>{onRefreshCapabilities?.();refreshService()},[onRefreshCapabilities,refreshService]);
  const interceptReady=!!(caps.tcp&&caps.udp&&caps.ipv6&&caps.process_identity&&caps.original_destination&&caps.reply_injection&&caps.loop_bypass&&!caps.unavailable_reason);
@@ -690,8 +690,8 @@ function ConfigNavigation({page,onGoto}){return <SectionNavigation page={page} o
 
 function SettingsPage({config,setv,save,toast,onReload,onRestart,onQuit,onGoto,dirty,onConfigRefresh,onRefreshCapabilities}){
  const[service,setService]=useState(null);
- const windowsServiceAvailable=hasBridge("goGetNetworkServiceStatus");
- useEffect(()=>{if(hasBridge('goGetNetworkServiceStatus'))callJSON('goGetNetworkServiceStatus',{}).then(setService).catch(()=>{})},[]);
+ const windowsServiceAvailable=config.platform==='windows'&&hasBridge("goGetNetworkServiceStatus");
+ useEffect(()=>{if(windowsServiceAvailable)callJSON('goGetNetworkServiceStatus',{}).then(setService).catch(()=>{})},[windowsServiceAvailable]);
  const act=async(name,msg)=>{if(name==='goUninstallNetworkService'&&dirty){toast('当前有未保存修改，请先保存或放弃后再卸载 Network Service','danger');return}try{const r=parseMutation(await call(name));if(!r.ok&&r.message)throw new Error(r.message);if(name==='goUninstallNetworkService'&&onConfigRefresh)await onConfigRefresh();if(onRefreshCapabilities)await onRefreshCapabilities();toast(r.message||msg);if(hasBridge('goGetNetworkServiceStatus'))setService(await callJSON('goGetNetworkServiceStatus',{}))}catch(e){toast(e.message,'danger')}};
  const auto=async v=>{try{const r=parseMutation(await call('goSetAutostart',v));if(!r.ok&&r.message)throw new Error(r.message);setv('isAutostart',v,false);toast(v?'已启用开机自启':'已关闭开机自启')}catch(e){toast(e.message,'danger')}};
  return <><SettingsNavigation page="settings" onGoto={onGoto}/><PageHead title="设置" desc="主题、窗口行为、开机自启与客户端维护。"/>

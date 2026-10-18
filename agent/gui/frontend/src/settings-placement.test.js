@@ -11,8 +11,8 @@ const body=(from,to)=>{
 };
 
 test('RDP and message settings are discoverable under Settings without moving operational pages',()=>{
- assert.match(src,/\['rdp-settings','monitor','远程桌面设置'/);
- assert.match(src,/\['message-settings','bell','消息设置'/);
+ assert.match(src,/\['rdp-settings','monitor','远程桌面偏好'/);
+ assert.match(src,/\['message-settings','bell','消息与弹窗'/);
  assert.match(src,/function SettingsNavigation\(\{page,onGoto\}\)\{return <SectionNavigation page=\{page\} onGoto=\{onGoto\} kind="settings"\/>\}/);
  assert.match(src,/else if\(page==='rdp-settings'\)content=<RDPSettingsPage/);
  assert.match(src,/else if\(page==='message-settings'\)content=<MessageSettingsPage/);

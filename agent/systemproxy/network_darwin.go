@@ -3,7 +3,6 @@
 package systemproxy
 
 import (
-	"bytes"
 	"fmt"
 	"os/exec"
 	"regexp"
@@ -135,10 +134,13 @@ func (darwinBackend) Write(service, kind string, s ProxyState) error {
 	if s.Authenticated {
 		return fmt.Errorf("restoring authenticated proxies is not supported")
 	}
-	if s.Host != "" && s.Port > 0 {
-		if err := runWrite(pair[0], service, s.Host, strconv.Itoa(s.Port), "off"); err != nil {
-			return err
-		}
+	// Passing an empty host and port 0 clears a previously absent server.
+	// If macOS rejects clearing, retain the recovery journal rather than
+	// claiming successful restoration of the original setting.
+	if s.Host == "" && s.Port == 0 {
+		if err := runWrite(pair[0], service, "", "0", "off"); err != nil { return err }
+	} else if s.Host != "" && s.Port > 0 {
+		if err := runWrite(pair[0], service, s.Host, strconv.Itoa(s.Port), "off"); err != nil { return err }
 	}
 	state := "off"
 	if s.Enabled {
@@ -149,7 +151,3 @@ func (darwinBackend) Write(service, kind string, s ProxyState) error {
 	}
 	return nil
 }
-
-// Keep lint/import check local: bytes is deliberately not needed after applying
-// the strict command argument escaping above.
-var _ = bytes.MinRead

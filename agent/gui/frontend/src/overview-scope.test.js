@@ -12,7 +12,8 @@ const rdp=section('function RDPPage(','function RDPSettingsPage(');
 
 test('Overview focuses on connection, aggregate traffic, and recent activity',()=>{
  assert.match(overview,/className="hero overview-hero"/);
- assert.match(overview,/当前代理出口/);
+ assert.match(overview,/当前运行出口/);
+ assert.match(overview,/默认代理出口配置/);
  assert.match(overview,/className="cards-4"><Metric label="下载速度"/);
  assert.match(overview,/Card title="最近连接"/);
  assert.match(overview,/onGoto\('exits'\)/);

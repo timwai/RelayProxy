@@ -138,9 +138,13 @@ func (darwinBackend) Write(service, kind string, s ProxyState) error {
 	// If macOS rejects clearing, retain the recovery journal rather than
 	// claiming successful restoration of the original setting.
 	if s.Host == "" && s.Port == 0 {
-		if err := runWrite(pair[0], service, "", "0", "off"); err != nil { return err }
+		if err := runWrite(pair[0], service, "", "0", "off"); err != nil {
+			return err
+		}
 	} else if s.Host != "" && s.Port > 0 {
-		if err := runWrite(pair[0], service, s.Host, strconv.Itoa(s.Port), "off"); err != nil { return err }
+		if err := runWrite(pair[0], service, s.Host, strconv.Itoa(s.Port), "off"); err != nil {
+			return err
+		}
 	}
 	state := "off"
 	if s.Enabled {

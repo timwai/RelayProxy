@@ -44,7 +44,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .page-head{display:flex;align-items:center;justify-content:flex-start;gap:9px;margin-bottom:11px;min-width:0}
 /* Page-level actions stay grouped and never reserve an empty left column. */
 .page-head>div:first-child{flex:0 1 auto;min-width:0}
-.page-head>.actions{flex:0 1 auto;flex-wrap:wrap;justify-content:flex-start;max-width:100%}
+.page-head>.actions{flex:0 1 auto;flex-wrap:nowrap;justify-content:flex-start;min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;scrollbar-width:thin}
 .page-head>.actions>.btn{flex:0 0 auto;white-space:nowrap}
 
 .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.actions.end{justify-content:flex-end}
@@ -174,14 +174,14 @@ a:focus-visible,.nav-item:focus-visible{outline:2px solid var(--brand);outline-o
    otherwise empty, right-aligned row above every screen. */
 .topbar .crumb{flex:0 1 auto;min-width:0;max-width:40%;white-space:nowrap}
 .topbar .crumb span:last-child{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.top-actions{min-width:0;margin-left:auto}
-.topbar-page-actions{display:flex;align-items:center;min-width:0;max-width:100%;-webkit-app-region:no-drag}
-.topbar-page-actions .page-action-buttons{display:flex;align-items:center;flex-wrap:nowrap;gap:6px;min-width:0;max-width:100%;overflow-x:auto;scrollbar-width:thin}
+.top-actions{min-width:0;min-height:0;margin-left:auto;flex:1 1 auto;justify-content:flex-end;flex-wrap:nowrap}
+.topbar-page-actions{display:flex;align-items:center;flex:0 1 auto;min-width:0;max-width:100%;overflow:hidden;-webkit-app-region:no-drag}
+.topbar-page-actions .page-action-buttons{display:flex;align-items:center;flex-wrap:nowrap;gap:6px;min-width:0;max-width:100%;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin}
 .topbar-page-actions .page-action-buttons>.btn{flex:0 0 auto;min-height:32px;padding:0 10px;font-size:12px;white-space:nowrap}
-.page-head.page-actions-inline{justify-content:flex-start;margin:0 0 10px}
-.page-head.page-actions-inline>.page-action-buttons{justify-content:flex-start;flex:0 1 auto;min-width:0;max-width:100%;flex-wrap:wrap}
+.page-head.page-actions-inline{justify-content:flex-start;min-width:0;max-width:100%;margin:0 0 10px}
+.page-head.page-actions-inline>.page-action-buttons{display:flex;align-items:center;justify-content:flex-start;flex:1 1 auto;min-width:0;max-width:100%;flex-wrap:nowrap;gap:6px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin;padding:2px 1px 5px}
 @media(max-width:820px){
- .page-head.page-actions-inline>.page-action-buttons{justify-content:flex-start;overflow-x:visible;flex-wrap:wrap}
+ .page-head.page-actions-inline>.page-action-buttons{justify-content:flex-start;overflow-x:auto;flex-wrap:nowrap}
 }
 
 /* All nine Settings categories use one compact, keyboard-scrollable row.
@@ -396,3 +396,18 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .device-speed-check-chevron{font-size:18px;line-height:1;min-width:14px;text-align:center;color:var(--brand)}
 .device-speed-check-content{display:flex;flex-direction:column;gap:10px;min-width:0}
 .device-speed-check-content>.mini{font-size:11px;color:var(--muted)}
+
+/* Page-level actions remain on one line on compact Wails windows. Scrolling
+   is confined to the actions, not the document or the fixed topbar. */
+.page-action-buttons>.btn{flex:0 0 auto;white-space:nowrap}
+.page-head.page-actions-inline{overflow:hidden}
+.page-head.page-actions-inline>.page-action-buttons:focus-visible,
+.topbar-page-actions .page-action-buttons:focus-visible{outline:2px solid var(--brand);outline-offset:-2px;border-radius:7px}
+.top-actions>.global-transfer-trigger,.top-actions>.badge{flex:0 0 auto}
+@media(max-width:640px){
+ .topbar .crumb{max-width:32%}
+ .top-actions{gap:4px}
+ .topbar-page-actions .page-action-buttons{gap:4px}
+ .topbar-page-actions .page-action-buttons>.btn{padding-inline:7px;font-size:11px}
+ .page-head.page-actions-inline>.page-action-buttons>.btn{min-height:34px;padding-inline:9px}
+}

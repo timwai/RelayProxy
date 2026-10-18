@@ -303,3 +303,16 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
  .device-path-grid{grid-template-columns:1fr}
  .device-path-summary{align-items:flex-start}
 }
+
+/* Routing policy remains editable without pushing the high-frequency rules
+   table below the initial viewport. */
+.routing-strategy-disclosure{border:1px solid var(--line);border-radius:12px;background:var(--surface2);overflow:hidden;margin-top:12px}
+.routing-strategy-disclosure>summary{display:block;cursor:pointer;list-style:none;padding:14px 17px}
+.routing-strategy-disclosure>summary::-webkit-details-marker{display:none}
+.routing-strategy-disclosure>summary>span{display:flex;flex-direction:column;gap:4px;min-width:0}
+.routing-strategy-disclosure>summary strong{font-size:13px}
+.routing-strategy-disclosure>summary small{font-size:11px;color:var(--muted);overflow-wrap:anywhere}
+.routing-strategy-disclosure>summary:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.routing-strategy-disclosure>summary:hover{background:var(--surface3)}
+.routing-strategy-disclosure>.card{border:0;border-top:1px solid var(--line);border-radius:0;box-shadow:none;margin:0}
+@media(max-width:640px){.routing-strategy-disclosure>summary{padding:12px}}

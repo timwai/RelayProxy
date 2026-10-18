@@ -15,7 +15,7 @@ export function deviceSpeedChecks({exitID,exit,connected=true,phase='idle',resul
  const waiting=checking?'测速中，等待真实数据':reviewing?'正在逐项核对测速结果':failed?'测速未完成，无法确认':'开始测速后核验';
  const rows=[];
  const add=(id,label,state,detail)=>rows.push({id,label,state,detail});
- const auth=!!exitID&&!!exit&&exit.online!==false;
+ const auth=connected&&!!exitID&&!!exit&&exit.online!==false;
  add('authorization','设备授权与在线状态',auth?'checked':'failed',auth?(exit.name||exit.deviceName||exitID)+' · 当前授权出口':exitID?'设备离线或已撤销授权':'缺少设备标识');
  const count=evidence.verifiedEndpointCount;
  add('candidate','公网直连候选端点',count>0?'checked':evidence.publicAdvertised?'candidate':'unknown',count>0?count+' 个已验证候选（不代表实测可达）':evidence.publicAdvertised?'设备已公布候选，尚未验证端点':'未发现已验证候选');

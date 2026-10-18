@@ -35,7 +35,7 @@ test('local file sharing leads with folder cards, keeps service switches availab
 
 test('remote browser sidebar contains only the ACL-filtered tree for the selected device',()=>{
  const tree=fragment(browser,'  <aside className="v4-tree">','  <div className="v4-splitter v4-tree-split"');
- const head=fragment(browser,'   <div className="v4-tools v4-unified-pathbar">','   <div className="v4-toolbar">');
+ const head=fragment(browser,'   <div className="v4-tools v4-unified-pathbar">','   <div className="v4-toolbar" role="group"');
  assert.match(tree,/visibleShares\.map\(s=><div className="v4-tree-share"/);
  assert.match(tree,/renderTreeBranch\(device,s\.id,'\.'\)/);
  assert.doesNotMatch(tree,/peers\.map\(/);

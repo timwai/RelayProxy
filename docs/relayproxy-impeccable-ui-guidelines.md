@@ -191,3 +191,10 @@ Information architecture principle: **daily operations** are available from the 
 - Check rows use a compact 38–40px grid with independently truncated label/evidence cells, a fixed status area and reduced 22–23px icons. A separate narrow-screen grid keeps all four pieces on one row instead of increasing dialog height.
 - Only presentation changes: actual `goRunSpeedTest` execution, exact-exit evidence matching, check sequencing, failure/candidate semantics, per-direction throughput and BBR calibration remain unchanged.
 - Regression test: `agent/gui/frontend/src/speed-check-density.test.js`.
+
+## Iteration 16: collapsible speed-test inspection and richer shared-file glyphs
+
+- **设备测速 → 链路逐项检查:** adds an accessible expand/collapse control; default expanded, and a persistent one-line live summary reports **测速中、结果核验中、检测失败** or the confirmed count even when the table is hidden. Collapsing hides the checklist and local network context, without canceling or changing the running test or BBR calibration. The arrow, status and focus styling are visible on compact windows.
+- **文件共享图标:** expands deterministic extension/name classification from generic office/image/archive/code/text buckets to recognizable JavaScript, TypeScript, Python, Go, Rust, Markdown, JSON, web markup, CSS, notebooks, databases, structured data, vectors, design documents, 3D models, subtitles, disk images, electronic books and certificates. Both detailed and compact glyphs share the same scalable inline SVG base and semantic hues; default and generic folder rendering remain consistent.
+- Extensions only, no remote content reads, thumbnails or additional file RPCs, ensuring large directory performance and preventing file preview security regressions. Existing file-selection, upload/download and share ACL flows are unchanged.
+- Tests extended in `fileIconKind.test.js` and added in `checklist-collapse-and-icon-diversity.test.js`. Native small-Wails viewport and dark-mode visual QA remain recommended.

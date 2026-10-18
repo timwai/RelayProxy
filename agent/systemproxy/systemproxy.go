@@ -17,6 +17,7 @@ type Settings struct {
 	AutoFollow *bool  `yaml:"auto_follow" json:"autoFollow,omitempty"`
 	HTTP       *bool  `yaml:"http" json:"http,omitempty"`
 	SOCKS5     *bool  `yaml:"socks5" json:"socks5,omitempty"`
+	ProxyIPLiterals *bool `yaml:"proxy_ip_literals" json:"proxyIpLiterals,omitempty"`
 }
 
 func on(p *bool) bool              { return p == nil || *p }
@@ -24,6 +25,7 @@ func (s Settings) Follow() bool    { return on(s.AutoFollow) }
 func (s Settings) UseHTTP() bool   { return on(s.HTTP) }
 func (s Settings) UseSOCKS5() bool { return on(s.SOCKS5) }
 func (s Settings) Enabled() bool   { return s.Mode == "system" }
+func (s Settings) UseIPTargets() bool { return on(s.ProxyIPLiterals) }
 
 type ProxyState struct {
 	Enabled       bool   `json:"enabled"`

@@ -162,3 +162,23 @@
 .file-share-advanced-content>.cards-3{margin:0}
 .file-share-advanced-content>.card{margin:0;box-shadow:none}
 @media(max-width:640px){.file-share-advanced>summary{padding:12px}.file-share-advanced-content{padding:10px}}
+
+/* Tab-free file sharing: main entry shows local folders, while the browser
+   shares an always-mounted owner for downloads and OS Save As handles. */
+.file-sharing-host[hidden]{display:none!important}
+.file-sharing-host:not([hidden]){min-width:0}
+.file-sharing-host:not(.is-remote)>*+*{margin-top:12px}
+.file-share-list-head{align-items:center;flex-wrap:wrap;gap:10px}
+.file-share-list-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px}
+.file-share-list-actions>.btn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.file-share-remote-back{display:flex;align-items:center;gap:10px;padding:0 0 6px;flex:0 0 auto}
+.file-share-remote-back .btn{display:inline-flex;align-items:center;gap:6px}
+.file-sharing-host.is-remote:not([hidden]){display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
+.main:has(> .file-sharing-host.is-remote:not([hidden])){display:flex;flex-direction:column;overflow:hidden;scrollbar-gutter:auto}
+.main:has(> .file-sharing-host.is-remote:not([hidden]))>.file-sharing-host{flex:1 1 auto;min-height:0}
+.file-sharing-host.is-remote>.file-browser-v4{flex:1 1 auto;height:auto;min-height:0;max-height:none;margin:0}
+html.file-browser-focus .file-sharing-host>.file-share-remote-back{display:none}
+html.file-browser-focus .main>.file-sharing-host.is-remote{flex:1 1 auto;min-height:0;height:100%}
+html.file-browser-focus .file-sharing-host>.file-browser-v4{flex:1 1 auto;min-height:0;height:100%;border:0;border-radius:0;margin:0}
+@media(max-width:800px){.file-share-list-actions{width:100%;justify-content:flex-start}.file-sharing-host.is-remote>.file-browser-v4{min-height:0}}
+@media(max-width:500px){.file-share-list-actions .btn{font-size:11px}.file-share-remote-back{padding-bottom:5px}}

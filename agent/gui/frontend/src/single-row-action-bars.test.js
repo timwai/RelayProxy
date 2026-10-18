@@ -17,7 +17,7 @@ test('PageHead keeps buttons together in one row for wide and narrow Agent windo
 });
 
 test('sharing header keeps the primary add-folder control first and all actions unwrapped',()=>{
- const header=filePage.slice(filePage.indexOf('className="file-share-list-head"'),filePage.indexOf('{!state&&<div className="empty">'));
+ const header=filePage.slice(filePage.indexOf('className="card-head file-share-list-head"'),filePage.indexOf('{!state&&<div className="empty">'));
  assert.ok(header.indexOf('＋ 添加共享文件夹')<header.indexOf('浏览其他设备文件'));
  assert.match(header,/className="file-share-list-actions" role="group" aria-label="共享文件夹操作" tabIndex=\{0\}/);
  assert.match(fileCss,/\.file-share-list-actions\{[^}]*flex-wrap:nowrap;[^}]*overflow-x:auto/);

@@ -152,3 +152,17 @@ Information architecture principle: **daily operations** are available from the 
 - Promote the transfer task indicator/dock to an app-wide lightweight **传输任务** panel opened by a persistent compact activity control in the main header or navigation footer (with running count). Never discard or cancel transfers when the user navigates away.
 - For discoverability, provide a secondary **浏览其他设备文件** action on the local share list rather than a new tab row. Preserve independent `filesWindow` deep links, transfer polling and ACL-verified remote inventory.
 - Before implementing, validate cross-page mount/unmount lifetime for remote transfers, app-wide task polling and any OS Save As handles; those currently remain in `FileSharingPage` and cannot be dropped just by removing the tabs.
+
+## Iteration 12: remove file-sharing tabs, preserve transfer owner, and prioritize lists elsewhere
+
+**Implemented**
+- Delete the **我的共享 / 其他设备 / 传输任务** tab strip from `FileSharingPage`. The main sidebar's **文件共享** route now lands directly in its existing, content-first local shared-folder list. The list header retains a compact **浏览其他设备文件** secondary action and **添加共享文件夹** primary action.
+- Remote browsing remains device-first: **设备中心 → 共享文件** passes the exact authorized device ID into the persistent file workspace, while the remote explorer offers a small **我的共享** back action and the existing header device selector. No three-way navigation tabs are exposed.
+- Replace the transfer tab with a global **传输任务** trigger in the Agent top bar, showing the number of running tasks. Opening it displays the existing per-task speed, progress, transport, pause/resume, save and clear actions in an accessible responsive drawer.
+- **Critical lifetime constraint:** React mounts `FileSharingPage` exactly once under `App` and toggles only its visibility. Its `saveHandles`, `completedSaves`, `completedUploads`, upload staging, completion polling, and remote directory invalidation all remain live while switching to unrelated pages. The owner continuously polls transfers every 1.2 seconds (until Agent exit) to fulfill OS/browser Save As transfers without a special transfers route.
+- A one-shot `navigationTarget` serial enables Device Center deep links without re-keying and thus remounting the transfer owner. The initial share selection still validates live ACLs; failure leaves the previous device ID unused and does not disclose another host's shares.
+- CSS adapts the nested persistent remote explorer to fill the available Wails/standalone viewport. Focus mode retains its full-window intent. Preserved all existing file-browser V4 operations and upload/download RPCs.
+- **Other pages:** change Messages' four segment buttons to a single compact message-type dropdown beside search. Move Monitor's four aggregate cards into a collapsible **流量统计与趋势** section below the connection table, opening directly on actual connection rows.
+- Tests added: `file-sharing-workspace.test.js`, `secondary-controls.test.js`; updated `content-first-navigation.test.js`, `page-head-layout.test.js`.
+
+**Acceptance / known scope:** Verify Windows/macOS file browser full-window and separate-window layout, Save As completion after navigating away from files, repeated reentry from Device Center, transfer drawer keyboard focus / Escape, and empty-share startup. The persistent transfer owner is an Agent React lifecycle implementation; it does not change Server/API semantics or attempt to persist browser file handles across full page reloads.

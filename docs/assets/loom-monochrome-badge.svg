@@ -1,0 +1,31 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Monochrome App Badge - Dark Mode Solid Squircle with Pure White Mark -->
+  <defs>
+    <mask id="badgeWarpCutouts">
+      <rect x="0" y="0" width="512" height="512" fill="#ffffff"/>
+      <rect x="150" y="246" width="52" height="52" rx="6" fill="#000000"/>
+      <rect x="214" y="310" width="52" height="52" rx="6" fill="#000000"/>
+    </mask>
+
+    <mask id="badgeWeftCutouts">
+      <rect x="0" y="0" width="512" height="512" fill="#ffffff"/>
+      <rect x="214" y="246" width="52" height="52" rx="6" fill="#000000"/>
+      <rect x="150" y="310" width="52" height="52" rx="6" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <!-- Solid Obsidian/Black Squircle -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="#000000"/>
+  <!-- 1px crisp outline for high-res screens -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="none" stroke="#222222" stroke-width="2"/>
+
+  <!-- High-contrast pure white interwoven glyph -->
+  <g fill="none" stroke="#ffffff" stroke-width="32" stroke-linecap="round" stroke-linejoin="round">
+    <rect x="160" y="256" width="256" height="96" rx="48" mask="url(#badgeWeftCutouts)"/>
+    <rect x="160" y="96" width="96" height="288" rx="48" mask="url(#badgeWarpCutouts)"/>
+  </g>
+
+  <!-- P2P Node Anchors -->
+  <circle cx="208" cy="144" r="8" fill="#ffffff"/>
+  <circle cx="368" cy="304" r="8" fill="#ffffff"/>
+</svg>

@@ -46,6 +46,11 @@ jobs:
           fi
       - name: Check modules
         run: go mod tidy -diff
+      - name: Test patched yamux
+        working-directory: third_party/yamux
+        run: |
+          go test ./... -count=1 -timeout=4m
+          go test -race -short ./... -count=1 -timeout=4m
       - name: Vet
         run: go vet ./...
       - name: Test

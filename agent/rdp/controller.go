@@ -16,6 +16,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"relayproxy/internal/netutil"
 	"relayproxy/internal/tunnel"
 )
 
@@ -249,17 +250,20 @@ func launchRDPClient(goos, address string) error {
 }
 
 func (c *Connection) serveTCP(ctx context.Context, dial func(context.Context, string) (net.Conn, error)) {
+	var backoff netutil.AcceptBackoff
 	for {
 		conn, err := c.TCPListener.Accept()
 		if err != nil {
-			select {
-			case <-ctx.Done():
-				return
-			default:
-				log.Printf("[RDP] 本地 TCP 接受失败: %v", err)
+			if ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return
 			}
+			log.Printf("[RDP] 本地 TCP 接受失败: %v", err)
+			if !backoff.Wait(ctx) {
+				return
+			}
+			continue
 		}
+		backoff.Reset()
 		tunnel.TuneTCPConn(conn)
 		go c.handleTCP(ctx, conn, dial)
 	}

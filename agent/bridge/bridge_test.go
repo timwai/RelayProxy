@@ -273,6 +273,32 @@ func TestRestartStateTracksAppliedSettingsAcrossSaves(t *testing.T) {
 	}
 }
 
+func TestProxyYAMLLimitsSurviveUISaveAndRequireRestart(t *testing.T) {
+	b := newTestBridge(t)
+	cfg, err := config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cfg.Proxy.MaxConnections = 1024
+	cfg.Proxy.IdleTimeoutSec = 600
+	cfg.Proxy.UDPIdleTimeoutSec = 90
+	if err := config.SaveAgentConfig(b.configPath, cfg); err != nil {
+		t.Fatal(err)
+	}
+	var theme ConfigUpdate
+	theme.GUI.Theme = ptr("light")
+	if _, err := b.SaveConfig(theme); err != nil {
+		t.Fatal(err)
+	}
+	state, err := b.GetConfigState()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !state.RestartRequired || state.Config.Proxy.MaxConnections != 1024 || state.Config.Proxy.IdleTimeoutSec != 600 || state.Config.Proxy.UDPIdleTimeoutSec != 90 || state.Runtime.Proxy.MaxConnections != 256 {
+		t.Fatalf("proxy YAML limits lost or applied before restart: %+v", state)
+	}
+}
+
 func TestInsecureTLSSaveRequiresRestart(t *testing.T) {
 	b := newTestBridge(t)
 	var in ConfigUpdate

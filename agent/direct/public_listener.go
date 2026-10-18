@@ -164,6 +164,8 @@ func (l *PublicListener) acceptLoop() {
 func (l *PublicListener) handleHandshake(session tunnel.TunnelSession) {
 	defer l.handshakeWG.Done()
 	defer func() { <-l.slots }()
+	stop := tunnel.InterruptOnCancel(l.ctx, session)
+	defer stop()
 
 	accepted, probe, err := l.handshake(l.ctx, session)
 	if err != nil {
@@ -172,9 +174,9 @@ func (l *PublicListener) handleHandshake(session tunnel.TunnelSession) {
 		return
 	}
 	if probe {
-		// The verifier owns connection shutdown after it has consumed the
-		// challenge response. Sending an application close from this side can
-		// overtake stream delivery and turn a successful probe into session closed.
+		// handshake waits briefly for the verifier's consumption acknowledgement.
+		// Keep the authentication slot until this unauthenticated session closes.
+		_ = session.Close()
 		return
 	}
 	if accepted == nil || accepted.Tunnel == nil {
@@ -233,9 +235,22 @@ func (l *PublicListener) handshake(ctx context.Context, session tunnel.TunnelSes
 		// response. Closing the connection immediately can race buffered stream
 		// delivery and surface a spurious "session closed" on the Server.
 		_ = stream.CloseWrite()
-		_ = stream.SetReadDeadline(time.Now().Add(250 * time.Millisecond))
+		drainUntil := time.Now().Add(time.Second)
+		_ = stream.SetReadDeadline(drainUntil)
 		var drain [1]byte
 		_, _ = stream.Read(drain[:])
+		// Older verifiers sent FIN before reading the response. An early EOF
+		// therefore cannot prove delivery; retain the bounded grace period unless
+		// the verifier closes its whole session after consuming the response.
+		if remaining := time.Until(drainUntil); remaining > 0 {
+			timer := time.NewTimer(remaining)
+			defer timer.Stop()
+			select {
+			case <-timer.C:
+			case <-session.Done():
+			case <-authCtx.Done():
+			}
+		}
 		return nil, true, nil
 
 	case protocol.PublicDirectHandshakeAuth:

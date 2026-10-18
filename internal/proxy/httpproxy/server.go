@@ -7,28 +7,29 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"math"
 	"net"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
 
+	"relayproxy/internal/netutil"
 	"relayproxy/internal/proxy"
+	"relayproxy/internal/tunnel"
 )
 
 type ServerConfig struct {
-	ListenAddr    string // e.g. "127.0.0.1:8080"
-	GetExitNodeID func() string
-	Dialer        proxy.TunnelDialer
+	ListenAddr       string // e.g. "127.0.0.1:8080"
+	GetExitNodeID    func() string
+	Dialer           proxy.TunnelDialer
+	MaxConnections   int
+	IdleTimeout      time.Duration
+	HandshakeTimeout time.Duration
 }
 
-const proxyCopyBufferSize = 128 * 1024
-
-var proxyCopyBufferPool = sync.Pool{
-	New: func() any { return new([proxyCopyBufferSize]byte) },
-}
+const maxRequestHeaderBytes = 64 << 10
 
 type Server struct {
 	cfg    ServerConfig
@@ -42,6 +43,7 @@ type Server struct {
 	conns     map[net.Conn]struct{}
 	closeDone chan struct{}
 	closeErr  error
+	slots     chan struct{}
 
 	// Includes listener setup and the accept loop so Close cannot finish while
 	// an accepted connection is still waiting to become a handler.
@@ -52,6 +54,15 @@ func NewServer(cfg ServerConfig) *Server {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = "127.0.0.1:8080"
 	}
+	if cfg.MaxConnections <= 0 {
+		cfg.MaxConnections = proxy.DefaultMaxConnections
+	}
+	if cfg.IdleTimeout <= 0 {
+		cfg.IdleTimeout = proxy.DefaultIdleTimeout
+	}
+	if cfg.HandshakeTimeout <= 0 {
+		cfg.HandshakeTimeout = proxy.DefaultHandshakeTimeout
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		cfg:       cfg,
@@ -59,6 +70,7 @@ func NewServer(cfg ServerConfig) *Server {
 		cancel:    cancel,
 		conns:     make(map[net.Conn]struct{}),
 		closeDone: make(chan struct{}),
+		slots:     make(chan struct{}, cfg.MaxConnections),
 	}
 }
 
@@ -147,6 +159,7 @@ func (s *Server) Close() error {
 
 func (s *Server) serve(listener net.Listener) {
 	defer s.activeConn.Done()
+	var backoff netutil.AcceptBackoff
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -154,11 +167,22 @@ func (s *Server) serve(listener net.Listener) {
 				return
 			}
 			log.Printf("[HTTPProxy] Accept error: %v", err)
+			if !backoff.Wait(s.ctx) {
+				return
+			}
+			continue
+		}
+		backoff.Reset()
+		select {
+		case s.slots <- struct{}{}:
+		default:
+			_ = conn.Close()
 			continue
 		}
 
 		s.mu.Lock()
 		if s.closed {
+			<-s.slots
 			s.mu.Unlock()
 			_ = conn.Close()
 			return
@@ -168,6 +192,7 @@ func (s *Server) serve(listener net.Listener) {
 		s.mu.Unlock()
 		go func(c net.Conn) {
 			defer s.activeConn.Done()
+			defer func() { <-s.slots }()
 			defer s.releaseConn(c)
 			_ = s.handleConn(c)
 		}(conn)
@@ -178,6 +203,8 @@ func (s *Server) serve(listener net.Listener) {
 // the race with a completed dial, close that connection here instead.
 func (s *Server) dialTCP(client net.Conn, exitID, host string, port uint16) (net.Conn, error) {
 	ctx := proxy.WithClientConn(s.ctx, "http", client)
+	ctx, cancel := context.WithTimeout(ctx, proxy.DialTimeout)
+	defer cancel()
 	conn, err := s.cfg.Dialer.DialTCP(ctx, exitID, host, port)
 	if err != nil {
 		return nil, err
@@ -202,13 +229,29 @@ func (s *Server) releaseConn(conn net.Conn) {
 
 func (s *Server) handleConn(conn net.Conn) error {
 	// Set initial read deadline to protect against slowloris
-	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
 
-	reader := bufio.NewReader(conn)
+	clientIO := &proxy.IdleConn{Conn: conn}
+	limited := &io.LimitedReader{R: clientIO, N: maxRequestHeaderBytes + 1}
+	reader := bufio.NewReader(limited)
 	req, err := http.ReadRequest(reader)
 	if err != nil {
+		if limited.N == 0 {
+			writeProxyError(conn, http.StatusRequestHeaderFieldsTooLarge)
+		} else if !errors.Is(err, io.EOF) {
+			writeProxyError(conn, http.StatusBadRequest)
+		}
 		return err
 	}
+	if maxRequestHeaderBytes+1-int(limited.N)-reader.Buffered() > maxRequestHeaderBytes {
+		writeProxyError(conn, http.StatusRequestHeaderFieldsTooLarge)
+		return errors.New("HTTP proxy headers exceed limit")
+	}
+	// Preserve prefetched body/tunnel bytes while removing the parsing limit.
+	limited.N = math.MaxInt64
+	_ = conn.SetDeadline(time.Time{})
+	clientIO.IdleTimeout = s.cfg.IdleTimeout
+	_ = conn.SetWriteDeadline(time.Now().Add(proxy.DialTimeout + s.cfg.IdleTimeout))
 
 	exitID := ""
 	if s.cfg.GetExitNodeID != nil {
@@ -229,18 +272,13 @@ func (s *Server) handleConn(conn net.Conn) error {
 
 // handleConnect handles HTTPS CONNECT method tunneling
 func (s *Server) handleConnect(clientConn net.Conn, clientReader *bufio.Reader, req *http.Request, exitID string) error {
-	host, portStr, err := net.SplitHostPort(req.Host)
+	host, port, err := parseAuthority(req.RequestURI, 443)
 	if err != nil {
-		host = req.Host
-		portStr = "443"
-	}
-	port, err := strconv.ParseUint(portStr, 10, 16)
-	if err != nil {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\nInvalid Port"))
+		writeProxyError(clientConn, http.StatusBadRequest)
 		return err
 	}
 
-	targetConn, err := s.dialTCP(clientConn, exitID, host, uint16(port))
+	targetConn, err := s.dialTCP(clientConn, exitID, host, port)
 	if err != nil {
 		log.Printf("[HTTPProxy] Connect DialTCP failed for %s:%d: %v", host, port, err)
 		_, _ = clientConn.Write([]byte("HTTP/1.1 504 Gateway Timeout\r\n\r\n"))
@@ -262,29 +300,14 @@ func (s *Server) handleConnect(clientConn net.Conn, clientReader *bufio.Reader, 
 
 // handleHTTP forwards regular HTTP requests
 func (s *Server) handleHTTP(clientConn net.Conn, clientReader *bufio.Reader, req *http.Request, exitID string) error {
-	var host string
-	var port uint16 = 80
-
+	authority := req.Host
 	if req.URL.IsAbs() {
-		host = req.URL.Hostname()
-		if p := req.URL.Port(); p != "" {
-			val, _ := strconv.ParseUint(p, 10, 16)
-			port = uint16(val)
-		}
-	} else if req.Host != "" {
-		h, p, err := net.SplitHostPort(req.Host)
-		if err == nil {
-			host = h
-			val, _ := strconv.ParseUint(p, 10, 16)
-			port = uint16(val)
-		} else {
-			host = req.Host
-		}
+		authority = req.URL.Host
 	}
-
-	if host == "" {
-		_, _ = clientConn.Write([]byte("HTTP/1.1 400 Bad Request\r\n\r\nMissing Host header"))
-		return errors.New("missing host")
+	host, port, err := parseAuthority(authority, 80)
+	if err != nil {
+		writeProxyError(clientConn, http.StatusBadRequest)
+		return err
 	}
 
 	targetConn, err := s.dialTCP(clientConn, exitID, host, port)
@@ -305,7 +328,7 @@ func (s *Server) handleHTTP(clientConn net.Conn, clientReader *bufio.Reader, req
 	}
 
 	// Write request to target
-	if err := req.Write(targetConn); err != nil {
+	if err := req.Write(&proxy.IdleConn{Conn: targetConn, IdleTimeout: s.cfg.IdleTimeout}); err != nil {
 		return err
 	}
 
@@ -318,34 +341,12 @@ func (s *Server) handleHTTP(clientConn net.Conn, clientReader *bufio.Reader, req
 }
 
 func (s *Server) pipeWithReader(clientConn net.Conn, clientReader io.Reader, targetConn net.Conn) {
-	var wg sync.WaitGroup
-	wg.Add(2)
+	buffered := &proxy.ReaderConn{Conn: clientConn, Reader: clientReader}
+	tunnel.Pipe(s.ctx, buffered, targetConn, s.cfg.IdleTimeout, nil)
+}
 
-	go func() {
-		defer wg.Done()
-		bufp := proxyCopyBufferPool.Get().(*[proxyCopyBufferSize]byte)
-		_, _ = io.CopyBuffer(targetConn, clientReader, bufp[:])
-		proxyCopyBufferPool.Put(bufp)
-		if cw, ok := targetConn.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
-		} else {
-			_ = targetConn.Close()
-		}
-	}()
-
-	go func() {
-		defer wg.Done()
-		bufp := proxyCopyBufferPool.Get().(*[proxyCopyBufferSize]byte)
-		_, _ = io.CopyBuffer(clientConn, targetConn, bufp[:])
-		proxyCopyBufferPool.Put(bufp)
-		if cw, ok := clientConn.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
-		} else {
-			_ = clientConn.Close()
-		}
-	}()
-
-	wg.Wait()
+func writeProxyError(conn net.Conn, status int) {
+	_, _ = fmt.Fprintf(conn, "HTTP/1.1 %d %s\r\nConnection: close\r\nContent-Length: 0\r\n\r\n", status, http.StatusText(status))
 }
 
 func removeHopHeaders(h http.Header) {

@@ -148,6 +148,20 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c == nil {
 		return fmt.Errorf("config cannot be nil")
 	}
+	if c.Proxy.MaxConnections < 1 || c.Proxy.MaxConnections > 65536 {
+		return fmt.Errorf("proxy.max_connections 必须在 1-65536 之间")
+	}
+	for _, item := range []struct {
+		name    string
+		seconds int
+	}{
+		{"proxy.idle_timeout_sec", c.Proxy.IdleTimeoutSec},
+		{"proxy.udp_idle_timeout_sec", c.Proxy.UDPIdleTimeoutSec},
+	} {
+		if item.seconds < 1 || item.seconds > 86400 {
+			return fmt.Errorf("%s 必须在 1-86400 秒之间", item.name)
+		}
+	}
 	if c.Mode != "CLIENT" {
 		return fmt.Errorf("客户端角色由服务端授权，配置文件不再接受 mode")
 	}

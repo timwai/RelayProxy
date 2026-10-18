@@ -19,6 +19,11 @@
 # Test artifacts
 *.test
 *.out
+*.pid
+
+# Windows build intermediates
+/windows/**/bin/
+/windows/**/obj/
 
 # Databases
 *.db
@@ -31,6 +36,8 @@ relayproxy.db
 *.crt
 *.key
 *.pem
+!/third_party/yamux/testdata/cert.pem
+!/third_party/yamux/testdata/key.pem
 
 # Logs
 *.log

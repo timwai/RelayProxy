@@ -1,0 +1,88 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 160" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <linearGradient id="bannerBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a0f1d"/>
+      <stop offset="100%" stop-color="#060911"/>
+    </linearGradient>
+
+    <!-- Border Gradient -->
+    <linearGradient id="bannerBorder" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.3"/>
+      <stop offset="50%" stop-color="#818cf8" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ec4899" stop-opacity="0.2"/>
+    </linearGradient>
+
+    <!-- Vertical Strand Gradient -->
+    <linearGradient id="bWarp" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00f5d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+
+    <!-- Horizontal Strand Gradient -->
+    <linearGradient id="bWeft" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+
+    <filter id="bShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="3" stdDeviation="4" flood-color="#000000" flood-opacity="0.8"/>
+    </filter>
+  </defs>
+
+  <!-- Banner Background Card -->
+  <rect x="0" y="0" width="760" height="160" rx="24" fill="url(#bannerBg)"/>
+  <rect x="0" y="0" width="760" height="160" rx="24" fill="none" stroke="url(#bannerBorder)" stroke-width="1.5"/>
+
+  <!-- Logo Mark (Left) -->
+  <g transform="translate(36, 16) scale(0.25)">
+    <!-- Base App Squircle -->
+    <rect x="24" y="24" width="464" height="464" rx="112" fill="#0f172a" stroke="#334155" stroke-width="4"/>
+
+    <!-- Central Weave -->
+    <!-- Horizontal Loop -->
+    <rect x="160" y="276" width="220" height="88" rx="44"
+          fill="none" stroke="url(#bWeft)" stroke-width="32" stroke-linecap="round"/>
+
+    <!-- Vertical Loop -->
+    <g filter="url(#bShadow)">
+      <rect x="162" y="116" width="88" height="260" rx="44"
+            fill="none" stroke="url(#bWarp)" stroke-width="32" stroke-linecap="round"/>
+    </g>
+
+    <!-- Weave Over-Under pass -->
+    <g filter="url(#bShadow)">
+      <path d="M 160 290 Q 160 276 174 276 L 210 276" fill="none" stroke="url(#bWeft)" stroke-width="32" stroke-linecap="round"/>
+      <path d="M 202 364 L 250 364" fill="none" stroke="url(#bWeft)" stroke-width="32"/>
+    </g>
+
+    <!-- Nodes -->
+    <circle cx="206" cy="160" r="10" fill="#00f5d4"/>
+    <circle cx="336" cy="320" r="10" fill="#ec4899"/>
+    <circle cx="206" cy="320" r="7" fill="#818cf8"/>
+  </g>
+
+  <!-- Typography (Right) -->
+  <g transform="translate(190, 42)">
+    <!-- Brand Wordmark -->
+    <text x="0" y="48" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif"
+          font-size="52" font-weight="800" fill="#ffffff" letter-spacing="-1.5">
+      Loom
+    </text>
+
+    <!-- Pill Tag -->
+    <g transform="translate(142, 14)">
+      <rect x="0" y="0" width="76" height="24" rx="12" fill="#1e293b" stroke="#38bdf8" stroke-width="1" stroke-opacity="0.4"/>
+      <text x="38" y="16" font-family="-apple-system, BlinkMacSystemFont, 'Inter', sans-serif"
+            font-size="11" font-weight="700" fill="#38bdf8" text-anchor="middle" letter-spacing="0.5">
+        PEER MESH
+      </text>
+    </g>
+
+    <!-- Tagline -->
+    <text x="2" y="78" font-family="-apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif"
+          font-size="15" font-weight="400" fill="#94a3b8" letter-spacing="0.2">
+      Decentralized, end-to-end encrypted device fabric &amp; tunnel system
+    </text>
+  </g>
+</svg>

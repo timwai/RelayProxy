@@ -1,0 +1,111 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <defs>
+    <!-- Background Gradient -->
+    <radialGradient id="bgGlow" cx="30%" cy="20%" r="90%">
+      <stop offset="0%" stop-color="#1e293b"/>
+      <stop offset="60%" stop-color="#0f172a"/>
+      <stop offset="100%" stop-color="#090d16"/>
+    </radialGradient>
+
+    <!-- Subtle border gradient for squircle -->
+    <linearGradient id="squircleBorder" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8" stop-opacity="0.35"/>
+      <stop offset="50%" stop-color="#6366f1" stop-opacity="0.2"/>
+      <stop offset="100%" stop-color="#ffffff" stop-opacity="0.05"/>
+    </linearGradient>
+
+    <!-- Vertical Strand Gradient (Warp - Cyan to Blue) -->
+    <linearGradient id="warpGrad" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#00f5d4"/>
+      <stop offset="45%" stop-color="#06b6d4"/>
+      <stop offset="100%" stop-color="#3b82f6"/>
+    </linearGradient>
+
+    <!-- Horizontal Strand Gradient (Weft - Indigo to Purple-Pink) -->
+    <linearGradient id="weftGrad" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" stop-color="#6366f1"/>
+      <stop offset="50%" stop-color="#8b5cf6"/>
+      <stop offset="100%" stop-color="#ec4899"/>
+    </linearGradient>
+
+    <!-- Shadow filter for 3D weave depth -->
+    <filter id="weaveShadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="4" stdDeviation="6" flood-color="#020617" flood-opacity="0.75"/>
+    </filter>
+
+    <!-- Ambient glow filter -->
+    <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+      <feGaussianBlur stdDeviation="8" result="coloredBlur"/>
+      <feMerge>
+        <feMergeNode in="coloredBlur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+
+    <!-- Clips for weave crossing points -->
+    <!-- Point 2 (Top-Right): Vertical strand is OVER horizontal strand -->
+    <clipPath id="clipTopRight">
+      <rect x="180" y="270" width="70" height="55"/>
+    </clipPath>
+    <!-- Point 4 (Bottom-Left): Vertical strand is OVER horizontal strand -->
+    <clipPath id="clipBottomLeft">
+      <rect x="135" y="315" width="65" height="60"/>
+    </clipPath>
+  </defs>
+
+  <!-- App Squircle Base (Apple/macOS standard curve r=112) -->
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="url(#bgGlow)"/>
+  <rect x="24" y="24" width="464" height="464" rx="112" fill="none" stroke="url(#squircleBorder)" stroke-width="2.5"/>
+
+  <!-- Background subtle grid lattice (hinting at mesh topology) -->
+  <g opacity="0.08" stroke="#ffffff" stroke-width="1.5" stroke-dasharray="4 8">
+    <line x1="184" y1="60" x2="184" y2="452"/>
+    <line x1="228" y1="60" x2="228" y2="452"/>
+    <line x1="60" y1="298" x2="452" y2="298"/>
+    <line x1="60" y1="342" x2="452" y2="342"/>
+  </g>
+
+  <!-- Central Weave Container -->
+  <g transform="translate(10, 0)">
+
+    <!-- 1. BASE: Horizontal Loop (Weft - Left to Right) -->
+    <!-- Center y=320, x from 160 to 376, width=216, height=88, rx=44, stroke=28 -->
+    <rect x="160" y="276" width="220" height="88" rx="44"
+          fill="none" stroke="url(#weftGrad)" stroke-width="28"
+          stroke-linecap="round" stroke-linejoin="round"/>
+
+    <!-- 2. Vertical Loop (Warp - Top to Bottom) with drop shadow -->
+    <!-- Center x=206, y from 120 to 376, width=88, height=260, rx=44, stroke=28 -->
+    <g filter="url(#weaveShadow)">
+      <rect x="162" y="116" width="88" height="260" rx="44"
+            fill="none" stroke="url(#warpGrad)" stroke-width="28"
+            stroke-linecap="round" stroke-linejoin="round"/>
+    </g>
+
+    <!-- 3. WEAVE OVERLAY: Horizontal segments that weave OVER the vertical loop -->
+    <!-- At Top-Left (x=160..210, y=276..305) and Bottom-Right (x=210..260, y=335..364) -->
+    <!-- This creates the authentic alternating over-under plain weave of a Loom! -->
+    <g filter="url(#weaveShadow)">
+      <!-- Top-Left horizontal cap passing OVER vertical strand -->
+      <path d="M 160 290 Q 160 276 174 276 L 210 276"
+            fill="none" stroke="url(#weftGrad)" stroke-width="28" stroke-linecap="round"/>
+      <!-- Bottom-Right horizontal segment passing OVER vertical strand -->
+      <path d="M 202 364 L 250 364"
+            fill="none" stroke="url(#weftGrad)" stroke-width="28"/>
+    </g>
+
+    <!-- 4. Glowing Mesh Node Dots (Representing cryptographic peers / endpoints) -->
+    <!-- Top peer node -->
+    <circle cx="206" cy="160" r="7" fill="#00f5d4" filter="url(#neonGlow)"/>
+    <circle cx="206" cy="160" r="3" fill="#ffffff"/>
+
+    <!-- Far-right peer node -->
+    <circle cx="336" cy="320" r="7" fill="#ec4899" filter="url(#neonGlow)"/>
+    <circle cx="336" cy="320" r="3" fill="#ffffff"/>
+
+    <!-- Interwoven core nexus node (Intersection center) -->
+    <circle cx="206" cy="320" r="5" fill="#a855f7" filter="url(#neonGlow)"/>
+    <circle cx="206" cy="320" r="2" fill="#ffffff"/>
+
+  </g>
+</svg>

@@ -30,6 +30,7 @@ import (
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/proxy"
 	"relayproxy/internal/proxy/httpproxy"
 	"relayproxy/internal/proxy/socks5"
 	"relayproxy/internal/traffic"
@@ -139,6 +140,9 @@ type AgentConfig struct {
 	SOCKS5Listen            string // "127.0.0.1:1080"
 	HTTPEnabled             *bool
 	HTTPListen              string // "127.0.0.1:8080"
+	ProxyMaxConnections     int
+	ProxyIdleTimeout        time.Duration
+	ProxyUDPIdleTimeout     time.Duration
 	DefaultExitID           string
 	CustomExits             []routing.CustomExit
 	ExitUpstreamID          string
@@ -393,6 +397,15 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	}
 	if cfg.HTTPListen == "" {
 		cfg.HTTPListen = "127.0.0.1:8080"
+	}
+	if cfg.ProxyMaxConnections <= 0 {
+		cfg.ProxyMaxConnections = proxy.DefaultMaxConnections
+	}
+	if cfg.ProxyIdleTimeout <= 0 {
+		cfg.ProxyIdleTimeout = proxy.DefaultIdleTimeout
+	}
+	if cfg.ProxyUDPIdleTimeout <= 0 {
+		cfg.ProxyUDPIdleTimeout = proxy.DefaultIdleTimeout
 	}
 	if strings.TrimSpace(cfg.RDPAddress) == "" {
 		cfg.RDPAddress = "127.0.0.1:3389"
@@ -1440,7 +1453,8 @@ func (a *Agent) Start() (err error) {
 	}
 	if cfg.Mode == "CLIENT" || cfg.Mode == "BOTH" {
 		if cfg.IsSOCKS5Enabled() {
-			srv := socks5.NewServer(socks5.ServerConfig{ListenAddr: cfg.SOCKS5Listen, GetExitNodeID: getExit, Dialer: a.dialer})
+			srv := socks5.NewServer(socks5.ServerConfig{ListenAddr: cfg.SOCKS5Listen, GetExitNodeID: getExit, Dialer: a.dialer,
+				MaxConnections: cfg.ProxyMaxConnections, IdleTimeout: cfg.ProxyIdleTimeout, UDPIdleTimeout: cfg.ProxyUDPIdleTimeout})
 			if err := srv.Start(); err != nil {
 				return fmt.Errorf("failed to start SOCKS5: %w", err)
 			}
@@ -1449,7 +1463,8 @@ func (a *Agent) Start() (err error) {
 			a.mu.Unlock()
 		}
 		if cfg.IsHTTPEnabled() {
-			srv := httpproxy.NewServer(httpproxy.ServerConfig{ListenAddr: cfg.HTTPListen, GetExitNodeID: getExit, Dialer: a.dialer})
+			srv := httpproxy.NewServer(httpproxy.ServerConfig{ListenAddr: cfg.HTTPListen, GetExitNodeID: getExit, Dialer: a.dialer,
+				MaxConnections: cfg.ProxyMaxConnections, IdleTimeout: cfg.ProxyIdleTimeout})
 			if err := srv.Start(); err != nil {
 				return fmt.Errorf("failed to start HTTP proxy: %w", err)
 			}

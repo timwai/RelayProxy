@@ -17,6 +17,13 @@ transport:
     down_mbps: 0               # Server -> 本机；0 = BBR Aggressive
     disable_loss_compensation: false
 
+# 两种代理各自的连接上限；SOCKS5 UDP association 计入 SOCKS5 上限。
+# 多标签浏览器可按设备资源提高到 1024。修改后重启 Agent 生效。
+proxy:
+  max_connections: 256
+  idle_timeout_sec: 300        # TCP 双向空闲超时
+  udp_idle_timeout_sec: 300    # UDP 关联双向有效报文空闲超时，独立于 TCP control
+
 # P2P 直连默认自动启用：首个连接立即走 Relay，后台建立直连；
 # 后续连接优先复用 P2P QUIC。relay_only 可完全关闭直连尝试。
 p2p:

@@ -8,7 +8,47 @@ import (
 	"testing"
 
 	"relayproxy/agent/routing"
+	"relayproxy/internal/proxy"
 )
+
+func TestProxyLimitsYAMLRoundTrip(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "agent.yaml")
+	if err := os.WriteFile(path, []byte("server:\n  address: relay.example.test\nproxy:\n  max_connections: 1024\n  idle_timeout_sec: 600\n  udp_idle_timeout_sec: 90\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := LoadAgentConfig(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := SaveAgentConfig(path, CloneAgentConfig(cfg)); err != nil {
+		t.Fatal(err)
+	}
+	reloaded, err := LoadAgentConfig(path)
+	if err != nil || reloaded.Proxy.MaxConnections != 1024 || reloaded.Proxy.IdleTimeoutSec != 600 || reloaded.Proxy.UDPIdleTimeoutSec != 90 {
+		t.Fatalf("proxy limits lost after save: %+v, %v", reloaded, err)
+	}
+	defaults := &AgentConfigFile{}
+	if err := NormalizeAgentConfig(defaults); err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Proxy.MaxConnections != proxy.DefaultMaxConnections || defaults.Proxy.IdleTimeoutSec != 300 || defaults.Proxy.UDPIdleTimeoutSec != 300 {
+		t.Fatalf("unexpected proxy defaults: %+v", defaults.Proxy)
+	}
+	for _, field := range []string{"connections", "tcp_idle", "udp_idle"} {
+		bad := CloneAgentConfig(defaults)
+		switch field {
+		case "connections":
+			bad.Proxy.MaxConnections = -1
+		case "tcp_idle":
+			bad.Proxy.IdleTimeoutSec = -1
+		case "udp_idle":
+			bad.Proxy.UDPIdleTimeoutSec = 86401
+		}
+		if err := NormalizeAgentConfig(bad); err == nil {
+			t.Fatalf("accepted invalid %s", field)
+		}
+	}
+}
 
 func TestApplyAgentDefaultsPreservesExplicitRoutingMode(t *testing.T) {
 	cfg := &AgentConfigFile{}

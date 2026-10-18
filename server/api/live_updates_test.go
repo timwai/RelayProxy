@@ -1,6 +1,53 @@
 package api
 
-import "testing"
+import (
+	"bufio"
+	"context"
+	"net/http"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"relayproxy/server/repository"
+)
+
+func TestLiveEventsSurviveServerWriteTimeout(t *testing.T) {
+	r := &Router{live: newLiveUpdates()}
+	srv := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		user := &repository.User{IdentityID: "identity", Role: "admin"}
+		req = req.WithContext(context.WithValue(req.Context(), principalContextKey, user))
+		r.handleLiveEvents(w, req)
+	}))
+	srv.Config.WriteTimeout = 50 * time.Millisecond
+	srv.Start()
+	defer srv.Close()
+	client := &http.Client{Timeout: 3 * time.Second}
+	resp, err := client.Get(srv.URL)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	reader := bufio.NewReader(resp.Body)
+	if line, err := reader.ReadString('\n'); err != nil || line != ": connected\n" {
+		t.Fatalf("initial SSE event: %q, %v", line, err)
+	}
+	// Keep the HTTP response open beyond the server-wide absolute deadline.
+	time.Sleep(150 * time.Millisecond)
+	r.live.publish("")
+	for {
+		line, err := reader.ReadString('\n')
+		if err != nil {
+			t.Fatalf("SSE ended at the global WriteTimeout: %v", err)
+		}
+		if strings.HasPrefix(line, "data: ") {
+			if !strings.Contains(line, `"revision":1`) {
+				t.Fatalf("invalid event: %q", line)
+			}
+			break
+		}
+	}
+}
 
 func TestLiveUpdatesScopeIsolationAndAdminDelivery(t *testing.T) {
 	h := newLiveUpdates()

@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="100%" height="100%">
+  <!-- Loom Monochrome Identity - Pure Single-Color Vector Asset -->
+  <!-- Adapts automatically via currentColor (Black on Light, White on Dark) -->
+  <defs>
+    <!-- Mask for Vertical Loop: Cuts gaps where Horizontal Loop passes OVER -->
+    <!-- Gaps at Top-Left (176, 272) and Bottom-Right (240, 336) -->
+    <mask id="warpCutouts">
+      <!-- White base reveals everything -->
+      <rect x="0" y="0" width="512" height="512" fill="#ffffff"/>
+      <!-- Black cuts hide parts of the vertical loop with an 8px border-radius gap -->
+      <!-- Top-Left Cutout: centered at (176, 272), 52x52 box -->
+      <rect x="150" y="246" width="52" height="52" rx="6" fill="#000000"/>
+      <!-- Bottom-Right Cutout: centered at (240, 336), 52x52 box -->
+      <rect x="214" y="310" width="52" height="52" rx="6" fill="#000000"/>
+    </mask>
+
+    <!-- Mask for Horizontal Loop: Cuts gaps where Vertical Loop passes OVER -->
+    <!-- Gaps at Top-Right (240, 272) and Bottom-Left (176, 336) -->
+    <mask id="weftCutouts">
+      <!-- White base reveals everything -->
+      <rect x="0" y="0" width="512" height="512" fill="#ffffff"/>
+      <!-- Black cuts hide parts of the horizontal loop with an 8px border-radius gap -->
+      <!-- Top-Right Cutout: centered at (240, 272), 52x52 box -->
+      <rect x="214" y="246" width="52" height="52" rx="6" fill="#000000"/>
+      <!-- Bottom-Left Cutout: centered at (176, 336), 52x52 box -->
+      <rect x="150" y="310" width="52" height="52" rx="6" fill="#000000"/>
+    </mask>
+  </defs>
+
+  <g fill="none" stroke="currentColor" stroke-width="32" stroke-linecap="round" stroke-linejoin="round">
+    <!-- 1. Horizontal Loop (Weft - Base of 'L') with weave cutouts -->
+    <rect x="160" y="256" width="256" height="96" rx="48" mask="url(#weftCutouts)"/>
+
+    <!-- 2. Vertical Loop (Warp - Stem of 'L') with weave cutouts -->
+    <rect x="160" y="96" width="96" height="288" rx="48" mask="url(#warpCutouts)"/>
+  </g>
+
+  <!-- Central P2P Node Anchors (Solid in monochrome) -->
+  <circle cx="208" cy="144" r="8" fill="currentColor"/>
+  <circle cx="368" cy="304" r="8" fill="currentColor"/>
+</svg>

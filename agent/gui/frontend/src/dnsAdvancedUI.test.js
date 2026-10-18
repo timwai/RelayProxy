@@ -14,5 +14,7 @@ test('simplified DNS page retains advanced settings and diagnostics',()=>{
     assert.ok(dnsPage.includes(field),'missing DNS advanced option '+field);
   }
   assert.ok(dnsPage.includes('disabled={!r.fake_ip_enabled}'),'FakeIP-dependent protection needs explicit mode guard');
-  assert.ok(dnsPage.includes('onGoto(\'diagnostics\')'),'DNS diagnostics navigation must remain available');
+  assert.ok(dnsPage.includes("call('goProbeDNS')"),'DNS diagnostics must remain available on the DNS page');
+  assert.match(source,/\['diagnostics','terminal','诊断与日志'\]/,'full diagnostics must remain available in navigation');
+  assert.doesNotMatch(dnsPage,/onGoto\(/,'DNS settings should not duplicate sidebar navigation');
 });

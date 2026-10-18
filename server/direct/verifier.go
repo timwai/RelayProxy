@@ -138,21 +138,24 @@ func probeEndpoint(ctx context.Context, record EndpointRecord, dialAddress strin
 		return fmt.Errorf("public direct probe stream failed: %w", err)
 	}
 	defer stream.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = stream.SetDeadline(deadline)
+	}
+	stop := tunnel.InterruptOnCancel(ctx, session)
+	defer stop()
 	nonce := make([]byte, 32)
 	if _, err := rand.Read(nonce); err != nil {
 		return err
 	}
+	return exchangeProbe(stream, nonce)
+}
+
+func exchangeProbe(stream tunnel.TunnelStream, nonce []byte) error {
 	if err := protocol.WriteJSON(stream, protocol.PublicDirectHandshakeRequest{
 		Type:  protocol.PublicDirectHandshakeProbe,
 		Probe: &protocol.PublicDirectProbeRequest{Nonce: nonce},
 	}); err != nil {
 		return err
-	}
-	// Signal that the verifier has no more request bytes. The Exit waits for
-	// this FIN after writing its response before closing the QUIC connection,
-	// preventing connection close from overtaking the response stream.
-	if err := stream.CloseWrite(); err != nil {
-		return fmt.Errorf("public direct probe close-write failed: %w", err)
 	}
 	var response protocol.PublicDirectHandshakeResponse
 	if err := protocol.ReadJSON(stream, &response); err != nil {
@@ -161,5 +164,10 @@ func probeEndpoint(ctx context.Context, record EndpointRecord, dialAddress strin
 	if !response.Success || response.Probe == nil || !bytes.Equal(response.Probe.Nonce, nonce) {
 		return errors.New("public direct verification challenge mismatch")
 	}
+	// Only acknowledge consumption after reading the response. Otherwise the
+	// listener's connection close can overtake its buffered response bytes.
+	// The validated echo is the proof. A deadline or remote close during this
+	// best-effort acknowledgement must not invalidate an already-read response.
+	_ = stream.CloseWrite()
 	return nil
 }

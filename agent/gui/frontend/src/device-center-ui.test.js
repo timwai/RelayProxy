@@ -8,12 +8,13 @@ const app=read('./App.jsx'),files=read('./FileSharingPage.jsx'),css=read('./styl
 test('device cards provide capabilities without changing the selected default exit',()=>{
  assert.match(app,/function DeviceCenter\(\{status,exits,targets,filePeers,config,onSpeed,onSpeedAll,onGoto,onFiles,onConnectRDP,onRefresh\}\)/);
  const view=app.slice(app.indexOf('function DeviceCenter('),app.indexOf('function ProxyPage('));
- assert.match(view,/onFiles\(d.id\)/);
+ assert.doesNotMatch(view,/onFiles\(/);
  assert.match(view,/onConnectRDP\(d.id\)/);
  assert.match(view,/onSpeed\(d.id\)/);
  assert.match(view,/setDetail\(d.id\)/);
  assert.doesNotMatch(view,/goSelectExit|onSelect\(/);
- assert.match(view,/d\.shares\.length>0&&<button/);
+ assert.match(view,/d\.shares\.length>0&&<Badge/);
+ assert.match(view,/selected\.shares\.map/);
  assert.match(view,/d\.rdp&&<button/);
  assert.match(view,/d\.proxy&&<button/);
 });
@@ -38,7 +39,7 @@ test('file shortcut uses only ACL-verified shares and never unapproved host entr
 });
 
 test('device card controls are responsive, focusable and labelled',()=>{
- assert.match(app,/aria-label=\{'打开 '\+name\+' 的共享文件'\}/);
+ assert.match(app,/className="device-center-card-name" type="button" onClick=\{\(\)=>setDetail\(d.id\)\}/);
  assert.match(app,/aria-label=\{'远程连接 '\+name\}/);
  assert.match(app,/aria-label=\{'测速 '\+name\}/);
  assert.match(css,/\.device-center-grid\{display:grid;grid-template-columns:repeat\(auto-fill/);

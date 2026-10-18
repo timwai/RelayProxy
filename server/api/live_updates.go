@@ -90,7 +90,7 @@ func (h *liveUpdates) publish(identityID string) {
 }
 
 func (r *Router) handleLiveEvents(w http.ResponseWriter, req *http.Request) {
-	flusher, ok := w.(http.Flusher)
+	_, ok := w.(http.Flusher)
 	if !ok {
 		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
 		return
@@ -106,12 +106,31 @@ func (r *Router) handleLiveEvents(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	defer unsubscribe()
+	rc := http.NewResponseController(w)
+	if err := rc.SetWriteDeadline(time.Time{}); err != nil {
+		http.Error(w, "streaming deadline unsupported", http.StatusInternalServerError)
+		return
+	}
+	// The server-wide WriteTimeout is an absolute response deadline. Each
+	// event gets its own short write budget, with no deadline between events.
+	writeEvent := func(format string, args ...any) error {
+		if err := rc.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+			return err
+		}
+		if _, err := fmt.Fprintf(w, format, args...); err != nil {
+			return err
+		}
+		if err := rc.Flush(); err != nil {
+			return err
+		}
+		return rc.SetWriteDeadline(time.Time{})
+	}
 	w.Header().Set("Content-Type", "text/event-stream; charset=utf-8")
 	w.Header().Set("Cache-Control", "no-store")
 	w.Header().Set("X-Accel-Buffering", "no")
-	w.WriteHeader(http.StatusOK)
-	_, _ = fmt.Fprint(w, ": connected\n\n")
-	flusher.Flush()
+	if err := writeEvent(": connected\n\n"); err != nil {
+		return
+	}
 	pulse := time.NewTicker(25 * time.Second)
 	defer pulse.Stop()
 	for {
@@ -120,10 +139,9 @@ func (r *Router) handleLiveEvents(w http.ResponseWriter, req *http.Request) {
 			return
 		case revision := <-ch:
 			payload, _ := json.Marshal(map[string]uint64{"revision": revision})
-			if _, err := fmt.Fprintf(w, "event: invalidate\ndata: %s\n\n", payload); err != nil {
+			if err := writeEvent("event: invalidate\ndata: %s\n\n", payload); err != nil {
 				return
 			}
-			flusher.Flush()
 		case <-pulse.C:
 			// A disabled user or revoked login must not hold an authorized
 			// long-lived subscription until the browser happens to reconnect.
@@ -140,10 +158,9 @@ func (r *Router) handleLiveEvents(w http.ResponseWriter, req *http.Request) {
 				current.IdentityID != user.IdentityID {
 				return
 			}
-			if _, err = fmt.Fprint(w, ": keepalive\n\n"); err != nil {
+			if err = writeEvent(": keepalive\n\n"); err != nil {
 				return
 			}
-			flusher.Flush()
 		}
 	}
 }

@@ -729,12 +729,12 @@ func main() {
 	defer shutdownCancel()
 
 	_ = adminServer.Shutdown(shutdownCtx)
-	_ = gw.Close()
 	close(authorizationExpiryStop)
 	select {
 	case <-authorizationExpiryDone:
 	case <-shutdownCtx.Done():
 	}
+	_ = gw.Close()
 	close(auditCh)
 	select {
 	case <-auditDone:

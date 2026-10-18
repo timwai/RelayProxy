@@ -22,13 +22,9 @@ func TestSendPunchRoundTracksEachAuthenticatedNonce(t *testing.T) {
 	defer sender.Close()
 	address := netip.AddrPortFrom(netip.MustParseAddr("127.0.0.1"), uint16(receiver.LocalAddr().(*net.UDPAddr).Port))
 	key := []byte("0123456789abcdef0123456789abcdef")
-	pending := map[uint64]time.Time{}
-	nextNonce := uint64(100)
-	if err := sendPunchRound(sender, 999, key, []netip.AddrPort{address}, &nextNonce, pending); err != nil {
+	pending := map[uint64]pendingPunch{}
+	if err := sendPunchRound(sender, 999, key, []netip.AddrPort{address}, pending); err != nil {
 		t.Fatal(err)
-	}
-	if nextNonce != 101 || pending[101].IsZero() {
-		t.Fatalf("first round did not track transmitted nonce: next=%d pending=%v", nextNonce, pending)
 	}
 	buffer := make([]byte, 256)
 	_ = receiver.SetReadDeadline(time.Now().Add(time.Second))
@@ -37,13 +33,22 @@ func TestSendPunchRoundTracksEachAuthenticatedNonce(t *testing.T) {
 		t.Fatal(err)
 	}
 	decoded, err := secure.DecodePunchPacket(buffer[:n], key)
-	if err != nil || decoded.Type != secure.PunchRequest || decoded.Nonce != 101 || decoded.SessionID != 999 {
+	if err != nil || decoded.Type != secure.PunchRequest || decoded.SessionID != 999 {
 		t.Fatalf("sent packet nonce mismatch: %+v error=%v", decoded, err)
 	}
-	if err := sendPunchRound(sender, 999, key, []netip.AddrPort{address}, &nextNonce, pending); err != nil {
+	first := pending[decoded.Nonce]
+	if first.address != address || first.sentAt.IsZero() {
+		t.Fatalf("missing destination/send time: %+v", first)
+	}
+	if err := sendPunchRound(sender, 999, key, []netip.AddrPort{address}, pending); err != nil {
 		t.Fatal(err)
 	}
-	if nextNonce != 102 || pending[102].Before(pending[101]) {
-		t.Fatalf("nonce/send timestamps not fresh per round: %d %+v", nextNonce, pending)
+	n, _, err = receiver.ReadFromUDP(buffer)
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := secure.DecodePunchPacket(buffer[:n], key)
+	if err != nil || second.Nonce == decoded.Nonce || pending[second.Nonce].sentAt.Before(first.sentAt) || len(pending) != 2 {
+		t.Fatalf("nonce/send timestamps not fresh per round: %+v %+v %v", second, pending, err)
 	}
 }

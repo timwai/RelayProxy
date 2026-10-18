@@ -1,6 +1,7 @@
 package direct
 
 import (
+	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
@@ -12,7 +13,28 @@ import (
 	agentdirect "relayproxy/agent/direct"
 	"relayproxy/internal/cert"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 )
+
+type expiredProbeAck struct{ *testControlStream }
+
+func (s expiredProbeAck) CloseWrite() error { return context.DeadlineExceeded }
+
+func TestValidProbeSurvivesAcknowledgementDeadline(t *testing.T) {
+	nonce := bytes.Repeat([]byte{3}, 32)
+	stream := expiredProbeAck{newControlStream(t, protocol.PublicDirectHandshakeResponse{
+		Success: true, Probe: &protocol.PublicDirectProbeResponse{Nonce: nonce},
+	})}
+	if err := exchangeProbe(stream, nonce); err != nil {
+		t.Fatalf("validated response rejected during FIN cleanup: %v", err)
+	}
+	wrong := expiredProbeAck{newControlStream(t, protocol.PublicDirectHandshakeResponse{
+		Success: true, Probe: &protocol.PublicDirectProbeResponse{Nonce: []byte("wrong")},
+	})}
+	if err := exchangeProbe(wrong, nonce); err == nil {
+		t.Fatal("invalid response was accepted")
+	}
+}
 
 func startProbeListener(t *testing.T) (*agentdirect.PublicListener, string, context.CancelFunc) {
 	t.Helper()
@@ -42,6 +64,59 @@ func startProbeListener(t *testing.T) (*agentdirect.PublicListener, string, cont
 		<-done
 	})
 	return listener, cert.Fingerprint(certificate.Certificate[0]), cancel
+}
+
+func TestProbeReadHonorsVerificationDeadline(t *testing.T) {
+	certificate, err := cert.EnsureCertificate("", "", "silent-probe-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listener, err := tunnel.ListenDirectQUIC("127.0.0.1:0", &tls.Config{Certificates: []tls.Certificate{certificate}}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer listener.Close()
+	serverCtx, cancelServer := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancelServer()
+	requestRead := make(chan struct{})
+	serverDone := make(chan struct{})
+	go func() {
+		defer close(serverDone)
+		session, err := listener.Accept(serverCtx)
+		if err != nil {
+			return
+		}
+		defer session.Close()
+		stream, err := session.AcceptStream(serverCtx)
+		if err != nil {
+			return
+		}
+		defer stream.Close()
+		var request protocol.PublicDirectHandshakeRequest
+		if err := protocol.ReadJSON(stream, &request); err != nil {
+			return
+		}
+		close(requestRead)
+		// Keep QUIC alive but never answer the application-level challenge.
+		select {
+		case <-session.Done():
+		case <-serverCtx.Done():
+		}
+	}()
+	ctx, cancel := context.WithTimeout(context.Background(), 150*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err = probeEndpoint(ctx, EndpointRecord{CertFingerprint: cert.Fingerprint(certificate.Certificate[0])}, listener.Addr().String())
+	if err == nil || time.Since(started) > time.Second {
+		t.Fatalf("silent probe ignored verification timeout: %v after %s", err, time.Since(started))
+	}
+	select {
+	case <-requestRead:
+	default:
+		t.Fatal("probe failed before reaching the silent application")
+	}
+	cancelServer()
+	<-serverDone
 }
 
 func TestVerifierPinsExitCertificateAndChallenge(t *testing.T) {

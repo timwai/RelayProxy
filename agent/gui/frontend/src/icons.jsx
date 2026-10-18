@@ -4,6 +4,7 @@ import React from 'react';
 // nav item's text colour (muted / hover / active). Paths adapted from Lucide
 // (ISC licence, https://lucide.dev).
 const ICONS={
+ refresh:<><path d="M20 7a9 9 0 1 0 1 9"/><path d="M20 2v5h-5"/></>,
  dashboard:<><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></>,
  devices:<><path d="M18 8V6a2 2 0 0 0-2-2H4a2 2 0 0 0-2 2v7a2 2 0 0 0 2 2h8"/><path d="M10 19v-3.96 3.15"/><path d="M7 19h5"/><rect x="16" y="12" width="6" height="10" rx="2"/></>,
  route:<><circle cx="6" cy="19" r="3"/><path d="M9 19h8.5a3.5 3.5 0 0 0 0-7h-11a3.5 3.5 0 0 1 0-7H15"/><circle cx="18" cy="5" r="3"/></>,

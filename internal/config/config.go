@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"relayproxy/agent/routing"
+	"relayproxy/internal/proxy"
 )
 
 type ServerConfig struct {
@@ -146,7 +147,10 @@ type AgentConfigFile struct {
 	Mode string `yaml:"-"` // runtime-only capability view; grants come from the server
 
 	Proxy struct {
-		SOCKS5 struct {
+		MaxConnections    int `yaml:"max_connections"` // per listener, including UDP associations
+		IdleTimeoutSec    int `yaml:"idle_timeout_sec"`
+		UDPIdleTimeoutSec int `yaml:"udp_idle_timeout_sec"`
+		SOCKS5            struct {
 			Enabled *bool  `yaml:"enabled"`
 			Listen  string `yaml:"listen"`
 			Port    int    `yaml:"port"`
@@ -508,6 +512,15 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	}
 	if cfg.Proxy.SOCKS5.Listen == "" {
 		cfg.Proxy.SOCKS5.Listen = "127.0.0.1"
+	}
+	if cfg.Proxy.MaxConnections == 0 {
+		cfg.Proxy.MaxConnections = proxy.DefaultMaxConnections
+	}
+	if cfg.Proxy.IdleTimeoutSec == 0 {
+		cfg.Proxy.IdleTimeoutSec = int(proxy.DefaultIdleTimeout.Seconds())
+	}
+	if cfg.Proxy.UDPIdleTimeoutSec == 0 {
+		cfg.Proxy.UDPIdleTimeoutSec = int(proxy.DefaultIdleTimeout.Seconds())
 	}
 	if cfg.Proxy.SOCKS5.Port == 0 {
 		cfg.Proxy.SOCKS5.Port = 1080

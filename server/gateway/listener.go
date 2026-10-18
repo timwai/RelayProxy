@@ -19,6 +19,7 @@ import (
 	"github.com/apernet/quic-go"
 	"github.com/google/uuid"
 	quiccongestion "relayproxy/internal/congestion"
+	"relayproxy/internal/netutil"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 	"relayproxy/server/session"
@@ -294,15 +295,20 @@ func (g *Gateway) reserveConnection() bool {
 
 func (g *Gateway) serveTCP() {
 	defer g.wg.Done()
+	var backoff netutil.AcceptBackoff
 	for {
 		rawConn, err := g.tcpListener.Accept()
 		if err != nil {
-			if g.closed.Load() {
+			if g.closed.Load() || errors.Is(err, net.ErrClosed) {
 				return
 			}
 			log.Printf("[Gateway] TCP accept error: %v", err)
+			if !backoff.Wait(g.ctx) {
+				return
+			}
 			continue
 		}
+		backoff.Reset()
 		tunnel.TuneTCPConn(rawConn)
 
 		if !g.reserveConnection() {
@@ -363,15 +369,20 @@ func (g *Gateway) serveTCP() {
 
 func (g *Gateway) serveQUIC() {
 	defer g.wg.Done()
+	var backoff netutil.AcceptBackoff
 	for {
 		conn, err := g.quicListener.Accept(g.ctx)
 		if err != nil {
-			if g.closed.Load() {
+			if g.closed.Load() || g.ctx.Err() != nil || errors.Is(err, net.ErrClosed) {
 				return
 			}
 			log.Printf("[Gateway] QUIC accept error: %v", err)
+			if !backoff.Wait(g.ctx) {
+				return
+			}
 			continue
 		}
+		backoff.Reset()
 
 		if !g.reserveConnection() {
 			log.Printf("[Gateway] Connection limit reached (%d), rejecting QUIC %s", g.cfg.MaxConnections, conn.RemoteAddr())
@@ -780,7 +791,13 @@ func (g *Gateway) notifyProxyExitInventoryChanged(revision uint64) {
 			!containsCapability(dev.Capabilities, protocol.CapabilityResourceInventoryPush) {
 			continue
 		}
+		g.mu.Lock()
+		if g.closed.Load() {
+			g.mu.Unlock()
+			return
+		}
 		g.wg.Add(1)
+		g.mu.Unlock()
 		go func(target *session.DeviceSession) {
 			defer g.wg.Done()
 			if err := g.pushProxyExitInventory(target, revision); err != nil && !g.closed.Load() {

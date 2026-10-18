@@ -47,12 +47,14 @@ test('legacy page IDs remain reachable and each group keeps active state',()=>{
  assert.match(src,/x\[0\]==='routing'\?CONFIG_IDS\.has\(page\):page===x\[0\]/);
 });
 
-test('Device Center shortcuts are operational and custom exit CRUD remains in Configuration',()=>{
+test('Device Center retains device operations and keeps file browsing and exit configuration in their pages',()=>{
  assert.match(ex,/buildDeviceCenter\(\{proxyExits:exits,rdpTargets:targets,filePeers\}\)/);
- assert.match(ex,/onFiles\(d.id\)/);
+ assert.doesNotMatch(ex,/onFiles\(/);
+ assert.match(nav,/\['files','folder','文件共享'\]/);
  assert.match(ex,/onConnectRDP\(d.id\)/);
  assert.match(ex,/onSpeed\(d.id\)/);
- assert.match(ex,/onGoto\('routing'\)/);
+ assert.doesNotMatch(ex,/onGoto\(/);
+ assert.match(config,/\['routing','split','分流规则'/);
  assert.doesNotMatch(ex,/<CustomExitManager/);
  assert.match(proxy,/<CustomExitManager config=\{config\} save=\{save\} toast=\{toast\} dirty=\{dirty\}\/>/);
  assert.match(src,/if\(dirty\)\{toast\('请先保存代理配置或放弃未保存的修改/);

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"net"
+	"sync"
 	"testing"
 	"time"
 
@@ -53,6 +54,146 @@ func testDialConfig(listener *direct.PublicListener, ticket []byte) direct.DialC
 		ExitDeviceID:   "exit",
 		Ticket:         ticket,
 	}
+}
+
+func TestPublicDirectClosesUncooperativeProbe(t *testing.T) {
+	for _, earlyFIN := range []bool{false, true} {
+		t.Run(map[bool]string{false: "open_stream", true: "legacy_early_fin"}[earlyFIN], func(t *testing.T) {
+			testPublicDirectClosesProbe(t, earlyFIN)
+		})
+	}
+}
+
+func testPublicDirectClosesProbe(t *testing.T, earlyFIN bool) {
+	listener := newTestListener(t, []byte("ticket"))
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	session, err := tunnel.DialDirectQUIC(ctx, listener.Addr(), &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	stream, err := session.OpenStream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	_ = stream.SetDeadline(time.Now().Add(2 * time.Second))
+	nonce := bytes.Repeat([]byte{1}, 32)
+	if err := protocol.WriteJSON(stream, protocol.PublicDirectHandshakeRequest{
+		Type:  protocol.PublicDirectHandshakeProbe,
+		Probe: &protocol.PublicDirectProbeRequest{Nonce: nonce},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if earlyFIN {
+		if err := stream.CloseWrite(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Model a slow peer consuming the echo after the former 250ms grace. This
+	// uses a real QUIC session and also covers the legacy FIN-before-read path.
+	time.Sleep(500 * time.Millisecond)
+	var response protocol.PublicDirectHandshakeResponse
+	if err := protocol.ReadJSON(stream, &response); err != nil || !response.Success || response.Probe == nil || !bytes.Equal(response.Probe.Nonce, nonce) {
+		t.Fatalf("probe response: %+v, %v", response, err)
+	}
+	// The unauthenticated peer deliberately leaves the request stream open.
+	select {
+	case <-session.Done():
+	case <-time.After(2 * time.Second):
+		t.Fatal("listener abandoned the unauthenticated probe session")
+	}
+}
+
+func TestPublicDirectProbeWithHighRTTAndDelayedConsumer(t *testing.T) {
+	listener := newTestListener(t, []byte("ticket"))
+	address := delayedUDPRelay(t, listener.Addr(), 350*time.Millisecond)
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	session, err := tunnel.DialDirectQUIC(ctx, address, &tls.Config{InsecureSkipVerify: true}, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer session.Close()
+	stream, err := session.OpenStream(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stream.Close()
+	_ = stream.SetDeadline(time.Now().Add(4 * time.Second))
+	nonce := bytes.Repeat([]byte{9}, 32)
+	if err := protocol.WriteJSON(stream, protocol.PublicDirectHandshakeRequest{
+		Type:  protocol.PublicDirectHandshakeProbe,
+		Probe: &protocol.PublicDirectProbeRequest{Nonce: nonce},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	// 350ms in each direction gives ~700ms RTT. Delay consumption beyond the
+	// old close-arrival bound (350 + 250 + 350ms), but within the new grace.
+	time.Sleep(1200 * time.Millisecond)
+	var response protocol.PublicDirectHandshakeResponse
+	if err := protocol.ReadJSON(stream, &response); err != nil || !response.Success || response.Probe == nil || !bytes.Equal(response.Probe.Nonce, nonce) {
+		t.Fatalf("delayed probe response: %+v, %v", response, err)
+	}
+	_ = stream.CloseWrite()
+}
+
+func delayedUDPRelay(t *testing.T, upstream string, delay time.Duration) string {
+	t.Helper()
+	server, err := net.ResolveUDPAddr("udp", upstream)
+	if err != nil {
+		t.Fatal(err)
+	}
+	conn, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	readDone := make(chan struct{})
+	var workers sync.WaitGroup
+	slots := make(chan struct{}, 128)
+	go func() {
+		defer close(readDone)
+		var client *net.UDPAddr
+		var buf [65535]byte
+		for {
+			n, source, err := conn.ReadFromUDP(buf[:])
+			if err != nil {
+				return
+			}
+			destination := server
+			if source.String() == server.String() {
+				if client == nil {
+					continue
+				}
+				destination = client
+			} else {
+				client = source
+			}
+			select {
+			case slots <- struct{}{}:
+			default:
+				continue
+			}
+			packet := append([]byte(nil), buf[:n]...)
+			workers.Add(1)
+			go func(destination *net.UDPAddr) {
+				defer workers.Done()
+				defer func() { <-slots }()
+				timer := time.NewTimer(delay)
+				defer timer.Stop()
+				select {
+				case <-ctx.Done():
+					return
+				case <-timer.C:
+					_, _ = conn.WriteToUDP(packet, destination)
+				}
+			}(destination)
+		}
+	}()
+	t.Cleanup(func() { cancel(); _ = conn.Close(); <-readDone; workers.Wait() })
+	return conn.LocalAddr().String()
 }
 
 func newSignedTestListener(t *testing.T, brutalRates ...uint64) (*direct.PublicListener, []byte, *tls.Config) {

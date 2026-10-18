@@ -51,6 +51,7 @@ func (s *YAMUXStreamAdapter) Close() error {
 		return nil
 	}
 	_ = s.Stream.SetDeadline(time.Now())
+	_ = s.Stream.CloseRead()
 	s.deadlineMu.Unlock()
 	return s.Stream.Close()
 }
@@ -99,15 +100,17 @@ type TLSSession struct {
 }
 
 // DefaultYAMUXConfig keeps stream setup responsive and permits enough
-// in-flight data for high-latency links without using yamux's tiny 256 KiB
-// stream window.
+// in-flight data for moderate-latency links while bounding the amplification
+// from yamux's per-stream buffering and all receive buffers in one session.
 func DefaultYAMUXConfig() *yamux.Config {
 	config := yamux.DefaultConfig()
 	// Match the Relay's default per-device stream ceiling. yamux assumes a
 	// symmetric backlog and blocks outgoing SYNs when this queue fills; keeping
 	// the library default (256) would impose an unintended lower burst limit.
 	config.AcceptBacklog = yamuxAcceptBacklog
-	config.MaxStreamWindowSize = 16 << 20
+	// Bound receive arrays before allocation, even for streams awaiting Accept.
+	config.MaxStreamWindowSize = 1 << 20
+	config.MaxSessionBufferSize = 64 << 20
 	config.StreamOpenTimeout = 15 * time.Second
 	config.StreamCloseTimeout = 30 * time.Second
 	// RelayProxy's control channel already provides end-to-end liveness.

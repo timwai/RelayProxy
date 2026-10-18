@@ -41,6 +41,11 @@ type punchObservation struct {
 	rtt            time.Duration
 }
 
+type pendingPunch struct {
+	address netip.AddrPort
+	sentAt  time.Time
+}
+
 // Punch races all validated UDP candidates on one socket and returns the
 // authenticated peer address. The caller owns conn after a successful return.
 func Punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCandidate, sessionID uint64, key []byte, timeout time.Duration) (*UDPResult, error) {
@@ -92,11 +97,7 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 	if len(addresses) == 0 {
 		return nil, errors.New("no usable P2P UDP candidates")
 	}
-	var nextNonce uint64
-	if err := binary.Read(rand.Reader, binary.BigEndian, &nextNonce); err != nil {
-		return nil, err
-	}
-	pending := make(map[uint64]time.Time, len(addresses)*2)
+	pending := make(map[uint64]pendingPunch, len(addresses)*2)
 	nextSend := time.Time{}
 	buffer := make([]byte, 1500)
 	var settleUntil time.Time
@@ -117,7 +118,13 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 			return nil, fmt.Errorf("P2P UDP punch timeout after %s", timeout)
 		}
 		if nextSend.IsZero() || !now.Before(nextSend) {
-			if err := sendPunchRound(conn, sessionID, key, addresses, &nextNonce, pending); err != nil {
+			// Old rounds cannot authorize a later path; bound retained challenges.
+			for nonce, probe := range pending {
+				if now.Sub(probe.sentAt) > 5*time.Second {
+					delete(pending, nonce)
+				}
+			}
+			if err := sendPunchRound(conn, sessionID, key, addresses, pending); err != nil {
 				return nil, err
 			}
 			nextSend = time.Now().Add(80 * time.Millisecond)
@@ -150,12 +157,7 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 			// reach the new address for symmetric punching to complete.
 			// Never learn unauthenticated traffic or unsolicited ACKs.
 			if packet.Type != secure.PunchRequest && packet.Type != secure.PunchKeep {
-				if packet.Type != secure.PunchAck {
-					continue
-				}
-				if _, ok := pending[packet.Nonce]; !ok {
-					continue
-				}
+				continue
 			}
 			if learned >= maxLearnedPunchAddresses {
 				continue
@@ -174,10 +176,10 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 			ack := secure.PunchPacket{Type: secure.PunchAck, SessionID: sessionID, Nonce: packet.Nonce}.Encode(key)
 			_, _ = conn.WriteToUDPAddrPort(ack, remote)
 		case secure.PunchAck:
-			if sentAt, ok := pending[packet.Nonce]; ok {
+			if probe, ok := pending[packet.Nonce]; ok && remote == probe.address {
 				delete(pending, packet.Nonce)
 				observation.gotAck = true
-				rtt := time.Since(sentAt)
+				rtt := time.Since(probe.sentAt)
 				if observation.rtt <= 0 || rtt < observation.rtt {
 					observation.rtt = rtt
 				}
@@ -233,18 +235,25 @@ func bestPunchObservation(observations map[netip.AddrPort]*punchObservation) (ne
 // Each outbound probe round has an independent nonce and send timestamp.
 // Measuring from the first round overstates RTT when NAT mapping settles
 // several rounds later. Bound pending nonces to avoid unbounded state.
-func sendPunchRound(conn *net.UDPConn, sessionID uint64, key []byte, addresses []netip.AddrPort, nextNonce *uint64, pending map[uint64]time.Time) error {
+func sendPunchRound(conn *net.UDPConn, sessionID uint64, key []byte, addresses []netip.AddrPort, pending map[uint64]pendingPunch) error {
 	var lastErr error
 	sent := 0
 	for _, address := range addresses {
-		*nextNonce = *nextNonce + 1
-		nonce := *nextNonce
+		var nonce uint64
+		for {
+			if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
+				return err
+			}
+			if _, exists := pending[nonce]; !exists {
+				break
+			}
+		}
 		packet := secure.PunchPacket{Type: secure.PunchRequest, SessionID: sessionID, Nonce: nonce}.Encode(key)
 		if _, err := conn.WriteToUDPAddrPort(packet, address); err != nil {
 			lastErr = err
 			continue
 		}
-		pending[nonce] = time.Now()
+		pending[nonce] = pendingPunch{address: address, sentAt: time.Now()}
 		sent++
 	}
 	if sent > 0 {

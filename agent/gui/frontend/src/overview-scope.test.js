@@ -16,7 +16,8 @@ test('Overview focuses on connection, aggregate traffic, and recent activity',()
  assert.match(overview,/默认代理出口配置/);
  assert.match(overview,/className="cards-4"><Metric label="下载速度"/);
  assert.match(overview,/Card title="最近连接"/);
- assert.match(overview,/onGoto\('exits'\)/);
+ assert.match(overview,/<PageHead actions=\{<Button onClick=\{onRefresh\}>刷新<\/Button>\}\/>/);
+ assert.doesNotMatch(overview,/onGoto\(/);
  for(const label of ['代理出口可用路径','UPnP 网关映射','系统流量接管','网络出口"','本机代理"','身份状态','RDP TCP 实际路径'])
   assert.ok(!overview.includes(label),`overview should not duplicate ${label}`);
 });

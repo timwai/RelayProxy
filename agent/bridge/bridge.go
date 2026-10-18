@@ -356,6 +356,9 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Device.IdentityID = c.IdentityID
 	res.Transport.Mode = c.TransportMode
 	res.Proxy.DefaultExitID = c.DefaultExitID
+	res.Proxy.MaxConnections = c.ProxyMaxConnections
+	res.Proxy.IdleTimeoutSec = int(c.ProxyIdleTimeout / time.Second)
+	res.Proxy.UDPIdleTimeoutSec = int(c.ProxyUDPIdleTimeout / time.Second)
 	res.Proxy.CustomExits = routing.CloneCustomExits(c.CustomExits)
 	res.Proxy.SOCKS5.Enabled = c.SOCKS5Enabled
 	res.Proxy.SOCKS5.Listen, res.Proxy.SOCKS5.Port = splitListen(c.SOCKS5Listen)
@@ -927,7 +930,9 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"SOCKS5 开关":      enabled(c.Proxy.SOCKS5.Enabled), "SOCKS5 地址": c.Proxy.SOCKS5.Listen,
 		"SOCKS5 端口": c.Proxy.SOCKS5.Port, "HTTP 开关": enabled(c.Proxy.HTTP.Enabled),
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
-		"出口开关": enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
+		"代理连接上限": c.Proxy.MaxConnections, "代理 TCP 空闲超时": c.Proxy.IdleTimeoutSec,
+		"代理 UDP 关联空闲超时": c.Proxy.UDPIdleTimeoutSec,
+		"出口开关":          enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
 		"浏览器网络共享": c.Exit.BrowserNetworkShare,
 		"私网访问":    c.Exit.AllowPrivateNetwork, "回环访问": c.Exit.AllowLoopback,
 		"共享上游出口": c.Exit.UpstreamExitID,

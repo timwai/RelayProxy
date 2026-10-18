@@ -96,6 +96,36 @@ func TestSymmetricPunchStillRequiresPeerRequest(t *testing.T) {
 	}
 }
 
+func TestPunchRejectsAckFromDifferentAddress(t *testing.T) {
+	key := []byte("0123456789abcdef0123456789abcdef")
+	for _, advertised := range []bool{false, true} {
+		t.Run(map[bool]string{false: "unknown_address", true: "other_candidate"}[advertised], func(t *testing.T) {
+			wrongSource, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer wrongSource.Close()
+			client, err := net.ListenUDP("udp4", &net.UDPAddr{IP: net.IPv4(127, 0, 0, 1)})
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer client.Close()
+			peer := newPassiveResponder(t, 42, key, func(p secure.PunchPacket) []byte {
+				_, _ = wrongSource.WriteToUDP(p.Encode(key), client.LocalAddr().(*net.UDPAddr))
+				return nil
+			})
+			candidates := []protocol.P2PCandidate{{Protocol: "udp", Address: peer.LocalAddr().String()}}
+			if advertised {
+				candidates = append(candidates, protocol.P2PCandidate{Protocol: "udp", Address: wrongSource.LocalAddr().String()})
+			}
+			result, err := PunchResponder(context.Background(), client, candidates, 42, key, 200*time.Millisecond)
+			if err == nil || result != nil {
+				t.Fatalf("nonce was accepted from another address: result=%+v err=%v", result, err)
+			}
+		})
+	}
+}
+
 // The peer can acquire a different NAT mapping when sending to us than the
 // address observed by rendezvous. An authenticated incoming request must teach
 // the other side to send its own punches to the rebound address.

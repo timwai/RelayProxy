@@ -11,17 +11,14 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
+	"relayproxy/internal/netutil"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
+	"relayproxy/internal/tunnel"
 )
-
-const proxyCopyBufferSize = 128 * 1024
-
-var proxyCopyBufferPool = sync.Pool{
-	New: func() any { return new([proxyCopyBufferSize]byte) },
-}
 
 const (
 	Version5 = 0x05
@@ -48,9 +45,13 @@ const (
 )
 
 type ServerConfig struct {
-	ListenAddr    string // e.g. "127.0.0.1:1080"
-	GetExitNodeID func() string
-	Dialer        proxy.TunnelDialer
+	ListenAddr       string // e.g. "127.0.0.1:1080"
+	GetExitNodeID    func() string
+	Dialer           proxy.TunnelDialer
+	MaxConnections   int
+	IdleTimeout      time.Duration
+	UDPIdleTimeout   time.Duration
+	HandshakeTimeout time.Duration
 	// Authenticate enables RFC 1929 username/password auth. The returned
 	// process metadata is trusted only after this callback accepts the pair.
 	Authenticate func(username, password string) (process string, aliases []string, ok bool)
@@ -69,16 +70,30 @@ type Server struct {
 	workers     sync.WaitGroup
 	closeOnce   sync.Once
 	closeErr    error
+	slots       chan struct{}
 }
 
 func NewServer(cfg ServerConfig) *Server {
 	if cfg.ListenAddr == "" {
 		cfg.ListenAddr = "127.0.0.1:1080"
 	}
+	if cfg.MaxConnections <= 0 {
+		cfg.MaxConnections = proxy.DefaultMaxConnections
+	}
+	if cfg.IdleTimeout <= 0 {
+		cfg.IdleTimeout = proxy.DefaultIdleTimeout
+	}
+	if cfg.HandshakeTimeout <= 0 {
+		cfg.HandshakeTimeout = proxy.DefaultHandshakeTimeout
+	}
+	if cfg.UDPIdleTimeout <= 0 {
+		cfg.UDPIdleTimeout = proxy.DefaultIdleTimeout
+	}
 	ctx, cancel := context.WithCancel(context.Background())
 	return &Server{
 		cfg: cfg, ctx: ctx, cancel: cancel,
 		conns: make(map[net.Conn]struct{}), packetConns: make(map[net.PacketConn]struct{}),
+		slots: make(chan struct{}, cfg.MaxConnections),
 	}
 }
 
@@ -169,6 +184,7 @@ func (s *Server) Close() error {
 
 func (s *Server) serve(listener net.Listener) {
 	defer s.workers.Done()
+	var backoff netutil.AcceptBackoff
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -176,16 +192,28 @@ func (s *Server) serve(listener net.Listener) {
 				return
 			}
 			log.Printf("[SOCKS5] Accept error: %v", err)
+			if !backoff.Wait(s.ctx) {
+				return
+			}
+			continue
+		}
+		backoff.Reset()
+		select {
+		case s.slots <- struct{}{}:
+		default:
+			_ = conn.Close()
 			continue
 		}
 
 		if !s.trackConn(conn) {
+			<-s.slots
 			_ = conn.Close()
 			return
 		}
 		s.workers.Add(1)
 		go func(c net.Conn) {
 			defer s.workers.Done()
+			defer func() { <-s.slots }()
 			defer s.releaseConn(c)
 			if err := s.handleConn(c); err != nil && !errors.Is(err, io.EOF) {
 				// Log debug / non-fatal error
@@ -213,7 +241,7 @@ func (s *Server) releaseConn(conn net.Conn) {
 
 func (s *Server) handleConn(conn net.Conn) error {
 	// Set handshake timeout to prevent Slowloris attacks
-	_ = conn.SetDeadline(time.Now().Add(15 * time.Second))
+	_ = conn.SetDeadline(time.Now().Add(s.cfg.HandshakeTimeout))
 
 	// 1. Negotiation handshake
 	// +----+----------+----------+
@@ -320,6 +348,9 @@ func (s *Server) handleConn(conn net.Conn) error {
 		_ = s.sendReply(conn, RepAddrNotSupport, "0.0.0.0", 0)
 		return errors.New("invalid SOCKS5 destination")
 	}
+	// Parsing is complete. Give dialing and the reply their own budgets.
+	_ = conn.SetDeadline(time.Time{})
+	_ = conn.SetWriteDeadline(time.Now().Add(proxy.DialTimeout + s.cfg.IdleTimeout))
 	if cmd == CmdUDPAssociate {
 		return s.handleUDPAssociate(conn, host, port, process, processAliases)
 	}
@@ -337,6 +368,8 @@ func (s *Server) handleConn(conn net.Conn) error {
 	// 3. Dial target via tunnel dialer
 	dialCtx := proxy.WithClientConn(s.ctx, "socks5", conn)
 	dialCtx = proxy.WithClientProcess(dialCtx, process, processAliases)
+	dialCtx, cancelDial := context.WithTimeout(dialCtx, proxy.DialTimeout)
+	defer cancelDial()
 	targetConn, err := s.cfg.Dialer.DialTCP(dialCtx, exitID, host, port)
 	if err != nil {
 		if s.ctx.Err() != nil {
@@ -473,17 +506,18 @@ type udpTarget struct {
 }
 
 type udpAssociation struct {
-	server     *Server
-	conn       *net.UDPConn
-	ctx        context.Context
-	cancel     context.CancelFunc
-	control    net.Conn
-	clientMu   sync.RWMutex
-	clientAddr *net.UDPAddr
-	mu         sync.Mutex
-	targets    map[string]*udpTarget
-	closed     bool
-	workers    sync.WaitGroup
+	server       *Server
+	conn         *net.UDPConn
+	ctx          context.Context
+	cancel       context.CancelFunc
+	control      net.Conn
+	clientMu     sync.RWMutex
+	clientAddr   *net.UDPAddr
+	mu           sync.Mutex
+	targets      map[string]*udpTarget
+	closed       bool
+	workers      sync.WaitGroup
+	lastActivity atomic.Int64
 }
 
 func (s *Server) handleUDPAssociate(
@@ -536,6 +570,7 @@ func (s *Server) handleUDPAssociate(
 		server: s, conn: udpConn, ctx: ctx, cancel: cancel,
 		control: control, targets: make(map[string]*udpTarget),
 	}
+	association.touch()
 	association.workers.Add(1)
 	go association.reapIdleTargets()
 	controlDone := make(chan struct{})
@@ -554,6 +589,10 @@ func (s *Server) handleUDPAssociate(
 		if source == nil || !source.IP.Equal(peer.IP) {
 			continue
 		}
+		host, port, payload, parseErr := decodeUDPDatagram(buf[:n])
+		if parseErr != nil || port == 0 {
+			continue
+		}
 		association.clientMu.Lock()
 		if association.clientAddr == nil {
 			if requestedPort != 0 && int(requestedPort) != source.Port {
@@ -567,10 +606,7 @@ func (s *Server) handleUDPAssociate(
 		}
 		association.clientMu.Unlock()
 
-		host, port, payload, parseErr := decodeUDPDatagram(buf[:n])
-		if parseErr != nil || port == 0 {
-			continue
-		}
+		association.touch()
 		_ = association.forward(host, port, payload)
 	}
 	association.close()
@@ -687,7 +723,9 @@ func (a *udpAssociation) readTarget(target *udpTarget) {
 		if client == nil {
 			continue
 		}
-		_, _ = a.conn.WriteToUDP(packet, client)
+		if _, err := a.conn.WriteToUDP(packet, client); err == nil {
+			a.touch()
+		}
 		a.mu.Lock()
 		if current := a.targets[target.key]; current == target {
 			current.lastUsed = time.Now()
@@ -706,13 +744,21 @@ func (a *udpAssociation) removeTarget(target *udpTarget) {
 
 func (a *udpAssociation) reapIdleTargets() {
 	defer a.workers.Done()
-	ticker := time.NewTicker(udpTargetSweepInterval)
+	ticker := time.NewTicker(max(time.Millisecond, min(udpTargetSweepInterval, a.server.cfg.UDPIdleTimeout/4)))
 	defer ticker.Stop()
 	for {
 		select {
 		case <-a.ctx.Done():
 			return
 		case now := <-ticker.C:
+			if now.Sub(time.Unix(0, a.lastActivity.Load())) >= a.server.cfg.UDPIdleTimeout {
+				// Wake both the receive loop and an in-flight dial. The handler
+				// owns close/join; this worker must not wait for itself.
+				a.cancel()
+				_ = a.conn.Close()
+				_ = a.control.Close()
+				return
+			}
 			var stale []net.PacketConn
 			a.mu.Lock()
 			if a.closed {
@@ -733,8 +779,14 @@ func (a *udpAssociation) reapIdleTargets() {
 	}
 }
 
+func (a *udpAssociation) touch() { a.lastActivity.Store(time.Now().UnixNano()) }
+
 func (a *udpAssociation) close() {
 	a.cancel()
+	// UDP failure must also wake the TCP control reader and its handler.
+	if a.control != nil {
+		_ = a.control.Close()
+	}
 	a.mu.Lock()
 	if a.closed {
 		a.mu.Unlock()
@@ -838,29 +890,7 @@ func sameUDPAddr(a, b *net.UDPAddr) bool {
 }
 
 func (s *Server) pipe(c1, c2 net.Conn) {
-	var wg sync.WaitGroup
-	wg.Add(2)
-
-	copyOne := func(dst, src net.Conn) {
-		defer wg.Done()
-		bufp := proxyCopyBufferPool.Get().(*[proxyCopyBufferSize]byte)
-		_, _ = io.CopyBuffer(dst, src, bufp[:])
-		proxyCopyBufferPool.Put(bufp)
-
-		// Attempt half-close if supported
-		if tc, ok := dst.(*net.TCPConn); ok {
-			_ = tc.CloseWrite()
-		} else if cw, ok := dst.(interface{ CloseWrite() error }); ok {
-			_ = cw.CloseWrite()
-		} else {
-			_ = dst.Close()
-		}
-	}
-
-	go copyOne(c1, c2)
-	go copyOne(c2, c1)
-
-	wg.Wait()
+	tunnel.Pipe(s.ctx, c1, c2, s.cfg.IdleTimeout, nil)
 }
 
 func SplitHostPort(target string) (string, uint16, error) {

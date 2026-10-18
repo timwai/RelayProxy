@@ -620,7 +620,7 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
 </div>
    </details>
   </>}
-  {tab==='remote'&&<><div className="file-share-remote-back"><button type="button" className="btn quiet" onClick={()=>setTab('local')}><Icon name="folder" size={15}/> 我的共享</button><span className="mini">已授权设备的共享文件</span></div><FileBrowserV4
+  {tab==='remote'&&<FileBrowserV4
     peers={peers} device={remoteDevice} share={remoteShare} path={remotePath} shares={remoteShares}
     entries={remoteEntries} loading={remoteLoading} error={remoteError} latency={browseLatency}
     canWrite={canUpload} warmStatus={warmStatus} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
@@ -628,7 +628,7 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
     onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
     onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onClearTransfer={clearTransfer} onClearInactiveTransfers={clearInactiveTransfers} onOpenTransfers={()=>onTransferOpenChange?.(true)} onCancelUpload={()=>{uploadCancelRef.current=true}}
     onRefresh={()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}}
-    toast={toast}/></>}
+    onBackToShares={()=>setTab('local')} toast={toast}/>}
   {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>
    <div className="modal wide" role="dialog" aria-modal="true" aria-label={editor==='new'?'添加共享文件夹':'编辑共享文件夹'}>
     <div className="modal-head"><h2>{editor==='new'?'添加共享文件夹':'编辑共享与设备权限'}</h2><button className="close" aria-label="关闭" onClick={()=>setEditor(null)} disabled={busy}>×</button></div>

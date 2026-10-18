@@ -85,3 +85,24 @@ Roll UI changes out incrementally; avoid large UI rewrites that touch networking
 - Covered screens include Agent routing / DNS selectors, settings, file sharing permissions, file-browser sorting, monitoring; Server filters, configuration groups, RDP/security dialogs and Browser Sync approval.
 - The dropdown menu itself can be drawn by the OS / embedded WebView; the visual skin and height of OS-owned expanded options are not controllable via CSS. Manual acceptance should exercise macOS and Windows native Wails builds plus desktop and mobile browsers.
 - Regression tests: `agent/gui/frontend/src/select-style.test.js` and `server/web/frontend/src/select-style.test.js`. No backing config schemas or select `onChange` handlers changed.
+
+## Iteration 7: operational pages vs frequently edited configuration vs low-frequency settings
+
+Information architecture principle: **daily operations** are available from the left sidebar; **Network Configuration** contains traffic behavior and network policies, which users edit repeatedly; **Settings** contains equipment identity, operating-system preferences and presentation behavior.
+
+| Area | Navigation | Owns | Does not own |
+| --- | --- | --- | --- |
+| 工作台 | 运行概览、出口选择 | Connection state, choosing an already configured exit, tests, speed and path | Creating proxy definitions |
+| 协作 | 文件共享、远程桌面、消息 | Working with authorized shares/devices, active RDP, messages and history | RDP startup switch, popup preferences |
+| 观察 | 实时监控、诊断与日志 | Diagnostics and current traffic | Startup/config values |
+| 网络配置 | 分流规则 (default), DNS 与防泄漏, 代理与自定义出口, 连接策略, 出口共享 | Routing rules/subscriptions, DNS policies, local proxy listeners and custom exits, QUIC/P2P preferences and exit-sharing ACL | Desktop appearance and app lifecycle |
+| 设置 | 常规设置, 设备与身份, 远程桌面偏好, 消息与弹窗 | Appearance, autostart, maintenance, local device identity, RDP capability enablement and popup duration | Frequently edited routing rules and DNS |
+
+- **One visible Network Configuration entry**, defaulting to **分流规则**, prevents flooding the sidebar with individual low-level knobs. Its five subcategories use the same compact horizontally scrollable navigation component as Settings, which now has only four subcategories.
+- Existing bookmark `?page=connection`, `?page=proxy`, `?page=exitshare`, `?page=dns`, `?page=routing`, `?page=devices`, `?page=rdp-settings` and `?page=message-settings` remain valid; the backend configuration schema and save payloads are unchanged.
+- Selected configuration subpages keep the Network Configuration sidebar entry active; Settings remains highlighted only for low-frequency settings subpages.
+- The operational Exit Picker now lists both authorized Server exits and configured local exits, including disabled status. The `CustomExitManager` editing UI moves into **代理与自定义出口**; its network test and save APIs stay the same.
+- While a proxy draft is dirty, saving an independent custom exit is blocked with a descriptive message, avoiding silent loss of the draft from `refreshConfig`.
+- RDP and message pages remain operational only; the controls moved in the previous iteration stay in Settings.
+- Updated and new regression tests: `ui-responsive.test.js`, `settings-placement.test.js`, `page-head-layout.test.js`, `navigation-architecture.test.js`.
+- Acceptance: verify navigation from each deep link, keyboard focus in horizontal category navigation, unsaved-state discard prompts and local exit selection plus diagnostics at 820px/1100px widths.

@@ -56,7 +56,7 @@ const EMPTY={
  exitUpstream:{mode:'',address:'',username:'',password:''},
  rdp:{enabled:true,address:'127.0.0.1:3389'},
  p2p:{enabled:true,mode:'auto',punchTimeoutMs:1200,keepaliveSec:10,idleTimeoutSec:120,maxExitSessions:4,fallback:true,upnpAllowed:false},publicDirectAdvertise:'',
- networkMode:'',network:{mode:'',exclude_processes:[]},networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
+ networkMode:'',network:{mode:'',exclude_processes:[]},systemProxy:{mode:'',autoFollow:true,http:true,socks5:true},systemProxyStatus:{},platform:'',networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
  verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,dns_exit_id:'',dns_upstreams:[],doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
 };
 
@@ -303,6 +303,7 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
 }
 
 function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilities,toast}){
+ const sys=config.systemProxy||EMPTY.systemProxy,sysStatus=config.systemProxyStatus||{},isMac=config.platform==='darwin';
  const s=config.socks5||EMPTY.socks5,h=config.http||EMPTY.http,rs=config.runtime?.socks5||s,rh=config.runtime?.http||h,caps=config.networkCapabilities||{},[service,setService]=useState(null),[repairing,setRepairing]=useState(false);
  const windowsCaptureAvailable=hasBridge('goGetNetworkServiceStatus');
  const refreshService=useCallback(async()=>{if(!hasBridge('goGetNetworkServiceStatus'))return null;try{const x=await callJSON('goGetNetworkServiceStatus',{});setService(x||{});return x}catch{return null}},[]);
@@ -329,6 +330,19 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
    <div className="setting top-gap"><div className="grow"><b>{status.httpRunning?'当前运行地址':'保存后地址'}</b><div className="mono mini">{status.httpRunning?runtimeHttpURI:httpURI}</div></div><Button quiet onClick={()=>copy(status.httpRunning?runtimeHttpURI:httpURI,'HTTP Proxy 地址')}>复制</Button></div>{httpPending&&<div className="notice warn top-gap">保存配置为 <span className="mono">{httpURI}</span>，当前进程仍使用 <span className="mono">{runtimeHttpURI}</span>；重启后切换。</div>}
   </Card>
  </div>
+ {isMac&&<Card title="macOS 系统代理" eyebrow="SYSTEM PROXY" action={<Badge tone={sysStatus.lastError?'warn':sysStatus.applied?'ok':'neutral'}>{sysStatus.lastError?'需要处理':sysStatus.applied?'已接管':'未接管'}</Badge>}>
+   <Setting title="接管模式" desc="通过系统 HTTP / HTTPS / SOCKS 代理将兼容应用流量交给 RelayProxy；无需 Apple Developer 签名。">
+    <Select value={sys.mode||''} onChange={e=>{setv('systemProxy.mode',e.target.value);if(e.target.value==='system'){setv('networkMode','');setv('network.mode','')}}}><option value="">关闭系统代理</option><option value="system">系统代理（推荐）</option></Select>
+   </Setting>
+   <Setting title="自动跟随活动网络" desc="Wi-Fi / 有线网络切换时恢复旧服务，并配置新的活动服务。"><Switch checked={sys.autoFollow!==false} onChange={v=>setv('systemProxy.autoFollow',v)}/></Setting>
+   <Setting title="HTTP / HTTPS" desc={httpAddr}><Switch checked={sys.http!==false} onChange={v=>setv('systemProxy.http',v)}/></Setting>
+   <Setting title="SOCKS5" desc={socksAddr}><Switch checked={sys.socks5!==false} onChange={v=>setv('systemProxy.socks5',v)}/></Setting>
+   <div className="mini top-gap">启用前持久保存原系统代理；正常退出、关闭或网络切换时仅恢复 RelayProxy 设置的值。意外退出后下一次启动尝试恢复。可能提示 macOS 管理员授权。</div>
+   {sysStatus.service&&<div className="setting top-gap"><div className="grow"><b>当前网络服务</b><span className="mono mini">{sysStatus.service}</span></div></div>}
+   {sysStatus.pendingRecovery>0&&<div className="notice warn top-gap">尚有 {sysStatus.pendingRecovery} 项代理设置等待安全恢复。</div>}
+   {sysStatus.lastError&&<div className="notice warn top-gap">{sysStatus.lastError}</div>}
+   <div className="notice top-gap">系统代理不会捕获所有应用的 UDP / QUIC 流量；已有认证代理、PAC 或自动代理发现配置不会被静默覆盖。</div>
+  </Card>}
  {windowsCaptureAvailable&&<Card title="Windows 系统透明代理" eyebrow="WINDOWS NETWORK CAPTURE" action={<Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'运行条件已满足':service?.installed?'服务需修复':'服务未安装'}</Badge>}>
   <Setting title="接管系统流量" desc="使用 WinDivert 按进程与分流规则处理本机 TCP / UDP。"><Switch checked={config.networkMode==='divert'} disabled={!canToggleIntercept} onChange={v=>{setv('networkMode',v?'divert':'');setv('network.mode',v?'divert':'')}}/></Setting>
   {!interceptReady&&<div className="notice warn top-gap"><b>当前系统透明代理尚不可用。</b> {caps.unavailable_reason||'此构建缺少完整的 TCP / UDP / IPv6 / 进程识别或回注能力。'}{config.networkMode==='divert'?' 你仍可关闭已保存的透明代理模式。':' 请修复 Network Service，或继续使用 SOCKS5 / HTTP Proxy。'}</div>}
@@ -341,7 +355,7 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
   <Field label="排除进程" help="这些进程的流量不经透明代理；可用换行、逗号或分号分隔，如 steam.exe, Teams.exe"><Textarea rows="5" value={ruleListText(config.network?.exclude_processes)} onChange={e=>setv('network.exclude_processes',e.target.value)}/></Field>
   <div className="actions top-gap"><Button disabled={repairing} onClick={repair}>{repairing?'修复中…':'安装 / 修复服务'}</Button><Button onClick={onService}>高级维护 / 卸载</Button></div>
  </Card>}
- <SaveBar dirty={dirty} label="保存代理设置" hint="同时保存 SOCKS5、HTTP Proxy 与系统透明代理设置；监听开关、地址、端口与透明代理开关需重启生效，排除进程立即生效。" onSave={()=>save({proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
+ <SaveBar dirty={dirty} label="保存代理设置" hint="保存本地监听和系统代理设置；macOS 系统代理可即时应用，监听地址与端口仍需重启生效。" onSave={()=>save({systemProxy:isMac?{mode:sys.mode||'',autoFollow:sys.autoFollow!==false,http:sys.http!==false,socks5:sys.socks5!==false}:undefined,proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
  <CustomExitManager config={config} save={save} toast={toast} dirty={dirty}/></>
 }
 
@@ -801,7 +815,7 @@ export default function App(){
  const theme=useCallback(mode=>{const m=['light','dark','system'].includes(mode)?mode:'system',dark=m==='dark'||(m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.classList.toggle('dark',dark)},[]);
  const syncExitInventory=useCallback(async x=>{const summary=arr(x?.proxyExits),key=makeExitInventoryKey(x);if(exitInventoryKey.current===key)return;exitInventoryKey.current=key;if(!hasBridge('goGetProxyExits')){setExits(summary);setExitsReady(true);return}try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch{setExits(summary);setExitsReady(true)}},[]);
  const refreshStatus=useCallback(async()=>{if(!hasBridge('goGetStatus'))return null;try{const x=await callJSON('goGetStatus',{});applyStatus(x);void syncExitInventory(x);return x}catch{return null}},[applyStatus,syncExitInventory]);
- const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');setConfig({...EMPTY,...x,customExits:arr(x.customExits),socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules),subscriptions:arr(x.routing?.subscriptions)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
+ const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');setConfig({...EMPTY,...x,customExits:arr(x.customExits),socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},systemProxy:{...EMPTY.systemProxy,...x.systemProxy},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules),subscriptions:arr(x.routing?.subscriptions)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
  const refreshNetworkCapabilities=useCallback(async()=>{if(!hasBridge('goGetNetworkCapabilities'))return null;try{const x=await callJSON('goGetNetworkCapabilities',{});setConfig(p=>({...p,networkCapabilities:x||{}}));return x}catch{return null}},[]);
  const refreshExits=useCallback(async()=>{if(hasBridge('goGetProxyExits'))try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch(e){toast('读取授权出口失败：'+e.message,'danger')}},[toast]);
  const refreshTargets=useCallback(async()=>{if(hasBridge('goGetRDPTargets'))try{setTargets(arr(await callJSON('goGetRDPTargets',[])))}catch(e){setTargets([]);toast(e.message,'danger')}},[toast]);

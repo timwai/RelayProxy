@@ -349,7 +349,7 @@ export default function FileBrowserV4({
     <a className="btn v4-window-link" role="menuitem" href={focus?returnToAppURL():newWindowURL()} title={focus?'返回主界面':'在当前页面打开独立文件浏览器'}><Icon name="monitor" size={15}/>{focus?'返回主界面':'独立页面'}</a>
     <button type="button" role="menuitem" onClick={()=>{setBrowserMenuOpen(false);setFocus(v=>!v)}}><Icon name="dashboard" size={15}/>{focus?'退出专注模式':'专注模式'}</button>
    </div>}
-   <div className="v4-toolbar">
+   <div className="v4-toolbar" role="group" aria-label="文件浏览器工具栏" tabIndex={0}>
     <input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索当前文件夹…" aria-label="搜索文件"/>
     <select value={sort} onChange={e=>setSort(e.target.value)} aria-label="排序">
      <option value="name">按名称</option><option value="time">按时间</option><option value="size">按大小</option></select>

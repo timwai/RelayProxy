@@ -3,11 +3,13 @@ import {readFileSync} from 'node:fs';
 import test from 'node:test';
 const read=p=>readFileSync(new URL(p,import.meta.url),'utf8');
 const app=read('./App.jsx'),styles=read('./styles.css');
-test('page actions are contextual rather than portaled into global topbar',()=>{
+test('page actions are portaled into the existing card heading',()=>{
  assert.match(app,/function PageHead\(\{actions\}\)/);
  assert.match(app,/page-actions-contextual/);
  assert.match(app,/page-more-menu/);
- assert.doesNotMatch(app,/createPortal|id="agent-page-actions"/);
+ assert.match(app,/createPortal\(controls,host\)/);
+ assert.match(app,/querySelector\('\.card-head'\)/);
+ assert.doesNotMatch(app,/id="agent-page-actions"/);
  assert.match(styles,/\.page-head\.page-actions-contextual\{/);
 });
 test('contextual menu works without action wrapping',()=>{

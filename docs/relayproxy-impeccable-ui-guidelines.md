@@ -134,3 +134,21 @@ Information architecture principle: **daily operations** are available from the 
 - On a fresh visit without an explicit file deep link, auto-select only the first *ACL-verified online* device to show its folder roots immediately. Remember that the initial automatic choice already happened; later revoked/offline devices clear selection without silently switching to a different device. Explicit Device Center and standalone `fileDevice/fileShare/filePath` targets retain priority and fail closed if unauthorized.
 - The browser does not copy any stale, unauthenticated shares into the tree: `visibleShares` is intersected with the current verified peer ACL. The backend list-files and upload/mutation checks remain intact.
 - Regression coverage: `agent/gui/frontend/src/content-first-navigation.test.js`, alongside existing V4 file-browser and visibility tests. Native Windows/macOS Wails 820px viewport and standalone file explorer should be visually accepted prior to merging.
+
+## Iteration 11: device-scoped link evidence belongs to per-device speed tests
+
+**Implemented:** Remove the aggregate **当前代理出口 · 链路诊断** card from Device Center, including its duplicated global status fields. Each device's **测速** shortcut now opens the wider **设备双向测速与链路信息** modal, which shows:
+- The target device ID and its specific, currently authorized proxy exit inventory entry.
+- **Public Direct:** an exit-specific advertised/verified candidate indication, **not** an assertion that public direct is active. It becomes **本次测速使用** only when the exact exit's speed-test response identifies that transport.
+- **P2P QUIC and Relay:** independently labelled according to the exact same speed-test response, not guessed from global `status.directPath` / `status.p2pPath`. Upload/download may use different paths; show both.
+- Measured throughput, per-leg QUIC RTT, jitter, packet loss, GSO, congestion control and relevant UDP buffers from the existing speed result. The response must carry the requested `exitId` before being attributed to that device.
+- Existing **UPnP gateway**, **Native UDP associations** and Server control state under a distinct, collapsed **本机网络环境** section. These are local Agent diagnostics, never remote-peer proof. Current RDP TCP/UDP paths appear only for an exact-match active RDP target.
+- Retain per-device BBR five-round calibration without automatically enabling Brutal, and do not change Agent/Server protocol or routing configuration.
+- See `deviceSpeedLink.js` and `deviceSpeedLink.test.js` for the fail-closed provenance logic; `overview-scope.test.js` now enforces the per-device placement.
+
+**Proposal only — next file-sharing navigation iteration (not implemented in this batch):**
+- Remove the three top-level file-sharing tabs. Keep **文件共享** in the Agent navigation as the direct entry to **我的共享** (file-share directories list, permissions and lower advanced settings). Do not add separate permanently visible main-sidebar entries.
+- Make remote browsing device-oriented: **设备中心 → [设备] → 共享文件** opens that device in File Browser V4. The existing file browser header already provides a device switcher; it must remain accessible from standalone windows.
+- Promote the transfer task indicator/dock to an app-wide lightweight **传输任务** panel opened by a persistent compact activity control in the main header or navigation footer (with running count). Never discard or cancel transfers when the user navigates away.
+- For discoverability, provide a secondary **浏览其他设备文件** action on the local share list rather than a new tab row. Preserve independent `filesWindow` deep links, transfer polling and ACL-verified remote inventory.
+- Before implementing, validate cross-page mount/unmount lifetime for remote transfers, app-wide task polling and any OS Save As handles; those currently remain in `FileSharingPage` and cannot be dropped just by removing the tabs.

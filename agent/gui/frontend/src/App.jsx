@@ -270,8 +270,8 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
     </div>
     <div className="device-center-card-actions" aria-label={name+' 快捷操作'}>
      {d.shares.length>0&&<button type="button" className="device-quick-action" disabled={!online} title={online?'打开该设备已授权的共享文件':'设备当前不可访问'} aria-label={'打开 '+name+' 的共享文件'} onClick={()=>onFiles(d.id)}><Icon name="folder" size={18}/><span>共享文件</span></button>}
-     {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||!rdpEnabled} title={!rdpEnabled?'请在设置中启用远程桌面并确认控制端授权':online?'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>远程桌面</span></button>}
-     {d.proxy&&<button type="button" className="device-quick-action" disabled={!online} title={online?'测试此设备代理出口':'设备离线或未连接'} aria-label={'测速 '+name} onClick={()=>onSpeed(d.id)}><Icon name="activity" size={18}/><span>测速</span></button>}
+     {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||d.rdp.online===false||!rdpEnabled} title={!rdpEnabled?'请在设置中启用远程桌面并确认控制端授权':online?'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>远程桌面</span></button>}
+     {d.proxy&&<button type="button" className="device-quick-action" disabled={!online||d.proxy.online===false} title={online?'测试此设备代理出口':'设备离线或未连接'} aria-label={'测速 '+name} onClick={()=>onSpeed(d.id)}><Icon name="activity" size={18}/><span>测速</span></button>}
      <button type="button" className="device-quick-action" title={'查看 '+name+' 的授权与路径信息'} aria-label={'查看 '+name+' 详情'} onClick={()=>setDetail(d.id)}><Icon name="shield" size={18}/><span>设备详情</span></button>
     </div>
    </article>;

@@ -208,7 +208,7 @@ function CustomExitManager({config,save,toast,dirty}){
     {items.map(item=><div className="target-row" key={item.id}>
      <div className="identity-icon small">↗</div>
      <div className="grow">
-      <div className="row"><strong>{item.name}</strong><Badge tone={item.enabled?'ok':'neutral'}>{item.enabled?'已启用':'已停用'}</Badge>{config.upstreamExitId===item.id&&<Badge tone="blue">共享上游</Badge>}</div>
+      <div className="row"><strong>{item.name}</strong><Badge tone={item.enabled?'ok':'neutral'}>{item.enabled?'已启用':'已停用'}</Badge>{config.defaultExitId===item.id&&<Badge tone="blue">默认出口</Badge>}{config.upstreamExitId===item.id&&<Badge tone="blue">共享上游</Badge>}</div>
       <div className="mono mini">{item.protocol.toUpperCase()} · {item.address} · {item.protocol==='socks5'?'支持 UDP ASSOCIATE':'仅 TCP'}</div>
      </div>
      <Button quiet disabled={!item.enabled||busy} onClick={()=>test(item)}>测试</Button>
@@ -235,7 +235,7 @@ function CustomExitManager({config,save,toast,dirty}){
 function Exits({status,exits,selected,onSelect,onSpeed,onSpeedAll,config,onGoto}){
  const publicMeta=e=>{const p=e?.direct?.public,endpoints=arr(p?.endpoints),verified=endpoints.filter(x=>x.verified),first=verified[0]||endpoints[0];return {available:!!p?.available,transport:p?.transport||'',count:verified.length,endpoint:first?.dialAddress||first?.address||'',source:first?.source||''}};
  const customs=arr(config.customExits);
- const staleSelected=!!selected&&(selected.startsWith('local:')?!customs.some(e=>e.id===selected&&e.enabled):!exits.some(e=>(e.deviceId||e.id)===selected));
+ const staleSelected=!!selected&&(selected.startsWith('local:')?!customs.some(e=>e.id===selected):!exits.some(e=>(e.deviceId||e.id)===selected));
  const inventoryLive=!!status.connected;
  return <><PageHead title="出口选择" desc="管理 Server 授权出口与本机自定义 SOCKS5 / HTTP 出口。" actions={<><Button onClick={()=>onGoto('proxy')}>管理自定义出口</Button><Button onClick={onSpeedAll}>全部测速</Button><Button primary onClick={()=>onSpeed(selected)}>单出口测速</Button></>}/>
  <div className={cx('notice',!inventoryLive&&'warn')}>{inventoryLive?'自动选择只在仅有一个授权在线出口时直接生效。原选择被撤销、删除或不再授权时会保留旧设备 ID，不会静默改选其他出口或 DIRECT。':'Relay 当前未连接。下面保留的是上一次成功审批得到的权威出口库存，用于排障和预选；在线状态需重连后重新确认。'}</div>

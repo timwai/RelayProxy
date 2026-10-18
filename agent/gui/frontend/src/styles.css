@@ -384,3 +384,15 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 @keyframes device-link-check-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.device-speed-check,.device-speed-check-icon{animation:none!important;transition:none!important}}
 @media(max-width:640px){.device-speed-target>.field{flex:1 1 100%}.device-speed-check{grid-template-columns:22px minmax(76px,1fr) minmax(0,1fr) auto;gap:6px;padding:7px 8px;min-height:38px}.device-speed-check-icon{width:22px;height:22px}.device-speed-check-label,.device-speed-check-detail{font-size:11px}.device-speed-check-state{font-size:10px}}
+
+/* Disclosure leaves a live one-line status visible without occupying modal
+   height when the per-path checks are not needed. */
+.device-speed-evidence{gap:8px}
+.device-speed-check-toggle{width:100%;border:0;background:transparent;color:var(--text);display:flex;align-items:center;gap:10px;min-height:30px;padding:2px 0;text-align:left;cursor:pointer}
+.device-speed-check-toggle>strong{font-size:13px}
+.device-speed-check-toggle:hover>strong{color:var(--brand)}
+.device-speed-check-toggle:focus-visible{outline:2px solid var(--brand);outline-offset:3px;border-radius:6px}
+.device-speed-check-summary{margin-left:auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.device-speed-check-chevron{font-size:18px;line-height:1;min-width:14px;text-align:center;color:var(--brand)}
+.device-speed-check-content{display:flex;flex-direction:column;gap:10px;min-width:0}
+.device-speed-check-content>.mini{font-size:11px;color:var(--muted)}

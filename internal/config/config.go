@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"relayproxy/agent/routing"
+	"relayproxy/agent/systemproxy"
 	"relayproxy/internal/proxy"
 )
 
@@ -215,6 +216,8 @@ type AgentConfigFile struct {
 			CIDRs   []string `yaml:"cidrs"`   // IP ranges: CIDR / single IP / "start-end"
 		} `yaml:"access"`
 	} `yaml:"exit"`
+
+	SystemProxy systemproxy.Settings `yaml:"system_proxy"`
 
 	Network struct {
 		// Mode: "" (off, use SOCKS5/HTTP) or "divert" (system intercept via

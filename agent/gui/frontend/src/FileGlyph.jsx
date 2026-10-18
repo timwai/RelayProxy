@@ -7,8 +7,41 @@ function LetterMark({label}){
  return <><rect x="10.7" y="17.1" width="19.1" height="12.6" rx="3" fill="var(--fg-color)" opacity=".13"/>
   <text x="20.25" y="25.8" textAnchor="middle" fill="var(--fg-color)" fontSize={label.length>2?8.1:10.2} fontWeight="800" fontFamily="system-ui,sans-serif">{label}</text></>;
 }
+function OfficeMark({letter,type}){
+ // A readable colored initial in front of a document/grid/slide, kept
+ // recognizable in both the 30px list view and 83px details view.
+ return <>
+  <rect x="12.2" y="15.9" width="17.1" height="15.6" rx="2" fill="var(--fg-color)" opacity=".16"/>
+  {type==='word'&&<path d="M19.3 20.1h8M19.3 23.4h8M19.3 26.7h6" fill="none" stroke="var(--fg-color)" strokeWidth="1.5" strokeLinecap="round"/>}
+  {type==='excel'&&<g fill="none" stroke="var(--fg-color)" strokeWidth="1.25"><path d="M20 18h8v11h-8zM20 21.6h8M20 25.2h8M24 18v11"/></g>}
+  {type==='powerpoint'&&<><circle cx="23.6" cy="23.6" r="5" fill="none" stroke="var(--fg-color)" strokeWidth="1.6"/><path d="M23.6 18.6v5h5" fill="none" stroke="var(--fg-color)" strokeWidth="1.5"/></>}
+  <rect x="9.5" y="18.1" width="12.4" height="13" rx="2.1" fill="var(--fg-color)"/>
+  <text x="15.7" y="27.2" fill="#fff" textAnchor="middle" fontSize="9.9" fontWeight="900" fontFamily="system-ui,sans-serif">{letter}</text>
+ </>;
+}
+function ArchiveMark({label}){
+ return <>
+  <rect x="11.1" y="16.4" width="17.8" height="15" rx="2.7" fill="var(--fg-color)" opacity=".15"/>
+  <path d="M19.8 16.8v9" stroke="var(--fg-color)" strokeWidth="2.9" strokeDasharray="2 1.9"/>
+  <rect x="16.7" y="24.4" width="6.2" height="3.7" rx=".9" fill="var(--fg-surface)" stroke="var(--fg-color)" strokeWidth="1.3"/>
+  <rect x="10.8" y="28.2" width="18.4" height="6" rx="2" fill="var(--fg-color)"/>
+  <text x="20" y="32.7" fill="#fff" textAnchor="middle" fontSize={label.length>2?6.9:8.2} fontWeight="850" fontFamily="system-ui,sans-serif">{label}</text>
+ </>;
+}
 function FileMark({kind}){
  switch(kind){
+  case 'word':return <OfficeMark letter="W" type="word"/>;
+  case 'excel':return <OfficeMark letter="X" type="excel"/>;
+  case 'powerpoint':return <OfficeMark letter="P" type="powerpoint"/>;
+  case 'zip':return <ArchiveMark label="ZIP"/>;
+  case 'rar':return <ArchiveMark label="RAR"/>;
+  case 'sevenzip':return <ArchiveMark label="7Z"/>;
+  case 'tar':return <ArchiveMark label="TAR"/>;
+  case 'compressed':return <ArchiveMark label="GZ"/>;
+  case 'windows':return <><path d="M12 18.7l7.1-1v7.2H12zm8.4-1.2 8-1.1v8.5h-8zM12 25.9h7.1v7.1l-7.1-1zm8.4 0h8v8.4l-8-1.1z" fill="var(--fg-color)"/></>;
+  case 'android':return <><rect x="12.7" y="21.5" width="14.6" height="9.5" rx="2.2" fill="var(--fg-color)" opacity=".22"/><path d="M13.4 21.5c.8-5.5 12.4-5.5 13.2 0M16 17l-1.1-2M24 17l1.1-2" fill="none" stroke="var(--fg-color)" strokeWidth="1.7" strokeLinecap="round"/><circle cx="17.4" cy="20" r=".9" fill="var(--fg-color)"/><circle cx="22.6" cy="20" r=".9" fill="var(--fg-color)"/><path d="M15.5 31v2.2M24.5 31v2.2" stroke="var(--fg-color)" strokeWidth="2.4" strokeLinecap="round"/></>;
+  case 'apple':return <LetterMark label="APP"/>;
+  case 'package':return <><path d="m20 16 8 4.5v9L20 34l-8-4.5v-9zM12 20.5l8 4.4 8-4.4M20 24.9V34" stroke="var(--fg-color)" strokeWidth="1.8" strokeLinejoin="round" fill="var(--fg-color)" fillOpacity=".12"/></>;
   case 'pdf':return <><rect x="10.2" y="17.8" width="20" height="11.6" rx="2.4" fill="var(--fg-color)"/><text x="20.2" y="25.9" fill="#fff" textAnchor="middle" fontSize="8.5" fontWeight="800" letterSpacing=".3">PDF</text></>;
   case 'document':return <g fill="none" stroke="var(--fg-color)" strokeWidth="2.1" strokeLinecap="round"><path d="M13.5 17.4h13M13.5 21.8h13M13.5 26.2h9.5"/></g>;
   case 'spreadsheet':return <><rect x="12.4" y="16.7" width="15.7" height="13.3" rx="1.6" fill="var(--fg-color)" opacity=".16"/><rect x="12.4" y="16.7" width="15.7" height="13.3" rx="1.6" fill="none" stroke="var(--fg-color)" strokeWidth="1.8"/><path d="M12.4 21.2h15.7M12.4 25.5h15.7M19 16.7v13.3" stroke="var(--fg-color)" strokeWidth="1.5"/></>;

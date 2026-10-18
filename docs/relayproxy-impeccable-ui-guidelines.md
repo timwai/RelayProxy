@@ -106,3 +106,14 @@ Information architecture principle: **daily operations** are available from the 
 - RDP and message pages remain operational only; the controls moved in the previous iteration stay in Settings.
 - Updated and new regression tests: `ui-responsive.test.js`, `settings-placement.test.js`, `page-head-layout.test.js`, `navigation-architecture.test.js`.
 - Acceptance: verify navigation from each deep link, keyboard focus in horizontal category navigation, unsaved-state discard prompts and local exit selection plus diagnostics at 820px/1100px widths.
+
+## Iteration 8: Device Center, capability shortcuts and default exit placement
+
+- Rename the Agent sidebar's operational `exits` route from **出口选择** to **设备中心** without removing old `?page=exits` bookmarks.
+- Merge authenticated Agent proxy exit inventory, RDP authorized targets, and **only live directory-ACL-verified file hosts** by device ID. Never infer file access from `files.host` capability or the Server peer list alone. Local SOCKS5/HTTP proxy definitions remain in Network Configuration, separate from physical remote device cards.
+- Each remote device card shows only the capabilities discovered for that device: `共享文件` (verified `shares`), `远程桌面` (authorized RDP target and local controller enabled), `测速` (proxy exit), and `设备详情` (source-specific status). Actions disable when the session/device is offline; generic card selection never modifies the proxy route.
+- The file shortcut mounts the existing `FileSharingPage` with an initial device ID. That page re-fetches and validates the directory ACL before showing content, opens the sole authorized share automatically, or shows the list of authorized shares when several are present. No new file transfer implementation; preserves directory cache, download/upload flow, prewarming and permissions.
+- The RDP shortcut reuses the existing `goConnectRDP` path with an identity-bound authorized target, then opens the RDP session page. The speed shortcut reuses the existing per-exit speed modal; its results and the detail view must never falsely show the current default exit's global path as another device's measurement.
+- `网络配置 → 分流规则 → 全局路由策略` now owns `默认代理出口` using the **existing** `defaultExitId` proxy save key, independent of `routing.default_action`. Rule-/subscription-specific `exit_id` continues to override the default. Disconnected, deleted or revoked exit references must not cause silent fallback to local DIRECT.
+- Refresh verified file hosts every five seconds while Device Center is displayed and fail closed on errors/revocation; leave the old operational `exits` URI valid.
+- Tests: `deviceCenter.test.js`, `device-center-ui.test.js`, adjusted `navigation-architecture.test.js`. Manual acceptance: proxy-only, RDP-only and files-only hosts; mixed capabilities; offline/revoked ACL; multi-share navigation; double-click file explorer; small Wails window and 200% zoom.

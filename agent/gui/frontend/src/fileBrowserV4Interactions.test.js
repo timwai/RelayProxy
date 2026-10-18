@@ -46,7 +46,8 @@ test('every page has one compact title in the topbar and actions moved below',()
  const page=read('./FileSharingPage.jsx');
  assert.match(app,/function PageHead\(\{actions\}\)/);
  assert.doesNotMatch(page,/<h1>文件共享<\/h1>/);
- assert.match(page,/className="file-share-header-actions"/);
+ assert.match(page,/className="file-share-list-actions"/);
+ assert.doesNotMatch(page,/className="file-share-tabs"/);
 });
 
 // Moving a page into Settings must not invalidate its existing deep link.

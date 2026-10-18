@@ -320,7 +320,7 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
     })();
    }
   }catch(e){setTransferError(e.message||String(e))}
- },[onTransferSummary]);
+ },[]);
  useEffect(()=>{
   if(!active)return;
   const requested=navigationTarget?.device;
@@ -582,21 +582,10 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
  }
  const shares=state?.shares||[];
  const active=shares.filter(s=>s.enabled).length;
- return <>
-
+ return <><section className={'file-sharing-host '+(tab==='remote'?'is-remote':'')} hidden={!active}>
   {error&&<div className="notice danger file-share-error" role="alert">{error}</div>}
-  <div className="file-share-header">
-   <div className="file-share-tabs" role="tablist" aria-label="文件共享页面">
-    {[[ 'local','我的共享'],['remote','其他设备'],['transfers','传输任务']].map(([id,title])=><button type="button" key={id} role="tab" aria-selected={tab===id} className={tab===id?'selected':''} onClick={()=>setTab(id)}>{title}</button>)}
-   </div>
-   <div className="file-share-header-actions">
-    <button className="btn quiet" onClick={tab==='transfers'?refreshTransfers:tab==='remote'?()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}:refresh} disabled={busy}>刷新</button>
-    {tab==='local'&&<button className="btn primary" onClick={()=>edit(null)} disabled={!state||busy}>＋ 添加共享文件夹</button>}
-    {tab==='transfers'&&transfers.some(x=>x.state!=='running')&&<button className="btn" onClick={clearInactiveTransfers}>清除已结束</button>}
-   </div>
-  </div>
   {tab==='local'&&<>
-   <section className="card"><div className="card-head"><div><div className="eyebrow">{shares.length} DIRECTORIES · {active} 已启用</div><h2>共享文件夹</h2></div><span className={'badge '+(state?.enabled?'ok':'neutral')}>{state?.enabled?'共享已启用':'共享已关闭'}</span></div>
+   <section className="card"><div className="card-head file-share-list-head"><div><div className="eyebrow">{shares.length} DIRECTORIES · {active} 已启用</div><h2>共享文件夹</h2></div><div className="file-share-list-actions"><span className={'badge '+(state?.enabled?'ok':'neutral')}>{state?.enabled?'共享已启用':'共享已关闭'}</span><button className="btn quiet" onClick={refresh} disabled={busy}>刷新</button><button className="btn" onClick={()=>{setTab('remote');void refreshPeers()}}><Icon name="devices" size={15}/> 浏览其他设备文件</button><button className="btn primary" onClick={()=>edit(null)} disabled={!state||busy}>＋ 添加共享文件夹</button></div></div>
    {!state&&<div className="empty">正在读取本机文件共享配置…</div>}
    {state&&shares.length===0&&<div className="empty">还没有共享文件夹。添加本机目录后，再为设备设置只读或读写权限。</div>}
    {shares.map(share=><div className="file-share-item" key={share.id}>
@@ -628,16 +617,38 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
 </div>
    </details>
   </>}
-  {tab==='remote'&&<FileBrowserV4
+  {tab==='remote'&&<><div className="file-share-remote-back"><button type="button" className="btn quiet" onClick={()=>setTab('local')}><Icon name="folder" size={15}/> 我的共享</button><span className="mini">已授权设备的共享文件</span></div><FileBrowserV4
     peers={peers} device={remoteDevice} share={remoteShare} path={remotePath} shares={remoteShares}
     entries={remoteEntries} loading={remoteLoading} error={remoteError} latency={browseLatency}
     canWrite={canUpload} warmStatus={warmStatus} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
     transfers={transfers} treeRevision={treeRevision} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
     onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
-    onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onClearTransfer={clearTransfer} onClearInactiveTransfers={clearInactiveTransfers} onOpenTransfers={()=>setTab('transfers')} onCancelUpload={()=>{uploadCancelRef.current=true}}
+    onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onClearTransfer={clearTransfer} onClearInactiveTransfers={clearInactiveTransfers} onOpenTransfers={()=>onTransferOpenChange?.(true)} onCancelUpload={()=>{uploadCancelRef.current=true}}
     onRefresh={()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}}
-    toast={toast}/>}
-  {tab==='transfers'&&<section className="card">
+    toast={toast}/></>}
+  {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>
+   <div className="modal wide" role="dialog" aria-modal="true" aria-label={editor==='new'?'添加共享文件夹':'编辑共享文件夹'}>
+    <div className="modal-head"><h2>{editor==='new'?'添加共享文件夹':'编辑共享与设备权限'}</h2><button className="close" aria-label="关闭" onClick={()=>setEditor(null)} disabled={busy}>×</button></div>
+    <div className="modal-body">
+     <div className="form-grid">
+      <label className="field"><span>共享名称</span><input className="control" value={draft.name} maxLength={100} onChange={e=>setDraft(s=>({...s,name:e.target.value}))} placeholder="例如：工作资料"/></label>
+      <div className="field"><span>本机共享文件夹</span><div className="file-share-folder-input"><input className="control" value={draft.rootPath} onChange={e=>setDraft(s=>({...s,rootPath:e.target.value}))} placeholder="点击浏览选择文件夹，或输入绝对路径"/><button type="button" className="btn" onClick={chooseShareFolder} disabled={busy}><Icon name="folder"/> 浏览…</button></div><small className="mini">选择的是运行 Agent 的设备上的文件夹。远程访问管理页时须手动输入 Agent 主机路径。</small>{folderPickerError&&<div className="notice danger" role="alert">{folderPickerError}</div>}</div>
+     </div>
+     <div className="file-share-permissions"><h3>设备权限</h3><p className="mini">默认不授权。只显示 Server 已审批、同身份且具备文件访问能力的设备；离线设备也可预先设置权限。</p>
+      {candidateError&&<div className="notice danger" role="alert">{candidateError}</div>}
+      {candidatesLoading&&<div className="mini">正在读取 Server 已授权设备…</div>}
+      {Object.entries(draft.permissions||{}).map(([id,perm])=><div className="file-share-permission" key={id}><span className="grow file-share-grantee"><b>{candidates.find(item=>item.deviceId===id)?.name||'历史授权设备'}</b><small className="mono">{id}</small></span><select className="control" value={perm} onChange={e=>setDraft(s=>({...s,permissions:{...s.permissions,[id]:e.target.value}}))}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn danger" onClick={()=>setDraft(s=>{const permissions={...s.permissions};delete permissions[id];return {...s,permissions}})}>移除</button></div>)}
+      <div className="file-share-permission"><select aria-label="选择已审批的访问设备" className="control" value={device} disabled={candidatesLoading||!candidates.length} onChange={e=>setDevice(e.target.value)}><option value="">选择已审批的设备…</option>{candidates.filter(item=>!draft.permissions?.[item.deviceId]).map(item=><option key={item.deviceId} value={item.deviceId}>{item.name||item.deviceId} · {item.online?'在线':'离线'} · {item.deviceId}</option>)}</select><select className="control" value={permission} onChange={e=>setPermission(e.target.value)}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn" onClick={addPermission} disabled={!device||!candidates.some(item=>item.deviceId===device)}>添加权限</button></div>
+     </div>
+    </div>
+    <div className="modal-foot"><button className="btn" onClick={()=>setEditor(null)} disabled={busy}>取消</button><button className="btn primary" disabled={busy} onClick={saveEditor}>{busy?'保存中…':'保存共享'}</button></div>
+   </div>
+  </div>}
+ </section>
+ {transferOpen&&document.getElementById('agent-file-transfer-portal')&&createPortal(
+  <div className="global-transfer-shade" onMouseDown={e=>e.target===e.currentTarget&&onTransferOpenChange?.(false)}>
+   <section className="global-transfer-panel" role="dialog" aria-modal="false" aria-label="文件传输任务">
+    <div className="global-transfer-panel-head"><div><strong>文件传输任务</strong><span className="mini">{transfers.filter(t=>t.state==='running').length} 项进行中 · {transfers.length} 项记录</span></div><div className="actions"><button type="button" className="btn quiet" onClick={refreshTransfers}>刷新</button>{transfers.some(t=>t.state!=='running')&&<button type="button" className="btn" onClick={clearInactiveTransfers}>清除已结束</button>}<button type="button" className="btn" onClick={()=>onTransferOpenChange?.(false)} aria-label="关闭传输任务">关闭</button></div></div>
    
    {transferError&&<div className="notice danger" role="alert">{transferError}</div>}
    <div className="mini">下载保存至本机 Downloads/RelayProxy；上传到共享端当前目录。优先尝试文件专用 QUIC 直连，其次 TCP/TLS，均不可用时回退 Relay；不要求授予代理或 RDP 权限。</div>
@@ -657,24 +668,8 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
      {item.direction==='download'&&(item.state==='paused'||item.state==='failed')&&<button className="btn primary" onClick={()=>resumeDownload(item.id)}>继续下载</button>}
       {item.state!=='running'&&<button className="btn" title="只清除传输记录，不删除下载的文件" onClick={()=>clearTransfer(item.id)}>清除记录</button>}
     </div>)}
-  </section>}
-  {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>
-   <div className="modal wide" role="dialog" aria-modal="true" aria-label={editor==='new'?'添加共享文件夹':'编辑共享文件夹'}>
-    <div className="modal-head"><h2>{editor==='new'?'添加共享文件夹':'编辑共享与设备权限'}</h2><button className="close" aria-label="关闭" onClick={()=>setEditor(null)} disabled={busy}>×</button></div>
-    <div className="modal-body">
-     <div className="form-grid">
-      <label className="field"><span>共享名称</span><input className="control" value={draft.name} maxLength={100} onChange={e=>setDraft(s=>({...s,name:e.target.value}))} placeholder="例如：工作资料"/></label>
-      <div className="field"><span>本机共享文件夹</span><div className="file-share-folder-input"><input className="control" value={draft.rootPath} onChange={e=>setDraft(s=>({...s,rootPath:e.target.value}))} placeholder="点击浏览选择文件夹，或输入绝对路径"/><button type="button" className="btn" onClick={chooseShareFolder} disabled={busy}><Icon name="folder"/> 浏览…</button></div><small className="mini">选择的是运行 Agent 的设备上的文件夹。远程访问管理页时须手动输入 Agent 主机路径。</small>{folderPickerError&&<div className="notice danger" role="alert">{folderPickerError}</div>}</div>
-     </div>
-     <div className="file-share-permissions"><h3>设备权限</h3><p className="mini">默认不授权。只显示 Server 已审批、同身份且具备文件访问能力的设备；离线设备也可预先设置权限。</p>
-      {candidateError&&<div className="notice danger" role="alert">{candidateError}</div>}
-      {candidatesLoading&&<div className="mini">正在读取 Server 已授权设备…</div>}
-      {Object.entries(draft.permissions||{}).map(([id,perm])=><div className="file-share-permission" key={id}><span className="grow file-share-grantee"><b>{candidates.find(item=>item.deviceId===id)?.name||'历史授权设备'}</b><small className="mono">{id}</small></span><select className="control" value={perm} onChange={e=>setDraft(s=>({...s,permissions:{...s.permissions,[id]:e.target.value}}))}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn danger" onClick={()=>setDraft(s=>{const permissions={...s.permissions};delete permissions[id];return {...s,permissions}})}>移除</button></div>)}
-      <div className="file-share-permission"><select aria-label="选择已审批的访问设备" className="control" value={device} disabled={candidatesLoading||!candidates.length} onChange={e=>setDevice(e.target.value)}><option value="">选择已审批的设备…</option>{candidates.filter(item=>!draft.permissions?.[item.deviceId]).map(item=><option key={item.deviceId} value={item.deviceId}>{item.name||item.deviceId} · {item.online?'在线':'离线'} · {item.deviceId}</option>)}</select><select className="control" value={permission} onChange={e=>setPermission(e.target.value)}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn" onClick={addPermission} disabled={!device||!candidates.some(item=>item.deviceId===device)}>添加权限</button></div>
-     </div>
-    </div>
-    <div className="modal-foot"><button className="btn" onClick={()=>setEditor(null)} disabled={busy}>取消</button><button className="btn primary" disabled={busy} onClick={saveEditor}>{busy?'保存中…':'保存共享'}</button></div>
-   </div>
-  </div>}
+   </section>
+
+  </div>,document.getElementById('agent-file-transfer-portal'))}
  </>;
 }

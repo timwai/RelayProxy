@@ -57,3 +57,9 @@ test('wrong exit ID, disconnected and failed measurements cannot be checked',()=
  const offline=deviceSpeedChecks({exitID:'mac-a',exit:authorized,connected:false});
  assert.equal(get(offline,'authorization').state,'failed');
 });
+
+test('missing one direction is never counted as a verified dual-direction test',()=>{
+ const incomplete=rows('done',{exitId:'mac-a',upload:{path:'p2p_quic'}},5);
+ assert.equal(get(incomplete,'test').state,'failed');
+ assert.equal(get(incomplete,'p2p').state,'waiting');
+});

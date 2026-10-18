@@ -19,14 +19,14 @@ export function buildDeviceCenter({proxyExits=[],rdpTargets=[],filePeers=[]}={})
   const d=add(id,exit.name||exit.deviceName);
   if(!d)continue;
   d.proxy=exit;
-  if(exit.online===true)d.online=true;
+  if(exit.online!==false)d.online=true;
  }
  for(const target of Array.isArray(rdpTargets)?rdpTargets:[]){
   const id=target?.deviceId||target?.id;
   const d=add(id,target?.name||target?.deviceName);
   if(!d)continue;
   d.rdp=target;
-  if(target.online===true)d.online=true;
+  if(target.online!==false)d.online=true;
  }
  for(const peer of onlyVerifiedFilePeers(filePeers)){
   const d=add(peer.deviceId,peer.name||peer.deviceName);

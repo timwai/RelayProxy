@@ -9,10 +9,10 @@ import (
 )
 
 type fakeBackend struct {
-	current string
-	states  map[string]ProxyState
-	pac     bool
-	fail    bool
+	current  string
+	states   map[string]ProxyState
+	pac      bool
+	fail     bool
 	failKind string
 }
 

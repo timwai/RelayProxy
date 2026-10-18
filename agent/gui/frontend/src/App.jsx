@@ -107,7 +107,7 @@ function Overview({status,config,exits,traffic,history,onRefresh,onGoto}){
  return <><PageHead title="运行概览" desc="连接状态、当前出口、数据路径、本机代理与实时流量。" actions={<><Button onClick={()=>onGoto('diagnostics')}>诊断</Button><Button onClick={onRefresh}>刷新</Button><Button primary onClick={()=>onGoto('exits')}>切换出口</Button></>}/>
  <div className="cards-2">
   <Card className="hero"><div className="hero-glow"/><div className="hero-status"><span className={cx('dot',connected?'online':'offline')}/><div><div className="eyebrow">{connected?'CONNECTED':'DISCONNECTED'}</div><div className="big">{connected?'RelayProxy 已连接':'等待连接到 RelayProxy Server'}</div><div className="muted">{((connected?(config.runtime?.serverAddress||config.serverAddress):config.serverAddress)||'尚未配置服务器')+' · '+(status.transport||config.runtime?.transport||config.transport||'auto')}{connected&&config.runtime?.serverAddress&&config.runtime.serverAddress!==config.serverAddress?' · 已保存新 Server，待重启':''}</div></div><Badge tone={connected?'ok':/reject|denied|revoked|撤销|拒绝/i.test(approvalLabel)?'danger':'neutral'}>{approvalLabel}</Badge></div>
-   <div className="exit-mini"><div className="flag">↗</div><div className="grow"><div className="mini">当前出口</div><strong>{exitName(exits,status.selectedExit||config.defaultExitId)}</strong><div className="mini">{'出口可用路径：'+path+' · '+(rtt?rtt+' ms':'等待延迟数据')}</div><div className="chips top-gap">{directActive&&<Badge tone="ok">公网直连</Badge>}{p2pActive&&<Badge tone="blue">P2P</Badge>}{udp>0&&<Badge tone="blue">UDP 原生数据报</Badge>}</div></div><Button quiet onClick={()=>onGoto('exits')}>›</Button></div>
+   <div className="exit-mini"><div className="flag">↗</div><div className="grow"><div className="mini">当前出口</div><strong>{exitName([...exits,...arr(config.customExits)],status.selectedExit||config.defaultExitId)}</strong><div className="mini">{'出口可用路径：'+path+' · '+(rtt?rtt+' ms':'等待延迟数据')}</div><div className="chips top-gap">{directActive&&<Badge tone="ok">公网直连</Badge>}{p2pActive&&<Badge tone="blue">P2P</Badge>}{udp>0&&<Badge tone="blue">UDP 原生数据报</Badge>}</div></div><Button quiet onClick={()=>onGoto('exits')}>›</Button></div>
    <svg className="map-line" viewBox="0 0 520 160"><path d="M18 112 C122 40 205 138 302 68 S442 54 510 22"/><circle cx="18" cy="112" r="5"/><circle cx="302" cy="68" r="5"/><circle cx="510" cy="22" r="5"/></svg>
   </Card>
   <Card title="代理出口可用路径" eyebrow="PROXY PATH" action={<Badge tone={connected?'ok':'neutral'}>{connected?'在线':'离线'}</Badge>}>
@@ -163,7 +163,7 @@ function Connection({status,config,setv,save,dirty,onReload}){
 }
 
 
-function CustomExitManager({config,save,onSelect,selected,toast}){
+function CustomExitManager({config,save,toast,dirty}){
  const items=arr(config.customExits);
  const [draft,setDraft]=useState(null),[busy,setBusy]=useState(false);
  const refs=id=>[
@@ -173,7 +173,7 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
   ...arr(config.routing?.rules).filter(r=>r.exit_id===id).map(r=>'分流规则：'+(r.name||'未命名'))
  ].filter(Boolean);
  const update=(key,val)=>setDraft(x=>({...x,[key]:val}));
- const persist=async next=>{setBusy(true);try{return await save({proxy:{customExits:next}})}finally{setBusy(false)}};
+ const persist=async next=>{if(dirty){toast('请先保存代理配置或放弃未保存的修改，再调整自定义出口。','warn');return false}setBusy(true);try{return await save({proxy:{customExits:next}})}finally{setBusy(false)}};
  const edit=item=>setDraft(item?{...item,password:'',clearPassword:false}:{id:'local:'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),name:'',protocol:'socks5',address:'',enabled:true,username:'',password:'',clearPassword:false});
  const saveDraft=async()=>{
   if(!draft)return;
@@ -211,7 +211,6 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
       <div className="row"><strong>{item.name}</strong><Badge tone={item.enabled?'ok':'neutral'}>{item.enabled?'已启用':'已停用'}</Badge>{config.upstreamExitId===item.id&&<Badge tone="blue">共享上游</Badge>}</div>
       <div className="mono mini">{item.protocol.toUpperCase()} · {item.address} · {item.protocol==='socks5'?'支持 UDP ASSOCIATE':'仅 TCP'}</div>
      </div>
-     <Button quiet onClick={()=>onSelect(item.id)} disabled={!item.enabled||selected===item.id}>{selected===item.id?'默认出口':'设为默认'}</Button>
      <Button quiet disabled={!item.enabled||busy} onClick={()=>test(item)}>测试</Button>
      <Button quiet onClick={()=>edit(item)}>编辑</Button>
      <Switch checked={item.enabled} disabled={busy} label={'启停 '+item.name} onChange={()=>toggle(item)}/>
@@ -240,12 +239,12 @@ function Exits({status,exits,selected,onSelect,onSpeed,onSpeedAll,config,onGoto}
  const inventoryLive=!!status.connected;
  return <><PageHead title="出口选择" desc="管理 Server 授权出口与本机自定义 SOCKS5 / HTTP 出口。" actions={<><Button onClick={()=>onGoto('proxy')}>管理自定义出口</Button><Button onClick={onSpeedAll}>全部测速</Button><Button primary onClick={()=>onSpeed(selected)}>单出口测速</Button></>}/>
  <div className={cx('notice',!inventoryLive&&'warn')}>{inventoryLive?'自动选择只在仅有一个授权在线出口时直接生效。原选择被撤销、删除或不再授权时会保留旧设备 ID，不会静默改选其他出口或 DIRECT。':'Relay 当前未连接。下面保留的是上一次成功审批得到的权威出口库存，用于排障和预选；在线状态需重连后重新确认。'}</div>
- <div className="exit-grid top-gap"><button className={cx('exit-card',!selected&&'selected')} onClick={()=>onSelect('')}><div className="flag">◎</div><div className="grow"><strong>自动选择</strong><div className="mini">仅一个授权在线出口时自动选择；不会绕过既定策略。</div></div><span className="radio"/></button>{staleSelected&&<button className="exit-card selected disabled" disabled><div className="flag">!</div><div className="grow"><div className="row"><strong>不可用旧选择</strong><Badge tone="danger">已撤销 / 已删除</Badge></div><div className="mono mini">{selected}</div><div className="mini">Server 当前授权库存中已不存在此出口。请手动选择新的出口或切回自动选择。</div></div><span className="radio"/></button>}{exits.map(e=>{const id=e.deviceId||e.id,m=publicMeta(e),offline=inventoryLive&&e.online===false;return <button key={id} className={cx('exit-card',selected===id&&'selected',offline&&'disabled')} onClick={()=>!offline&&onSelect(id)}><div className="flag">↗</div><div className="grow"><div className="row"><strong>{e.name||id}</strong><Badge tone={!inventoryLive?'neutral':offline?'neutral':'ok'}>{!inventoryLive?'上次库存':offline?'离线':'在线'}</Badge>{m.available&&<Badge tone="blue">Public Direct</Badge>}</div><div className="mini">{e.identityName||e.authorizationSource||id}</div>{m.available&&<div className="exit-path-meta"><span>{m.transport||'QUIC'}</span><span>{m.count?m.count+' 个已验证端点':'端点可用'}</span>{m.endpoint&&<span className="mono">{m.endpoint}</span>}</div>}</div><span className="radio"/></button>})}{customs.map(e=><button key={e.id} type="button" className={cx('exit-card',selected===e.id&&'selected',!e.enabled&&'disabled')} disabled={!e.enabled} onClick={()=>onSelect(e.id)}><div className="flag">↗</div><div className="grow"><div className="row"><strong>{e.name||e.id}</strong><Badge tone={e.enabled?'blue':'neutral'}>{e.enabled?'本机出口':'已停用'}</Badge></div><div className="mini">{e.protocol?.toUpperCase()||'SOCKS5'} · {e.address||'未设置地址'}</div></div><span className="radio"/></button>)}</div>
- {!exits.length&&<Card><div className="empty">当前没有已授权出口。请在 Server 管理端为此身份授权可用出口。</div></Card>}
- <Card title="当前路径" eyebrow="LIVE PATH"><div className="cards-3 compact"><div><div className="mini">选择出口</div><strong>{exitName(exits,selected)}</strong></div><div><div className="mini">Direct</div><strong>{status.connected?(status.directPath||status.directState||'—'):'offline'}</strong>{status.connected&&status.directEndpoint&&<div className="mono mini">{status.directEndpoint}</div>}</div><div><div className="mini">P2P</div><strong>{status.connected?(status.p2pPath||status.p2pState||'—'):'offline'}</strong>{status.connected&&status.p2pCandidateSummary&&<div className="mini">{status.p2pCandidateSummary}</div>}</div></div></Card></>
+ <div className="exit-grid top-gap"><button className={cx('exit-card',!selected&&'selected')} onClick={()=>onSelect('')}><div className="flag">◎</div><div className="grow"><strong>自动选择</strong><div className="mini">仅一个授权在线出口时自动选择；不会绕过既定策略。</div></div><span className="radio"/></button>{staleSelected&&<button className="exit-card selected disabled" disabled><div className="flag">!</div><div className="grow"><div className="row"><strong>不可用旧选择</strong><Badge tone="danger">{selected.startsWith('local:')?'已停用 / 已删除':'已撤销 / 已删除'}</Badge></div><div className="mono mini">{selected}</div><div className="mini">{selected.startsWith('local:')?'本机出口不存在或已停用。请在网络配置中检查，或改选其他出口。':'Server 当前授权库存中已不存在此出口。请手动选择新的出口或切回自动选择。'}</div></div><span className="radio"/></button>}{exits.map(e=>{const id=e.deviceId||e.id,m=publicMeta(e),offline=inventoryLive&&e.online===false;return <button key={id} className={cx('exit-card',selected===id&&'selected',offline&&'disabled')} onClick={()=>!offline&&onSelect(id)}><div className="flag">↗</div><div className="grow"><div className="row"><strong>{e.name||id}</strong><Badge tone={!inventoryLive?'neutral':offline?'neutral':'ok'}>{!inventoryLive?'上次库存':offline?'离线':'在线'}</Badge>{m.available&&<Badge tone="blue">Public Direct</Badge>}</div><div className="mini">{e.identityName||e.authorizationSource||id}</div>{m.available&&<div className="exit-path-meta"><span>{m.transport||'QUIC'}</span><span>{m.count?m.count+' 个已验证端点':'端点可用'}</span>{m.endpoint&&<span className="mono">{m.endpoint}</span>}</div>}</div><span className="radio"/></button>})}{customs.map(e=><button key={e.id} type="button" className={cx('exit-card',selected===e.id&&'selected',!e.enabled&&'disabled')} disabled={!e.enabled} onClick={()=>onSelect(e.id)}><div className="flag">↗</div><div className="grow"><div className="row"><strong>{e.name||e.id}</strong><Badge tone={e.enabled?'blue':'neutral'}>{e.enabled?'本机出口':'已停用'}</Badge></div><div className="mini">{e.protocol?.toUpperCase()||'SOCKS5'} · {e.address||'未设置地址'}</div></div><span className="radio"/></button>)}</div>
+ {!exits.length&&!customs.length&&<Card><div className="empty">当前没有可用出口。可前往网络配置添加本机出口，或在 Server 管理端申请设备出口授权。</div></Card>}
+ <Card title="当前路径" eyebrow="LIVE PATH"><div className="cards-3 compact"><div><div className="mini">选择出口</div><strong>{exitName([...exits,...customs],selected)}</strong></div><div><div className="mini">Direct</div><strong>{status.connected?(status.directPath||status.directState||'—'):'offline'}</strong>{status.connected&&status.directEndpoint&&<div className="mono mini">{status.directEndpoint}</div>}</div><div><div className="mini">P2P</div><strong>{status.connected?(status.p2pPath||status.p2pState||'—'):'offline'}</strong>{status.connected&&status.p2pCandidateSummary&&<div className="mini">{status.p2pCandidateSummary}</div>}</div></div></Card></>
 }
 
-function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilities,toast,onSelect,selected}){
+function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilities,toast}){
  const s=config.socks5||EMPTY.socks5,h=config.http||EMPTY.http,rs=config.runtime?.socks5||s,rh=config.runtime?.http||h,caps=config.networkCapabilities||{},[service,setService]=useState(null),[repairing,setRepairing]=useState(false);
  const windowsCaptureAvailable=hasBridge('goGetNetworkServiceStatus');
  const refreshService=useCallback(async()=>{if(!hasBridge('goGetNetworkServiceStatus'))return null;try{const x=await callJSON('goGetNetworkServiceStatus',{});setService(x||{});return x}catch{return null}},[]);
@@ -285,7 +284,7 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
   <div className="actions top-gap"><Button disabled={repairing} onClick={repair}>{repairing?'修复中…':'安装 / 修复服务'}</Button><Button onClick={onService}>高级维护 / 卸载</Button></div>
  </Card>}
  <SaveBar dirty={dirty} label="保存代理设置" hint="同时保存 SOCKS5、HTTP Proxy 与系统透明代理设置；监听开关、地址、端口与透明代理开关需重启生效，排除进程立即生效。" onSave={()=>save({proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
- <CustomExitManager config={config} save={save} onSelect={onSelect} selected={selected} toast={toast}/></>
+ <CustomExitManager config={config} save={save} toast={toast} dirty={dirty}/></>
 }
 
 function ExitShare({status,config,setv,save,dirty}){
@@ -688,7 +687,7 @@ export default function App(){
 
  const setv=useCallback((path,value,markDirty=true)=>{setConfig(prev=>{const next=structuredClone(prev),keys=path.split('.');let o=next;for(let i=0;i<keys.length-1;i++){o[keys[i]]=o[keys[i]]&&typeof o[keys[i]]==='object'?o[keys[i]]:{};o=o[keys[i]]}o[keys[keys.length-1]]=value;return next});if(markDirty)setDirty(true)},[]);
  const save=useCallback(async payload=>{if(!loaded||!config.revision){toast('配置尚未就绪，暂不能保存','danger');return false}try{const r=await saveConfig(config.revision,payload);if(!r.ok)throw new Error(r.message||'保存失败');await refreshConfig();await refreshStatus();toast(r.restartRequired?(r.message||'已保存，部分设置需重启'):(r.message||'已保存'));return true}catch(e){toast(e.message,'danger');return false}},[loaded,config.revision,toast,refreshConfig,refreshStatus]);
- const select=useCallback(async id=>{try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName(exits,id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[exits,refreshConfig,refreshStatus,toast]);
+ const select=useCallback(async id=>{try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName([...exits,...arr(config.customExits)],id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[exits,config.customExits,refreshConfig,refreshStatus,toast]);
  const clearMessages=useCallback(async()=>{if(messages.length&&!confirm('清空本设备的消息历史？'))return;await call('goClearMessages');messageIDs.current.clear();setMessages([]);setUnreadMessages(0);toast('消息历史已清空')},[messages.length,toast]);
  const clearConnections=useCallback(async()=>{await call('goClearConnections');await refreshConnections();toast('已清理结束连接历史')},[refreshConnections,toast]);
  const clearLogs=useCallback(async()=>{await call('goClearLogs');setLogs([]);toast('日志已清空')},[toast]);
@@ -713,7 +712,7 @@ export default function App(){
  else if(page==='devices')content=<Devices {...p} onRefresh={refreshStatus}/>;
  else if(page==='connection')content=<Connection {...p} onReload={()=>requestLifecycle('reload')}/>;
  else if(page==='exits')content=<Exits status={status} exits={exits} selected={status.selectedExit||config.defaultExitId||''} onSelect={select} onSpeed={id=>{setSpeedExit(id||'');setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} config={config} onGoto={requestPage}/>;
- else if(page==='proxy')content=<ProxyPage {...p} onSelect={select} selected={status.selectedExit||config.defaultExitId||''} onService={()=>requestPage('settings')} onRefreshCapabilities={refreshNetworkCapabilities}/>;
+ else if(page==='proxy')content=<ProxyPage {...p} onService={()=>requestPage('settings')} onRefreshCapabilities={refreshNetworkCapabilities}/>;
  else if(page==='exitshare')content=<ExitShare {...p}/>;
  else if(page==='routing')content=<RoutingPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;
  else if(page==='dns')content=<DNSPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃 DNS 设置草稿')}}/>;

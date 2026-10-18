@@ -8,7 +8,7 @@ const css=read('./fileBrowserV4.css'),fileCss=read('./fileSharing.css');
 const slice=(start,end)=>{const a=browser.indexOf(start),b=browser.indexOf(end,a);assert.ok(a>=0&&b>a);return browser.slice(a,b)};
 
 test('browser has ONE top navigation bar and peer is first breadcrumb, not a title/select row',()=>{
- const toolbar=slice('   <div className="v4-tools v4-unified-pathbar">','   <div className="v4-toolbar">');
+ const toolbar=slice('   <div className="v4-tools v4-unified-pathbar">','   <div className="v4-toolbar" role="group"');
  assert.doesNotMatch(browser,/<div className="v4-head">/);
  assert.doesNotMatch(browser,/className="v4-device-switch"/);
  assert.match(toolbar,/aria-label="文件夹路径"/);
@@ -37,7 +37,7 @@ test('searchable device selector only lists the authorized peer inventory, keybo
 });
 
 test('return, standalone and focus actions are in popover rather than a header band',()=>{
- const toolbar=slice('   <div className="v4-tools v4-unified-pathbar">','   <div className="v4-toolbar">');
+ const toolbar=slice('   <div className="v4-tools v4-unified-pathbar">','   <div className="v4-toolbar" role="group"');
  assert.match(toolbar,/aria-label="更多浏览器操作"/);
  assert.match(toolbar,/role="menu" aria-label="更多文件浏览器操作"/);
  assert.match(toolbar,/返回我的共享/);

@@ -15,6 +15,7 @@ import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 import {rdpPathLabel} from './pathStatus.js';
 import {deviceSpeedLinkEvidence} from './deviceSpeedLink.js';
+import {DEVICE_SPEED_REVIEW_STEPS,deviceSpeedChecks} from './deviceSpeedChecks.js';
 
 // Operational pages are always one click away. Frequently edited policies
 // live under Network Configuration; infrequent preferences live in Settings.
@@ -670,39 +671,33 @@ function PopupPreview({type}){
  return <div className={cx('popup-preview',important&&'important')}><div className="popup-preview-head"><div className={cx('message-icon',isCode?'code':important?'important':'')}>{isCode?'#':important?'!':'✦'}</div><div><div className="eyebrow">{important?'IMPORTANT':isCode?'VERIFICATION CODE':'MESSAGE'}</div><strong>{important?'重要提醒':isCode?'收到新的验证码':'收到新消息'}</strong></div></div><div className="mini top-gap">来自 RelayProxy · 刚刚</div>{isCode&&<div className="preview-code">482913</div>}<p>{important?'Tokyo 出口已从 Public Direct 降级至 Relay，请检查公网直连状态。':isCode?'用于登录验证，请勿向他人泄露。':'设备审批已完成，新的授权能力已同步到本机。'}</p><div className="actions end"><Button>{isCode?'稍后处理':'知道了'}</Button>{isCode&&<Button primary>复制验证码</Button>}</div></div>
 }
 
-function DeviceSpeedLinkDetails({exitID,exits,result,status}){
+function DeviceSpeedLinkDetails({exitID,exits,result,status,phase,revealCount}){
  const matched=arr(exits).find(x=>(x.deviceId||x.id)===exitID);
- const report=deviceSpeedLinkEvidence(exitID,matched,result);
- const ready=report.verifiedTest;
- const badge=(used,possible)=>used?<Badge tone="ok">本次测速使用</Badge>:possible?<Badge tone="blue">设备报告候选 · 未实测</Badge>:<Badge>未在本次测速中确认</Badge>;
+ const rows=deviceSpeedChecks({exitID,exit:matched,phase,result,revealCount});
  const online=status?.connected===true;
  const udp=Number(status?.nativeUdp?.associations||0);
- return <div className="device-speed-evidence">
-  <div className="device-speed-heading">
-   <strong>设备链路信息</strong>
-   <span className="mini">{exitID?('目标：'+(matched?.name||matched?.deviceName||exitID)):'未指定设备 · 自动选择'}</span>
+ const stateLabel={checked:'通过',progress:'检测中',waiting:'待检测',candidate:'仅候选',unknown:'未确认',failed:'失败'};
+ return <section className="device-speed-evidence" aria-label="该设备链路检测进度">
+  <div className="device-speed-heading"><strong>链路逐项检查</strong><span className="mini">{matched?.name||matched?.deviceName||exitID||'未指定设备'}</span></div>
+  <div className="mini">测速响应按上行、下行统一返回；完成后逐行核验真实路径。未命中某条链路不代表该链路不可用。</div>
+  <div className="device-speed-check-list" role="list">
+   {rows.map(row=><div key={row.id} role="listitem" className={'device-speed-check is-'+row.state}>
+    <span className="device-speed-check-icon" aria-hidden="true">{row.state==='checked'?'✓':row.state==='progress'?'◌':row.state==='failed'?'×':row.state==='waiting'?'·':row.state==='candidate'?'i':'–'}</span>
+    <div className="device-speed-check-main"><strong>{row.label}</strong><span className="mini">{row.detail}</span></div>
+    <span className="device-speed-check-state">{stateLabel[row.state]}</span>
+   </div>)}
   </div>
-  <div className="notice">{ready?'本次链路结果来自该设备专属测速响应；其他协议仅表示候选能力，不能视为测试成功。':'尚未取得与该设备 ID 对应的有效测速响应；以下不展示其他出口的全局链路状态。'}</div>
-  <div className="device-speed-path-list">
-   <Setting title="Public Direct" desc={report.verifiedEndpointCount?('已验证公网候选端点 '+report.verifiedEndpointCount+' 个'):report.publicAdvertised?'该出口报告公网直连候选':'该出口暂无经过验证的公网候选资料'}>
-    {badge(report.usedPublic,report.publicAdvertised||report.verifiedEndpointCount>0)}
-   </Setting>
-   <Setting title="P2P QUIC" desc="仅依据本次目标设备测速的实际路径确认"><Badge tone={report.usedP2P?'ok':'neutral'}>{report.usedP2P?'本次测速使用':'未在本次测速中确认'}</Badge></Setting>
-   <Setting title="Relay" desc="备用链路是否可达不能仅凭一次测速判定"><Badge tone={report.usedRelay?'ok':'neutral'}>{report.usedRelay?'本次测速使用':'未在本次测速中确认'}</Badge></Setting>
-   {ready&&<><Setting title="上行实际路径"><span className="mono mini">{report.uploadPath||'未报告'}</span></Setting>
-    <Setting title="下行实际路径"><span className="mono mini">{report.downloadPath||'未报告'}</span></Setting></>}
-   {!ready&&result&&!result.error&&exitID&&result.exitId!==exitID&&<div className="notice warn">测速返回的出口标识与所选设备不一致，已忽略其链路结果。</div>}
-  </div>
+  <div className="mini device-speed-check-note" role="status" aria-live="polite">{phase==='running'?'正在对该设备执行双向测速，链路结果尚未返回。':phase==='reviewing'?'测速已结束，正在逐项核对结果。':phase==='done'?'检测结果已逐项核对完成。':phase==='failed'?'测速失败，未确认的链路不会标记为通过。':'准备就绪，可开始检测所选设备。'}</div>
   <details className="device-speed-local">
-   <summary>本机网络环境与 RDP 路径（非远程设备实测）</summary>
+   <summary>本机网络环境（不是远程设备测速结果）</summary>
    <div className="device-speed-path-list">
-    <Setting title="本机 UPnP 映射" desc={status?.upnpError||status?.upnpAddress||'仅反映本机网关，映射不代表远端设备可达'}><Badge tone={status?.upnpState==='MAPPED'?'ok':status?.upnpState==='FAILED'||status?.upnpState==='DEGRADED'?'danger':'neutral'}>{status?.upnpState||'DISABLED'}</Badge></Setting>
-    <Setting title="本机 Native UDP" desc="本机进程级数据报 Association，与该设备测速无直接对应">{udp+' 个'}</Setting>
-    <Setting title="Server Relay 会话" desc="仅表示本机控制连接在线，不代表此设备测速经 Relay"><Badge tone={online?'blue':'neutral'}>{online?'在线':'离线'}</Badge></Setting>
-    {exitID&&status?.rdpTargetId===exitID&&<><Setting title="RDP TCP 实际路径" desc="此设备目前是活动 RDP 目标">{rdpPathLabel(status.rdpPathTcp)}</Setting><Setting title="RDP UDP 实际路径" desc={status.rdpUdpReason||'此设备目前是活动 RDP 目标'}>{rdpPathLabel(status.rdpPathUdp)}</Setting></>}
+    <Setting title="本机 UPnP 映射" desc={status?.upnpError||status?.upnpAddress||'仅反映本机网关；映射成功不代表远端设备可达'}><Badge tone={status?.upnpState==='MAPPED'?'ok':status?.upnpState==='FAILED'||status?.upnpState==='DEGRADED'?'danger':'neutral'}>{status?.upnpState||'DISABLED'}</Badge></Setting>
+    <Setting title="本机 Native UDP" desc="当前活动的数据报 Association">{udp+' 个'}</Setting>
+    <Setting title="Server Relay 控制会话" desc="仅代表 Agent 控制连接，并非这台设备测速路径"><Badge tone={online?'blue':'neutral'}>{online?'在线':'离线'}</Badge></Setting>
+    {exitID&&status?.rdpTargetId===exitID&&<><Setting title="RDP TCP 路径" desc="当前活动 RDP 目标是这台设备">{rdpPathLabel(status.rdpPathTcp)}</Setting><Setting title="RDP UDP 路径" desc={status.rdpUdpReason||'当前活动 RDP 目标是这台设备'}>{rdpPathLabel(status.rdpPathUdp)}</Setting></>}
    </div>
   </details>
- </div>;
+ </section>;
 }
 
 function SpeedModal({open,exits,status,initialExit,onClose,toast}){

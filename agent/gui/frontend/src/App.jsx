@@ -672,8 +672,8 @@ function PopupPreview({type}){
 
 function DeviceSpeedLinkDetails({exitID,exits,result,status,phase,revealCount}){
  const matched=arr(exits).find(x=>(x.deviceId||x.id)===exitID);
- const rows=deviceSpeedChecks({exitID,exit:matched,connected:online,phase,result,revealCount});
  const online=status?.connected===true;
+ const rows=deviceSpeedChecks({exitID,exit:matched,connected:online,phase,result,revealCount});
  const udp=Number(status?.nativeUdp?.associations||0);
  const stateLabel={checked:'通过',progress:'检测中',waiting:'待检测',candidate:'仅候选',unknown:'未确认',failed:'失败'};
  return <section className="device-speed-evidence" aria-label="该设备链路检测进度">

@@ -124,7 +124,7 @@ func (m *Manager) Status() Status {
 	defer m.mu.Unlock()
 	pending := 0
 	applied := 0
-	if m.desired.Enabled() && m.activeService != "" {
+	if m.desired.Enabled() && m.activeService != "" && m.lastError == "" {
 		applied = len(m.records)
 	} else {
 		pending = len(m.records)

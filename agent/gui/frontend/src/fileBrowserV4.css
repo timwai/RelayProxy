@@ -1,4 +1,4 @@
-.file-browser-v4{--file-tree-width:248px;--file-detail-width:286px;display:grid;grid-template-columns:var(--file-tree-width) 6px minmax(0,1fr);border:1px solid var(--line);background:var(--surface2);min-height:560px;height:clamp(560px,calc(100vh - 255px),1200px);border-radius:16px;overflow:hidden;position:relative;isolation:isolate}
+.file-browser-v4{--file-tree-width:248px;--file-detail-width:286px;display:grid;grid-template-columns:var(--file-tree-width) 6px minmax(0,1fr);border:1px solid var(--line);background:var(--surface2);min-height:480px;height:clamp(480px,calc(100dvh - 172px),1200px);border-radius:16px;overflow:hidden;position:relative;isolation:isolate}
 .file-browser-v4.has-details{grid-template-columns:var(--file-tree-width) 6px minmax(0,1fr) 6px var(--file-detail-width)}
 .file-browser-v4 button{font-family:inherit}
 .v4-tree{grid-column:1;grid-row:1;background:var(--surface3);display:flex;flex-direction:column;min-height:0;overflow:hidden}
@@ -33,11 +33,11 @@
 .v4-crumbs{display:flex;align-items:center;min-width:0;flex:1;overflow-x:auto;white-space:nowrap;gap:6px;scrollbar-width:thin}
 .v4-crumbs button{border:0;background:transparent;color:var(--brand);font-weight:650;padding:5px;white-space:nowrap}
 .v4-crumbs span{color:var(--subtle)}
-.v4-toolbar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:wrap}
-.v4-toolbar>input{min-width:110px;flex:1 1 140px;max-width:400px;background:var(--surface3);border:1px solid var(--line2);border-radius:9px;padding:9px 10px;outline:0}
+.v4-toolbar{display:flex;align-items:center;gap:8px;padding:10px 14px;border-bottom:1px solid var(--line);flex-wrap:nowrap;min-width:0;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin}
+.v4-toolbar>input{min-width:120px;flex:1 0 150px;max-width:400px;background:var(--surface3);border:1px solid var(--line2);border-radius:9px;padding:9px 10px;outline:0}
 .v4-toolbar>input:focus{border-color:var(--brand)}
-.v4-toolbar>select{max-width:110px;min-width:82px;background:var(--surface2);border:1px solid var(--line2);border-radius:9px;padding:8px 6px}
-.v4-view{display:flex;border:1px solid var(--line2);border-radius:9px;padding:3px;gap:2px}
+.v4-toolbar>select{flex:0 0 auto;max-width:110px;min-width:82px;background:var(--surface2);border:1px solid var(--line2);border-radius:9px;padding:8px 6px}
+.v4-view{display:flex;flex:0 0 auto;border:1px solid var(--line2);border-radius:9px;padding:3px;gap:2px}
 .v4-view button{border:0;background:transparent;border-radius:6px;width:29px;height:27px;color:var(--muted)}
 .v4-view button.active{color:var(--brand);background:color-mix(in srgb,var(--brand) 12%,var(--surface2))}
 .v4-selection{padding:9px 15px;display:flex;align-items:center;flex-wrap:wrap;gap:10px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--brand) 7%,var(--surface2));font-size:11px}
@@ -158,6 +158,18 @@ html.file-browser-focus .main>*+*{margin-top:0}
 .v4-file-glyph>svg{width:30px;height:30px;display:block;overflow:visible;flex:0 0 auto}
 .v4-glyph-folder{--fg-color:#368df2;--fg-folder-back:#8ec9fe;--fg-folder-front:#388ff2;--fg-folder-edge:#236fd0}
 .v4-glyph-pdf{--fg-color:#e4545d}
+.v4-glyph-word{--fg-color:#2256a5}
+.v4-glyph-excel{--fg-color:#168056}
+.v4-glyph-powerpoint{--fg-color:#d26035}
+.v4-glyph-zip{--fg-color:#c58b35}
+.v4-glyph-rar{--fg-color:#8755bb}
+.v4-glyph-sevenzip{--fg-color:#5577bc}
+.v4-glyph-tar{--fg-color:#9d7957}
+.v4-glyph-compressed{--fg-color:#8f8b42}
+.v4-glyph-windows{--fg-color:#2178cc}
+.v4-glyph-android{--fg-color:#428e60}
+.v4-glyph-apple{--fg-color:#647891}
+.v4-glyph-package{--fg-color:#9977bd}
 .v4-glyph-document{--fg-color:#4386df}
 .v4-glyph-spreadsheet{--fg-color:#1faa79}
 .v4-glyph-presentation{--fg-color:#ec8744}
@@ -166,6 +178,25 @@ html.file-browser-focus .main>*+*{margin-top:0}
 .v4-glyph-audio{--fg-color:#c35ccc}
 .v4-glyph-archive{--fg-color:#cf9440}
 .v4-glyph-code{--fg-color:#169bb5}
+.v4-glyph-javascript{--fg-color:#b69112}
+.v4-glyph-typescript{--fg-color:#3178c6}
+.v4-glyph-python{--fg-color:#3976ac}
+.v4-glyph-golang{--fg-color:#1597aa}
+.v4-glyph-rust{--fg-color:#b15c3e}
+.v4-glyph-web{--fg-color:#df7148}
+.v4-glyph-stylesheet{--fg-color:#8066cb}
+.v4-glyph-json{--fg-color:#9d6cc0}
+.v4-glyph-markdown{--fg-color:#4c7aa6}
+.v4-glyph-notebook{--fg-color:#df7d3d}
+.v4-glyph-database{--fg-color:#358dbe}
+.v4-glyph-data{--fg-color:#1a9c8e}
+.v4-glyph-vector{--fg-color:#bd5dae}
+.v4-glyph-design{--fg-color:#ce6487}
+.v4-glyph-model3d{--fg-color:#9d76c7}
+.v4-glyph-subtitle{--fg-color:#508ca0}
+.v4-glyph-disk{--fg-color:#7783ae}
+.v4-glyph-ebook{--fg-color:#4b9c74}
+.v4-glyph-certificate{--fg-color:#c19041}
 .v4-glyph-config{--fg-color:#6981c2}
 .v4-glyph-text{--fg-color:#718198}
 .v4-glyph-font{--fg-color:#916fba}
@@ -229,3 +260,103 @@ html[data-theme="dark"] .v4-glyph-folder{
    not only the old .file-share-tabs child. */
 html.file-browser-focus .main>.file-share-header{display:none}
 html.file-browser-focus .main>.file-browser-v4{flex:1 1 auto;min-height:0;height:100%}
+
+/* Occupy the actual file workspace instead of subtracting a guessed 255px.
+   Status banners and the file-sharing tab row retain their natural height. */
+.main:has(> .file-browser-v4){display:flex;flex-direction:column;overflow:hidden;scrollbar-gutter:auto}
+.main:has(> .file-browser-v4)>.file-browser-v4{flex:1 1 auto;min-height:0;height:auto;max-height:none;margin-top:12px}
+.main:has(> .file-browser-v4)>.file-share-header{flex:0 0 auto}
+.file-browser-v4 .v4-head{padding:10px 14px}
+.file-browser-v4 .v4-head h2{font-size:17px;margin:0 0 2px;letter-spacing:-.2px}
+.file-browser-v4 .v4-tools{padding:6px 12px}
+.file-browser-v4 .v4-toolbar{padding:7px 12px}
+@media(max-width:900px){
+ .main:has(> .file-browser-v4)>.file-browser-v4{min-height:0}
+}
+@media(max-width:500px){
+ .file-browser-v4 .v4-head{padding:9px 10px}
+ .file-browser-v4 .v4-tools,.file-browser-v4 .v4-toolbar{padding:6px 8px}
+}
+/* Focus mode is a dedicated full-window explorer, with no outer margins. */
+html.file-browser-focus .main:has(> .file-browser-v4)>.file-browser-v4{margin-top:0}
+
+/* File rows participate in keyboard navigation without creating a second
+   selection toolbar or shifting folder positions. */
+.v4-entry:focus-visible{outline:2px solid var(--brand);outline-offset:-2px;background:color-mix(in srgb,var(--brand) 7%,var(--surface2))}
+.v4-file-scroll>.v4-selection button:focus-visible,.v4-window-link:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+/* The sidebar is a folder tree for the selected host; host switching lives in
+   the explorer header instead of occupying one sidebar row per device. */
+.v4-tree-share{min-width:0;margin:3px 1px}
+.v4-tree-share>.v4-tree-folder{min-width:0}
+.v4-tree-share .v4-share{min-width:0;flex:1}
+.v4-head-title{display:flex;align-items:center;gap:14px;flex:1;min-width:0}
+.v4-device-switch{display:flex;align-items:center;gap:8px;flex:0 1 265px;min-width:145px;color:var(--brand)}
+.v4-device-switch>svg{flex:0 0 auto}
+.v4-device-switch select{min-width:0;width:100%;max-width:100%;height:44px;min-height:44px;font-size:13px}
+.v4-head-location{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.v4-head-location h2{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.v4-head-location small{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.v4-tree-head{padding:12px 12px 10px}
+.v4-tree-scroll{padding:8px}
+@media(max-width:1150px){.v4-head{flex-wrap:wrap}.v4-head-actions{margin-left:auto}.v4-device-switch{flex-basis:225px}}
+@media(max-width:650px){.v4-head-title{flex-wrap:wrap;gap:7px}.v4-device-switch{flex:1 1 100%;min-width:0}.v4-head-location{flex:1 1 100%}.v4-head-actions{width:100%;justify-content:flex-end}}
+@media(max-width:640px){.v4-device-switch select{height:48px;min-height:48px;font-size:14px}}
+
+/* Compact single-line navigation: peer is the first breadcrumb. The picker
+   floats OVER the file list, never creating another top header row. */
+.file-browser-v4 .v4-unified-pathbar{position:relative;flex:0 0 auto;min-height:44px;max-height:52px;padding:5px 11px;gap:6px;z-index:9}
+.v4-unified-pathbar .v4-crumbs{gap:4px;scrollbar-width:none}
+.v4-unified-pathbar .v4-crumbs::-webkit-scrollbar{display:none}
+.v4-unified-pathbar .v4-crumbs button{font-size:12px;border-radius:7px;min-height:32px;padding:5px 6px}
+.v4-unified-pathbar .v4-crumbs button:hover{background:var(--surface3)}
+.v4-unified-pathbar .v4-crumbs button:focus-visible,.v4-path-actions button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.v4-unified-pathbar .v4-crumbs .v4-peer-trigger{display:inline-flex;align-items:center;justify-content:center;gap:6px;max-width:min(250px,52%);flex:0 0 auto;padding:5px 8px;background:var(--surface3);color:var(--text);border:1px solid var(--line2);border-radius:8px}
+.v4-peer-trigger>svg{color:var(--brand);flex:0 0 auto}
+.v4-peer-trigger-name{display:block;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.v4-peer-trigger .v4-chevron{color:var(--muted);font-size:14px;margin-left:2px}
+.v4-path-actions{display:flex;align-items:center;flex:0 0 auto;gap:5px}
+.v4-path-actions>.btn{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;padding:5px 7px}
+.v4-browser-more{font-size:23px;line-height:16px;padding-bottom:9px!important}
+.v4-path-meta,.v4-path-error{font-size:10px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v4-path-meta{color:var(--muted)}.v4-path-error{color:var(--danger)}
+.v4-main .v4-peer-popover{position:absolute;z-index:35;width:min(328px,calc(100% - 16px));max-height:min(410px,70%);overflow:hidden;display:flex;flex-direction:column;border-radius:13px;border:1px solid var(--line2);background:var(--surface2);box-shadow:var(--shadow2);padding:9px}
+.v4-peer-search{display:flex;align-items:center;gap:8px;min-height:38px;border:1px solid var(--line2);background:var(--surface3);border-radius:9px;padding:0 10px;flex:0 0 auto}
+.v4-peer-search>svg{color:var(--muted)}
+.v4-peer-search input{min-width:0;width:100%;height:36px;border:0;background:transparent;outline:0;color:var(--text);font:inherit;font-size:12px}
+.v4-peer-search:focus-within{border-color:var(--brand)}
+.v4-peer-list{flex:1 1 auto;overflow-y:auto;min-height:0;padding:6px 0}
+.v4-peer-option{width:100%;display:flex;gap:10px;align-items:center;text-align:left;border:1px solid transparent;background:transparent;color:var(--text);border-radius:9px;padding:10px 8px;min-height:54px;cursor:pointer}
+.v4-peer-option:hover,.v4-peer-option:focus-visible{background:var(--surface3);border-color:var(--line)}
+.v4-peer-option.selected{background:color-mix(in srgb,var(--brand) 9%,var(--surface2))}
+.v4-peer-icon{width:35px;height:35px;flex:0 0 auto;display:grid;place-items:center;border-radius:9px;background:var(--surface3);color:var(--brand)}
+.v4-peer-info{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}
+.v4-peer-info strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v4-peer-info small{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v4-peer-current{font-size:16px;font-weight:700;color:var(--ok)}
+.v4-peer-empty{padding:22px 10px;text-align:center;color:var(--muted);font-size:12px}
+.v4-peer-popover-foot{padding:7px 6px 2px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
+.v4-browser-menu{position:absolute;z-index:36;right:8px;top:45px;min-width:192px;display:flex;flex-direction:column;gap:2px;border:1px solid var(--line2);border-radius:11px;background:var(--surface2);box-shadow:var(--shadow2);padding:6px}
+.v4-browser-menu>button,.v4-browser-menu>a{border:0;background:transparent;text-decoration:none;min-height:37px;display:flex;align-items:center;justify-content:flex-start;gap:10px;border-radius:7px;padding:8px 10px;color:var(--text);font-size:12px;cursor:pointer}
+.v4-browser-menu>button:hover,.v4-browser-menu>a:hover,.v4-browser-menu>button:focus-visible,.v4-browser-menu>a:focus-visible{background:var(--surface3);color:var(--brand);outline:none}
+@media(max-width:750px){
+ .v4-path-meta,.v4-path-error{display:none}
+ .v4-unified-pathbar .v4-crumbs .v4-peer-trigger{max-width:190px}
+ .v4-peer-trigger-name{max-width:135px}
+}
+@media(max-width:640px){
+ .file-browser-v4 .v4-unified-pathbar{min-height:48px;padding:6px 8px}
+ .v4-unified-pathbar .v4-crumbs .v4-peer-trigger{max-width:170px;min-height:38px}
+ .v4-path-actions>.btn{min-height:38px;min-width:38px}
+ .v4-main .v4-peer-popover{top:auto!important;bottom:8px;left:8px!important;right:8px;width:auto;max-height:min(420px,70%)}
+}
+
+/* The file search, sort, view and write actions never create a second toolbar
+   row. At small widths users can scroll the controls without scrolling files. */
+.v4-toolbar>.btn{flex:0 0 auto;white-space:nowrap}
+.v4-toolbar:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+@media(max-width:640px){
+ .v4-toolbar{gap:6px}
+ .v4-toolbar>input{flex-basis:135px;min-width:115px}
+ .v4-toolbar>select{min-width:78px}
+}

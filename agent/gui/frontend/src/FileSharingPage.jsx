@@ -1,4 +1,5 @@
 import React, {useCallback,useEffect,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
 import {call,callJSON} from './bridge.js';
 import {Icon} from './icons.jsx';
 import {createDirectoryCache} from './fileBrowserCache.js';
@@ -6,6 +7,7 @@ import {onlyVerifiedFilePeers} from './fileShareVisibility.js';
 import './fileSharing.css';
 import FileBrowserV4 from './FileBrowserV4.jsx';
 import FileGlyph from './FileGlyph.jsx';
+import useDialogFocus from './useDialogFocus.js';
 
 const formatFileBytes=n=>{const num=Math.max(0,Number(n)||0);if(num<1024)return num.toFixed(0)+' B';const units=['KiB','MiB','GiB','TiB'];const power=Math.min(4,Math.floor(Math.log(num)/Math.log(1024)));return (num/1024**power).toFixed(1)+' '+units[power-1]};
 const blank=()=>({id:'',name:'',rootPath:'',enabled:true,permissions:{}});
@@ -13,16 +15,16 @@ const empty=()=>({revision:0,enabled:false,directUpnpEnabled:false,shares:[]});
 const upnpStateLabel={disabled:'已关闭',not_approved:'等待 Server 审批',awaiting_request:'等待文件直连请求',discovering:'正在发现路由器',mapped:'已取得公网候选地址',private_wan:'网关 WAN 为内网或 CGNAT',unavailable:'映射不可用'};
 const countPermissions=share=>Object.values(share.permissions||{}).filter(v=>v==='read'||v==='read_write').length;
 
-export default function FileSharingPage({toast}) {
+export default function FileSharingPage({toast,initialDevice='',active=true,navigationTarget=null,transferOpen=false,onTransferOpenChange,onTransferSummary}) {
  const [state,setState]=useState(null);
- const [tab,setTab]=useState(new URLSearchParams(window.location.search).has('filesWindow')?'remote':'local');
+ const [tab,setTab]=useState(initialDevice||new URLSearchParams(window.location.search).has('filesWindow')?'remote':'local');
  const [directStatus,setDirectStatus]=useState(null);
  const [warmStatus,setWarmStatus]=useState('');
  const [busy,setBusy]=useState(false);
  const [error,setError]=useState('');
  const [editor,setEditor]=useState(null);
  const [draft,setDraft]=useState(blank);
- const [device,setDevice]=useState('');
+ const [grantPickerOpen,setGrantPickerOpen]=useState(false),[grantQuery,setGrantQuery]=useState(''),[grantSelected,setGrantSelected]=useState([]);
  const [permission,setPermission]=useState('read');
  const [candidates,setCandidates]=useState([]);
  const [candidateError,setCandidateError]=useState('');
@@ -45,6 +47,11 @@ export default function FileSharingPage({toast}) {
  const completedSaves=useRef(new Set());
  const completedUploads=useRef(new Set());
  const peersRef=useRef([]);
+ const initialDeviceRef=useRef(initialDevice);
+ const initialAutoSelected=useRef(false);
+ const lastNavigationSerial=useRef(null);
+ const drawerRef=useRef(null);
+ useDialogFocus(transferOpen,drawerRef,()=>onTransferOpenChange?.(false));
  const peerRefreshSerial=useRef(0);
  const selectedRemote=useRef({device:'',share:''});
  const directoryCache=useRef(createDirectoryCache());
@@ -66,6 +73,7 @@ export default function FileSharingPage({toast}) {
  useEffect(()=>{selectedRemote.current={device:remoteDevice,share:remoteShare}},[remoteDevice,remoteShare]);
 
  const [transfers,setTransfers]=useState([]);
+ useEffect(()=>{onTransferSummary?.(transfers.filter(t=>t.state==='running').length,transfers.length)},[transfers,onTransferSummary]);
  const [transferError,setTransferError]=useState('');
  const uploadCancelRef=useRef(false);
  const [uploading,setUploading]=useState(false);
@@ -218,12 +226,33 @@ export default function FileSharingPage({toast}) {
    if(JSON.stringify(peersRef.current)!==JSON.stringify(result))setTreeRevision(n=>n+1);
    peersRef.current=result;
    setPeers(result);
+   // Device Center deep link: only traverse this device if the current Agent
+   // has verified at least one readable share. Unapproved hosts fail closed.
+   const initialPeerID=initialDeviceRef.current;
+   if(initialPeerID){
+    initialDeviceRef.current='';
+    const peer=result.find(x=>x.deviceId===initialPeerID);
+    if(peer){
+     setTab('remote');
+     if(peer.shares.length===1){setRemoteShares(peer.shares);void openRemoteDir(peer.deviceId,peer.shares[0].id,'.')}
+     else void openRemoteDevice(peer.deviceId);
+    }else setRemoteError('该设备当前没有经过授权验证的可访问共享目录。');
+   }
    const initial=initialWindowTarget.current;
    const authorizedPeer=initial&&result.find(p=>p.deviceId===initial.device);
    if(authorizedPeer?.shares?.some(x=>x.id===initial.share)){
     initialWindowTarget.current=null;
     setRemoteShares(authorizedPeer.shares);
     void openRemoteDir(initial.device,initial.share,initial.path);
+   }
+   // On first discovery, reveal a verified device's folder tree immediately.
+   // Never silently switch devices after a later ACL revocation.
+   if(!initialAutoSelected.current){
+    if(initialPeerID||initial){initialAutoSelected.current=true}
+    else if(!selectedRemote.current.device&&result.length>0){
+     initialAutoSelected.current=true;
+     void openRemoteDevice(result[0].deviceId);
+    }
    }
    const selected=selectedRemote.current;
    if(selected.device){
@@ -244,7 +273,7 @@ export default function FileSharingPage({toast}) {
      }
     }
    }
-   setRemoteError('');
+   if(!initialPeerID||result.some(peer=>peer.deviceId===initialPeerID))setRemoteError('');
   }catch(e){
    if(seq!==peerRefreshSerial.current)return;
    navigationSerial.current+=1;
@@ -296,23 +325,34 @@ export default function FileSharingPage({toast}) {
   }catch(e){setTransferError(e.message||String(e))}
  },[]);
  useEffect(()=>{
-  if(tab!=='remote')return;
+  if(!active)return;
+  const requested=navigationTarget?.device;
+  if(requested&&navigationTarget.serial!==lastNavigationSerial.current){
+   lastNavigationSerial.current=navigationTarget.serial;
+   initialDeviceRef.current=requested;
+   initialAutoSelected.current=true;
+   setTab('remote');
+   void refreshPeers();
+  }else if(!requested&&!new URLSearchParams(window.location.search).has('filesWindow')){
+   setTab('local');
+  }
+ },[active,navigationTarget?.serial,refreshPeers]);
+ useEffect(()=>{
+  if(tab!=='remote'||!active)return;
   void refreshPeers();
   const timer=setInterval(()=>void refreshPeers(),15000);
   return ()=>{
    clearInterval(timer);
    peerRefreshSerial.current+=1; // discard responses after leaving the file browser
   };
- },[tab,refreshPeers]);
+ },[tab,active,refreshPeers]);
  useEffect(()=>{
-  if(tab==='transfers'||tab==='remote')void refreshTransfers();
-  // A browser-selected Save As handle must still be fulfilled when the
-  // user switches between the remote explorer and transfers tabs.
-  const timer=setInterval(()=>{
-   if(tab==='transfers'||tab==='remote'||saveHandles.current.size>0)void refreshTransfers();
-  },900);
+  void refreshTransfers();
+  // Keep the transfer owner mounted across all Agent pages: Save As handles
+  // and upload-completion directory refresh survive route changes.
+  const timer=setInterval(()=>void refreshTransfers(),1200);
   return ()=>clearInterval(timer);
- },[tab,refreshTransfers]);
+ },[refreshTransfers]);
  async function openRemoteDevice(id){
   const verified=peersRef.current.find(peer=>peer.deviceId===id);
   if(!verified)return;
@@ -525,13 +565,13 @@ export default function FileSharingPage({toast}) {
   setFolderPickerError('');
   setEditor(share?'edit':'new');
   setDraft(share?{...share,permissions:{...share.permissions}}:blank());
-  setDevice('');setPermission('read');
+  setGrantPickerOpen(false);setGrantQuery('');setGrantSelected([]);setPermission('read');
  }
- function addPermission(){
-  const id=device.trim();
-  if(!id||!candidates.some(item=>item.deviceId===id))return;
-  setDraft(s=>({...s,permissions:{...(s.permissions||{}),[id]:permission}}));
-  setDevice('');
+ function addPermissions(){
+  const eligible=grantSelected.filter(id=>candidates.some(item=>item.deviceId===id&&!draft.permissions?.[id]));
+  if(!eligible.length)return;
+  setDraft(s=>({...s,permissions:{...(s.permissions||{}),...Object.fromEntries(eligible.map(id=>[id,permission]))}}));
+  setGrantSelected([]);setGrantQuery('');setGrantPickerOpen(false);
  }
  async function saveEditor(){
   const item={...draft,name:draft.name.trim(),rootPath:draft.rootPath.trim()};
@@ -544,23 +584,25 @@ export default function FileSharingPage({toast}) {
   await commit(s=>({...s,shares:s.shares.filter(v=>v.id!==share.id)}));
  }
  const shares=state?.shares||[];
- const active=shares.filter(s=>s.enabled).length;
- return <>
-
+ const activeShareCount=shares.filter(s=>s.enabled).length;
+ return <><section className={'file-sharing-host '+(tab==='remote'?'is-remote':'')} hidden={!active}>
   {error&&<div className="notice danger file-share-error" role="alert">{error}</div>}
-  <div className="file-share-header">
-   <div className="file-share-tabs" role="tablist" aria-label="文件共享页面">
-    {[[ 'local','我的共享'],['remote','其他设备'],['transfers','传输任务']].map(([id,title])=><button type="button" key={id} role="tab" aria-selected={tab===id} className={tab===id?'selected':''} onClick={()=>setTab(id)}>{title}</button>)}
-   </div>
-   <div className="file-share-header-actions">
-    <button className="btn quiet" onClick={tab==='transfers'?refreshTransfers:tab==='remote'?()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}:refresh} disabled={busy}>刷新</button>
-    {tab==='local'&&<button className="btn primary" onClick={()=>edit(null)} disabled={!state||busy}>＋ 添加共享文件夹</button>}
-    {tab==='transfers'&&transfers.some(x=>x.state!=='running')&&<button className="btn" onClick={clearInactiveTransfers}>清除已结束</button>}
-   </div>
-  </div>
   {tab==='local'&&<>
-   <div className="cards-3">
-    <div className="metric"><div className="mini">共享文件夹</div><div className="metric-value">{shares.length}</div><div className="mini">{active} 个已启用</div></div>
+   <section className="card"><div className="card-head file-share-list-head"><div><div className="eyebrow">{shares.length} DIRECTORIES · {activeShareCount} 已启用</div><h2>共享文件夹</h2></div><div className="file-share-list-actions" role="group" aria-label="共享文件夹操作" tabIndex={0}><button className="btn primary" onClick={()=>edit(null)} disabled={!state||busy}>＋ 添加共享文件夹</button><button className="btn" onClick={()=>{setTab('remote');void refreshPeers()}}><Icon name="devices" size={15}/> 浏览其他设备文件</button><button className="btn quiet" onClick={refresh} disabled={busy}>刷新</button><span className={'badge '+(state?.enabled?'ok':'neutral')}>{state?.enabled?'共享已启用':'共享已关闭'}</span></div></div>
+   {!state&&<div className="empty">正在读取本机文件共享配置…</div>}
+   {state&&shares.length===0&&<div className="empty">还没有共享文件夹。添加本机目录后，再为设备设置只读或读写权限。</div>}
+   {shares.map(share=><div className="file-share-item" key={share.id}>
+    <div className="file-share-folder"><FileGlyph name={share.name} isDir/></div>
+    <div className="grow file-share-detail"><b>{share.name}</b><div className="mono mini" title={share.rootPath}>{share.rootPath}</div><div className="mini">{countPermissions(share)} 台设备已授权 · {share.enabled?'目录已启用':'目录已停用'}</div></div>
+    <span className={'badge '+(share.enabled?'ok':'neutral')}>{share.enabled?'已启用':'已停用'}</span>
+    <button type="button" role="switch" aria-label={'启用 '+share.name} aria-checked={share.enabled} className={'switch '+(share.enabled?'on':'')} disabled={busy} onClick={()=>commit(s=>({...s,shares:s.shares.map(v=>v.id===share.id?{...v,enabled:!v.enabled}:v)}))}><span/></button>
+    <div className="file-share-ops"><button className="btn" onClick={()=>edit(share)} disabled={busy}>编辑 / 权限</button><button className="btn danger" onClick={()=>remove(share)} disabled={busy}>移除</button></div>
+   </div>)}
+   </section>
+   <details className="file-share-advanced" id="file-share-options">
+    <summary><span><strong>共享服务与直连设置</strong><small>管理共享开关、UPnP 端口映射及授权统计</small></span><Icon name="settings" size={17}/></summary>
+    <div className="file-share-advanced-content">   <div className="cards-3">
+    <div className="metric"><div className="mini">共享文件夹</div><div className="metric-value">{shares.length}</div><div className="mini">{activeShareCount} 个已启用</div></div>
     <div className="metric"><div className="mini">设备权限</div><div className="metric-value">{shares.reduce((n,s)=>n+countPermissions(s),0)}</div><div className="mini">各共享文件夹独立授权</div></div>
     <div className="metric"><div className="mini">共享服务</div><div className="metric-value" style={{fontSize:19}}>{state?.enabled?'已开启':'已关闭'}</div><div className="mini">初始默认关闭</div></div>
    </div>
@@ -575,17 +617,8 @@ export default function FileSharingPage({toast}) {
     <div className="mini">默认关闭。启用后尝试独立映射文件专用 TCP 与 QUIC/UDP 端口；只有公网可路由的 WAN 地址才会公布，仍须 Server 审批、一次性票据与 TLS 指纹校验。关闭后同时撤销两种映射。映射成功不代表跨运营商公网可达，也不代表完成 NAT 打洞。</div>
     {state?.directUpnpEnabled&&<><div className="file-share-upnp-status" role="status"><b>TCP</b><span>{!state?.enabled?'共享服务未开启':upnpStateLabel[directStatus?.mappingState]||'读取映射状态中…'}</span>{directStatus?.publicAddress&&<span className="mono">{directStatus.publicAddress}</span>}{directStatus?.reason&&<span className="mini" title={directStatus.reason}>{directStatus.reason}</span>}</div><div className="file-share-upnp-status" role="status"><b>QUIC / UDP</b><span>{!state?.enabled?'共享服务未开启':upnpStateLabel[directStatus?.quicMappingState]||'读取映射状态中…'}</span>{directStatus?.quicPublicAddress&&<span className="mono">{directStatus.quicPublicAddress}</span>}{directStatus?.quicReason&&<span className="mini" title={directStatus.quicReason}>{directStatus.quicReason}</span>}</div></>}
    </section>
-   <section className="card"><div className="card-head"><div><div className="eyebrow">{shares.length} DIRECTORIES</div><h2>共享文件夹</h2></div></div>
-   {!state&&<div className="empty">正在读取本机文件共享配置…</div>}
-   {state&&shares.length===0&&<div className="empty">还没有共享文件夹。添加本机目录后，再为设备设置只读或读写权限。</div>}
-   {shares.map(share=><div className="file-share-item" key={share.id}>
-    <div className="file-share-folder"><FileGlyph name={share.name} isDir/></div>
-    <div className="grow file-share-detail"><b>{share.name}</b><div className="mono mini" title={share.rootPath}>{share.rootPath}</div><div className="mini">{countPermissions(share)} 台设备已授权 · {share.enabled?'目录已启用':'目录已停用'}</div></div>
-    <span className={'badge '+(share.enabled?'ok':'neutral')}>{share.enabled?'已启用':'已停用'}</span>
-    <button type="button" role="switch" aria-label={'启用 '+share.name} aria-checked={share.enabled} className={'switch '+(share.enabled?'on':'')} disabled={busy} onClick={()=>commit(s=>({...s,shares:s.shares.map(v=>v.id===share.id?{...v,enabled:!v.enabled}:v)}))}><span/></button>
-    <div className="file-share-ops"><button className="btn" onClick={()=>edit(share)} disabled={busy}>编辑 / 权限</button><button className="btn danger" onClick={()=>remove(share)} disabled={busy}>移除</button></div>
-   </div>)}
-   </section>
+</div>
+   </details>
   </>}
   {tab==='remote'&&<FileBrowserV4
     peers={peers} device={remoteDevice} share={remoteShare} path={remotePath} shares={remoteShares}
@@ -593,10 +626,46 @@ export default function FileSharingPage({toast}) {
     canWrite={canUpload} warmStatus={warmStatus} uploading={uploading} uploadStaged={uploadStaged} uploadTotal={uploadTotal}
     transfers={transfers} treeRevision={treeRevision} onDevice={openRemoteDevice} onDirectory={openRemoteDir}
     onDownload={beginDownload} onUpload={uploadFiles} onMutate={mutateRemote}
-    onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onClearTransfer={clearTransfer} onClearInactiveTransfers={clearInactiveTransfers} onOpenTransfers={()=>setTab('transfers')} onCancelUpload={()=>{uploadCancelRef.current=true}}
+    onCancelTransfer={cancelTransfer} onResumeTransfer={resumeDownload} onClearTransfer={clearTransfer} onClearInactiveTransfers={clearInactiveTransfers} onOpenTransfers={()=>onTransferOpenChange?.(true)} onCancelUpload={()=>{uploadCancelRef.current=true}}
     onRefresh={()=>{void refreshPeers();if(remoteDevice&&remoteShare)void openRemoteDir(remoteDevice,remoteShare,remotePath,{force:true})}}
-    toast={toast}/>}
-  {tab==='transfers'&&<section className="card">
+    onBackToShares={()=>setTab('local')} toast={toast}/>}
+  {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>
+   <div className="modal wide" role="dialog" aria-modal="true" aria-label={editor==='new'?'添加共享文件夹':'编辑共享文件夹'}>
+    <div className="modal-head"><h2>{editor==='new'?'添加共享文件夹':'编辑共享与设备权限'}</h2><button className="close" aria-label="关闭" onClick={()=>setEditor(null)} disabled={busy}>×</button></div>
+    <div className="modal-body">
+     <div className="form-grid">
+      <label className="field"><span>共享名称</span><input className="control" value={draft.name} maxLength={100} onChange={e=>setDraft(s=>({...s,name:e.target.value}))} placeholder="例如：工作资料"/></label>
+      <div className="field"><span>本机共享文件夹</span><div className="file-share-folder-input"><input className="control" value={draft.rootPath} onChange={e=>setDraft(s=>({...s,rootPath:e.target.value}))} placeholder="点击浏览选择文件夹，或输入绝对路径"/><button type="button" className="btn" onClick={chooseShareFolder} disabled={busy}><Icon name="folder"/> 浏览…</button></div><small className="mini">选择的是运行 Agent 的设备上的文件夹。远程访问管理页时须手动输入 Agent 主机路径。</small>{folderPickerError&&<div className="notice danger" role="alert">{folderPickerError}</div>}</div>
+     </div>
+     <div className="file-share-permissions"><h3>设备权限</h3><p className="mini">默认不授权。只显示 Server 已审批、同身份且具备文件访问能力的设备；离线设备也可预先设置权限。</p>
+      {candidateError&&<div className="notice danger" role="alert">{candidateError}</div>}
+      {candidatesLoading&&<div className="mini">正在读取 Server 已授权设备…</div>}
+      {Object.entries(draft.permissions||{}).map(([id,perm])=><div className="file-share-permission" key={id}><span className="grow file-share-grantee"><b>{candidates.find(item=>item.deviceId===id)?.name||'历史授权设备'}</b><small className="mono">{id}</small></span><select className="control" value={perm} onChange={e=>setDraft(s=>({...s,permissions:{...s.permissions,[id]:e.target.value}}))}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn danger" onClick={()=>setDraft(s=>{const permissions={...s.permissions};delete permissions[id];return {...s,permissions}})}>移除</button></div>)}
+      <button type="button" className="btn file-share-grant-trigger" aria-expanded={grantPickerOpen} aria-controls="file-share-grant-picker" onClick={()=>{setGrantPickerOpen(open=>!open);setGrantSelected([]);setGrantQuery('');void loadCandidates()}} disabled={busy}>
+       <Icon name="devices" size={16}/> {grantPickerOpen?'收起设备选择':'＋ 添加授权设备'} <span className="mini">支持搜索和批量授权</span>
+      </button>
+      {grantPickerOpen&&<section className="file-share-grant-picker" id="file-share-grant-picker" aria-label="选择已审批的访问设备">
+       <label className="file-share-grant-search"><span className="mini">搜索设备名称或 ID</span><input className="control" type="search" value={grantQuery} onChange={e=>setGrantQuery(e.target.value)} placeholder="搜索已审批设备…"/></label>
+       <div className="file-share-grant-list" aria-label="可添加的授权设备">
+        {candidates.filter(item=>!draft.permissions?.[item.deviceId]&&[item.name,item.deviceId].some(v=>String(v||'').toLowerCase().includes(grantQuery.trim().toLowerCase()))).map(item=><label className="file-share-grant-option" key={item.deviceId}>
+         <input type="checkbox" checked={grantSelected.includes(item.deviceId)} onChange={e=>setGrantSelected(prev=>e.target.checked?[...prev,item.deviceId]:prev.filter(id=>id!==item.deviceId))}/>
+         <span className="file-share-grant-device-icon"><Icon name="devices" size={18}/></span>
+         <span className="file-share-grant-device-info"><strong>{item.name||item.deviceId}</strong><small>{item.online?'在线':'离线 · 可预先授权'} · {item.deviceId.length>16?item.deviceId.slice(0,7)+'…'+item.deviceId.slice(-5):item.deviceId}</small></span>
+        </label>)}
+        {!candidatesLoading&&!candidates.some(item=>!draft.permissions?.[item.deviceId]&&[item.name,item.deviceId].some(v=>String(v||'').toLowerCase().includes(grantQuery.trim().toLowerCase())))&&<div className="file-share-grant-empty">{candidates.length?'没有符合条件的待授权设备':'暂无可授权设备，请先在 Server 审批文件访问能力'}</div>}
+       </div>
+       <div className="file-share-grant-footer"><label className="field"><span>批量授予权限</span><select className="control" value={permission} onChange={e=>setPermission(e.target.value)}><option value="read">只读（默认）</option><option value="read_write">读写</option></select></label><button type="button" className="btn primary" onClick={addPermissions} disabled={candidatesLoading||!grantSelected.some(id=>candidates.some(item=>item.deviceId===id&&!draft.permissions?.[id]))}>添加 {grantSelected.filter(id=>candidates.some(item=>item.deviceId===id&&!draft.permissions?.[id])).length} 台设备</button></div>
+      </section>}
+     </div>
+    </div>
+    <div className="modal-foot"><button className="btn" onClick={()=>setEditor(null)} disabled={busy}>取消</button><button className="btn primary" disabled={busy} onClick={saveEditor}>{busy?'保存中…':'保存共享'}</button></div>
+   </div>
+  </div>}
+ </section>
+ {transferOpen&&document.getElementById('agent-file-transfer-portal')&&createPortal(
+  <div className="global-transfer-shade" onMouseDown={e=>e.target===e.currentTarget&&onTransferOpenChange?.(false)}>
+   <section ref={drawerRef} tabIndex={-1} className="global-transfer-panel" role="dialog" aria-modal="true" aria-label="文件传输任务">
+    <div className="global-transfer-panel-head"><div><strong>文件传输任务</strong><span className="mini">{transfers.filter(t=>t.state==='running').length} 项进行中 · {transfers.length} 项记录</span></div><div className="actions"><button type="button" className="btn quiet" onClick={refreshTransfers}>刷新</button>{transfers.some(t=>t.state!=='running')&&<button type="button" className="btn" onClick={clearInactiveTransfers}>清除已结束</button>}<button type="button" className="btn" onClick={()=>onTransferOpenChange?.(false)} aria-label="关闭传输任务">关闭</button></div></div>
    
    {transferError&&<div className="notice danger" role="alert">{transferError}</div>}
    <div className="mini">下载保存至本机 Downloads/RelayProxy；上传到共享端当前目录。优先尝试文件专用 QUIC 直连，其次 TCP/TLS，均不可用时回退 Relay；不要求授予代理或 RDP 权限。</div>
@@ -616,24 +685,8 @@ export default function FileSharingPage({toast}) {
      {item.direction==='download'&&(item.state==='paused'||item.state==='failed')&&<button className="btn primary" onClick={()=>resumeDownload(item.id)}>继续下载</button>}
       {item.state!=='running'&&<button className="btn" title="只清除传输记录，不删除下载的文件" onClick={()=>clearTransfer(item.id)}>清除记录</button>}
     </div>)}
-  </section>}
-  {editor&&<div className="overlay show" onMouseDown={e=>{if(e.target===e.currentTarget&&!busy)setEditor(null)}}>
-   <div className="modal wide" role="dialog" aria-modal="true" aria-label={editor==='new'?'添加共享文件夹':'编辑共享文件夹'}>
-    <div className="modal-head"><h2>{editor==='new'?'添加共享文件夹':'编辑共享与设备权限'}</h2><button className="close" aria-label="关闭" onClick={()=>setEditor(null)} disabled={busy}>×</button></div>
-    <div className="modal-body">
-     <div className="form-grid">
-      <label className="field"><span>共享名称</span><input className="control" value={draft.name} maxLength={100} onChange={e=>setDraft(s=>({...s,name:e.target.value}))} placeholder="例如：工作资料"/></label>
-      <div className="field"><span>本机共享文件夹</span><div className="file-share-folder-input"><input className="control" value={draft.rootPath} onChange={e=>setDraft(s=>({...s,rootPath:e.target.value}))} placeholder="点击浏览选择文件夹，或输入绝对路径"/><button type="button" className="btn" onClick={chooseShareFolder} disabled={busy}><Icon name="folder"/> 浏览…</button></div><small className="mini">选择的是运行 Agent 的设备上的文件夹。远程访问管理页时须手动输入 Agent 主机路径。</small>{folderPickerError&&<div className="notice danger" role="alert">{folderPickerError}</div>}</div>
-     </div>
-     <div className="file-share-permissions"><h3>设备权限</h3><p className="mini">默认不授权。只显示 Server 已审批、同身份且具备文件访问能力的设备；离线设备也可预先设置权限。</p>
-      {candidateError&&<div className="notice danger" role="alert">{candidateError}</div>}
-      {candidatesLoading&&<div className="mini">正在读取 Server 已授权设备…</div>}
-      {Object.entries(draft.permissions||{}).map(([id,perm])=><div className="file-share-permission" key={id}><span className="grow file-share-grantee"><b>{candidates.find(item=>item.deviceId===id)?.name||'历史授权设备'}</b><small className="mono">{id}</small></span><select className="control" value={perm} onChange={e=>setDraft(s=>({...s,permissions:{...s.permissions,[id]:e.target.value}}))}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn danger" onClick={()=>setDraft(s=>{const permissions={...s.permissions};delete permissions[id];return {...s,permissions}})}>移除</button></div>)}
-      <div className="file-share-permission"><select aria-label="选择已审批的访问设备" className="control" value={device} disabled={candidatesLoading||!candidates.length} onChange={e=>setDevice(e.target.value)}><option value="">选择已审批的设备…</option>{candidates.filter(item=>!draft.permissions?.[item.deviceId]).map(item=><option key={item.deviceId} value={item.deviceId}>{item.name||item.deviceId} · {item.online?'在线':'离线'} · {item.deviceId}</option>)}</select><select className="control" value={permission} onChange={e=>setPermission(e.target.value)}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn" onClick={addPermission} disabled={!device||!candidates.some(item=>item.deviceId===device)}>添加权限</button></div>
-     </div>
-    </div>
-    <div className="modal-foot"><button className="btn" onClick={()=>setEditor(null)} disabled={busy}>取消</button><button className="btn primary" disabled={busy} onClick={saveEditor}>{busy?'保存中…':'保存共享'}</button></div>
-   </div>
-  </div>}
+   </section>
+
+  </div>,document.getElementById('agent-file-transfer-portal'))}
  </>;
 }

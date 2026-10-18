@@ -1,6 +1,7 @@
 import React,{useCallback,useEffect,useRef,useState} from 'react';
 import {Icon} from './icons.jsx';
 import FileGlyph from './FileGlyph.jsx';
+import useDialogFocus from './useDialogFocus.js';
 import {fileIconLabel} from './fileIconKind.js';
 import {call,callJSON,hasBridge} from './bridge.js';
 import {planSameShareMoves,contextSelection} from './fileBrowserV4Ops.js';
@@ -16,17 +17,22 @@ const within=(x,min,max)=>Math.max(min,Math.min(max,x));
 
 export default function FileBrowserV4({
  peers,device,share,path,shares,entries,loading,error,latency,canWrite,warmStatus,treeRevision,
- uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onCancelTransfer,onResumeTransfer,onClearTransfer,onClearInactiveTransfers,onOpenTransfers,onRefresh,toast
+ uploadStaged,uploadTotal,uploading,transfers,onDevice,onDirectory,onDownload,onUpload,onMutate,onCancelUpload,onCancelTransfer,onResumeTransfer,onClearTransfer,onClearInactiveTransfers,onOpenTransfers,onRefresh,onBackToShares,toast
 }){
  const [query,setQuery]=useState(''),[sort,setSort]=useState('name'),[view,setView]=useState('list');
  const [selected,setSelected]=useState([]),[anchor,setAnchor]=useState(''),[details,setDetails]=useState(false),[visibleLimit,setVisibleLimit]=useState(200);
- const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false),[dockOpen,setDockOpen]=useState(true);
+ const [focus,setFocus]=useState(focusParam),[treeOpen,setTreeOpen]=useState(false),[dockOpen,setDockOpen]=useState(false);
+ const [peerPickerOpen,setPeerPickerOpen]=useState(false),[peerQuery,setPeerQuery]=useState(''),[peerPickerPosition,setPeerPickerPosition]=useState({top:0,left:0});
+ const [browserMenuOpen,setBrowserMenuOpen]=useState(false);
  const [menu,setMenu]=useState(null),[dialog,setDialog]=useState(null),[dropTarget,setDropTarget]=useState('');
  const [treeWidth,setTreeWidth]=useState(248),[detailWidth,setDetailWidth]=useState(286);
  const [expanded,setExpanded]=useState(new Set()),[treeFolders,setTreeFolders]=useState({});
- const box=useRef(null),input=useRef(null),menuRef=useRef(null),dragInfo=useRef(null),uploadTarget=useRef(null),touchTimer=useRef(null);
+ const box=useRef(null),mainRef=useRef(null),peerButtonRef=useRef(null),peerSearchRef=useRef(null),peerPickerRef=useRef(null),browserMenuRef=useRef(null),browserMenuButtonRef=useRef(null),input=useRef(null),menuRef=useRef(null),dialogRef=useRef(null),dragInfo=useRef(null),uploadTarget=useRef(null),touchTimer=useRef(null);
+ useDialogFocus(!!dialog,dialogRef,()=>setDialog(null));
  const writable=!!canWrite&&!loading&&!uploading;
- const activeShare=shares.find(x=>x.id===share);
+ const selectedPeer=peers.find(x=>x.deviceId===device);
+ const visibleShares=selectedPeer?shares.filter(item=>selectedPeer.shares.some(allowed=>allowed.id===item.id)):[];
+ const activeShare=visibleShares.find(x=>x.id===share);
  const filtered=[...entries].filter(x=>x.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>{
   if(a.isDir!==b.isDir)return a.isDir?-1:1;
   if(sort==='size')return (b.size||0)-(a.size||0)||a.name.localeCompare(b.name);
@@ -37,9 +43,34 @@ export default function FileBrowserV4({
  const preview=chosen.length===1?chosen[0]:null;
  const runningTransfers=transfers.filter(item=>item.state==='running');
  const recentTransfers=runningTransfers.length?runningTransfers.slice(-3).reverse():transfers.slice(-3).reverse();
+ // Keep the file viewport large while idle; reveal progress when a transfer starts.
+ // Users may still collapse the dock during a running transfer.
+ useEffect(()=>{if(runningTransfers.length>0)setDockOpen(true)},[runningTransfers.length]);
  const transferLabel={running:'进行中',completed:'已完成',failed:'失败',cancelled:'已取消',paused:'已暂停'};
  const rootName=activeShare?.name||'共享文件夹';
- const deviceName=peers.find(x=>x.deviceId===device)?.name||device||'选择设备';
+ const deviceName=selectedPeer?.name||device||'选择设备';
+ const availablePeers=peers.filter(peer=>[peer.name,peer.deviceId].some(value=>String(value||'').toLocaleLowerCase().includes(peerQuery.trim().toLocaleLowerCase())));
+ const closePicker=()=>{setPeerPickerOpen(false);setPeerQuery('')};
+ const choosePeer=id=>{if(!peers.some(peer=>peer.deviceId===id))return;closePicker();peerButtonRef.current?.focus();if(id!==device)openDevice(id)};
+ const openPeerPicker=()=>{
+  if(peerPickerOpen){closePicker();return}
+  setBrowserMenuOpen(false);setPeerQuery('');
+  if(mainRef.current&&peerButtonRef.current){
+   const outer=mainRef.current.getBoundingClientRect(),anchor=peerButtonRef.current.getBoundingClientRect();
+   setPeerPickerPosition({left:Math.max(8,Math.min(anchor.left-outer.left,outer.width-328)),top:anchor.bottom-outer.top+7});
+  }
+  setPeerPickerOpen(true);
+ };
+ useEffect(()=>{if(peerPickerOpen)peerSearchRef.current?.focus()},[peerPickerOpen]);
+ useEffect(()=>{if(!peerPickerOpen&&!browserMenuOpen)return;
+  const handleKey=e=>{if(e.key==='Escape'){e.preventDefault();e.stopPropagation();if(peerPickerOpen){closePicker();peerButtonRef.current?.focus()}else{setBrowserMenuOpen(false);browserMenuButtonRef.current?.focus()}}};
+  const outside=e=>{if(peerPickerOpen&&!peerPickerRef.current?.contains(e.target)&&!peerButtonRef.current?.contains(e.target))closePicker();
+   if(browserMenuOpen&&!browserMenuRef.current?.contains(e.target)&&!browserMenuButtonRef.current?.contains(e.target))setBrowserMenuOpen(false)};
+  document.addEventListener('keydown',handleKey,true);
+  document.addEventListener('pointerdown',outside);
+  return()=>{document.removeEventListener('keydown',handleKey,true);document.removeEventListener('pointerdown',outside)}
+ },[peerPickerOpen,browserMenuOpen]);
+ useEffect(()=>{setPeerPickerOpen(false);setBrowserMenuOpen(false)},[device]);
  useEffect(()=>{setSelected([]);setAnchor('');setQuery('');setMenu(null);setDialog(null);setVisibleLimit(200)},[device,share,path]);
  const treeGeneration=useRef(0);
  useEffect(()=>{treeGeneration.current+=1;setExpanded(new Set());setTreeFolders({})},[treeRevision]);
@@ -48,15 +79,15 @@ export default function FileBrowserV4({
  useEffect(()=>{setSelected([]);setAnchor('');setMenu(null)},[entries]);
  useEffect(()=>{document.documentElement.classList.toggle('file-browser-focus',focus);return()=>document.documentElement.classList.remove('file-browser-focus')},[focus]);
  useEffect(()=>{const keyHandler=e=>{
-   if(!box.current?.contains(e.target)||menu||dialog)return;
+   if(!box.current?.contains(e.target)||menu||dialog||peerPickerOpen||browserMenuOpen)return;
    if(e.target instanceof Element&&e.target.closest('input,textarea,select,[contenteditable="true"]'))return;
    if((e.ctrlKey||e.metaKey)&&e.key.toLowerCase()==='a'){e.preventDefault();setSelected(filtered.map(x=>x.name))}
    if(e.key==='F2'&&chosen.length===1&&canWrite){e.preventDefault();requestRename(chosen[0])}
    if((e.key==='Delete'||e.key==='Backspace')&&chosen.length&&canWrite){e.preventDefault();requestRemove(chosen)}
   };document.addEventListener('keydown',keyHandler);return()=>document.removeEventListener('keydown',keyHandler)
- },[chosen.map(x=>x.name).join('|'),canWrite,filtered.map(x=>x.name).join('|'),menu,dialog]);
- useEffect(()=>{const close=e=>{if(e.key==='Escape'){if(dialog)setDialog(null);else if(menu)setMenu(null);else if(focus)setFocus(false);else setSelected([])}};
-  document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close)},[dialog,menu,focus]);
+ },[chosen.map(x=>x.name).join('|'),canWrite,filtered.map(x=>x.name).join('|'),menu,dialog,peerPickerOpen,browserMenuOpen]);
+ useEffect(()=>{const close=e=>{if(e.key==='Escape'){if(peerPickerOpen||browserMenuOpen)return;if(dialog)setDialog(null);else if(menu)setMenu(null);else if(focus)setFocus(false);else setSelected([])}};
+  document.addEventListener('keydown',close);return()=>document.removeEventListener('keydown',close)},[dialog,menu,focus,peerPickerOpen,browserMenuOpen]);
  useEffect(()=>{const clear=e=>{if(!e.target.closest('.file-v4-context'))setMenu(null)};document.addEventListener('pointerdown',clear);return()=>document.removeEventListener('pointerdown',clear)},[]);
  useEffect(()=>{if(!menu||!menuRef.current)return;const bounds=menuRef.current.getBoundingClientRect();setMenu(prev=>prev?{...prev,x:Math.max(8,Math.min(prev.x,window.innerWidth-bounds.width-8)),y:Math.max(8,Math.min(prev.y,window.innerHeight-bounds.height-8))}:null)},[menu?.key]);
  const report=message=>toast?.(message);
@@ -256,53 +287,69 @@ export default function FileBrowserV4({
  return <section className={'file-browser-v4 '+(details?'has-details ':'')+(treeOpen?'tree-open ':'')} ref={box}
   style={{'--file-tree-width':treeWidth+'px','--file-detail-width':detailWidth+'px'}} aria-label="远程文件浏览器">
   <aside className="v4-tree">
-   <div className="v4-tree-head"><strong>已授权设备</strong><button className="btn quiet" onClick={onRefresh} title="刷新设备"><Icon name="activity"/></button></div>
-   <div className="v4-tree-scroll">{peers.length===0&&<div className="file-browser-aside-empty">暂无在线且授权访问的共享目录</div>}
-    {peers.map(d=><div className="v4-device" key={d.deviceId}>
-     <button className={'v4-device-row '+(device===d.deviceId?'active':'')} onClick={()=>openDevice(d.deviceId)}>
-      <Icon name="devices" size={17}/><span>{d.name||d.deviceId}</span><small>{d.shares.length} 个共享</small></button>
-     {device===d.deviceId&&<div className="v4-shares">{d.shares.map(s=><div key={s.id}>
-      <div className="v4-tree-folder">
-       <button className="v4-tree-expand" aria-label={'展开 '+s.name} onClick={()=>void toggleTree(d.deviceId,s.id,'.')}>
-        {expanded.has(treeKey(d.deviceId,s.id,'.'))?'⌄':'›'}</button>
-       <button className={'v4-share '+(share===s.id?'active':'')}
-        onClick={()=>navigate(d.deviceId,s.id,'.')}
-        onContextMenu={e=>showMenu(e,'tree',null,{path:'.',share:s.id,device:d.deviceId,permission:s.permission})}
-        onDragOver={e=>dragOver(e,'share-'+s.id,acceptTarget(d.deviceId,s.id))}
-        onDragLeave={()=>setDropTarget('')}
-        onDrop={e=>handleDrop(e,'.',s.id,d.deviceId)}>
-        <FileGlyph name={s.name} isDir variant="tree"/><span>{s.name}</span><small>{s.permission==='read_write'?'读写':'只读'}</small>
-       </button></div>
-       {renderTreeBranch(d.deviceId,s.id,'.')}
-      </div>)}</div>}
+   <div className="v4-tree-head"><strong>文件夹目录树</strong><button className="btn quiet" onClick={onRefresh} aria-label="刷新共享目录" title="刷新共享目录"><Icon name="activity"/></button></div>
+   <div className="v4-tree-scroll">
+    {!device&&<div className="file-browser-aside-empty">从顶部选择设备后，这里只显示该设备已授权的目录树。</div>}
+    {device&&!selectedPeer&&<div className="file-browser-aside-empty">当前设备未授权或已离线，请从顶部重新选择。</div>}
+    {selectedPeer&&visibleShares.length===0&&<div className="file-browser-aside-empty">该设备没有可访问的共享目录。</div>}
+    {selectedPeer&&visibleShares.map(s=><div className="v4-tree-share" key={s.id}>
+     <div className="v4-tree-folder">
+      <button className="v4-tree-expand" aria-label={'展开 '+s.name} onClick={()=>void toggleTree(device,s.id,'.')}>
+       {expanded.has(treeKey(device,s.id,'.'))?'⌄':'›'}</button>
+      <button className={'v4-share '+(share===s.id?'active':'')}
+       onClick={()=>navigate(device,s.id,'.')}
+       onContextMenu={e=>showMenu(e,'tree',null,{path:'.',share:s.id,device,permission:s.permission})}
+       onDragOver={e=>dragOver(e,'share-'+s.id,acceptTarget(device,s.id))}
+       onDragLeave={()=>setDropTarget('')}
+       onDrop={e=>handleDrop(e,'.',s.id,device)}>
+       <FileGlyph name={s.name} isDir variant="tree"/><span>{s.name}</span><small>{s.permission==='read_write'?'读写':'只读'}</small>
+      </button>
+     </div>
+     {renderTreeBranch(device,s.id,'.')}
     </div>)}
-   </div><div className="v4-tree-foot"><Icon name="shield" size={15}/>仅显示共享所有者实际授权的目录</div>
+   </div>
+   <div className="v4-tree-foot"><Icon name="shield" size={15}/>仅显示当前设备授权的目录</div>
   </aside>
-  <div className="v4-splitter v4-tree-split" role="separator" tabIndex={0} aria-label="调整设备树宽度"
+  <div className="v4-splitter v4-tree-split" role="separator" tabIndex={0} aria-label="调整文件夹目录树宽度"
    onPointerDown={e=>resize(e,'tree')} onDoubleClick={()=>setTreeWidth(248)}
    onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();setTreeWidth(v=>within(v+(e.key==='ArrowRight'?16:-16),190,420))}}}/>
-  <div className="v4-main">
-   <div className="v4-head">
-    <div className="v4-head-title"><div className="eyebrow">REMOTE FILE EXPLORER</div><h2>{rootName}</h2>
-     <small>{deviceName} · {canWrite?'读写':'只读'}{warmStatus?' · '+warmStatus:''}{error?' · '+error:''}</small></div>
-    <div className="v4-head-actions">
-     <button className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} title="选择设备"><Icon name="devices"/></button>
-     {hasBridge('goOpenFileBrowserWindow')&&
-      <button className="btn" onClick={openNativeWindow} title="通过 Wails 打开原生独立文件浏览器"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>}
-     <a className="btn v4-window-link" href={focus?returnToAppURL():newWindowURL()}
-      title={focus?'返回当前浏览器的管理界面':'在当前页面进入独立文件浏览器，不触发弹窗拦截'}>
-      <Icon name="monitor"/> <span className="v4-optional">{focus?'返回主界面':'独立页面'}</span></a>
-     <button className="btn" onClick={()=>setFocus(v=>!v)} title={focus?'退出专注模式':'文件浏览器充满整个窗口'}>
-      <Icon name="dashboard"/> <span>{focus?'退出专注':'专注模式'}</span></button>
+  <div className="v4-main" ref={mainRef}>
+   <div className="v4-tools v4-unified-pathbar">
+    <button type="button" className="btn quiet v4-up" onClick={()=>navigate(device,share,parent(path))} disabled={!share||path==='.'} aria-label="返回上级目录">↑</button>
+    <nav className="v4-crumbs" aria-label="文件夹路径">
+     <button type="button" ref={peerButtonRef} className="v4-peer-trigger" aria-label="切换共享设备" aria-haspopup="dialog" aria-expanded={peerPickerOpen} onClick={openPeerPicker}>
+      <Icon name="devices" size={16}/><span className="v4-peer-trigger-name">{deviceName}</span><span aria-hidden="true" className="v4-chevron">⌄</span>
+     </button>
+     {share&&<><span aria-hidden="true">›</span><button type="button" onClick={()=>navigate(device,share,'.')}>{rootName}</button></>}
+     {path!=='.'&&path.split('/').map((name,i,a)=><React.Fragment key={i}><span aria-hidden="true">›</span><button type="button" onClick={()=>navigate(device,share,a.slice(0,i+1).join('/'))}>{name}</button></React.Fragment>)}
+    </nav>
+    {warmStatus&&<span className="v4-path-meta" title={'直连协商：'+warmStatus}>{warmStatus}</span>}
+    {error&&<span className="v4-path-error" title={error}>目录错误</span>}
+    <div className="v4-path-actions">
+     <button type="button" className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} aria-label="显示文件夹目录树" title="显示文件夹目录树"><Icon name="folder"/></button>
+     <button type="button" className="btn quiet" title="刷新文件夹" aria-label="刷新文件夹" onClick={onRefresh}><Icon name="activity"/></button>
+     <button type="button" ref={browserMenuButtonRef} className="btn v4-browser-more" title="更多浏览器操作" aria-label="更多浏览器操作" aria-expanded={browserMenuOpen} aria-haspopup="menu" onClick={()=>{closePicker();setBrowserMenuOpen(v=>!v)}}>⋯</button>
     </div>
    </div>
-   <div className="v4-tools">
-    <button className="btn quiet" onClick={()=>navigate(device,share,parent(path))} disabled={!share||path==='.'} aria-label="返回上级">↑</button>
-    <nav className="v4-crumbs" aria-label="文件夹路径">{share&&<button onClick={()=>navigate(device,share,'.')}>{rootName}</button>}
-     {path!=='.'&&path.split('/').map((name,i,a)=><React.Fragment key={i}><span>›</span><button onClick={()=>navigate(device,share,a.slice(0,i+1).join('/'))}>{name}</button></React.Fragment>)}</nav>
-    <button className="btn quiet" title="刷新" onClick={onRefresh}><Icon name="activity"/></button>
-   </div>
-   <div className="v4-toolbar">
+   {peerPickerOpen&&<div className="v4-peer-popover" ref={peerPickerRef} style={{top:peerPickerPosition.top,left:peerPickerPosition.left}} role="dialog" aria-modal="false" aria-label="选择共享设备">
+    <div className="v4-peer-search"><Icon name="activity" size={15}/><input ref={peerSearchRef} type="search" placeholder="搜索设备名称或 ID…" aria-label="搜索共享设备" value={peerQuery} onChange={e=>setPeerQuery(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'&&availablePeers.length)choosePeer(availablePeers[0].deviceId)}}/></div>
+    <div className="v4-peer-list" role="listbox" aria-label="已授权的共享设备">
+     {availablePeers.map(peer=><button type="button" key={peer.deviceId} role="option" aria-selected={peer.deviceId===device} className={'v4-peer-option '+(peer.deviceId===device?'selected':'')} onClick={()=>choosePeer(peer.deviceId)}>
+      <span className="v4-peer-icon"><Icon name="devices" size={19}/></span>
+      <span className="v4-peer-info"><strong>{peer.name||peer.deviceId}</strong><small>{peer.shares.length} 个已授权共享 · {peer.deviceId.length>16?peer.deviceId.slice(0,7)+'…'+peer.deviceId.slice(-5):peer.deviceId}</small></span>
+      {peer.deviceId===device&&<span className="v4-peer-current">✓</span>}
+     </button>)}
+     {!availablePeers.length&&<div className="v4-peer-empty">{peers.length?'没有符合条件的共享设备':'暂无已授权的共享设备'}</div>}
+    </div>
+    <div className="v4-peer-popover-foot">{peers.length} 台可访问设备 · 仅展示已验证的共享授权</div>
+   </div>}
+   {browserMenuOpen&&<div className="v4-browser-menu" ref={browserMenuRef} role="menu" aria-label="更多文件浏览器操作">
+    {onBackToShares&&<button type="button" role="menuitem" onClick={()=>{setBrowserMenuOpen(false);onBackToShares()}}><Icon name="folder" size={15}/> 返回我的共享</button>}
+    {hasBridge('goOpenFileBrowserWindow')&&<button type="button" role="menuitem" onClick={()=>{setBrowserMenuOpen(false);openNativeWindow()}}><Icon name="monitor" size={15}/> 原生独立窗口</button>}
+    <a className="btn v4-window-link" role="menuitem" href={focus?returnToAppURL():newWindowURL()} title={focus?'返回主界面':'在当前页面打开独立文件浏览器'}><Icon name="monitor" size={15}/>{focus?'返回主界面':'独立页面'}</a>
+    <button type="button" role="menuitem" onClick={()=>{setBrowserMenuOpen(false);setFocus(v=>!v)}}><Icon name="dashboard" size={15}/>{focus?'退出专注模式':'专注模式'}</button>
+   </div>}
+   <div className="v4-toolbar" role="group" aria-label="文件浏览器工具栏" tabIndex={0}>
     <input type="search" value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索当前文件夹…" aria-label="搜索文件"/>
     <select value={sort} onChange={e=>setSort(e.target.value)} aria-label="排序">
      <option value="name">按名称</option><option value="time">按时间</option><option value="size">按大小</option></select>
@@ -334,19 +381,20 @@ export default function FileBrowserV4({
     {canWrite&&<><button onClick={()=>requestMove(chosen)}>移动</button><button onClick={()=>requestRemove(chosen)}>删除</button></>}
    </div>}
     {!share?<div className="v4-placeholder">从左侧选择已授权共享目录</div>:
-    <div className={'v4-file-list '+(view==='grid'?'grid':'list')}>
+    <div className={'v4-file-list '+(view==='grid'?'grid':'list')} role="list" aria-label="共享目录文件">
      {view==='list'&&<div className="v4-column-head"><input type="checkbox" checked={filtered.length>0&&selected.length===filtered.length} onChange={setAll} aria-label="全选"/>
       <span>名称</span><span>大小</span><span>修改时间</span><span></span></div>}
      {loading?<div className="v4-placeholder">正在加载目录…</div>:filtered.length===0?<div className="v4-placeholder">{query?'无匹配文件':'当前目录为空，可拖入文件上传'}</div>:
       filtered.slice(0,visibleLimit).map(entry=><div key={entry.name} data-file-name={entry.name}
        className={'v4-entry '+(selected.includes(entry.name)?'selected ':'')+(dropTarget==='file-'+entry.name?'drop-active':'')}
+       role="listitem" aria-label={(entry.isDir?'文件夹 ':'文件 ')+entry.name}
        tabIndex={0} draggable={writable}
        onClick={e=>clickFile(e,entry)}
        onTouchStart={e=>{const r=e.currentTarget.getBoundingClientRect();touchTimer.current=setTimeout(()=>{showMenu({preventDefault:()=>{},stopPropagation:()=>{},clientX:r.left+25,clientY:r.top+25},'file',entry)},650)}}
        onTouchEnd={()=>clearTimeout(touchTimer.current)} onTouchMove={()=>clearTimeout(touchTimer.current)}
        onDoubleClick={()=>entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}
        onContextMenu={e=>showMenu(e,'file',entry)}
-       onKeyDown={e=>{if(e.key==='Enter')entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true);if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>e.preventDefault(),stopPropagation:()=>e.stopPropagation(),clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
+       onKeyDown={e=>{if(e.target!==e.currentTarget)return;if(e.key===' '){e.preventDefault();clickFile(e,entry)}if(e.key==='Enter'){e.preventDefault();entry.isDir?navigate(device,share,join(path,entry.name)):setDetails(true)}if(e.key==='ContextMenu'||e.key==='F10'&&e.shiftKey){const r=e.currentTarget.getBoundingClientRect();showMenu({preventDefault:()=>e.preventDefault(),stopPropagation:()=>e.stopPropagation(),clientX:r.left+24,clientY:r.top+24},'file',entry)}}}
        onDragStart={e=>dragStart(e,entry)} onDragEnd={()=>{dragInfo.current=null;setDropTarget('')}}
        onDragOver={entry.isDir?e=>dragOver(e,'file-'+entry.name,writable):undefined}
        onDragLeave={()=>setDropTarget('')}
@@ -357,7 +405,7 @@ export default function FileBrowserV4({
        <span className="v4-entry-name" title={entry.name}>{entry.name}</span>
        <span className="v4-entry-size">{entry.isDir?'—':fmt(entry.size)}</span>
        <span className="v4-entry-date">{date(entry.modTime)}</span>
-       <button className="v4-more" title="更多操作" onClick={e=>{e.stopPropagation();showMenu(e,'file',entry)}}>⋯</button>
+       <button className="v4-more" title="更多操作" aria-label={'更多操作：'+entry.name} onClick={e=>{e.stopPropagation();showMenu(e,'file',entry)}}>⋯</button>
       </div>)}
     </div>}
     {filtered.length>visibleLimit&&<button className="v4-load-more" onClick={()=>setVisibleLimit(n=>n+200)}>显示更多（剩余 {filtered.length-visibleLimit} 项）</button>}
@@ -407,7 +455,7 @@ export default function FileBrowserV4({
      <div className="v4-detail-actions">{!preview.isDir&&<button className="btn primary" onClick={()=>onDownload(preview)}>下载文件</button>}
       {canWrite&&<button className="btn" onClick={()=>requestRename(preview)}>重命名</button>}</div>
     </div>:<div className="v4-placeholder">选择文件查看详情</div>}</aside></>}
-  {treeOpen&&<button className="v4-tree-shade" onClick={()=>setTreeOpen(false)} aria-label="关闭设备列表"/>}
+  {treeOpen&&<button className="v4-tree-shade" onClick={()=>setTreeOpen(false)} aria-label="关闭文件夹目录树"/>}
   {menu&&<div className="file-v4-context" ref={menuRef} role="menu"
     style={{left:menu.x,top:menu.y}}>{itemsForMenu().map(([key,title])=>
     <button key={key} className={key==='remove'?'danger':''} role="menuitem" onClick={()=>{
@@ -419,8 +467,8 @@ export default function FileBrowserV4({
       }else void action(key,menu.item,menu.target,menu.targets);
     }}>{title}</button>)}</div>}
   {dialog&&<div className="v4-dialog-backdrop" onMouseDown={e=>e.target===e.currentTarget&&setDialog(null)}>
-   <div className="v4-dialog" role="dialog" aria-modal="true">
-    <h3>{({mkdir:'新建文件夹',rename:'重命名',move:'移动文件',remove:'确认删除'})[dialog.kind]}</h3>
+   <div ref={dialogRef} tabIndex={-1} className="v4-dialog" role="dialog" aria-modal="true" aria-labelledby="v4-file-dialog-title">
+    <h3 id="v4-file-dialog-title">{({mkdir:'新建文件夹',rename:'重命名',move:'移动文件',remove:'确认删除'})[dialog.kind]}</h3>
     {dialog.kind==='remove'?<p>将删除所选 {dialog.items.length} 项。非空文件夹无法删除，删除操作不可撤销。</p>:
      <><p>{dialog.kind==='move'?'请输入同一共享下的目标相对目录（根目录使用 .）':'请输入新名称'}</p>
       <input autoFocus value={dialog.value||''} onChange={e=>setDialog(d=>({...d,value:e.target.value}))} onKeyDown={e=>e.key==='Enter'&&void confirmDialog()}/></>}

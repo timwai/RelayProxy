@@ -743,3 +743,94 @@ html[data-theme="dark"] #root .metric-amber .metric-icon{background:#4a361c;colo
  #root .browser-sync-refined .browser-sync-audit-actions{width:100%}
  #root .browser-sync-refined .browser-sync-audit-actions .btn{flex:1;min-width:110px}
 }
+
+/* Each console page keeps one semantic heading; the existing top bar is the
+   visible title. Descriptive context and actions share one compact row. */
+#root .page-head.page-actions-toolbar{display:flex;flex-direction:row;align-items:center;flex-wrap:wrap;gap:8px 16px;min-height:36px;margin-bottom:14px}
+#root .page-head.page-actions-toolbar>.sr-only{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
+#root .page-head.page-actions-toolbar>.page-context-help{flex:1 1 260px;min-width:0;margin:0;font-size:12px;line-height:1.45;color:var(--muted)}
+#root .page-head.page-actions-toolbar>.head-actions{flex:0 1 auto;margin-left:auto;max-width:100%}
+#root .dialog-header .btn{width:40px;height:40px;min-height:40px}
+@media(max-width:760px){
+ #root .page-head.page-actions-toolbar{flex-direction:row;align-items:center;gap:10px}
+ #root .page-head.page-actions-toolbar>.page-context-help{flex:1 1 100%}
+ #root .page-head.page-actions-toolbar>.head-actions{width:100%;margin-left:0;justify-content:flex-start}
+ #root .dialog-header .btn{width:44px;height:44px;min-height:44px}
+}
+
+/* Operational data tables: sticky labels, keyboard scrolling, measured
+   vertical density. Preserve horizontal scrolling for wide diagnostics. */
+#root .table-wrap{max-width:100%;max-height:min(68dvh,720px);overflow:auto;overscroll-behavior:contain;scrollbar-gutter:stable}
+#root .table-wrap:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+#root .table-wrap thead th{position:sticky;top:0;z-index:2;background:var(--surface3);box-shadow:0 1px 0 var(--line);padding-block:11px}
+#root .table-wrap tbody td{padding-block:11px}
+#root .table-wrap td .table-action{display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+@media(max-width:760px){#root .table-wrap{max-height:min(62dvh,580px)}}
+
+/* At compact widths the left drawer must not leave offscreen tabbable controls.
+   Theme choice moves from the crowded top bar into the mobile drawer. */
+#root{color-scheme:light}
+html[data-theme="dark"] #root{color-scheme:dark}
+#root .nav-item[aria-current="page"]{font-weight:750}
+#root .mobile-theme-controls{display:none}
+@media(max-width:760px){
+ #root #app .sidebar{visibility:hidden;pointer-events:none}
+ #root #app.mobile-nav-open .sidebar{visibility:visible;pointer-events:auto}
+ #root .mobile-theme-controls{display:flex;gap:4px;align-items:center;justify-content:space-between;margin-bottom:12px;padding:4px;background:var(--surface3);border:1px solid var(--line);border-radius:11px}
+ #root .mobile-theme-controls button{flex:1;min-height:40px;border:0;background:transparent;color:var(--muted);border-radius:8px;font-size:12px}
+ #root .mobile-theme-controls button.active{background:var(--surface2);color:var(--text);font-weight:750;box-shadow:0 2px 6px rgba(0,0,0,.07)}
+}
+@media(prefers-reduced-motion:reduce){
+ #root #app .sidebar,#root #app .mobile-nav-overlay{transition:none!important}
+}
+
+/* Page-level actions share the global title bar where there is room.
+   On smaller layouts, help text and controls flow from the left together,
+   never with a blank column reserved before right-aligned buttons. */
+#root .page-head.page-actions-toolbar{justify-content:flex-start;gap:8px 12px}
+#root .page-head.page-actions-toolbar>.page-context-help{flex:0 1 auto;max-width:min(480px,100%);min-width:0}
+#root .page-head.page-actions-toolbar>.head-actions{flex:0 1 auto;margin-left:0;justify-content:flex-start;width:auto;max-width:100%}
+#root .page-head.page-actions-toolbar>.head-actions>.btn{flex:0 0 auto}
+#root .page-head.page-head-portal-placeholder{position:absolute;width:1px;height:1px;min-height:0;margin:0;padding:0;overflow:hidden}
+#root .topbar-right{min-width:0}
+#root .topbar-page-actions{display:flex;align-items:center;min-width:0;max-width:100%;overflow-x:auto;scrollbar-width:thin}
+#root .topbar-page-actions .head-actions{display:flex;align-items:center;justify-content:flex-start;flex-wrap:nowrap;gap:6px;min-width:max-content;max-width:none}
+#root .topbar-page-actions .actions{display:flex;align-items:center;flex-wrap:nowrap;gap:6px}
+#root .topbar-page-actions .btn{white-space:nowrap;flex:0 0 auto;min-height:32px;padding:0 10px;font-size:12px}
+@media(max-width:760px){
+ #root .page-head.page-actions-toolbar>.page-context-help{flex:0 1 auto;max-width:100%}
+ #root .page-head.page-actions-toolbar>.head-actions{width:auto;max-width:100%;justify-content:flex-start;margin-left:0}
+ #root .page-head.page-actions-toolbar>.head-actions>.btn{flex:0 0 auto}
+}
+
+/* Shared dropdown spec for dashboard filters, admin dialogs, Server Settings
+   and Browser Sync approval controls. Listboxes with size/multiple are native. */
+#root{--select-chevron:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23475569'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E")}
+html[data-theme="dark"] #root{--select-chevron:url("data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20width='16'%20height='16'%20viewBox='0%200%2024%2024'%20fill='none'%20stroke='%23cbd5e1'%20stroke-width='2.2'%20stroke-linecap='round'%20stroke-linejoin='round'%3E%3Cpath%20d='m6%209%206%206%206-6'/%3E%3C/svg%3E")}
+#root select:not([multiple]):not([size]){
+ box-sizing:border-box;
+ min-height:44px;
+ height:44px;
+ max-width:100%;
+ padding:0 38px 0 13px;
+ border:1px solid var(--line2);
+ border-radius:10px;
+ background-color:var(--surface2);
+ background-image:var(--select-chevron);
+ background-repeat:no-repeat;
+ background-position:right 12px center;
+ background-size:16px 16px;
+ appearance:none;
+ -webkit-appearance:none;
+ color:var(--text);
+ font-size:14px;
+ font-weight:550;
+ line-height:1.35;
+ cursor:pointer;
+ text-overflow:ellipsis;
+}
+#root select:not([multiple]):not([size]):hover:not(:disabled){border-color:var(--brand);background-color:var(--surface3)}
+#root select:not([multiple]):not([size]):focus-visible{outline:2px solid var(--brand);outline-offset:2px;border-color:var(--brand)}
+#root select:not([multiple]):not([size]):disabled{cursor:not-allowed;opacity:.55}
+#root select:not([multiple]):not([size]) option{background:var(--surface2);color:var(--text)}
+@media(max-width:640px){#root select:not([multiple]):not([size]){min-height:48px;height:48px;font-size:14px}}

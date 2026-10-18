@@ -1,4 +1,5 @@
 import React,{useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
 import {DeviceLabel} from './DeviceLabel.js';
 import {parseRuleKeywords,validateDraftMessageRules,createMessageRule,changeRuleType} from './message-rule-editor.js';
 import {formatAuditIngress} from './rdp-audit-ui.js';
@@ -20,13 +21,25 @@ const blank={dashboard:{},devices:[],enrollments:[],identities:[],exits:[],sessi
 const queryFromHash=()=>{const [p,t]=location.hash.slice(1).split('/');return {page:pages[p]?p:'overview',settingTab:getGroup(t||'admin').id};};
 function Banner({children,type=''}) {return <div className={'config-help '+type}>{children}</div>}
 function Badge({children,tone=''}){return <span className={'badge '+tone}>{children}</span>}
-function Action({children,onClick,tone='',disabled=false,type='button'}){const invoke=e=>{try{const result=onClick?.(e);if(result&&typeof result.catch==='function')result.catch(err=>console.error('操作失败',err));}catch(err){console.error('操作失败',err)}};return <button type={type} disabled={disabled} className={'btn '+tone} onClick={onClick?invoke:undefined}>{children}</button>}
+function Action({children,onClick,tone='',disabled=false,type='button',...props}){const invoke=e=>{try{const result=onClick?.(e);if(result&&typeof result.catch==='function')result.catch(err=>console.error('操作失败',err));}catch(err){console.error('操作失败',err)}};return <button {...props} type={type} disabled={disabled} className={'btn '+tone} onClick={onClick?invoke:undefined}>{children}</button>}
 function Field({label,value,onChange,onBlur,type='text',placeholder='',options=[],disabled=false,wide=false,help='',required=false}){
  return <label className={'field '+(wide?'wide':'')}><span>{label}</span>{type==='lines'?<textarea value={Array.isArray(value)?value.join('\n'):value??''} disabled={disabled} rows={4} placeholder={placeholder} onChange={e=>onChange(e.target.value)}/>:type==='select'||type==='bool-select'||type==='congestion-select'?<select value={type==='congestion-select'?(value?'bbr':'brutal'):String(value??'')} disabled={disabled} onChange={e=>onChange(type==='congestion-select'?e.target.value==='bbr':type==='bool-select'?e.target.value==='true':e.target.value)}>{(type==='congestion-select'?[['bbr','BBR Aggressive（禁止 Brutal）'],['brutal','Brutal（允许已授权客户端协商）']]:type==='bool-select'?[['false','HTTP'],['true','HTTPS']]:options).map(o=><option key={o[0]} value={o[0]}>{o[1]}</option>)}</select>:type==='checkbox'?<span className="toggle-field"><span>{value?'已启用':'已关闭'}</span><input type="checkbox" disabled={disabled} checked={!!value} onChange={e=>onChange(e.target.checked)}/></span>:<input type={type} min={type==='number'?0:undefined} required={required} disabled={disabled} placeholder={placeholder} value={value??''} onBlur={onBlur} onChange={e=>onChange(type==='number'?(e.target.value===''?'':Number(e.target.value)):e.target.value)}/>} {help&&<small>{help}</small>}</label>;
 }
 function Select({value,onChange,items=[],placeholder='请选择',disabled=false}){return <select className="input" disabled={disabled} value={value||''} onChange={e=>onChange(e.target.value)}><option value="">{placeholder}</option>{items.map(x=><option key={x.id} value={x.id}>{x.name||x.deviceName||x.id}</option>)}</select>}
-function Table({columns,items,render,empty='暂无数据'}){return <div className="table-wrap"><table><thead><tr>{columns.map((col,i)=><th key={i}>{col}</th>)}</tr></thead><tbody>{items.length?items.map((item,i)=><tr key={item.id||item.sourceIp||i}>{render(item,i)}</tr>):<tr><td colSpan={columns.length}><div className="empty-state">{empty}</div></td></tr>}</tbody></table></div>}
-function Head({title,desc,actions}){return <div className="page-head"><div><h1>{title}</h1>{desc&&<p>{desc}</p>}</div>{actions&&<div className="head-actions">{actions}</div>}</div>}
+function Table({columns,items,render,empty='暂无数据'}){return <div className="table-wrap" role="region" tabIndex={0} aria-label={'数据表格：'+columns.slice(0,2).join('、')}><table><thead><tr>{columns.map((col,i)=><th scope="col" key={i}>{col}</th>)}</tr></thead><tbody>{items.length?items.map((item,i)=><tr key={item.id||item.sourceIp||i}>{render(item,i)}</tr>):<tr><td colSpan={columns.length}><div className="empty-state">{empty}</div></td></tr>}</tbody></table></div>}
+function Head({title,desc,actions}){
+ const [target,setTarget]=useState(null);
+ const [wide,setWide]=useState(()=>window.matchMedia('(min-width:1380px)').matches);
+ useEffect(()=>setTarget(document.getElementById('server-page-actions')),[]);
+ useEffect(()=>{
+  const media=window.matchMedia('(min-width:1380px)');
+  const update=()=>setWide(media.matches);
+  media.addEventListener?.('change',update);
+  return()=>media.removeEventListener?.('change',update);
+ },[]);
+ if(wide&&actions)return <div className="page-head page-actions-toolbar page-head-portal-placeholder"><h1 className="sr-only">{title}</h1>{target&&createPortal(<div className="head-actions">{actions}</div>,target)}</div>;
+ return <div className="page-head page-actions-toolbar"><h1 className="sr-only">{title}</h1>{desc&&<p className="page-context-help">{desc}</p>}{actions&&<div className="head-actions">{actions}</div>}</div>;
+}
 function Panel({title,desc,actions,children,className=''}){return <section className={'card page-section '+className}><div className="card-title-area"><div><h2>{title}</h2>{desc&&<p className="section-description">{desc}</p>}</div>{actions}</div>{children}</section>}
 function DeviceAuthSummary({name,id,platform,arch,identity,state,requested=false}) {
  const online=state==='online';
@@ -65,7 +78,29 @@ function Caps({value,onChange,allowed=allCapabilities}) {
  </div>;
 }
 
-function Dialog({dialog,close}){const ref=useRef(null);useEffect(()=>{if(!dialog)return;const onKey=e=>{if(e.key==='Escape')close()};document.addEventListener('keydown',onKey);return()=>document.removeEventListener('keydown',onKey)},[dialog,close]);if(!dialog)return null;return <div className="dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section ref={ref} role="dialog" aria-modal="true" aria-label={dialog.title} className={'dialog-window '+(dialog.wide?'wide':'')}><header className="dialog-header"><h2>{dialog.title}</h2><Action onClick={close}>✕</Action></header><div className="modal-content-scroll">{dialog.body}</div></section></div>}
+// Keep keyboard focus inside a modal, and restore the triggering control on exit.
+function useDialogFocus(open, dialogRef, onClose){
+ const onCloseRef=useRef(onClose);onCloseRef.current=onClose;
+ useEffect(()=>{
+  if(!open||!dialogRef.current)return;
+  const dialog=dialogRef.current,previous=document.activeElement;
+  const selector='a[href],button:not(:disabled),input:not(:disabled),select:not(:disabled),textarea:not(:disabled),[tabindex]:not([tabindex="-1"])';
+  const focusable=()=>Array.from(dialog.querySelectorAll(selector)).filter(el=>el.getClientRects().length>0&&!el.closest('[aria-hidden="true"]'));
+  (focusable().find(el=>/^(INPUT|SELECT|TEXTAREA)$/.test(el.tagName))||focusable()[0]||dialog).focus();
+  const onKey=e=>{
+   if(e.key==='Escape'){e.preventDefault();onCloseRef.current?.();return}
+   if(e.key!=='Tab')return;
+   const items=focusable();
+   if(!items.length){e.preventDefault();dialog.focus();return}
+   const first=items[0],last=items[items.length-1],active=document.activeElement;
+   if(e.shiftKey&&(active===first||!dialog.contains(active))){e.preventDefault();last.focus()}
+   else if(!e.shiftKey&&(active===last||!dialog.contains(active))){e.preventDefault();first.focus()}
+  };
+  document.addEventListener('keydown',onKey);
+  return()=>{document.removeEventListener('keydown',onKey);if(previous instanceof HTMLElement&&previous.isConnected)previous.focus()};
+ },[open,dialogRef]);
+}
+function Dialog({dialog,close}){const ref=useRef(null);useDialogFocus(!!dialog,ref,close);if(!dialog)return null;return <div className="dialog-backdrop" onMouseDown={e=>{if(e.target===e.currentTarget)close()}}><section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={dialog.title} className={'dialog-window '+(dialog.wide?'wide':'')}><header className="dialog-header"><h2>{dialog.title}</h2><Action onClick={close} aria-label="关闭对话框">✕</Action></header><div className="modal-content-scroll">{dialog.body}</div></section></div>}
 function Login({onLogin,error}){
  const [username,setUser]=useState(''),[password,setPassword]=useState('');
  const [busy,setBusy]=useState(false),[localError,setLocalError]=useState('');
@@ -94,8 +129,8 @@ function Login({onLogin,error}){
 }
 export function App(){
  const [user,setUser]=useState(null),[authReady,setAuthReady]=useState(false),[authError,setAuthError]=useState('');
- const [route,setRoute]=useState(queryFromHash),[theme,setTheme]=useState(()=>localStorage.getItem('relayproxy-theme')||'system');
- const [mobileNavOpen,setMobileNavOpen]=useState(false);
+ const [route,setRoute]=useState(queryFromHash),[theme,setTheme]=useState(()=>{const value=localStorage.getItem('relayproxy-theme');return ['system','light','dark'].includes(value)?value:'system'});
+ const [mobileNavOpen,setMobileNavOpen]=useState(false);const mobileMenuRef=useRef(null);
  const [data,setData]=useState(blank),[loading,setLoading]=useState(false),[error,setError]=useState(''),[notice,setNotice]=useState('');
  const [dialog,setDialog]=useState(null),[messageChannel,setMessageChannel]=useState('');
  const [draft,setDraft]=useState(null),[saved,setSaved]=useState(null),[settingsTab,setSettingsTab]=useState(route.settingTab),[saving,setSaving]=useState(false);
@@ -128,6 +163,22 @@ export function App(){
  useEffect(()=>{if(user)refresh(user);},[user,refreshCounter]);
  useEffect(()=>{if(!user)return;return subscribeLiveUpdates(()=>{refresh(user,true).catch(()=>{})});},[user,refresh]);
  useEffect(()=>{const update=()=>{const next=queryFromHash();setRoute(next);setSettingsTab(next.settingTab)};window.addEventListener('hashchange',update);return()=>window.removeEventListener('hashchange',update)},[]);
+ useEffect(()=>{
+  if(!mobileNavOpen)return;
+  const previous=document.activeElement,nav=document.getElementById('server-navigation');
+  const focusable=()=>Array.from(nav?.querySelectorAll('a[href],button:not(:disabled),[tabindex]:not([tabindex="-1"])')||[]).filter(el=>el.getClientRects().length>0);
+  focusable()[0]?.focus();
+  const key=e=>{
+   if(e.key==='Escape'){e.preventDefault();setMobileNavOpen(false);return}
+   if(e.key!=='Tab')return;
+   const items=focusable(),first=items[0],last=items[items.length-1];
+   if(!items.length){e.preventDefault();return}
+   if(e.shiftKey&&(document.activeElement===first||!nav.contains(document.activeElement))){e.preventDefault();last.focus()}
+   else if(!e.shiftKey&&(document.activeElement===last||!nav.contains(document.activeElement))){e.preventDefault();first.focus()}
+  };
+  document.addEventListener('keydown',key);
+  return()=>{document.removeEventListener('keydown',key);if(previous instanceof HTMLElement&&previous.isConnected)previous.focus()};
+ },[mobileNavOpen]);
  useEffect(()=>{const dark=theme==='dark'||theme==='system'&&window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.dataset.theme=dark?'dark':'light';localStorage.setItem('relayproxy-theme',theme);const mq=window.matchMedia('(prefers-color-scheme: dark)');const fn=()=>{if(theme==='system')document.documentElement.dataset.theme=mq.matches?'dark':'light'};mq.addEventListener('change',fn);return()=>mq.removeEventListener('change',fn)},[theme]);
  useEffect(()=>{const fn=e=>{if(dirty){e.preventDefault();e.returnValue=''}};window.addEventListener('beforeunload',fn);return()=>window.removeEventListener('beforeunload',fn)},[dirty]);
  const run=useCallback(async(fn,success)=>{try{setError('');const result=await fn();if(success)flash(success);setRefreshCounter(x=>x+1);return result}catch(e){setError(e.message);throw e}},[flash]);
@@ -136,7 +187,7 @@ export function App(){
  if(!authReady)return <div className="login-screen login-loading">正在检查登录状态…</div>;
  if(!user)return <Login error={authError} onLogin={async (username,password)=>{await api('/auth/login',json('POST',{username,password}));const result=await api('/auth/me');setUser(result.user||result);setAuthError('')}}/>;
  let page=route.page;if(!admin&&adminPages.has(page))page='overview';
- return <div id="app" className={mobileNavOpen?'mobile-nav-open':''}><button type="button" className="mobile-nav-overlay" aria-label="关闭导航菜单" tabIndex={mobileNavOpen?0:-1} onClick={()=>setMobileNavOpen(false)}/><aside className="sidebar" id="server-navigation"><BrandMark/><div className="nav-scroll">{nav.map(([title,items])=><section className="nav-group" key={title}><div className="group-name">{title}</div>{items.filter(([p])=>admin||!adminPages.has(p)).map(([p,label])=><button type="button" key={p} onClick={()=>go(p)} className={'nav-item '+(page===p?'active':'')}><span className="nav-icon"><Icon name={navIcons[p]} size={17}/></span><span>{label}</span>{p==='devices'&&data.enrollments.length>0&&<span className="nav-count">{data.enrollments.length}</span>}</button>)}</section>)}</div><div className="sidebar-footer"><div className="side-status"><i className="status-dot"/><div><strong>Server · {error?'DEGRADED':'ONLINE'}</strong><small>Relay 控制台</small></div></div><button className="user-chip" onClick={()=>setDialog({title:'账户管理',body:<Account user={user} onPasswordChanged={()=>{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null);setAuthError('密码已修改，请重新登录')}} logout={async()=>{try{await api('/auth/logout',{method:'POST'})}finally{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null)}}}/>})}><span className="avatar">{user.username?.slice(0,1).toUpperCase()||'A'}</span><span className="grow"><strong>{user.username}</strong><small>{admin?'全局管理员':'身份管理员'}</small></span></button></div></aside><div className="workspace"><header className="topbar"><button type="button" className="mobile-menu-toggle" aria-label={mobileNavOpen?'关闭导航菜单':'打开导航菜单'} aria-controls="server-navigation" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(o=>!o)}><span/><span/><span/></button><div className="crumb"><span>RelayProxy</span><span style={{opacity:.5}}>/</span><b>{pages[page]}</b></div><div className="topbar-right"><div className="theme-seg">{[['system','自动'],['light','浅色'],['dark','深色']].map(([v,t])=><button key={v} onClick={()=>setTheme(v)} className={theme===v?'active':''}>{t}</button>)}</div><Action disabled={loading} onClick={()=>ctx.refresh()}>{loading?'刷新中':'刷新'}</Action></div></header><main className="main-scroll"><div className="main-inner">{error&&<div className="err-notice" role="alert">{error}</div>}{data.settings?.restartRequired&&<Banner type="warn"><b>配置已保存，等待服务重启。</b> {list(data.settings.restartFields).join('、')}</Banner>}{page==='overview'?<Overview ctx={ctx}/>:page==='devices'?<Devices ctx={ctx}/>:page==='identities'?<Identities ctx={ctx}/>:page==='browserSync'?<BrowserSyncAdmin identities={ctx.data.identities} onOpenSettings={()=>ctx.go("settings","browserSync")}/>:page==='exits'?<Exits ctx={ctx}/>:page==='sessions'||page==='p2p'?<Connections ctx={ctx} p2pOnly={page==='p2p'}/>:page==='messages'?<Messages ctx={ctx}/>:page==='channels'?<Channels ctx={ctx}/>:page==='rdp'?<Ingress ctx={ctx}/>:page==='audit'?<Audit ctx={ctx}/>:page==='security'?<Security ctx={ctx}/>:<Settings ctx={ctx}/>}</div></main></div><Dialog dialog={dialog} close={close}/>{notice&&<div className="toast-live" role="status">{notice}</div>}</div>;
+ return <div id="app" className={mobileNavOpen?'mobile-nav-open':''}><button type="button" className="mobile-nav-overlay" aria-label="关闭导航菜单" tabIndex={mobileNavOpen?0:-1} onClick={()=>setMobileNavOpen(false)}/><aside className="sidebar" id="server-navigation" role="navigation" aria-label="Server 主导航"><BrandMark/><div className="nav-scroll">{nav.map(([title,items])=><section className="nav-group" key={title}><div className="group-name">{title}</div>{items.filter(([p])=>admin||!adminPages.has(p)).map(([p,label])=><button type="button" key={p} onClick={()=>go(p)} title={label} aria-label={label} aria-current={page===p?'page':undefined} className={'nav-item '+(page===p?'active':'')}><span className="nav-icon"><Icon name={navIcons[p]} size={17}/></span><span>{label}</span>{p==='devices'&&data.enrollments.length>0&&<span className="nav-count">{data.enrollments.length}</span>}</button>)}</section>)}</div><div className="sidebar-footer"><div className="mobile-theme-controls" role="group" aria-label="主题模式">{[['system','自动'],['light','浅色'],['dark','深色']].map(([v,t])=><button type="button" key={v} aria-pressed={theme===v} className={theme===v?'active':''} onClick={()=>setTheme(v)}>{t}</button>)}</div><div className="side-status"><i className="status-dot"/><div><strong>Server · {error?'DEGRADED':'ONLINE'}</strong><small>Relay 控制台</small></div></div><button className="user-chip" aria-label={'账户管理：'+(user.username||'当前账户')} onClick={()=>setDialog({title:'账户管理',body:<Account user={user} onPasswordChanged={()=>{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null);setAuthError('密码已修改，请重新登录')}} logout={async()=>{try{await api('/auth/logout',{method:'POST'})}finally{setDialog(null);setUser(null);setData(blank);setDraft(null);setSaved(null)}}}/>})}><span className="avatar">{user.username?.slice(0,1).toUpperCase()||'A'}</span><span className="grow"><strong>{user.username}</strong><small>{admin?'全局管理员':'身份管理员'}</small></span></button></div></aside><div className="workspace"><header className="topbar"><button ref={mobileMenuRef} type="button" className="mobile-menu-toggle" aria-label={mobileNavOpen?'关闭导航菜单':'打开导航菜单'} aria-controls="server-navigation" aria-expanded={mobileNavOpen} onClick={()=>setMobileNavOpen(o=>!o)}><span/><span/><span/></button><div className="crumb"><span>RelayProxy</span><span style={{opacity:.5}}>/</span><b>{pages[page]}</b></div><div className="topbar-right"><div id="server-page-actions" className="topbar-page-actions"/><div className="theme-seg" role="group" aria-label="主题模式">{[['system','自动'],['light','浅色'],['dark','深色']].map(([v,t])=><button type="button" key={v} onClick={()=>setTheme(v)} aria-pressed={theme===v} className={theme===v?'active':''}>{t}</button>)}</div><Action disabled={loading} onClick={()=>ctx.refresh()}>{loading?'刷新中':'刷新'}</Action></div></header><main className="main-scroll"><div className="main-inner">{error&&<div className="err-notice" role="alert">{error}</div>}{data.settings?.restartRequired&&<Banner type="warn"><b>配置已保存，等待服务重启。</b> {list(data.settings.restartFields).join('、')}</Banner>}{page==='overview'?<Overview ctx={ctx}/>:page==='devices'?<Devices ctx={ctx}/>:page==='identities'?<Identities ctx={ctx}/>:page==='browserSync'?<BrowserSyncAdmin identities={ctx.data.identities} onOpenSettings={()=>ctx.go("settings","browserSync")}/>:page==='exits'?<Exits ctx={ctx}/>:page==='sessions'||page==='p2p'?<Connections ctx={ctx} p2pOnly={page==='p2p'}/>:page==='messages'?<Messages ctx={ctx}/>:page==='channels'?<Channels ctx={ctx}/>:page==='rdp'?<Ingress ctx={ctx}/>:page==='audit'?<Audit ctx={ctx}/>:page==='security'?<Security ctx={ctx}/>:<Settings ctx={ctx}/>}</div></main></div><Dialog dialog={dialog} close={close}/>{notice&&<div className="toast-live" role="status">{notice}</div>}</div>;
 }
 function Account({user,onPasswordChanged,logout}){
  const [old,setOld]=useState(''),[pw,setPw]=useState(''),[confirmPw,setConfirmPw]=useState('');

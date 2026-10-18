@@ -1,36 +1,46 @@
 import React, {useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
 import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} from './bridge.js';
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
+import {buildDeviceCenter} from './deviceCenter.js';
+import {onlyVerifiedFilePeers} from './fileShareVisibility.js';
 import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolChoice,protocolsFromChoice,ruleListText,splitRuleList} from './ruleLines.js';
 import {Icon} from './icons.jsx';
 import FileSharingPage from './FileSharingPage.jsx';
+import useDialogFocus from './useDialogFocus.js';
 import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
 import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
 import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
-import {proxyPathStatus,rdpPathLabel} from './pathStatus.js';
+import {rdpPathLabel} from './pathStatus.js';
+import {DEVICE_SPEED_REVIEW_STEPS,deviceSpeedChecks} from './deviceSpeedChecks.js';
 
-// Daily operations stay in the sidebar; detailed controls live in Settings.
+// Operational pages are always one click away. Frequently edited policies
+// live under Network Configuration; infrequent preferences live in Settings.
 const NAV=[
- {group:'工作台',items:[['overview','dashboard','运行概览'],['connection','route','连接与路径'],['exits','globe','出口选择']]},
+ {group:'工作台',items:[['overview','dashboard','运行概览'],['exits','devices','设备中心']]},
  {group:'协作',items:[['files','folder','文件共享'],['rdp','monitor','远程桌面'],['messages','bell','消息']]},
- {group:'观察',items:[['monitor','activity','实时监控']]}
+ {group:'观察',items:[['monitor','activity','实时监控'],['diagnostics','terminal','诊断与日志']]},
+ {group:'网络配置',items:[['routing','split','网络配置']]}
+];
+const CONFIG_SECTIONS=[
+ ['routing','split','分流规则','进程、域名、规则订阅和指定出口'],
+ ['dns','shield','DNS 与防泄漏','自动解析、DNS 出口和防泄漏'],
+ ['proxy','swap','代理与自定义出口','SOCKS5、HTTP、透明代理和本机出口'],
+ ['connection','route','连接策略','传输协议、P2P 与公网直连'],
+ ['exitshare','share','出口共享','共享能力、上游出口与访问控制']
 ];
 const SETTINGS_SECTIONS=[
- ['devices','devices','设备与身份','设备信息、身份与审批'],
- ['proxy','swap','本机代理','SOCKS5、HTTP、透明代理'],
- ['routing','split','分流规则','规则与订阅'],
- ['dns','shield','DNS 与防泄漏','DNS 策略与接管'],
- ['exitshare','share','本机出口共享','共享本机网络出口'],
- ['diagnostics','terminal','诊断与日志','诊断工具与日志']
+ ['devices','devices','设备与身份','设备标识、身份与审批状态'],
+ ['rdp-settings','monitor','远程桌面偏好','控制端启用与授权状态'],
+ ['message-settings','bell','消息与弹窗','关闭时间与弹窗预览']
 ];
+const CONFIG_IDS=new Set(CONFIG_SECTIONS.map(x=>x[0]));
 const SETTINGS_IDS=new Set(SETTINGS_SECTIONS.map(x=>x[0]));
-const PAGE_NAMES=Object.fromEntries([...NAV.flatMap(g=>g.items),...SETTINGS_SECTIONS].map(x=>[x[0],x[2]]));
-// The browser's /connections bookmark and shareable ?page=... links should
-// open the same React route as the desktop shell. Never trust arbitrary page
-// names or persist unknown values into the navigation state.
-const PAGE_IDS = new Set([...NAV.flatMap(group => group.items.map(item => item[0])),...SETTINGS_IDS,'settings']);
+const PAGE_NAMES=Object.fromEntries([...NAV.flatMap(g=>g.items),...CONFIG_SECTIONS,...SETTINGS_SECTIONS].map(x=>[x[0],x[2]]));
+const PAGE_IDS = new Set([...NAV.flatMap(group=>group.items.map(item=>item[0])),...CONFIG_IDS,...SETTINGS_IDS,'settings']);
+// Preserve all existing ?page=... bookmarks and stored page IDs.
 function initialPage() {
  const requested = new URLSearchParams(window.location.search).get('page');
  if (PAGE_IDS.has(requested)) return requested;
@@ -63,7 +73,21 @@ function Switch({checked,onChange,disabled,label}){return <button type="button" 
 function Card({title,eyebrow,action,children,className}){return <section className={cx('card',className)}>{(title||eyebrow||action)&&<div className="card-head"><div>{eyebrow&&<div className="eyebrow">{eyebrow}</div>}{title&&<h2>{title}</h2>}</div>{action}</div>}{children}</section>}
 // The compact top bar already names the active page. Do not repeat a large
 // title and description before its content; actions get their own toolbar.
-function PageHead({actions}){return actions?<div className="page-head page-actions-toolbar"><div className="actions">{actions}</div></div>:null}
+function PageHead({actions}){
+ const [target,setTarget]=useState(null);
+ const [wide,setWide]=useState(()=>window.matchMedia('(min-width:1100px)').matches);
+ useEffect(()=>setTarget(document.getElementById('agent-page-actions')),[]);
+ useEffect(()=>{
+  const media=window.matchMedia('(min-width:1100px)');
+  const update=()=>setWide(media.matches);
+  media.addEventListener?.('change',update);
+  return()=>media.removeEventListener?.('change',update);
+ },[]);
+ if(!actions)return null;
+ const buttons=<div className="actions page-action-buttons" role="group" aria-label="当前页面快捷操作" tabIndex={0}>{actions}</div>;
+ if(wide)return target?createPortal(buttons,target):null;
+ return <div className="page-head page-actions-inline">{buttons}</div>;
+}
 function Field({label,help,children,className}){return <label className={cx('field',className)}><span>{label}</span>{children}{help&&<small>{help}</small>}</label>}
 const Input=p=><input className="control" {...p}/>;
 const Select=p=><select className="control" {...p}/>;
@@ -73,34 +97,23 @@ const SPARK_POINTS=24;
 function Spark({series}){const pts=arr(series).slice(-SPARK_POINTS),max=Math.max(0,...pts);if(!pts.length)return <div className="spark idle" aria-hidden="true"/>;return <div className="spark" title={'最近 '+pts.length+' 次采样'}>{pts.map((v,i)=><i key={i} style={{height:(max>0?Math.max(8,Math.round(v/max*100)):8)+'%'}}/>)}</div>}
 function Metric({label,value,hint,series}){return <div className="metric"><div className="eyebrow">{label}</div><div className="metric-value">{value}</div><div className="mini">{hint}</div>{series&&<Spark series={series}/>}</div>}
 function SaveBar({dirty,label,onSave,hint,children}){return <div className={cx('save-bar',dirty&&'dirty')}><div className="grow"><b>{dirty?'存在未保存的修改':'所有修改已保存'}</b>{hint&&<div className="mini">{hint}</div>}</div>{children}<Button primary onClick={onSave}>{label}</Button></div>}
-function Modal({open,title,children,footer,onClose,wide}){if(!open)return null;return <div className="overlay show" onMouseDown={e=>e.target===e.currentTarget&&onClose&&onClose()}><div className={cx('modal',wide&&'wide')}><div className="modal-head"><h2>{title}</h2><button className="close" onClick={onClose}>×</button></div><div className="modal-body">{children}</div>{footer&&<div className="modal-foot">{footer}</div>}</div></div>}
+function Modal({open,title,children,footer,onClose,wide}){
+ const ref=useRef(null);useDialogFocus(open,ref,onClose);
+ if(!open)return null;
+ return <div className="overlay show" onMouseDown={e=>e.target===e.currentTarget&&onClose?.()}><section ref={ref} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={cx('modal',wide&&'wide')}><div className="modal-head"><h2>{title}</h2><button type="button" className="close" aria-label="关闭对话框" onClick={onClose}>×</button></div><div className="modal-body">{children}</div>{footer&&<div className="modal-foot">{footer}</div>}</section></div>;
+}
 
 function Overview({status,config,exits,traffic,history,onRefresh,onGoto}){
- const connected=!!status.connected,{path,directReady:directActive,p2pReady:p2pActive,relay:relayPath}=proxyPathStatus(status),rtt=connected?(status.directRttMs||status.p2pRttMs||status.latency||0):0;
- const approval=String(status.approvalState||''),approvalLower=approval.toLowerCase(),approvalLabel=connected?(approval||'已连接'):(/pending|wait|approval|待审批/.test(approvalLower)||/reject|denied|revoked|撤销|拒绝/.test(approvalLower)?approval:'未连接');
- const udp=Number(status.nativeUdp?.associations||0);
- return <><PageHead title="运行概览" desc="连接状态、当前出口、数据路径、本机代理与实时流量。" actions={<><Button onClick={()=>onGoto('diagnostics')}>诊断</Button><Button onClick={onRefresh}>刷新</Button><Button primary onClick={()=>onGoto('exits')}>切换出口</Button></>}/>
- <div className="cards-2">
-  <Card className="hero"><div className="hero-glow"/><div className="hero-status"><span className={cx('dot',connected?'online':'offline')}/><div><div className="eyebrow">{connected?'CONNECTED':'DISCONNECTED'}</div><div className="big">{connected?'RelayProxy 已连接':'等待连接到 RelayProxy Server'}</div><div className="muted">{((connected?(config.runtime?.serverAddress||config.serverAddress):config.serverAddress)||'尚未配置服务器')+' · '+(status.transport||config.runtime?.transport||config.transport||'auto')}{connected&&config.runtime?.serverAddress&&config.runtime.serverAddress!==config.serverAddress?' · 已保存新 Server，待重启':''}</div></div><Badge tone={connected?'ok':/reject|denied|revoked|撤销|拒绝/i.test(approvalLabel)?'danger':'neutral'}>{approvalLabel}</Badge></div>
-   <div className="exit-mini"><div className="flag">↗</div><div className="grow"><div className="mini">当前出口</div><strong>{exitName(exits,status.selectedExit||config.defaultExitId)}</strong><div className="mini">{'出口可用路径：'+path+' · '+(rtt?rtt+' ms':'等待延迟数据')}</div><div className="chips top-gap">{directActive&&<Badge tone="ok">公网直连</Badge>}{p2pActive&&<Badge tone="blue">P2P</Badge>}{udp>0&&<Badge tone="blue">UDP 原生数据报</Badge>}</div></div><Button quiet onClick={()=>onGoto('exits')}>›</Button></div>
-   <svg className="map-line" viewBox="0 0 520 160"><path d="M18 112 C122 40 205 138 302 68 S442 54 510 22"/><circle cx="18" cy="112" r="5"/><circle cx="302" cy="68" r="5"/><circle cx="510" cy="22" r="5"/></svg>
-  </Card>
-  <Card title="代理出口可用路径" eyebrow="PROXY PATH" action={<Badge tone={connected?'ok':'neutral'}>{connected?'在线':'离线'}</Badge>}>
-   <div className="mini">以下路径用于当前代理出口；远程桌面按目标设备单独协商 TCP / UDP。</div>
-   <Setting title="Public Direct" desc={connected?(status.directEndpoint||'Server 验证公网端点'):'等待 Relay 重连后重新确认'}><Badge tone={directActive?'ok':connected&&status.directState?'blue':'neutral'}>{connected?(directActive?'Ready':status.directState||'Idle'):'Offline'}</Badge></Setting>
-   <Setting title="UPnP 网关映射" desc={status.upnpError||status.upnpAddress||'仅在本机与 Server 同时允许时使用，映射成功不代表公网可达。'}><Badge tone={status.upnpState==='MAPPED'?'ok':status.upnpState==='DEGRADED'||status.upnpState==='FAILED'?'danger':status.upnpState==='CGNAT'?'warn':'neutral'}>{status.upnpState||'DISABLED'}</Badge></Setting><Setting title="P2P QUIC" desc={connected?(status.p2pCandidateSummary||'公网直连不可用时尝试候选路径'):'等待 Relay 重连后重新协商'}><Badge tone={p2pActive?'ok':connected&&status.p2pState?'blue':'neutral'}>{connected?(p2pActive?'Ready':status.p2pState||'Idle'):'Offline'}</Badge></Setting>
-   <Setting title="Relay" desc="控制隧道与最终回退路径"><Badge tone={relayPath?'warn':connected?'blue':'neutral'}>{relayPath?'Active':connected?'Standby':'Offline'}</Badge></Setting>
-   <Setting title="Native UDP" desc="进程级原生数据报资源"><span>{udp?udp+' associations':'空闲'}</span></Setting>
-   {status.rdpTargetId&&<><Setting title="RDP TCP 实际路径" desc={'目标设备：'+status.rdpTargetId}><Badge tone="blue">{rdpPathLabel(status.rdpPathTcp)}</Badge></Setting><Setting title="RDP UDP 实际路径" desc={status.rdpUdpReason}><Badge tone={status.rdpUdpActive?'ok':'neutral'}>{rdpPathLabel(status.rdpPathUdp)}</Badge></Setting></>}
-  </Card>
- </div>
+ const connected=!!status.connected;
+ const approval=String(status.approvalState||''),approvalLower=approval.toLowerCase();
+ const approvalLabel=connected?(approval||'已连接'):(/pending|wait|approval|待审批/.test(approvalLower)||/reject|denied|revoked|撤销|拒绝/.test(approvalLower)?approval:'未连接');
+ return <><PageHead actions={<><Button onClick={onRefresh}>刷新</Button><Button primary onClick={()=>onGoto('exits')}>查看设备</Button></>}/>
+ <Card className="hero overview-hero">
+  <div className="hero-glow"/>
+  <div className="hero-status"><span className={cx('dot',connected?'online':'offline')}/><div className="grow"><div className="eyebrow">{connected?'CONNECTED':'DISCONNECTED'}</div><div className="big">{connected?'RelayProxy 已连接':'等待连接到 RelayProxy Server'}</div><div className="muted">{((connected?(config.runtime?.serverAddress||config.serverAddress):config.serverAddress)||'尚未配置服务器')+' · '+(status.transport||config.runtime?.transport||config.transport||'auto')}{connected&&config.runtime?.serverAddress&&config.runtime.serverAddress!==config.serverAddress?' · 已保存新 Server，待重启':''}</div></div><Badge tone={connected?'ok':/reject|denied|revoked|撤销|拒绝/i.test(approvalLabel)?'danger':'neutral'}>{approvalLabel}</Badge></div>
+  <div className="overview-current-exit"><div className="grow"><div className="mini">{status.selectedExit?'当前运行出口':'默认代理出口配置'}</div><strong>{exitName([...exits,...arr(config.customExits)],status.selectedExit||config.defaultExitId)}</strong></div><div className="overview-quick-links"><Button quiet onClick={()=>onGoto('exits')}>设备与链路检测 ›</Button><Button quiet onClick={()=>onGoto('routing')}>分流规则 ›</Button></div></div>
+ </Card>
  <div className="cards-4"><Metric label="下载速度" value={fmtBytes(traffic?.download_rate||0,true)} hint={fmtBytes(traffic?.download||0)+' 累计'} series={history.down}/><Metric label="上传速度" value={fmtBytes(traffic?.upload_rate||0,true)} hint={fmtBytes(traffic?.upload||0)+' 累计'} series={history.up}/><Metric label="往返延迟" value={connected?((status.latency||0)+' ms'):'—'} hint="Server RTT" series={history.latency}/><Metric label="活跃连接" value={traffic?.active??status.activeStreams??0} hint={(traffic?.total||0)+' 累计连接'} series={history.active}/></div>
- <div className="cards-3">
-  <Card title="系统流量接管" eyebrow="WINDOWS" action={<Badge tone={status.divertRunning?'ok':'neutral'}>{status.divertRunning?'已接管':'未接管'}</Badge>}><div className="mini">{status.divertRunning?'按分流规则处理 TCP / UDP':'可启用 WinDivert 透明代理'}</div><div className="actions end top-gap"><Button onClick={()=>onGoto('proxy')}>管理透明代理</Button></div></Card>
-  <Card title="网络出口" eyebrow="EXIT" action={<Badge tone={status.exitRunning?'ok':'neutral'}>{status.exitRunning?'正在共享':'未运行'}</Badge>}><div className="mini">{config.allowInternet?'允许 Internet':'Internet 已关闭'} · {config.allowPrivateNetwork?'允许私有网络':'私有网络已关闭'}</div><div className="actions end top-gap"><Button onClick={()=>onGoto('exitshare')}>管理出口</Button></div></Card>
-  <Card title="本机代理" eyebrow="LOOPBACK" action={<Badge tone={status.socks5Running||status.httpRunning?'ok':'neutral'}>{status.socks5Running||status.httpRunning?'运行中':'已停止'}</Badge>}><div className="mini">SOCKS5 :{config.runtime?.socks5?.port||config.socks5?.port||1080} · HTTP :{config.runtime?.http?.port||config.http?.port||8080}{config.restartRequired?' · 存在待重启配置':''}</div><div className="actions end top-gap"><Button onClick={()=>onGoto('proxy')}>管理代理</Button></div></Card>
- </div>
- <Card title="身份状态" eyebrow="IDENTITY"><div className="cards-3 compact"><div><div className="mini">设备</div><strong>{status.deviceName||config.deviceName||'本设备'}</strong><div className="mono mini">{status.deviceId||'等待设备 ID'}</div></div><div><div className="mini">{connected?'身份':'上次批准身份'}</div><strong>{status.identityName||config.identityId||'尚未绑定'}</strong><div className="mini">{status.policyRevision?(connected?'策略 r':'上次策略 r')+status.policyRevision:'—'}</div></div><div><div className="mini">服务端授权模式</div><Badge tone={status.connected&&status.mode?'blue':'neutral'}>{status.connected&&status.mode?status.mode:'未授权 / 未连接'}</Badge></div></div></Card>
  <Card title="最近连接" eyebrow="LIVE TRAFFIC" action={<Button onClick={()=>onGoto('monitor')}>查看全部</Button>}><div className="recent-list">{arr(traffic?.connections).slice(0,3).map((x,i)=><div className="recent-row" key={x.id||i}><div className="app-mark">{String(x.process_name||x.process||'?').slice(0,1).toUpperCase()}</div><div className="grow"><strong>{x.process_name||x.process||'未知进程'}</strong><div className="mono mini">{(x.host||x.ip||'—')+(x.port?':'+x.port:'')}</div></div><div className="recent-rate"><b>{fmtBytes(x.download_rate||0,true)} ↓</b><span>{fmtBytes(x.upload_rate||0,true)} ↑</span></div><Badge tone={tone(x.state)}>{x.path||x.action||x.state||'—'}</Badge></div>)}{!arr(traffic?.connections).length&&<div className="empty compact-empty">暂无连接记录。</div>}</div></Card></>
 }
 
@@ -138,7 +151,7 @@ function Connection({status,config,setv,save,dirty,onReload}){
 }
 
 
-function CustomExitManager({config,save,onSelect,selected,toast}){
+function CustomExitManager({config,save,toast,dirty}){
  const items=arr(config.customExits);
  const [draft,setDraft]=useState(null),[busy,setBusy]=useState(false);
  const refs=id=>[
@@ -148,7 +161,7 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
   ...arr(config.routing?.rules).filter(r=>r.exit_id===id).map(r=>'分流规则：'+(r.name||'未命名'))
  ].filter(Boolean);
  const update=(key,val)=>setDraft(x=>({...x,[key]:val}));
- const persist=async next=>{setBusy(true);try{return await save({proxy:{customExits:next}})}finally{setBusy(false)}};
+ const persist=async next=>{if(dirty){toast('请先保存代理配置或放弃未保存的修改，再调整自定义出口。','warn');return false}setBusy(true);try{return await save({proxy:{customExits:next}})}finally{setBusy(false)}};
  const edit=item=>setDraft(item?{...item,password:'',clearPassword:false}:{id:'local:'+Date.now().toString(36)+'-'+Math.random().toString(36).slice(2),name:'',protocol:'socks5',address:'',enabled:true,username:'',password:'',clearPassword:false});
  const saveDraft=async()=>{
   if(!draft)return;
@@ -183,10 +196,9 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
     {items.map(item=><div className="target-row" key={item.id}>
      <div className="identity-icon small">↗</div>
      <div className="grow">
-      <div className="row"><strong>{item.name}</strong><Badge tone={item.enabled?'ok':'neutral'}>{item.enabled?'已启用':'已停用'}</Badge>{config.upstreamExitId===item.id&&<Badge tone="blue">共享上游</Badge>}</div>
+      <div className="row"><strong>{item.name}</strong><Badge tone={item.enabled?'ok':'neutral'}>{item.enabled?'已启用':'已停用'}</Badge>{config.defaultExitId===item.id&&<Badge tone="blue">默认出口</Badge>}{config.upstreamExitId===item.id&&<Badge tone="blue">共享上游</Badge>}</div>
       <div className="mono mini">{item.protocol.toUpperCase()} · {item.address} · {item.protocol==='socks5'?'支持 UDP ASSOCIATE':'仅 TCP'}</div>
      </div>
-     <Button quiet onClick={()=>onSelect(item.id)} disabled={!item.enabled||selected===item.id}>{selected===item.id?'默认出口':'设为默认'}</Button>
      <Button quiet disabled={!item.enabled||busy} onClick={()=>test(item)}>测试</Button>
      <Button quiet onClick={()=>edit(item)}>编辑</Button>
      <Switch checked={item.enabled} disabled={busy} label={'启停 '+item.name} onChange={()=>toggle(item)}/>
@@ -208,15 +220,64 @@ function CustomExitManager({config,save,onSelect,selected,toast}){
  </>;
 }
 
-function Exits({status,exits,selected,onSelect,onSpeed,onSpeedAll,config,save,toast}){
- const publicMeta=e=>{const p=e?.direct?.public,endpoints=arr(p?.endpoints),verified=endpoints.filter(x=>x.verified),first=verified[0]||endpoints[0];return {available:!!p?.available,transport:p?.transport||'',count:verified.length,endpoint:first?.dialAddress||first?.address||'',source:first?.source||''}};
- const staleSelected=!!selected&&!selected.startsWith('local:')&&!exits.some(e=>(e.deviceId||e.id)===selected),inventoryLive=!!status.connected;
- return <><PageHead title="出口选择" desc="管理 Server 授权出口与本机自定义 SOCKS5 / HTTP 出口。" actions={<><Button onClick={onSpeedAll}>全部测速</Button><Button primary onClick={()=>onSpeed(selected)}>单出口测速</Button></>}/>
- <div className={cx('notice',!inventoryLive&&'warn')}>{inventoryLive?'自动选择只在仅有一个授权在线出口时直接生效。原选择被撤销、删除或不再授权时会保留旧设备 ID，不会静默改选其他出口或 DIRECT。':'Relay 当前未连接。下面保留的是上一次成功审批得到的权威出口库存，用于排障和预选；在线状态需重连后重新确认。'}</div>
- <div className="exit-grid top-gap"><button className={cx('exit-card',!selected&&'selected')} onClick={()=>onSelect('')}><div className="flag">◎</div><div className="grow"><strong>自动选择</strong><div className="mini">仅一个授权在线出口时自动选择；不会绕过既定策略。</div></div><span className="radio"/></button>{staleSelected&&<button className="exit-card selected disabled" disabled><div className="flag">!</div><div className="grow"><div className="row"><strong>不可用旧选择</strong><Badge tone="danger">已撤销 / 已删除</Badge></div><div className="mono mini">{selected}</div><div className="mini">Server 当前授权库存中已不存在此出口。请手动选择新的出口或切回自动选择。</div></div><span className="radio"/></button>}{exits.map(e=>{const id=e.deviceId||e.id,m=publicMeta(e),offline=inventoryLive&&e.online===false;return <button key={id} className={cx('exit-card',selected===id&&'selected',offline&&'disabled')} onClick={()=>!offline&&onSelect(id)}><div className="flag">↗</div><div className="grow"><div className="row"><strong>{e.name||id}</strong><Badge tone={!inventoryLive?'neutral':offline?'neutral':'ok'}>{!inventoryLive?'上次库存':offline?'离线':'在线'}</Badge>{m.available&&<Badge tone="blue">Public Direct</Badge>}</div><div className="mini">{e.identityName||e.authorizationSource||id}</div>{m.available&&<div className="exit-path-meta"><span>{m.transport||'QUIC'}</span><span>{m.count?m.count+' 个已验证端点':'端点可用'}</span>{m.endpoint&&<span className="mono">{m.endpoint}</span>}</div>}</div><span className="radio"/></button>})}</div>
- {!exits.length&&<Card><div className="empty">当前没有已授权出口。请在 Server 管理端为此身份授权可用出口。</div></Card>}
- <CustomExitManager config={config} save={save} onSelect={onSelect} selected={selected} toast={toast}/>
- <Card title="当前路径" eyebrow="LIVE PATH"><div className="cards-3 compact"><div><div className="mini">选择出口</div><strong>{exitName(exits,selected)}</strong></div><div><div className="mini">Direct</div><strong>{status.connected?(status.directPath||status.directState||'—'):'offline'}</strong>{status.connected&&status.directEndpoint&&<div className="mono mini">{status.directEndpoint}</div>}</div><div><div className="mini">P2P</div><strong>{status.connected?(status.p2pPath||status.p2pState||'—'):'offline'}</strong>{status.connected&&status.p2pCandidateSummary&&<div className="mini">{status.p2pCandidateSummary}</div>}</div></div></Card></>
+function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,onGoto,onFiles,onConnectRDP,onRefresh}){
+ const [query,setQuery]=useState(''),[detail,setDetail]=useState('');
+ const devices=useMemo(()=>buildDeviceCenter({proxyExits:exits,rdpTargets:targets,filePeers}),[exits,targets,filePeers]);
+ const filtered=devices.filter(d=>!query.trim()||[d.name,d.id].some(x=>String(x).toLowerCase().includes(query.trim().toLowerCase())));
+ const selected=devices.find(d=>d.id===detail);
+ const proxyMeta=d=>{
+  const publicPath=d.proxy?.direct?.public||{};
+  const verified=arr(publicPath.endpoints).filter(x=>x.verified);
+  return {publicPath,verified};
+ };
+ const rdpEnabled=config.rdp?.enabled!==false&&config.runtime?.rdp?.enabled!==false&&arr(status.approvedCapabilities).includes('rdp.controller');
+ return <><PageHead actions={<><Button onClick={()=>onGoto('routing')}>分流规则与默认出口</Button><Button onClick={onRefresh}>刷新设备</Button><Button disabled={!status.connected||!exits.some(x=>x.online!==false)} onClick={onSpeedAll}>批量测速</Button></>}/>
+ <div className="device-center-intro">
+  <div><strong>已授权设备</strong><span className="mini">按设备查看可用能力。卡片只提供操作，不修改全局代理出口。</span></div>
+  <div className="device-center-filter"><Input aria-label="搜索设备名称或 ID" placeholder="搜索设备名称 / ID" value={query} onChange={e=>setQuery(e.target.value)}/><span className="mini">{filtered.length} 台</span></div>
+ </div>
+ <div className="device-center-grid">
+  {filtered.map(d=>{
+   const meta=proxyMeta(d),name=d.name||d.id;
+   const online=status.connected&&d.online;
+   return <article className="device-center-card" key={d.id} onClick={e=>{if(!e.target.closest('button'))setDetail(d.id)}}>
+    <div className="device-center-card-head">
+     <div className="identity-icon"><Icon name="devices" size={21}/></div>
+     <button className="device-center-card-name" type="button" onClick={()=>setDetail(d.id)} title={'查看 '+name+' 的设备详情'}>
+      <strong>{name}</strong><span className="mini mono">{d.id}</span>
+     </button>
+     <Badge tone={online?'ok':'neutral'}>{online?'在线':status.connected?'离线':'未连接'}</Badge>
+    </div>
+    <div className="device-center-caps">
+     {d.proxy&&<Badge tone="blue"><Icon name="globe" size={12}/> 代理出口</Badge>}
+     {d.shares.length>0&&<Badge tone="blue"><Icon name="folder" size={12}/> {d.shares.length} 个共享目录</Badge>}
+     {d.rdp&&<Badge tone="blue"><Icon name="monitor" size={12}/> 远程桌面</Badge>}
+     {meta.publicPath?.available&&<Badge tone="ok">公网直连候选</Badge>}
+    </div>
+    <div className="device-center-card-actions" aria-label={name+' 快捷操作'}>
+     {d.shares.length>0&&<button type="button" className="device-quick-action" disabled={!online} title={online?'打开该设备已授权的共享文件':'设备当前不可访问'} aria-label={'打开 '+name+' 的共享文件'} onClick={()=>onFiles(d.id)}><Icon name="folder" size={18}/><span>共享文件</span></button>}
+     {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||d.rdp.online===false||!rdpEnabled} title={!rdpEnabled?'请在设置中启用远程桌面并确认控制端授权':online?'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>远程桌面</span></button>}
+     {d.proxy&&<button type="button" className="device-quick-action" disabled={!online||d.proxy.online===false} title={online?'测试此设备代理出口':'设备离线或未连接'} aria-label={'测速 '+name} onClick={()=>onSpeed(d.id)}><Icon name="activity" size={18}/><span>测速</span></button>}
+     <button type="button" className="device-quick-action" title={'查看 '+name+' 的授权与路径信息'} aria-label={'查看 '+name+' 详情'} onClick={()=>setDetail(d.id)}><Icon name="shield" size={18}/><span>设备详情</span></button>
+    </div>
+   </article>;
+  })}
+ </div>
+ {!filtered.length&&<Card><div className="empty">{devices.length?'没有符合搜索条件的设备。':'暂无已授权的远程设备。请检查 Server 授权、RDP 权限或文件目录 ACL。'}</div></Card>}
+ {arr(config.customExits).length>0&&<Card title="本机自定义代理" eyebrow="LOCAL PROXIES" action={<Button onClick={()=>onGoto('proxy')}>管理配置</Button>}><div className="device-center-local-list">{arr(config.customExits).map(x=><div className="device-center-local-row" key={x.id}><Icon name="swap" size={16}/><div className="grow"><strong>{x.name||x.id}</strong><div className="mini mono">{x.protocol?.toUpperCase()||'SOCKS5'} · {x.address}</div></div><Badge tone={x.enabled?'ok':'neutral'}>{x.enabled?'已启用':'已停用'}</Badge></div>)}</div><div className="mini">本机自定义代理不是远程设备；可在网络配置中管理，并在分流规则中指定为出口。</div></Card>}
+ <Modal open={!!selected} title={selected?.name||'设备详情'} onClose={()=>setDetail('')} footer={<Button onClick={()=>setDetail('')}>关闭</Button>}>
+  {selected&&<div className="stack">
+   <Setting title="设备 ID"><span className="mono mini">{selected.id}</span></Setting>
+   <Setting title="连接状态"><Badge tone={status.connected&&selected.online?'ok':'neutral'}>{status.connected&&selected.online?'在线':'离线 / 未连接'}</Badge></Setting>
+   <Setting title="代理出口">{selected.proxy?'已授权':'未提供'}</Setting>
+   <Setting title="远程桌面">{selected.rdp?'目标已授权':'未提供'}</Setting>
+   <Setting title="共享目录">{selected.shares.length?selected.shares.length+' 个已验证的授权目录':'未提供'}</Setting>
+   {selected.proxy&&<div className="notice">{proxyMeta(selected).publicPath?.available?'此设备提供公网直连候选，但实际路径取决于连接时协商。':'当前没有可确认的公网直连端点。'}{proxyMeta(selected).verified.length?' · '+proxyMeta(selected).verified.length+' 个已验证端点':''}。仅显示本设备报告的候选能力，不套用其他出口的运行态路径。</div>}
+   {selected.proxy&&<div className="actions top-gap"><Button disabled={!status.connected||selected.proxy.online===false} onClick={()=>{setDetail('');onSpeed(selected.id)}}>测试此设备出口 ›</Button></div>}
+   {!!selected.shares.length&&<div className="device-center-share-list">{selected.shares.map(s=><div key={s.id} className="device-center-share"><Icon name="folder" size={15}/><span className="grow">{s.name||s.id}</span><Badge>{s.permission==='read_write'?'读写':'只读'}</Badge></div>)}</div>}
+  </div>}
+ </Modal>
+ </>;
 }
 
 function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilities,toast}){
@@ -258,7 +319,8 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
   <Field label="排除进程" help="这些进程的流量不经透明代理；可用换行、逗号或分号分隔，如 steam.exe, Teams.exe"><Textarea rows="5" value={ruleListText(config.network?.exclude_processes)} onChange={e=>setv('network.exclude_processes',e.target.value)}/></Field>
   <div className="actions top-gap"><Button disabled={repairing} onClick={repair}>{repairing?'修复中…':'安装 / 修复服务'}</Button><Button onClick={onService}>高级维护 / 卸载</Button></div>
  </Card>}
- <SaveBar dirty={dirty} label="保存代理设置" hint="同时保存 SOCKS5、HTTP Proxy 与系统透明代理设置；监听开关、地址、端口与透明代理开关需重启生效，排除进程立即生效。" onSave={()=>save({proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/></>
+ <SaveBar dirty={dirty} label="保存代理设置" hint="同时保存 SOCKS5、HTTP Proxy 与系统透明代理设置；监听开关、地址、端口与透明代理开关需重启生效，排除进程立即生效。" onSave={()=>save({proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
+ <CustomExitManager config={config} save={save} toast={toast} dirty={dirty}/></>
 }
 
 function ExitShare({status,config,setv,save,dirty}){
@@ -284,7 +346,7 @@ function ExitShare({status,config,setv,save,dirty}){
   {chosen&&chosen.protocol!=='socks5'&&<div className="notice warn top-gap">HTTP(S) CONNECT 仅支持 TCP。共享出口的 UDP 请求会失败，不会回退本机直连。</div>}
   {config.upstreamExitId&&!chosen&&<div className="notice danger top-gap">所选上游出口已丢失，保存将被阻止。请重新选择或切换到本机直连。</div>}
   {legacy&&<div className="notice warn top-gap">当前仍使用旧版上游 {u.mode}。请创建自定义出口并在此引用；切换上游前保留原有工作方式。</div>}
-  {!customs.length&&<div className="notice top-gap">暂无自定义出口。请前往「出口选择」创建。</div>}
+  {!customs.length&&<div className="notice top-gap">暂无自定义出口。请前往「网络配置 → 代理与自定义出口」创建。</div>}
  </Card><Card title="出口访问控制" eyebrow="ACCESS POLICY"><Field label="策略模式"><Select value={config.accessMode||''} onChange={e=>setv('accessMode',e.target.value)}><option value="">关闭</option><option value="allow">仅允许列表</option><option value="deny">拒绝列表</option></Select></Field><Field label="域名规则" help="可用换行、逗号或分号分隔，支持通配符，如 *.example.com"><Textarea rows="4" value={ruleListText(config.accessDomains)} onChange={e=>setv('accessDomains',e.target.value)}/></Field><Field label="CIDR / IP" help="可用换行、逗号或分号分隔，如 10.0.0.0/8, 192.168.1.1"><Textarea rows="4" value={ruleListText(config.accessCidrs)} onChange={e=>setv('accessCidrs',e.target.value)}/></Field></Card></div>
  <SaveBar dirty={dirty} label="保存出口共享设置" hint="同时保存出口能力、上游代理与访问控制；出口相关设置均为启动参数，保存后需重启客户端生效。" onSave={()=>save({exit:{enabled:config.exitEnabled,browserNetworkShare:!!config.browserNetworkShare,allowInternet:config.allowInternet,allowPrivateNetwork:config.allowPrivateNetwork,allowLoopback:config.allowLoopback,upstreamExitId:config.upstreamExitId||'',upstream:config.upstreamExitId?undefined:u,access:{mode:config.accessMode||'',domains:splitRuleList(config.accessDomains),cidrs:splitRuleList(config.accessCidrs)}}})}/>
  <Modal open={loopbackRisk} title="允许出口流量访问本机 Loopback？" onClose={()=>setLoopbackRisk(false)} footer={<><Button onClick={()=>setLoopbackRisk(false)}>保持关闭</Button><Button danger onClick={()=>{setv('allowLoopback',true);setLoopbackRisk(false)}}>我了解风险，允许访问</Button></>}><div className="notice danger"><b>启用后，经 Server 授权到达此出口的流量可以访问本机 Loopback 服务。</b><br/>这可能包含只监听 127.0.0.1 / ::1 的管理接口、开发服务或其他原本不面向网络开放的进程。仅在你明确需要且访问策略足够严格时开启。</div></Modal></>
@@ -331,7 +393,6 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
  const edit=i=>setEditing({index:i,rule:JSON.parse(JSON.stringify(i>=0?rules[i]:{name:'新规则',enabled:true,action:'PROXY',exit_id:'',datagram_required:false,handle_direct:false,processes:[],targets:[],ports:[],protocols:['tcp','udp']}))});
  const saveEditor=()=>{const n=[...rules],rule=normalizeRuleLists(editing.rule);if(editing.index<0)n.push(rule);else n[editing.index]=rule;commit(n);setEditing(null)};
  return <><PageHead title="分流规则" desc="按进程、域名/IP、端口和协议从上到下匹配，第一条命中的规则生效。DNS 解析与防泄漏已归入独立页面。" actions={<><Button onClick={()=>onGoto('dns')}>DNS 设置 ›</Button><Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button><Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button></>}/>
- <Card title="全局路由策略" eyebrow="ROUTING MODE"><div className="form-grid"><Field label="路由模式"><Select value={r.mode||'global_proxy'} onChange={e=>setv('routing.mode',e.target.value)}><option value="global_proxy">全局代理</option><option value="rule">规则模式</option><option value="direct">全局直连</option></Select></Field><Field label="规则未命中时"><Select value={r.default_action||'PROXY'} onChange={e=>setv('routing.default_action',e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field></div></Card>
  <Card title="规则列表" eyebrow={rules.length+' RULES'}><div className="rule-table"><div className="rule-row rule-head"><span>#</span><span>规则</span><span>匹配条件</span><span>动作</span><span>启用</span><span>操作</span></div>{rules.map((x,i)=><div className={cx('rule-row',!x.enabled&&'disabled',dragging===i&&'dragging',dropAt&&dropAt.i===i&&dragging!==i&&(dropAt.after?'drop-after':'drop-before'))} key={(x.name||'rule')+'-'+i} {...dragProps(i)}><span className="drag" role="button" tabIndex={-1} aria-label={'拖动调整顺序：'+(x.name||'规则 '+(i+1))} title="拖动调整顺序" onMouseDown={()=>{armed.current=true}}>⋮⋮</span><div><div className="row"><strong>{x.name||'规则 '+(i+1)}</strong></div><div className="mini">优先级 {i+1}</div></div><div className="chips">{arr(x.processes).slice(0,2).map(v=><span className="chip" key={'p'+v}>{v}</span>)}{arr(x.targets).slice(0,2).map(v=><span className="chip" key={'t'+v}>{v}</span>)}{arr(x.ports).slice(0,1).map(v=><span className="chip" key={'o'+v}>{v}</span>)}{!arr(x.processes).length&&!arr(x.targets).length&&!arr(x.ports).length&&<span className="mini">任意流量</span>}</div><div><Badge tone={x.action==='REJECT'?'danger':x.action==='DIRECT'?'blue':'ok'}>{x.action||'PROXY'}</Badge>{x.exit_id&&<div className="mini">{exitName(exits,x.exit_id)}</div>}</div><div><Switch checked={!!x.enabled} label={(x.enabled?'停用':'启用')+' '+(x.name||'规则 '+(i+1))} onChange={v=>toggle(i,v)}/></div><div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>move(i,-1)}>↑</Button><Button quiet disabled={i===rules.length-1} onClick={()=>move(i,1)}>↓</Button><Button quiet onClick={()=>edit(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除这条分流规则？')&&commit(rules.filter((_,n)=>n!==i))}>删除</Button></div></div>)}{!rules.length&&<div className="empty">尚无规则。切换到规则模式前请先添加规则。</div>}</div></Card>
  <Card title="规则订阅" eyebrow={subs.length+' SUBSCRIPTIONS'} action={<Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button>}>
   <div className="mini">支持 GFWList（Base64 / Adblock 主机规则）、域名和 IP/CIDR 文本列表。按上到下顺序匹配：手动规则优先 → 订阅 → 默认动作。仅在规则模式生效，每 6 小时自动更新；下载失败继续使用本地已缓存的最后成功版本。URL 路径、正则和 Adblock 修饰符不会被扩大为整个域名匹配。</div>
@@ -343,7 +404,15 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
   </div>)}
   {!subs.length&&<div className="empty">尚未添加订阅，可以添加 GFWList 或自建规则列表。</div>}
  </Card>
- <SaveBar dirty={dirty} label="保存分流规则" hint="保存全局路由策略与分流规则；DNS 选项请在 DNS 与防泄漏页修改。" onSave={()=>save({routing:routingPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
+ <details className="routing-strategy-disclosure">
+ <summary><span><strong>全局路由策略</strong><small>路由模式：{r.mode==='rule'?'规则模式':r.mode==='direct'?'全局直连':'全局代理'} · 默认出口：{exitName(exits,config.defaultExitId||'')} · 未命中：{r.default_action||'PROXY'}</small></span></summary>
+ <Card title="全局路由策略" eyebrow="ROUTING MODE"><div className="form-grid">
+ <Field label="路由模式"><Select value={r.mode||'global_proxy'} onChange={e=>setv('routing.mode',e.target.value)}><option value="global_proxy">全局代理</option><option value="rule">规则模式</option><option value="direct">全局直连</option></Select></Field>
+ <Field label="默认代理出口" help="仅影响未指定独立出口的 PROXY 流量；不会覆盖每条规则的指定出口。"><Select value={config.defaultExitId||''} onChange={e=>setv('defaultExitId',e.target.value)}><option value="">自动选择</option>{config.defaultExitId&&!exits.some(x=>(x.deviceId||x.id)===config.defaultExitId)&&<option value={config.defaultExitId}>原出口不可用 · {config.defaultExitId}</option>}{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false&&(x.deviceId||x.id)!==config.defaultExitId}>{x.name||x.deviceId||x.id}{x.online===false?' · 离线':''}</option>)}</Select></Field>
+ <Field label="规则未命中时"><Select value={r.default_action||'PROXY'} onChange={e=>setv('routing.default_action',e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field>
+ </div><div className="mini top-gap">「默认代理出口」决定 PROXY 连接用哪台设备；「规则未命中时」决定 PROXY / DIRECT / REJECT。两者独立，已授权出口撤销或离线时不会静默直连。</div></Card>
+ </details>
+ <SaveBar dirty={dirty} label="保存分流规则" hint="保存默认代理出口、全局路由策略与分流规则；DNS 选项请在 DNS 与防泄漏页修改。" onSave={()=>save({routing:routingPagePatch(r),proxy:{defaultExitId:config.defaultExitId||''}})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
  <Modal open={!!editingSub} title={editingSub&&editingSub.index>=0?'编辑规则订阅':'添加规则订阅'} wide onClose={()=>setEditingSub(null)} footer={<><Button onClick={()=>setEditingSub(null)}>取消</Button><Button primary onClick={saveSub}>保存订阅</Button></>}>
   {editingSub&&<div className="form-grid">
    <Field label="订阅名称"><Input value={editingSub.sub.name||''} onChange={e=>setEditingSub({...editingSub,sub:{...editingSub.sub,name:e.target.value}})}/></Field>
@@ -470,32 +539,48 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  </>;
 }
 
-function RDPPage({status,config,setv,save,dirty,targets,refreshTargets,refreshStatus,toast}){
+function RDPPage({status,config,targets,refreshTargets,refreshStatus,toast}){
  const[busy,setBusy]=useState('');
  const desiredEnabled=config.rdp?.enabled!==false,runtimeEnabled=config.runtime?.rdp?.enabled!==false;
  const controllerApproved=arr(status.approvedCapabilities).includes('rdp.controller');
- const saveRDP=async()=>{await save({rdp:{enabled:desiredEnabled}})};
- const restart=async()=>{try{const r=parseMutation(await call('goRestart'));if(!r.ok)throw new Error(r.message||'重启客户端失败')}catch(e){toast(e.message,'danger')}};
  const connect=async id=>{setBusy(id);try{const r=parseMutation(await call('goConnectRDP',id,true));if(!r.ok)throw new Error(r.message||'RDP 连接失败');toast('RDP 本地入口已建立');await refreshStatus()}catch(e){toast(e.message,'danger')}finally{setBusy('')}};
  const disconnect=async()=>{try{const r=parseMutation(await call('goDisconnectRDP'));if(!r.ok)throw new Error(r.message||'RDP 断开失败');await refreshStatus();toast('RDP 已断开')}catch(e){toast(e.message,'danger')}};
  const copy=async text=>{if(!text)return;if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',String(text));else await navigator.clipboard.writeText(String(text));toast('已复制 RDP 本地入口')};
  const activeTarget=targets.find(x=>(x.deviceId||x.id)===status.rdpTargetId),activeName=activeTarget?.name||status.rdpTargetId;
  return <><PageHead title="远程桌面" desc="仅显示 Server 授权的 RDP 目标，并优先建立 P2P TCP / UDP 辅助路径。" actions={<Button onClick={refreshTargets}>刷新设备</Button>}/>
- <Card title="RDP 客户端能力" eyebrow="CONTROLLER"><Setting title="启用远程桌面" desc="关闭时 Agent 不会向 Server 申请 rdp.controller，因此授权设备列表会为空。"><Switch checked={desiredEnabled} onChange={v=>setv('rdp.enabled',v)} label="启用远程桌面"/></Setting><Setting title="当前运行状态" desc={runtimeEnabled?'Agent 正在申请 RDP 能力':'当前进程未启用 RDP；保存后需要重启客户端'}><Badge tone={runtimeEnabled?'ok':'neutral'}>{runtimeEnabled?'已启用':'未启用'}</Badge></Setting><Setting title="Server 控制端授权" desc={status.connected?(controllerApproved?'当前会话已获得 rdp.controller':'当前会话没有 rdp.controller；请检查 Server 设备能力审批'):'连接 Server 后才能确认当前授权'}><Badge tone={controllerApproved?'ok':status.connected?'warn':'neutral'}>{controllerApproved?'已授权':status.connected?'未授权':'未连接'}</Badge></Setting>{dirty&&<SaveBar dirty label="保存 RDP 设置" hint="RDP 开关属于启动设置；保存后需重启客户端重新申请 Server 能力。" onSave={saveRDP}/>} {!dirty&&config.restartRequired&&arr(config.restartFields).some(x=>String(x).includes('RDP'))&&<div className="actions end top-gap"><Button primary onClick={restart}>重启客户端应用 RDP 设置</Button></div>}</Card>
- {!desiredEnabled&&<div className="notice warn"><b>RDP 已在本机配置中关闭。</b> 开启并保存、重启后，Agent 才会重新申请 rdp.controller 并获取已授权设备。</div>}
+
+ {!desiredEnabled&&<div className="notice warn"><b>RDP 已在本机配置中关闭。</b> 请在「设置 → 远程桌面设置」中开启、保存并重启客户端，之后才会重新申请 rdp.controller。</div>}
  {desiredEnabled&&runtimeEnabled&&status.connected&&!controllerApproved&&<div className="notice warn"><b>Server 未授予当前设备 rdp.controller。</b> 请在 Server 设备授权中启用“RDP 控制端”；授权变更后 Agent 会重新连接并刷新列表。</div>}
  {status.rdpTargetId&&<Card title="当前 RDP 会话" eyebrow="ACTIVE SESSION"><div className="rdp-session"><div className="identity-icon">▣</div><div className="grow"><strong>{activeName}</strong><div className="mono mini">{status.rdpTargetId}</div></div><Badge tone="ok">已连接</Badge></div><div className="setting top-gap"><div className="grow"><b>本地入口</b><div className="mono mini">{status.rdpListenAddr||'准备中'}</div></div><Button quiet disabled={!status.rdpListenAddr} onClick={()=>copy(status.rdpListenAddr)}>复制地址</Button></div><div className="cards-3 compact top-gap"><div><div className="mini">TCP Path</div><strong>{rdpPathLabel(status.rdpPathTcp)}</strong></div><div><div className="mini">UDP Path</div><strong>{rdpPathLabel(status.rdpPathUdp)}</strong></div><div><div className="mini">UDP</div><strong>{status.rdpUdpActive?'Active':status.rdpUdpEnabled?'Ready':'Off'}</strong></div></div>{status.rdpUdpReason&&<div className={cx('notice','top-gap',!status.rdpUdpEnabled&&'warn')}>{status.rdpUdpReason}</div>}<div className="actions end top-gap"><Button danger onClick={disconnect}>断开会话</Button></div></Card>}
  <Card title="已授权设备" eyebrow={targets.length+' TARGETS'}><div className="target-list">{targets.map(x=>{const id=x.deviceId||x.id,active=id===status.rdpTargetId;return <div className="target-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{x.name||id}</strong><div className="mono mini">{id}</div></div>{active&&<Badge tone="blue">当前会话</Badge>}<Badge tone={x.online?'ok':'neutral'}>{x.online?'在线':'离线'}</Badge><Button primary disabled={!x.online||!!busy||active} onClick={()=>connect(id)}>{active?'已连接':busy===id?'连接中…':'连接'}</Button></div>})}{!targets.length&&<div className="empty">{!desiredEnabled?'本机 RDP 功能已关闭。':!runtimeEnabled?'RDP 设置等待重启生效。':status.connected&&!controllerApproved?'当前设备未获得 Server 的 rdp.controller 授权。':'当前没有 Server 授权的 RDP 目标设备。'}</div>}</div></Card></>
 }
 
-function MessagesPage({messages,refresh,clear,toast,config,setv,save}){
- const[filter,setFilter]=useState('all'),[query,setQuery]=useState(''),[preview,setPreview]=useState('');
+function RDPSettingsPage({status,config,setv,save,dirty,toast,onGoto}){
+ const desiredEnabled=config.rdp?.enabled!==false,runtimeEnabled=config.runtime?.rdp?.enabled!==false;
+ const controllerApproved=arr(status.approvedCapabilities).includes('rdp.controller');
+ const saveRDP=async()=>{await save({rdp:{enabled:desiredEnabled}})};
+ const restart=async()=>{try{const r=parseMutation(await call('goRestart'));if(!r.ok)throw new Error(r.message||'重启客户端失败')}catch(e){toast(e.message,'danger')}};
+ return <><PageHead title="远程桌面设置" actions={<Button onClick={()=>onGoto('rdp')}>返回远程桌面</Button>}/>
+ <Card title="RDP 客户端能力" eyebrow="CONTROLLER"><Setting title="启用远程桌面" desc="关闭时 Agent 不会向 Server 申请 rdp.controller，因此授权设备列表会为空。"><Switch checked={desiredEnabled} onChange={v=>setv('rdp.enabled',v)} label="启用远程桌面"/></Setting><Setting title="当前运行状态" desc={runtimeEnabled?'Agent 正在申请 RDP 能力':'当前进程未启用 RDP；保存后需要重启客户端'}><Badge tone={runtimeEnabled?'ok':'neutral'}>{runtimeEnabled?'已启用':'未启用'}</Badge></Setting><Setting title="Server 控制端授权" desc={status.connected?(controllerApproved?'当前会话已获得 rdp.controller':'当前会话没有 rdp.controller；请检查 Server 设备能力审批'):'连接 Server 后才能确认当前授权'}><Badge tone={controllerApproved?'ok':status.connected?'warn':'neutral'}>{controllerApproved?'已授权':status.connected?'未授权':'未连接'}</Badge></Setting>{dirty&&<SaveBar dirty label="保存 RDP 设置" hint="RDP 开关属于启动设置；保存后需重启客户端重新申请 Server 能力。" onSave={saveRDP}/>} {!dirty&&config.restartRequired&&arr(config.restartFields).some(x=>String(x).includes('RDP'))&&<div className="actions end top-gap"><Button primary onClick={restart}>重启客户端应用 RDP 设置</Button></div>}</Card>
+ </>;
+}
+
+function MessagesPage({messages,refresh,clear,toast}){
+ const[filter,setFilter]=useState('all'),[query,setQuery]=useState('');
  const classified=m=>({code:!!m.verificationCode||m.messageType==='verification_code'||m.popupType==='verification_code',important:m.messageType==='important'||m.popupType==='important'});
  const q=query.trim().toLowerCase();
  const filtered=messages.filter(m=>{const type=classified(m),typeOK=filter==='all'||(filter==='code'&&type.code)||(filter==='important'&&type.important)||(filter==='normal'&&!type.code&&!type.important);if(!typeOK)return false;if(!q)return true;return [m.title,m.content,m.source,m.verificationCode,m.messageType,m.popupType,m.messageRule,m.verificationRule].some(v=>String(v||'').toLowerCase().includes(q))});
  const copy=async t=>{if(!t)return;if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',String(t));else await navigator.clipboard.writeText(String(t));toast('已复制')};
- const timeout=Number(config?.verificationPopupTimeoutSec??15);
  return <><PageHead title="消息中心" desc="验证码、普通消息与重要提醒；匹配规则由 Server 管理，Agent 负责展示、弹窗和历史。" actions={<><Button onClick={refresh}>刷新</Button><Button danger onClick={clear}>清空历史</Button></>}/>
+ <div className="filter-bar message-filter-compact"><label className="message-type-filter"><span className="mini">类型</span><Select aria-label="消息类型" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">全部消息</option><option value="code">验证码</option><option value="normal">普通消息</option><option value="important">重要提醒</option></Select></label><div className="message-search"><Input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索标题、内容、来源、规则或验证码"/><span className="mini">{filtered.length} 条</span></div></div>
+ <div className="message-list">{filtered.slice().reverse().map((m,i)=>{const type=classified(m),code=type.code,important=type.important,msgType=m.messageType||m.popupType||(code?'verification_code':important?'important':'message'),rule=m.messageRule||m.verificationRule||'未标注规则';return <article className={cx('message-card',important&&'important')} key={m.id||i}><div className={cx('message-icon',code?'code':important?'important':'')}>{code?'#':important?'!':'✦'}</div><div className="grow"><div className="row between"><strong>{m.title||(code?'验证码':important?'重要消息':'消息')}</strong><div className="actions"><Badge tone={code?'ok':important?'danger':'blue'}>{code?'验证码':important?'重要':'通知'}</Badge><Badge tone={m.popup?'ok':'neutral'}>{m.popup?'弹窗':'仅历史'}</Badge></div></div><div className="mini">{[m.source||'RelayProxy',rule,fmtTime(m.createdAt)].filter(Boolean).join(' · ')}</div><div className="chips top-gap"><span className="chip mono">{msgType}</span>{m.popupType&&m.popupType!==msgType&&<span className="chip mono">compat · {m.popupType}</span>}</div><p>{m.content||''}</p>{m.verificationCode&&<button className="code-box" onClick={()=>copy(m.verificationCode)}>{m.verificationCode}<small>点击复制</small></button>}</div></article>})}{!filtered.length&&<Card><div className="empty">{messages.length?'没有符合当前筛选条件的消息。':'暂无消息。'}</div></Card>}</div>
+ </>
+}
+
+function MessageSettingsPage({config,setv,save,onGoto}){
+ const[preview,setPreview]=useState('');
+ const timeout=Number(config?.verificationPopupTimeoutSec??15);
+ return <><PageHead title="消息设置" actions={<Button onClick={()=>onGoto('messages')}>返回消息中心</Button>}/>
  <div className="cards-2">
   <Card title="弹窗策略" eyebrow="LOCAL PRESENTATION">
    <Setting title="消息弹窗自动关闭" desc="0 表示不自动关闭；支持的桌面端会使用系统原生弹窗。"><div className="row"><Input type="number" min="0" max="3600" value={timeout} onChange={e=>setv('verificationPopupTimeoutSec',Number(e.target.value))}/><span className="mini">秒</span></div></Setting>
@@ -504,16 +589,17 @@ function MessagesPage({messages,refresh,clear,toast,config,setv,save}){
   </Card>
   <Card title="测试弹窗" eyebrow="PREVIEW"><div className="actions"><Button onClick={()=>setPreview('verification')}>验证码</Button><Button onClick={()=>setPreview('message')}>普通消息</Button><Button onClick={()=>setPreview('important')}>重要提醒</Button></div><div className="notice top-gap">弹窗通过图标、Badge、按钮和轻量边框区分消息类型，具体呈现由当前平台负责。</div></Card>
  </div>
- <div className="filter-bar"><div className="segment">{[['all','全部'],['code','验证码'],['normal','普通消息'],['important','重要提醒']].map(x=><button className={filter===x[0]?'active':''} key={x[0]} onClick={()=>setFilter(x[0])}>{x[1]}</button>)}</div><div className="message-search"><Input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索标题、内容、来源、规则或验证码"/><span className="mini">{filtered.length} 条</span></div></div>
- <div className="message-list">{filtered.slice().reverse().map((m,i)=>{const type=classified(m),code=type.code,important=type.important,msgType=m.messageType||m.popupType||(code?'verification_code':important?'important':'message'),rule=m.messageRule||m.verificationRule||'未标注规则';return <article className={cx('message-card',important&&'important')} key={m.id||i}><div className={cx('message-icon',code?'code':important?'important':'')}>{code?'#':important?'!':'✦'}</div><div className="grow"><div className="row between"><strong>{m.title||(code?'验证码':important?'重要消息':'消息')}</strong><div className="actions"><Badge tone={code?'ok':important?'danger':'blue'}>{code?'验证码':important?'重要':'通知'}</Badge><Badge tone={m.popup?'ok':'neutral'}>{m.popup?'弹窗':'仅历史'}</Badge></div></div><div className="mini">{[m.source||'RelayProxy',rule,fmtTime(m.createdAt)].filter(Boolean).join(' · ')}</div><div className="chips top-gap"><span className="chip mono">{msgType}</span>{m.popupType&&m.popupType!==msgType&&<span className="chip mono">compat · {m.popupType}</span>}</div><p>{m.content||''}</p>{m.verificationCode&&<button className="code-box" onClick={()=>copy(m.verificationCode)}>{m.verificationCode}<small>点击复制</small></button>}</div></article>})}{!filtered.length&&<Card><div className="empty">{messages.length?'没有符合当前筛选条件的消息。':'暂无消息。'}</div></Card>}</div>
- <Modal open={!!preview} title={preview==='verification'?'验证码弹窗':preview==='important'?'重要提醒弹窗':'普通消息弹窗'} onClose={()=>setPreview('')} footer={<Button primary onClick={()=>setPreview('')}>关闭预览</Button>}><PopupPreview type={preview}/></Modal></>
+
+ <Modal open={!!preview} title={preview==='verification'?'验证码弹窗':preview==='important'?'重要提醒弹窗':'普通消息弹窗'} onClose={()=>setPreview('')} footer={<Button primary onClick={()=>setPreview('')}>关闭预览</Button>}><PopupPreview type={preview}/></Modal></>;
 }
 
 function MonitorPage({connections: snapshot,history,refresh,clear,openNative}){
- const[query,setQuery]=useState(''),[stateFilter,setStateFilter]=useState('all'),[protocolFilter,setProtocolFilter]=useState('all'),[actionFilter,setActionFilter]=useState('all');
+ const[query,setQuery]=useState(''),[stateFilter,setStateFilter]=useState('all'),[protocolFilter,setProtocolFilter]=useState('all'),[actionFilter,setActionFilter]=useState('all'),[visibleLimit,setVisibleLimit]=useState(100);
+ useEffect(()=>setVisibleLimit(100),[query,stateFilter,protocolFilter,actionFilter]);
  const allRows=arr(snapshot?.connections);
  const q=query.trim().toLowerCase();
  const rows=allRows.filter(x=>{const state=String(x.state||'').toLowerCase(),protocol=String(x.protocol||'').toLowerCase(),action=String(x.action||'').toUpperCase();const stateOK=stateFilter==='all'||(stateFilter==='active'&&state==='active')||(stateFilter==='connecting'&&state==='connecting')||(stateFilter==='ended'&&/closed|ended|done/.test(state))||(stateFilter==='error'&&(/error|failed|reject|blocked/.test(state)||!!x.error));const protocolOK=protocolFilter==='all'||protocol===protocolFilter;const actionOK=actionFilter==='all'||action===actionFilter;if(!stateOK||!protocolOK||!actionOK)return false;if(!q)return true;return [x.process_name,x.process,x.host,x.ip,x.rule,x.exit_id,x.path,x.source,x.entry].some(v=>String(v||'').toLowerCase().includes(q))});
+ const visibleRows=rows.slice(0,visibleLimit);
  const active=Number(snapshot?.active??allRows.filter(x=>/active|connecting/i.test(x.state||'')).length);
  const total=Number(snapshot?.total??allRows.length),omitted=Number(snapshot?.omitted||0);
  const totalBytes=Number(snapshot?.upload||0)+Number(snapshot?.download||0),rate=Number(snapshot?.upload_rate||0)+Number(snapshot?.download_rate||0);
@@ -521,8 +607,10 @@ function MonitorPage({connections: snapshot,history,refresh,clear,openNative}){
  const pathText=x=>x.path||(x.action==='DIRECT'?'DIRECT':x.exit_id?('PROXY · '+x.exit_id):(x.action||'—'));
  const hitText=x=>({'global_proxy':'全局代理','direct':'全局直连','default':'默认动作','loop-guard':'回环保护','relay-unavailable':'Relay 不可用','fakeip-dns':'本机 FakeIP DNS','fakeip-expired':'FakeIP 映射失效','fakeip-dns-exit-changed':'DNS 出口变更，FakeIP 缓存已失效','fakeip-disabled':'FakeIP 已关闭','fakeip-direct-unsupported':'FakeIP 不支持直连','fakeip-proxy-unavailable':'FakeIP 上游不可用','doh-endpoint-blocked':'已知 DoH 解析器阻断','doh-ip-endpoint-blocked':'DoH 目标 IP 阻断'}[x.rule]||x.rule||'未记录');
  return <><PageHead title="实时监控" desc="观察当前连接、进程、目标、规则、动作、出口、路径与流量。" actions={<><Button onClick={refresh}>刷新</Button><Button onClick={openNative}>独立窗口</Button><Button danger onClick={clear}>清理历史</Button></>}/>
- <div className="cards-4"><Metric label="活跃连接" value={active} hint={omitted?'另有 '+omitted+' 条未列出':'当前活动流'} series={history.active}/><Metric label="累计连接" value={total} hint="本进程计数窗口"/><Metric label="实时吞吐" value={fmtBytes(rate,true)} hint={fmtBytes(snapshot?.download_rate||0,true)+' ↓ · '+fmtBytes(snapshot?.upload_rate||0,true)+' ↑'} series={history.total}/><Metric label="累计流量" value={fmtBytes(totalBytes)} hint={fmtBytes(snapshot?.download||0)+' ↓ · '+fmtBytes(snapshot?.upload||0)+' ↑'}/></div>
- <Card title="连接列表" eyebrow={rows.length+' / '+allRows.length+' VISIBLE'}><div className="monitor-filters"><Input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索进程 / 目标 / 规则 / 出口"/><Select value={stateFilter} onChange={e=>setStateFilter(e.target.value)}><option value="all">全部状态</option><option value="connecting">连接中</option><option value="active">活跃</option><option value="ended">已结束</option><option value="error">失败 / 阻断</option></Select><Select value={protocolFilter} onChange={e=>setProtocolFilter(e.target.value)}><option value="all">全部协议</option><option value="tcp">TCP</option><option value="udp">UDP</option></Select><Select value={actionFilter} onChange={e=>setActionFilter(e.target.value)}><option value="all">全部动作</option><option value="PROXY">代理</option><option value="DIRECT">直连</option><option value="REJECT">阻断</option></Select></div><div className="conn-table"><div className="conn-row conn-head"><span>应用 / 目标</span><span>连接路径</span><span>命中规则</span><span>状态</span><span>流量 / 速率</span><span>开始时间</span></div>{rows.map((x,i)=>{const proc=x.process_name||x.process||'未知进程',target=targetText(x),path=pathText(x),state=x.state||'—',up=Number(x.upload||0),down=Number(x.download||0),upRate=Number(x.upload_rate||0),downRate=Number(x.download_rate||0);return <div className="conn-row" key={x.id||i}><div><strong>{proc}</strong><div className="mono mini">{target} · {(x.protocol||'tcp').toUpperCase()}</div>{x.host&&<div className="mini">IP {x.ip||'—'} · 域名来源：{{'dns':'DNS','tls-sni':'TLS SNI','http-host':'HTTP Host','network-extension':'系统网络扩展','requested':'应用请求','fakeip':'FakeIP DNS 映射'}[x.domain_source]||x.domain_source||'未知'}</div>}{x.error&&<div className="conn-error">{x.error}</div>}</div><div><span>{path}</span><div className="mini">{x.entry||x.source||''}</div></div><div><span className={cx('rule-hit',!x.rule&&'muted')} title={'本连接路由决策：'+hitText(x)}>{hitText(x)}</span></div><Badge tone={tone(state)}>{state}</Badge><div className="mono"><div>{fmtBytes(down)} ↓ · {fmtBytes(up)} ↑</div><div className="mini">{fmtBytes(downRate,true)} ↓ · {fmtBytes(upRate,true)} ↑</div></div><span className="mini">{fmtTime(x.started_at)}</span></div>})}{!rows.length&&<div className="empty">{allRows.length?'没有符合当前筛选条件的连接。':'暂无连接记录。'}</div>}</div></Card></>
+ <Card title="连接列表" eyebrow={visibleRows.length+' / '+rows.length+' 条显示 · '+allRows.length+' 条记录'}><div className="monitor-filters" role="search" aria-label="连接筛选"><Input aria-label="搜索进程、目标、规则或出口" value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索进程 / 目标 / 规则 / 出口"/><Select aria-label="连接状态" value={stateFilter} onChange={e=>setStateFilter(e.target.value)}><option value="all">全部状态</option><option value="connecting">连接中</option><option value="active">活跃</option><option value="ended">已结束</option><option value="error">失败 / 阻断</option></Select><Select aria-label="连接协议" value={protocolFilter} onChange={e=>setProtocolFilter(e.target.value)}><option value="all">全部协议</option><option value="tcp">TCP</option><option value="udp">UDP</option></Select><Select aria-label="连接动作" value={actionFilter} onChange={e=>setActionFilter(e.target.value)}><option value="all">全部动作</option><option value="PROXY">代理</option><option value="DIRECT">直连</option><option value="REJECT">阻断</option></Select></div><div className="conn-table" role="region" aria-label="实时连接列表" tabIndex={0}><div className="conn-row conn-head"><span>应用 / 目标</span><span>连接路径</span><span>命中规则</span><span>状态</span><span>流量 / 速率</span><span>开始时间</span></div>{visibleRows.map((x,i)=>{const proc=x.process_name||x.process||'未知进程',target=targetText(x),path=pathText(x),state=x.state||'—',up=Number(x.upload||0),down=Number(x.download||0),upRate=Number(x.upload_rate||0),downRate=Number(x.download_rate||0);return <div className="conn-row" key={x.id||i}><div><strong>{proc}</strong><div className="mono mini">{target} · {(x.protocol||'tcp').toUpperCase()}</div>{x.host&&<div className="mini">IP {x.ip||'—'} · 域名来源：{{'dns':'DNS','tls-sni':'TLS SNI','http-host':'HTTP Host','network-extension':'系统网络扩展','requested':'应用请求','fakeip':'FakeIP DNS 映射'}[x.domain_source]||x.domain_source||'未知'}</div>}{x.error&&<div className="conn-error">{x.error}</div>}</div><div><span>{path}</span><div className="mini">{x.entry||x.source||''}</div></div><div><span className={cx('rule-hit',!x.rule&&'muted')} title={'本连接路由决策：'+hitText(x)}>{hitText(x)}</span></div><Badge tone={tone(state)}>{state}</Badge><div className="mono"><div>{fmtBytes(down)} ↓ · {fmtBytes(up)} ↑</div><div className="mini">{fmtBytes(downRate,true)} ↓ · {fmtBytes(upRate,true)} ↑</div></div><span className="mini">{fmtTime(x.started_at)}</span></div>})}{!rows.length&&<div className="empty">{allRows.length?'没有符合当前筛选条件的连接。':'暂无连接记录。'}</div>}</div>{rows.length>visibleLimit&&<div className="monitor-load-more"><span className="mini">已显示 {visibleRows.length} / {rows.length} 条匹配连接</span><Button onClick={()=>setVisibleLimit(n=>n+100)}>显示更多（剩余 {rows.length-visibleRows.length} 条）</Button></div>}</Card>
+ <details className="monitor-stats-disclosure"><summary><strong>流量统计与趋势</strong><span className="mini">{active} 条活跃 · {fmtBytes(rate,true)} 当前吞吐 · {fmtBytes(totalBytes)} 累计</span></summary>
+<div className="cards-4"><Metric label="活跃连接" value={active} hint={omitted?'另有 '+omitted+' 条未列出':'当前活动流'} series={history.active}/><Metric label="累计连接" value={total} hint="本进程计数窗口"/><Metric label="实时吞吐" value={fmtBytes(rate,true)} hint={fmtBytes(snapshot?.download_rate||0,true)+' ↓ · '+fmtBytes(snapshot?.upload_rate||0,true)+' ↑'} series={history.total}/><Metric label="累计流量" value={fmtBytes(totalBytes)} hint={fmtBytes(snapshot?.download||0)+' ↓ · '+fmtBytes(snapshot?.upload||0)+' ↑'}/></div>
+ </details></>
 }
 
 function DiagnosticsPage({diagnostics,logs,refreshDiagnostics,clearLogs,copyLogs}){
@@ -549,19 +637,19 @@ function DiagnosticsPage({diagnostics,logs,refreshDiagnostics,clearLogs,copyLogs
  <Card title="运行日志" eyebrow={visible.length+' / '+logs.length+' LINES'}><div className="log-toolbar"><div className="segment">{[['all','全部'],['relay','中继'],['p2p','P2P'],['proxy','代理'],['exit','出口']].map(x=><button key={x[0]} className={filter===x[0]?'active':''} onClick={()=>setFilter(x[0])}>{x[1]}</button>)}</div><span className="mini">{filter==='all'?'显示全部日志':'仅显示匹配分类的日志'}</span></div><div className="log-console">{visible.length?visible.map((x,i)=><div key={i} className={cx(/error|failed|失败|fatal|timeout/i.test(x)&&'log-error',/warn|retry|警告/i.test(x)&&'log-warn')}>{x}</div>):<div className="muted">当前分类暂无日志</div>}</div></Card></>
 }
 
-function SettingsNavigation({page,onGoto}){
- return <nav className="settings-navigation" aria-label="设置分类">
-  <button className={'settings-nav-item '+(page==='settings'?'active':'')} onClick={()=>onGoto('settings')}>
-   <span className="settings-nav-icon"><Icon name="settings"/></span>
-   <span><strong>常规设置</strong><small>外观、启动与客户端维护</small></span>
-  </button>
-  {SETTINGS_SECTIONS.map(([id,icon,label,description])=>
-   <button key={id} className={'settings-nav-item '+(page===id?'active':'')} onClick={()=>onGoto(id)}>
+function SectionNavigation({page,onGoto,kind}){
+ const configuration=kind==='configuration';
+ const items=configuration?CONFIG_SECTIONS:[['settings','settings','常规设置','外观、启动与客户端维护'],...SETTINGS_SECTIONS];
+ return <nav className="settings-navigation" aria-label={configuration?'网络配置分类':'设置分类'}>
+  {items.map(([id,icon,label,description])=>
+   <button key={id} type="button" title={description} aria-current={page===id?'page':undefined} className={'settings-nav-item '+(page===id?'active':'')} onClick={()=>onGoto(id)}>
     <span className="settings-nav-icon"><Icon name={icon}/></span>
     <span><strong>{label}</strong><small>{description}</small></span>
    </button>)}
  </nav>;
 }
+function SettingsNavigation({page,onGoto}){return <SectionNavigation page={page} onGoto={onGoto} kind="settings"/>}
+function ConfigNavigation({page,onGoto}){return <SectionNavigation page={page} onGoto={onGoto} kind="configuration"/>}
 
 function SettingsPage({config,setv,save,toast,onReload,onRestart,onQuit,onGoto,dirty,onConfigRefresh,onRefreshCapabilities}){
  const[service,setService]=useState(null);
@@ -572,7 +660,7 @@ function SettingsPage({config,setv,save,toast,onReload,onRestart,onQuit,onGoto,d
  return <><SettingsNavigation page="settings" onGoto={onGoto}/><PageHead title="设置" desc="主题、窗口行为、开机自启与客户端维护。"/>
  {config.restartRequired&&<div className="notice warn">以下设置需要重启客户端后生效：{arr(config.restartFields).join('、')||'启动参数'}。</div>}
  {config.reloadPending&&<div className="notice warn">配置文件中的策略与当前运行状态不同，可重新读取并应用。</div>}
- <div className="cards-2"><Card title="外观与窗口" eyebrow="APPEARANCE"><Setting title="主题" desc="跟随当前操作系统的外观设置"><Select value={config.theme||'system'} onChange={e=>setv('theme',e.target.value)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></Select></Setting><Setting title="关闭时最小化到托盘" desc="关闭主窗口后 Agent 保持运行"><Switch checked={!!config.minimizeToTray} onChange={v=>setv('minimizeToTray',v)}/></Setting><Setting title="消息弹窗" desc="自动关闭时长与弹窗预览在消息中心配置"><Button quiet onClick={()=>onGoto('messages')}>前往消息中心 ›</Button></Setting><div className="actions end top-gap"><Button primary onClick={()=>save({gui:{theme:config.theme,minimizeToTray:config.minimizeToTray}})}>保存界面设置</Button></div></Card>
+ <div className="cards-2"><Card title="外观与窗口" eyebrow="APPEARANCE"><Setting title="主题" desc="跟随当前操作系统的外观设置"><Select value={config.theme||'system'} onChange={e=>setv('theme',e.target.value)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></Select></Setting><Setting title="关闭时最小化到托盘" desc="关闭主窗口后 Agent 保持运行"><Switch checked={!!config.minimizeToTray} onChange={v=>setv('minimizeToTray',v)}/></Setting><div className="actions end top-gap"><Button primary onClick={()=>save({gui:{theme:config.theme,minimizeToTray:config.minimizeToTray}})}>保存界面设置</Button></div></Card>
  <Card title="启动与文件" eyebrow="APPLICATION"><Setting title="开机自启" desc="启动能力及所需权限由当前操作系统决定"><Switch checked={!!config.isAutostart} onChange={auto}/></Setting><Setting title="配置文件" desc={config.configPath||'未指定'}><Button onClick={()=>call('goOpenConfigDir')}>打开目录</Button></Setting><Setting title="版本" desc="RelayProxy Agent"><span className="mono">{config.version||'dev'}</span></Setting><div className="actions top-gap"><Button onClick={onReload}>重新读取并应用</Button><Button onClick={onRestart}>重启客户端</Button><Button danger onClick={onQuit}>退出</Button></div></Card></div>
  {windowsServiceAvailable&&<Card title="Windows 网络服务" eyebrow="NETWORK SERVICE"><div className="setting"><div className="grow"><b>服务状态</b><div className="mini">{service?.message||'透明代理由低权限 GUI 与 SYSTEM 网络服务协作完成。'}</div></div><Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'就绪':service?.running?'运行中':service?.installed?'已安装':'未安装'}</Badge></div>{service&&<div className="service-grid"><div><span>安装</span><b>{service.installed?'是':'否'}</b></div><div><span>运行</span><b>{service.running?'是':'否'}</b></div><div><span>自动启动</span><b>{service.autoStartKnown?(service.autoStart?'是':'否'):'未知'}</b></div><div><span>版本匹配</span><b>{service.versionMatch?'是':'否'}</b></div><div><span>恢复策略</span><b>{service.recoveryKnown?(service.recoveryEnabled?'已启用':'未启用'):'未知'}</b></div><div><span>PID</span><b className="mono">{service.pid||'—'}</b></div>{service.binaryPath&&<div className="service-path"><span>程序路径</span><b className="mono">{service.binaryPath}</b></div>}</div>}{dirty&&<div className="notice warn top-gap">存在未保存配置时暂不允许卸载 Network Service，避免原生侧关闭透明代理后导致草稿 revision 失效。</div>}<div className="actions top-gap"><Button onClick={()=>act('goRepairNetworkService','网络服务修复完成')}>修复服务</Button><Button danger disabled={dirty} onClick={()=>window.confirm('卸载 RelayProxy Windows 网络服务？此操作会同时关闭已保存的系统透明代理配置。')&&act('goUninstallNetworkService','网络服务已卸载')}>卸载服务</Button></div></Card>}</>
 }
@@ -582,28 +670,92 @@ function PopupPreview({type}){
  return <div className={cx('popup-preview',important&&'important')}><div className="popup-preview-head"><div className={cx('message-icon',isCode?'code':important?'important':'')}>{isCode?'#':important?'!':'✦'}</div><div><div className="eyebrow">{important?'IMPORTANT':isCode?'VERIFICATION CODE':'MESSAGE'}</div><strong>{important?'重要提醒':isCode?'收到新的验证码':'收到新消息'}</strong></div></div><div className="mini top-gap">来自 RelayProxy · 刚刚</div>{isCode&&<div className="preview-code">482913</div>}<p>{important?'Tokyo 出口已从 Public Direct 降级至 Relay，请检查公网直连状态。':isCode?'用于登录验证，请勿向他人泄露。':'设备审批已完成，新的授权能力已同步到本机。'}</p><div className="actions end"><Button>{isCode?'稍后处理':'知道了'}</Button>{isCode&&<Button primary>复制验证码</Button>}</div></div>
 }
 
-function SpeedModal({open,exits,initialExit,onClose,toast}){
- const[exitID,setExitID]=useState(''),[duration,setDuration]=useState(3),[busy,setBusy]=useState(false),[result,setResult]=useState(null),[calibration,setCalibration]=useState(null),[calibrateStep,setCalibrateStep]=useState(0);
- const exitsRef=useRef(exits);exitsRef.current=exits;
- useEffect(()=>{if(!open)return;setResult(null);setCalibration(null);setCalibrateStep(0);setExitID(exitUsable(exitsRef.current,initialExit)?initialExit:'')},[open,initialExit]);
- useEffect(()=>{if(open&&exitID&&!exitUsable(exits,exitID))setExitID('')},[open,exitID,exits]);
- const run=async()=>{setBusy(true);setResult(null);setCalibration(null);try{const p=parseMutation(await call('goRunSpeedTest',exitID,Number(duration)));if(!p.ok)throw new Error(p.message||'测速失败');setResult(p.result||p);toast('出口测速完成')}catch(e){setResult({error:e.message})}finally{setBusy(false)}};
- const calibrate=async()=>{if(busy)return;setBusy(true);setCalibration(null);setResult(null);setCalibrateStep(0);try{
-  const records=[];
+function DeviceSpeedLinkDetails({exitID,exits,result,status,phase,revealCount}){
+ const matched=arr(exits).find(x=>(x.deviceId||x.id)===exitID);
+ const online=status?.connected===true;
+ const rows=deviceSpeedChecks({exitID,exit:matched,connected:online,phase,result,revealCount});
+ const udp=Number(status?.nativeUdp?.associations||0);
+ const stateLabel={checked:'通过',progress:'检测中',waiting:'待检测',candidate:'仅候选',unknown:'未确认',failed:'失败'};
+ const [checkExpanded,setCheckExpanded]=useState(true);
+ const passedCount=rows.filter(row=>row.state==='checked').length;
+ const summary=phase==='running'?'测速中':phase==='reviewing'?'结果核验中':phase==='failed'?'检测失败':phase==='done'?passedCount+'/'+rows.length+' 项通过':passedCount+'/'+rows.length+' 项已确认';
+ return <section className="device-speed-evidence" aria-label="该设备链路检测进度">
+  <button type="button" className="device-speed-check-toggle" aria-expanded={checkExpanded} aria-controls="device-speed-check-content" onClick={()=>setCheckExpanded(open=>!open)}>
+   <strong>链路逐项检查</strong><span className="device-speed-check-summary" role="status" aria-live="polite">{summary}</span><span className="device-speed-check-chevron" aria-hidden="true">{checkExpanded?'⌄':'›'}</span>
+  </button>
+  {checkExpanded&&<div id="device-speed-check-content" className="device-speed-check-content">
+  <div className="mini">目标：{matched?.name||matched?.deviceName||exitID||'未指定设备'} · 本次测速未使用的路径仅代表未确认，不代表不可用。</div>
+  <div className="device-speed-check-list" role="list">
+   {rows.map(row=><div key={row.id} role="listitem" className={'device-speed-check is-'+row.state} title={row.label+' · '+row.detail} aria-label={row.label+'，'+row.detail+'，'+stateLabel[row.state]}>
+    <span className="device-speed-check-icon" aria-hidden="true">{row.state==='checked'?'✓':row.state==='progress'?'◌':row.state==='failed'?'×':row.state==='waiting'?'·':row.state==='candidate'?'i':'–'}</span>
+    <strong className="device-speed-check-label">{row.label}</strong>
+    <span className="device-speed-check-detail">{row.detail}</span>
+    <span className="device-speed-check-state">{stateLabel[row.state]}</span>
+   </div>)}
+  </div>
+  <div className="mini device-speed-check-note" role="status" aria-live="polite">{phase==='running'?'正在对该设备执行双向测速，链路结果尚未返回。':phase==='reviewing'?'测速已结束，正在逐项核对结果。':phase==='done'?'检测结果已逐项核对完成。':phase==='failed'?'测速失败，未确认的链路不会标记为通过。':'准备就绪，可开始检测所选设备。'}</div>
+  <details className="device-speed-local">
+   <summary>本机网络环境（不是远程设备测速结果）</summary>
+   <div className="device-speed-path-list">
+    <Setting title="本机 UPnP 映射" desc={status?.upnpError||status?.upnpAddress||'仅反映本机网关；映射成功不代表远端设备可达'}><Badge tone={status?.upnpState==='MAPPED'?'ok':status?.upnpState==='FAILED'||status?.upnpState==='DEGRADED'?'danger':'neutral'}>{status?.upnpState||'DISABLED'}</Badge></Setting>
+    <Setting title="本机 Native UDP" desc="当前活动的数据报 Association">{udp+' 个'}</Setting>
+    <Setting title="Server Relay 控制会话" desc="仅代表 Agent 控制连接，并非这台设备测速路径"><Badge tone={online?'blue':'neutral'}>{online?'在线':'离线'}</Badge></Setting>
+    {exitID&&status?.rdpTargetId===exitID&&<><Setting title="RDP TCP 路径" desc="当前活动 RDP 目标是这台设备">{rdpPathLabel(status.rdpPathTcp)}</Setting><Setting title="RDP UDP 路径" desc={status.rdpUdpReason||'当前活动 RDP 目标是这台设备'}>{rdpPathLabel(status.rdpPathUdp)}</Setting></>}
+   </div>
+  </details>
+  </div>}
+ </section>;
+}
+
+function SpeedModal({open,exits,status,initialExit,onClose,toast}){
+ // Device Center is the source of truth. Never silently use the automatic
+ // default exit when the requested device is offline or has lost authorization.
+ const exitID=initialExit||'';
+ const matched=arr(exits).find(x=>(x.deviceId||x.id)===exitID);
+ const exitReady=!!status?.connected&&exitUsable(exits,exitID);
+ const[duration,setDuration]=useState(3),[busy,setBusy]=useState(false),[result,setResult]=useState(null),[calibration,setCalibration]=useState(null),[calibrateStep,setCalibrateStep]=useState(0);
+ const[phase,setPhase]=useState('idle'),[revealCount,setRevealCount]=useState(0);
+ useEffect(()=>{if(!open)return;setResult(null);setCalibration(null);setCalibrateStep(0);setPhase('idle');setRevealCount(0)},[open,exitID]);
+ // The speed RPC has no streamed sub-step results. After the actual response
+ // returns, check and reveal each evidence row without fake probe timings.
+ useEffect(()=>{
+  if(phase!=='reviewing')return;
+  if(revealCount>=DEVICE_SPEED_REVIEW_STEPS){setPhase('done');return}
+  const id=setTimeout(()=>setRevealCount(n=>n+1),190);
+  return()=>clearTimeout(id);
+ },[phase,revealCount]);
+ const close=()=>{if(!busy&&phase!=='reviewing')onClose()};
+ const run=async()=>{if(busy||!exitReady)return;const requested=exitID;setBusy(true);setPhase('running');setRevealCount(0);setResult(null);setCalibration(null);try{
+  const p=parseMutation(await call('goRunSpeedTest',requested,Number(duration)));
+  if(!p.ok)throw new Error(p.message||'测速失败');
+  const measurement=p.result||p;
+  if(measurement.exitId!==requested)throw new Error('测速返回的出口与所选设备不一致，不能归属链路结果');
+  if(!(measurement.upload||measurement.up)||!(measurement.download||measurement.down))throw new Error('测速结果缺少完整的上下行数据，链路未确认');
+  setResult(measurement);setPhase('reviewing');toast('出口测速完成');
+ }catch(e){setResult({error:e.message,exitId:requested});setPhase('failed')}finally{setBusy(false)}};
+ const calibrate=async()=>{if(busy||!exitReady)return;setBusy(true);setPhase('running');setRevealCount(0);setCalibration(null);setResult(null);setCalibrateStep(0);try{
+  const records=[];const requested=exitID;
   for(let i=0;i<BRUTAL_CALIBRATION_ROUNDS;i++){
-   const payload=parseMutation(await call('goRunSpeedTest',exitID,3));
+   const payload=parseMutation(await call('goRunSpeedTest',requested,3));
    if(!payload.ok)throw new Error(payload.message||'BBR 测速失败');
    const measurement=payload.result||payload;
+   if(measurement.exitId!==requested)throw new Error('出口在测速期间发生切换');
    validateBrutalCalibrationSample(measurement);
    records.push(measurement);
-   // A path/transport change must invalidate the entire experiment.
    if(i>0&&records[0].exitId!==measurement.exitId)throw new Error('出口在测速期间发生切换');
    setCalibrateStep(i+1);
   }
-  setCalibration(proposeBrutalFromSpeedTests(records));toast('BBR 保守带宽候选值已计算');
- }catch(e){setCalibration({error:e.message});toast('未能生成安全候选值','danger')}finally{setBusy(false)}};
- const leg=(label,v={})=><div><div className="eyebrow">{label}</div><div className="big small-big">{Number(v.megabitsPerSecond??v.mbps??0).toFixed(2)} Mbps</div><div className="mini">{(v.path||'—')+' · '+fmtBytes(v.bytesPerSecond||0,true)}</div>{v.quic&&<div className="mini">丢包 {Number(v.quic.sent_packet_loss_pct||0).toFixed(2)}% · RTT 抖动 {Number(v.quic.rtt_deviation_ms||0).toFixed(1)} ms · GSO {v.quic.gso?'ON':'OFF'}{v.quic.congestion_controller?' · '+v.quic.congestion_controller:''}{v.quic.brutal_fallback_reason&&<div className="notice warn">Brutal 已自动退回 BBR：{v.quic.brutal_fallback_reason}</div>}{(v.quic.udp_read_buffer_bytes||v.quic.udp_write_buffer_bytes)?<div>UDP 缓冲：读取 {fmtBytes(v.quic.udp_read_buffer_bytes||0)} · 写入 {fmtBytes(v.quic.udp_write_buffer_bytes||0)}</div>:null}</div>}</div>;
- return <Modal open={open} title="出口双向测速" onClose={onClose} footer={<><Button onClick={onClose}>关闭</Button><Button disabled={busy} onClick={calibrate}>{busy&&calibrateStep?'校准中 '+calibrateStep+'/'+BRUTAL_CALIBRATION_ROUNDS:'5 轮 BBR 保守校准'}</Button><Button primary disabled={busy} onClick={run}>{busy?'测速中…':'开始测速'}</Button></>}><div className="form-grid"><Field label="出口"><Select value={exitID} onChange={e=>setExitID(e.target.value)}><option value="">当前 / 自动出口</option>{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false}>{x.name||x.deviceId}{x.online===false?' · 离线':''}</option>)}</Select></Field><Field label="每方向时长（秒）"><Input type="number" min="1" max="30" value={duration} onChange={e=>setDuration(Number(e.target.value))}/></Field></div>{calibration&&<div className={cx('speed-result',calibration.error&&'error')}>{calibration.error?calibration.error:<><div className="notice warn">仅验证本机 BBR 发送侧，无法确认服务端发送侧的控制器或真实链路容量；共享公平性、负载 RTT 与 Hysteria2 实网对照仍须单独验收。本功能不会应用配置。</div><div>当前 Relay BBR 五轮候选：上行 <b>{calibration.upload.candidateMbps} Mbps</b> · 下行 <b>{calibration.download.candidateMbps} Mbps</b></div><div className="mini">最低分位吞吐：上行 {calibration.upload.bbrP10Mbps} Mbps / 下行 {calibration.download.bbrP10Mbps} Mbps；预留 40% 带宽余量。</div></>}</div>}{result&&<div className={cx('speed-result',result.error&&'error')}>{result.error?result.error:<>{leg('上行',result.upload||result.up)}{leg('下行',result.download||result.down)}</>}</div>}</Modal>
+  setCalibration(proposeBrutalFromSpeedTests(records));setResult(records.at(-1));setPhase('reviewing');toast('BBR 保守带宽候选值已计算');
+ }catch(e){setCalibration({error:e.message});setResult({error:e.message,exitId});setPhase('failed');toast('未能生成安全候选值','danger')}finally{setBusy(false)}};
+ const leg=(label,v={})=><div><div className="eyebrow">{label}</div><div className="big small-big">{Number(v.megabitsPerSecond??v.mbps??0).toFixed(2)} Mbps</div><div className="mini">{(v.path||'—')+' · '+fmtBytes(v.bytesPerSecond||0,true)}</div>{v.quic&&<div className="mini">丢包 {Number(v.quic.sent_packet_loss_pct||0).toFixed(2)}% · RTT {Number(v.quic.smoothed_rtt_ms||v.quic.latest_rtt_ms||0).toFixed(1)} ms · RTT 抖动 {Number(v.quic.rtt_deviation_ms||0).toFixed(1)} ms · GSO {v.quic.gso?'ON':'OFF'}{v.quic.congestion_controller?' · '+v.quic.congestion_controller:''}{v.quic.brutal_fallback_reason&&<div className="notice warn">Brutal 已自动退回 BBR：{v.quic.brutal_fallback_reason}</div>}{(v.quic.udp_read_buffer_bytes||v.quic.udp_write_buffer_bytes)?<div>UDP 缓冲：读取 {fmtBytes(v.quic.udp_read_buffer_bytes||0)} · 写入 {fmtBytes(v.quic.udp_write_buffer_bytes||0)}</div>:null}</div>}</div>;
+ const reviewing=phase==='reviewing';
+ return <Modal open={open} title="出口双向测速 · 设备链路信息" wide onClose={close} footer={<><Button disabled={busy||reviewing} onClick={close}>关闭</Button><Button disabled={busy||reviewing||!exitReady} onClick={calibrate}>{busy&&calibrateStep?'校准中 '+calibrateStep+'/'+BRUTAL_CALIBRATION_ROUNDS:'5 轮 BBR 保守校准'}</Button><Button primary disabled={busy||reviewing||!exitReady} onClick={run}>{busy?'测速中…':reviewing?'核验中…':'开始测速'}</Button></>}>
+  <div className="device-speed-target"><div className="device-speed-target-identity"><Icon name="devices" size={18}/><div><span className="mini">当前测速设备（由设备卡片指定）</span><strong>{matched?.name||matched?.deviceName||exitID||'未选择设备'}</strong><span className="mono mini">{exitID||'无设备 ID'}</span></div></div><Field label="每方向时长（秒）"><Input type="number" min="1" max="30" disabled={busy||reviewing} value={duration} onChange={e=>setDuration(Number(e.target.value))}/></Field></div>
+  {!exitReady&&<div className="notice warn" role="alert">该设备当前不在线或未获得代理出口授权，已阻止自动回退到其他出口。请返回设备中心刷新授权。</div>}
+  <DeviceSpeedLinkDetails exitID={exitID} exits={exits} result={result} status={status} phase={phase} revealCount={revealCount}/>
+  {calibration&&<div className={cx('speed-result',calibration.error&&'error')}>{calibration.error?calibration.error:<><div className="notice warn">仅验证本机 BBR 发送侧，无法确认服务端发送侧的控制器或真实链路容量；共享公平性、负载 RTT 与 Hysteria2 实网对照仍须单独验收。本功能不会应用配置。</div><div>当前 Relay BBR 五轮候选：上行 <b>{calibration.upload.candidateMbps} Mbps</b> · 下行 <b>{calibration.download.candidateMbps} Mbps</b></div><div className="mini">最低分位吞吐：上行 {calibration.upload.bbrP10Mbps} Mbps / 下行 {calibration.download.bbrP10Mbps} Mbps；预留 40% 带宽余量。</div></>}</div>}
+  {result&&<div className={cx('speed-result',result.error&&'error')}>{result.error?result.error:<>{leg('上行',result.upload||result.up)}{leg('下行',result.download||result.down)}</>}</div>}
+ </Modal>;
 }
 
 function BatchSpeedModal({open,exits,onClose,toast}){
@@ -617,7 +769,8 @@ function BatchSpeedModal({open,exits,onClose,toast}){
 }
 
 export default function App(){
- const[page,setPage]=useState(initialPage),[status,setStatus]=useState({connected:false,proxyExits:[]}),[config,setConfig]=useState(EMPTY),[loaded,setLoaded]=useState(false),[configError,setConfigError]=useState(''),[confirmQuit,setConfirmQuit]=useState(false),[dirty,setDirty]=useState(false),[pendingAction,setPendingAction]=useState(null),[exits,setExits]=useState([]),[exitsReady,setExitsReady]=useState(false),[targets,setTargets]=useState([]),[messages,setMessages]=useState([]),[unreadMessages,setUnreadMessages]=useState(0),[connections,setConnections]=useState({connections:[],active:0,total:0,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}),[logs,setLogs]=useState([]),[diagnostics,setDiagnostics]=useState({}),[toastState,setToastState]=useState(null),[speedOpen,setSpeedOpen]=useState(false),[speedExit,setSpeedExit]=useState(''),[batchSpeedOpen,setBatchSpeedOpen]=useState(false),[history,setHistory]=useState({down:[],up:[],total:[],active:[],latency:[]});
+ const[page,setPage]=useState(initialPage),[transferPanelOpen,setTransferPanelOpen]=useState(false),[transferSummary,setTransferSummary]=useState({running:0,total:0}),[status,setStatus]=useState({connected:false,proxyExits:[]}),[config,setConfig]=useState(EMPTY),[loaded,setLoaded]=useState(false),[configError,setConfigError]=useState(''),[confirmQuit,setConfirmQuit]=useState(false),[dirty,setDirty]=useState(false),[pendingAction,setPendingAction]=useState(null),[exits,setExits]=useState([]),[exitsReady,setExitsReady]=useState(false),[targets,setTargets]=useState([]),[filePeers,setFilePeers]=useState([]),[fileTarget,setFileTarget]=useState(null),[messages,setMessages]=useState([]),[unreadMessages,setUnreadMessages]=useState(0),[connections,setConnections]=useState({connections:[],active:0,total:0,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}),[logs,setLogs]=useState([]),[diagnostics,setDiagnostics]=useState({}),[toastState,setToastState]=useState(null),[speedOpen,setSpeedOpen]=useState(false),[speedExit,setSpeedExit]=useState(''),[batchSpeedOpen,setBatchSpeedOpen]=useState(false),[history,setHistory]=useState({down:[],up:[],total:[],active:[],latency:[]});
+ const syncTransferSummary=useCallback((running,total)=>setTransferSummary(old=>old.running===running&&old.total===total?old:{running,total}),[]);
  const pushHistory=useCallback(patch=>setHistory(h=>{const n={...h};for(const k in patch)n[k]=[...h[k],Number(patch[k])||0].slice(-SPARK_POINTS);return n}),[]);
  const applyStatus=useCallback(x=>{setStatus(x||{});pushHistory({latency:x?.connected?x.latency:0})},[pushHistory]);
  const toastTimer=useRef(null),exitInventoryKey=useRef(''),pageRef=useRef(page),messageIDs=useRef(new Set());
@@ -628,7 +781,12 @@ export default function App(){
  const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');setConfig({...EMPTY,...x,customExits:arr(x.customExits),socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules),subscriptions:arr(x.routing?.subscriptions)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
  const refreshNetworkCapabilities=useCallback(async()=>{if(!hasBridge('goGetNetworkCapabilities'))return null;try{const x=await callJSON('goGetNetworkCapabilities',{});setConfig(p=>({...p,networkCapabilities:x||{}}));return x}catch{return null}},[]);
  const refreshExits=useCallback(async()=>{if(hasBridge('goGetProxyExits'))try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch(e){toast('读取授权出口失败：'+e.message,'danger')}},[toast]);
- const refreshTargets=useCallback(async()=>{if(hasBridge('goGetRDPTargets'))try{setTargets(arr(await callJSON('goGetRDPTargets',[])))}catch(e){toast(e.message,'danger')}},[toast]);
+ const refreshTargets=useCallback(async()=>{if(hasBridge('goGetRDPTargets'))try{setTargets(arr(await callJSON('goGetRDPTargets',[])))}catch(e){setTargets([]);toast(e.message,'danger')}},[toast]);
+ const refreshFilePeers=useCallback(async()=>{
+  if(!hasBridge('goGetFileSharePeers')){setFilePeers([]);return}
+  try{setFilePeers(onlyVerifiedFilePeers(await callJSON('goGetFileSharePeers',[])))}
+  catch{setFilePeers([])}
+ },[]);
  const refreshMessages=useCallback(async()=>{if(hasBridge('goGetMessages'))try{const items=arr(await callJSON('goGetMessages',[]));messageIDs.current=new Set(items.map(x=>x?.id).filter(Boolean));setMessages(items)}catch{}},[]);
  const refreshConnections=useCallback(async()=>{if(hasBridge('goGetConnections'))try{const x=await callJSON('goGetConnections',{connections:[]});const snap=Array.isArray(x)?{connections:x,active:x.filter(v=>/active|connecting/i.test(v.state||'')).length,total:x.length,omitted:0,upload:0,download:0,upload_rate:0,download_rate:0}:{connections:arr(x?.connections),active:Number(x?.active||0),total:Number(x?.total||0),omitted:Number(x?.omitted||0),upload:Number(x?.upload||0),download:Number(x?.download||0),upload_rate:Number(x?.upload_rate||0),download_rate:Number(x?.download_rate||0),sampled_at:x?.sampled_at,rate_window:x?.rate_window};setConnections(snap);pushHistory({down:snap.download_rate,up:snap.upload_rate,total:snap.download_rate+snap.upload_rate,active:snap.active})}catch{}},[pushHistory]);
  const refreshLogs=useCallback(async()=>{if(hasBridge('goGetLogs'))try{setLogs(arr(await callJSON('goGetLogs',[])).map(logText).filter(Boolean))}catch{}},[]);
@@ -639,45 +797,67 @@ export default function App(){
  // Wails or the HTTP bridge may start after React mounts. Keep retrying
  // until settings are actually available instead of freezing on empty defaults.
  useEffect(()=>{if(loaded)return;const timer=setInterval(()=>{void refreshConfig()},3000);return()=>clearInterval(timer)},[loaded,refreshConfig]);
- useEffect(()=>{pageRef.current=page;sessionStorage.setItem('relayproxy-react-page',page);if(page==='exits')refreshExits();if(page==='rdp')refreshTargets();if(page==='messages'){setUnreadMessages(0);refreshMessages()}if(page==='monitor')refreshConnections();if(page==='diagnostics'){refreshDiagnostics();refreshLogs()}},[page,refreshExits,refreshTargets,refreshMessages,refreshConnections,refreshDiagnostics,refreshLogs]);
+ useEffect(()=>{pageRef.current=page;sessionStorage.setItem('relayproxy-react-page',page);if(page==='exits'){refreshExits();refreshTargets();refreshFilePeers()}if(page==='rdp')refreshTargets();if(page==='messages'){setUnreadMessages(0);refreshMessages()}if(page==='monitor')refreshConnections();if(page==='diagnostics'){refreshDiagnostics();refreshLogs()}},[page,refreshExits,refreshTargets,refreshFilePeers,refreshMessages,refreshConnections,refreshDiagnostics,refreshLogs]);
+ useEffect(()=>{
+  if(page!=='exits')return;
+  const timer=setInterval(()=>void refreshFilePeers(),5000);
+  return()=>{clearInterval(timer);setFilePeers([])};
+ },[page,refreshFilePeers]);
  useEffect(()=>theme(config.theme||'system'),[config.theme,theme]);
 
  const setv=useCallback((path,value,markDirty=true)=>{setConfig(prev=>{const next=structuredClone(prev),keys=path.split('.');let o=next;for(let i=0;i<keys.length-1;i++){o[keys[i]]=o[keys[i]]&&typeof o[keys[i]]==='object'?o[keys[i]]:{};o=o[keys[i]]}o[keys[keys.length-1]]=value;return next});if(markDirty)setDirty(true)},[]);
  const save=useCallback(async payload=>{if(!loaded||!config.revision){toast('配置尚未就绪，暂不能保存','danger');return false}try{const r=await saveConfig(config.revision,payload);if(!r.ok)throw new Error(r.message||'保存失败');await refreshConfig();await refreshStatus();toast(r.restartRequired?(r.message||'已保存，部分设置需重启'):(r.message||'已保存'));return true}catch(e){toast(e.message,'danger');return false}},[loaded,config.revision,toast,refreshConfig,refreshStatus]);
- const select=useCallback(async id=>{try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName(exits,id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[exits,refreshConfig,refreshStatus,toast]);
+ const select=useCallback(async id=>{try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName([...exits,...arr(config.customExits)],id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[exits,config.customExits,refreshConfig,refreshStatus,toast]);
  const clearMessages=useCallback(async()=>{if(messages.length&&!confirm('清空本设备的消息历史？'))return;await call('goClearMessages');messageIDs.current.clear();setMessages([]);setUnreadMessages(0);toast('消息历史已清空')},[messages.length,toast]);
  const clearConnections=useCallback(async()=>{await call('goClearConnections');await refreshConnections();toast('已清理结束连接历史')},[refreshConnections,toast]);
  const clearLogs=useCallback(async()=>{await call('goClearLogs');setLogs([]);toast('日志已清空')},[toast]);
  const copyLogs=useCallback(async()=>{const text=logs.join('\n');if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',text);else await navigator.clipboard.writeText(text);toast('日志已复制')},[logs,toast]);
- const requestPage=useCallback(next=>{if(next===page)return;if(dirty){setPendingAction({kind:'page',target:next});return}setPage(next)},[dirty,page]);
+ const requestPage=useCallback(next=>{if(next===page)return;if(dirty){setPendingAction({kind:'page',target:next});return}setFileTarget(null);setPage(next)},[dirty,page]);
+ const openDeviceFiles=useCallback(deviceID=>{
+  if(dirty){setPendingAction({kind:'page',target:'files',fileDevice:deviceID});return}
+  setFileTarget({device:deviceID,serial:Date.now()});
+  setPage('files');
+ },[dirty]);
+ const connectDeviceRDP=useCallback(async deviceID=>{
+  const target=targets.find(t=>(t.deviceId||t.id)===deviceID);
+  if(!status.connected||!target||target.online===false||config.rdp?.enabled===false||config.runtime?.rdp?.enabled===false||!arr(status.approvedCapabilities).includes('rdp.controller')){toast('远程桌面目标当前不可连接，请检查设备状态与控制端授权','warn');return}
+  try{const result=parseMutation(await call('goConnectRDP',deviceID,true));
+   if(!result.ok)throw new Error(result.message||'RDP 连接失败');
+   await refreshStatus();toast('已连接远程桌面');
+   requestPage('rdp');
+  }catch(e){toast(e.message||String(e),'danger')}
+ },[targets,status,config.rdp,config.runtime,refreshStatus,requestPage,toast]);
  useEffect(()=>{window.relayNavigate=requestPage;return()=>{delete window.relayNavigate}},[requestPage]);
  const reloadConfig=useCallback(async()=>{let r;try{r=parseMutation(await call('goReloadConfig'))}catch(e){r={ok:false,message:e.message}}await refreshConfig();await refreshStatus();if(!r.ok){toast(r.message||'重新读取配置失败','danger');return}toast(r.message||'已重新读取配置')},[refreshConfig,refreshStatus,toast]);
  const restartApp=useCallback(async()=>{try{const r=parseMutation(await call('goRestart'));if(!r.ok)throw new Error(r.message||'重启客户端失败')}catch(e){toast(e.message,'danger')}},[toast]);
  const quitApp=useCallback(async()=>{try{await call('goQuit')}catch(e){toast('退出失败：'+(e?.message||String(e)),'danger')}},[toast]);
  const requestLifecycle=useCallback(kind=>{if(dirty){setPendingAction({kind});return}if(kind==='reload')void reloadConfig();else if(kind==='restart')void restartApp();else if(kind==='quit')setConfirmQuit(true)},[dirty,reloadConfig,restartApp,quitApp]);
- const discardAndContinue=useCallback(async()=>{const action=pendingAction;if(!action)return;setPendingAction(null);setDirty(false);if(action.kind==='page'){await refreshConfig();setPage(action.target);return}if(action.kind==='reload'){await reloadConfig();return}if(action.kind==='restart'){await restartApp();return}if(action.kind==='quit'){await quitApp()}},[pendingAction,refreshConfig,reloadConfig,restartApp,quitApp]);
+ const discardAndContinue=useCallback(async()=>{const action=pendingAction;if(!action)return;setPendingAction(null);setDirty(false);if(action.kind==='page'){await refreshConfig();setFileTarget(action.fileDevice?{device:action.fileDevice,serial:Date.now()}:null);setPage(action.target);return}if(action.kind==='reload'){await reloadConfig();return}if(action.kind==='restart'){await restartApp();return}if(action.kind==='quit'){await quitApp()}},[pendingAction,refreshConfig,reloadConfig,restartApp,quitApp]);
  useEffect(()=>{const h=e=>{if(!dirty)return;e.preventDefault();e.returnValue=''};window.addEventListener('beforeunload',h);return()=>window.removeEventListener('beforeunload',h)},[dirty]);
  const selectedExit=status.selectedExit||config.defaultExitId||'';
- const exitUnavailable=selectedExitUnavailable({exitsReady,connected:!!status.connected,exits,selected:selectedExit});
+ const exitUnavailable=selectedExitUnavailable({exitsReady,connected:!!status.connected,exits:[...exits,...arr(config.customExits)],selected:selectedExit});
  const approval=String(status.approvalState||'').toLowerCase();
  const approvalPending=/pending|wait|approval|待审批/.test(approval);
  const approvalRejected=/reject|denied|revoked|撤销|拒绝/.test(approval);
- const title=page==='settings'?'设置':PAGE_NAMES[page]||'RelayProxy';
+ const title=page==='settings'?'常规设置':PAGE_NAMES[page]||'RelayProxy';
+ const category=CONFIG_IDS.has(page)?'网络配置':(page==='settings'||SETTINGS_IDS.has(page))?'设置':'';
  const p={status,config,exits,setv,save,toast,dirty};
  let content;
  if(page==='overview')content=<Overview {...p} traffic={connections} history={history} onRefresh={refreshStatus} onGoto={requestPage}/>;
  else if(page==='devices')content=<Devices {...p} onRefresh={refreshStatus}/>;
  else if(page==='connection')content=<Connection {...p} onReload={()=>requestLifecycle('reload')}/>;
- else if(page==='exits')content=<Exits status={status} exits={exits} selected={status.selectedExit||config.defaultExitId||''} onSelect={select} onSpeed={id=>{setSpeedExit(id||'');setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} config={config} save={save} toast={toast}/>;
+ else if(page==='exits')content=<DeviceCenter status={status} exits={exits} targets={targets} filePeers={filePeers} config={config} onSpeed={id=>{setSpeedExit(id);setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} onGoto={requestPage} onFiles={openDeviceFiles} onConnectRDP={connectDeviceRDP} onRefresh={()=>{void Promise.all([refreshExits(),refreshTargets(),refreshFilePeers()])}}/>;
  else if(page==='proxy')content=<ProxyPage {...p} onService={()=>requestPage('settings')} onRefreshCapabilities={refreshNetworkCapabilities}/>;
  else if(page==='exitshare')content=<ExitShare {...p}/>;
  else if(page==='routing')content=<RoutingPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;
  else if(page==='dns')content=<DNSPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃 DNS 设置草稿')}}/>;
- else if(page==='files')content=<FileSharingPage toast={toast}/>;
- else if(page==='rdp')content=<RDPPage status={status} config={config} setv={setv} save={save} dirty={dirty} targets={targets} refreshTargets={refreshTargets} refreshStatus={refreshStatus} toast={toast}/>;
- else if(page==='messages')content=<MessagesPage messages={messages} refresh={refreshMessages} clear={clearMessages} toast={toast} config={config} setv={setv} save={save}/>;
+ else if(page==='files')content=null;
+ else if(page==='rdp')content=<RDPPage status={status} config={config} targets={targets} refreshTargets={refreshTargets} refreshStatus={refreshStatus} toast={toast}/>;
+ else if(page==='rdp-settings')content=<RDPSettingsPage status={status} config={config} setv={setv} save={save} dirty={dirty} toast={toast} onGoto={requestPage}/>;
+ else if(page==='messages')content=<MessagesPage messages={messages} refresh={refreshMessages} clear={clearMessages} toast={toast}/>;
+ else if(page==='message-settings')content=<MessageSettingsPage config={config} setv={setv} save={save} onGoto={requestPage}/>;
  else if(page==='monitor')content=<MonitorPage connections={connections} history={history} refresh={refreshConnections} clear={clearConnections} openNative={()=>call('goOpenConnections')}/>;
  else if(page==='diagnostics')content=<DiagnosticsPage diagnostics={diagnostics} logs={logs} refreshDiagnostics={refreshDiagnostics} clearLogs={clearLogs} copyLogs={copyLogs}/>;
  else content=<SettingsPage config={config} setv={setv} save={save} toast={toast} dirty={dirty} onGoto={requestPage} onConfigRefresh={async()=>{await refreshConfig();await refreshStatus()}} onRefreshCapabilities={refreshNetworkCapabilities} onReload={()=>requestLifecycle('reload')} onRestart={()=>requestLifecycle('restart')} onQuit={()=>requestLifecycle('quit')}/>;
- return <div className="app-shell"><aside className="sidebar"><div className="nav-scroll">{NAV.map(g=><div className="nav-group" key={g.group}><div className="group-name">{g.group}</div>{g.items.map(x=><button key={x[0]} className={cx('nav-item',page===x[0]&&'active')} onClick={()=>requestPage(x[0])}><span className="nav-icon"><Icon name={x[1]}/></span><span>{x[2]}</span>{x[0]==='messages'&&unreadMessages>0&&<i className="nav-dot" title={unreadMessages+' 条新消息'}>{unreadMessages>9?'9+':unreadMessages}</i>}</button>)}</div>)}</div><div className="sidebar-footer"><button className={cx('nav-item',(page==='settings'||SETTINGS_IDS.has(page))&&'active')} onClick={()=>requestPage('settings')}><span className="nav-icon"><Icon name="settings"/></span><span>设置</span></button><div className="connection-mini"><span className={cx('dot',status.connected?'online':'offline')}/><div><strong>{status.connected?'已连接':'未连接'}</strong><span>{status.connected?((status.latency||0)+' ms'):'—'}</span></div></div></div></aside><section className="workspace"><header className="topbar"><div className="crumb"><b>{title}</b><span>·</span><span>{status.deviceName||config.deviceName||'本设备'}</span></div><div className="top-actions">{dirty&&<Badge tone="blue">未保存</Badge>}{config.restartRequired&&<Badge tone="warn">需重启</Badge>}</div></header><main className="main">{SETTINGS_IDS.has(page)&&<SettingsNavigation page={page} onGoto={requestPage}/>} {approvalPending&&<div className="notice warn state-banner"><b>设备等待审批。</b> 请在 Relay Server 使用当前身份审批此设备所需能力。</div>}{approvalRejected&&<div className="notice danger state-banner"><b>设备授权不可用。</b> 当前设备可能已被拒绝或撤销，代理、出口与 RDP 能力会受限。</div>}{!loaded&&<div className="notice danger state-banner"><b>配置尚未加载。</b> {configError||'正在连接配置接口…'} <Button quiet onClick={()=>void refreshConfig()}>重试读取</Button></div>}{exitUnavailable&&<div className="notice warn state-banner"><b>已选出口不可用。</b> RelayProxy 不会静默改选其他出口；请在“出口选择”重新选择。 <Button quiet onClick={()=>requestPage('exits')}>重新选择</Button></div>}{content}</main></section><SpeedModal open={speedOpen} exits={exits} initialExit={speedExit} onClose={()=>setSpeedOpen(false)} toast={toast}/><BatchSpeedModal open={batchSpeedOpen} exits={exits} onClose={()=>setBatchSpeedOpen(false)} toast={toast}/><Modal open={!!pendingAction} title="有未保存的修改" onClose={()=>setPendingAction(null)} footer={<><Button onClick={()=>setPendingAction(null)}>继续编辑</Button><Button danger onClick={discardAndContinue}>放弃修改并继续</Button></>}><div className="notice warn">当前页面存在尚未保存的配置草稿。离开、重载、重启或退出会丢失这些修改。</div></Modal><Modal open={confirmQuit} title="退出 RelayProxy" onClose={()=>setConfirmQuit(false)} footer={<><Button onClick={()=>setConfirmQuit(false)}>取消</Button><Button danger onClick={()=>{setConfirmQuit(false);void quitApp()}}>确认退出</Button></>}><div className="notice">退出后将停止当前代理进程和连接。</div></Modal>{toastState&&<div className={cx('toast show',toastState.t==='danger'&&'danger',toastState.t==='warn'&&'warn')}>{toastState.message}</div>}</div>
+ return <div className="app-shell"><aside className="sidebar"><div className="nav-scroll">{NAV.map(g=><div className="nav-group" key={g.group}><div className="group-name">{g.group}</div>{g.items.map(x=><button key={x[0]} type="button" title={x[2]} aria-label={x[2]} aria-current={(x[0]==='routing'?CONFIG_IDS.has(page):page===x[0])?'page':undefined} className={cx('nav-item',(x[0]==='routing'?CONFIG_IDS.has(page):page===x[0])&&'active')} onClick={()=>requestPage(x[0])}><span className="nav-icon"><Icon name={x[1]}/></span><span>{x[2]}</span>{x[0]==='messages'&&unreadMessages>0&&<i className="nav-dot" title={unreadMessages+' 条新消息'}>{unreadMessages>9?'9+':unreadMessages}</i>}</button>)}</div>)}</div><div className="sidebar-footer"><button type="button" title="设置" aria-label="设置" aria-current={(page==='settings'||SETTINGS_IDS.has(page))?'page':undefined} className={cx('nav-item',(page==='settings'||SETTINGS_IDS.has(page))&&'active')} onClick={()=>requestPage('settings')}><span className="nav-icon"><Icon name="settings"/></span><span>设置</span></button><div className="connection-mini"><span className={cx('dot',status.connected?'online':'offline')}/><div><strong>{status.connected?'已连接':'未连接'}</strong><span>{status.connected?((status.latency||0)+' ms'):'—'}</span></div></div></div></aside><section className="workspace"><header className="topbar"><div className="crumb">{category&&<><span className="nav-category-crumb">{category}</span><span aria-hidden="true">/</span></>}<b>{title}</b><span>·</span><span>{status.deviceName||config.deviceName||'本设备'}</span></div><div className="top-actions"><div id="agent-page-actions" className="topbar-page-actions"/><button type="button" className="global-transfer-trigger" aria-label={'传输任务，'+transferSummary.running+' 项进行中'} aria-expanded={transferPanelOpen} onClick={()=>setTransferPanelOpen(open=>!open)}><Icon name="activity" size={16}/><span>传输任务</span>{transferSummary.running>0&&<span className="global-transfer-count">{transferSummary.running}</span>}</button>{dirty&&<Badge tone="blue">未保存</Badge>}{config.restartRequired&&<Badge tone="warn">需重启</Badge>}</div></header><main className="main">{CONFIG_IDS.has(page)&&<ConfigNavigation page={page} onGoto={requestPage}/>} {SETTINGS_IDS.has(page)&&<SettingsNavigation page={page} onGoto={requestPage}/>} {approvalPending&&<div className="notice warn state-banner"><b>设备等待审批。</b> 请在 Relay Server 使用当前身份审批此设备所需能力。</div>}{approvalRejected&&<div className="notice danger state-banner"><b>设备授权不可用。</b> 当前设备可能已被拒绝或撤销，代理、出口与 RDP 能力会受限。</div>}{!loaded&&<div className="notice danger state-banner"><b>配置尚未加载。</b> {configError||'正在连接配置接口…'} <Button quiet onClick={()=>void refreshConfig()}>重试读取</Button></div>}{exitUnavailable&&<div className="notice warn state-banner"><b>已选出口不可用。</b> RelayProxy 不会静默改选其他出口；请在「网络配置 → 分流规则」检查默认代理出口。 <Button quiet onClick={()=>requestPage('routing')}>查看配置</Button></div>}{content}<FileSharingPage toast={toast} active={page==='files'} navigationTarget={fileTarget} transferOpen={transferPanelOpen} onTransferOpenChange={setTransferPanelOpen} onTransferSummary={syncTransferSummary}/></main></section><div id="agent-file-transfer-portal"/><SpeedModal open={speedOpen} exits={exits} status={status} initialExit={speedExit} onClose={()=>setSpeedOpen(false)} toast={toast}/><BatchSpeedModal open={batchSpeedOpen} exits={exits} onClose={()=>setBatchSpeedOpen(false)} toast={toast}/><Modal open={!!pendingAction} title="有未保存的修改" onClose={()=>setPendingAction(null)} footer={<><Button onClick={()=>setPendingAction(null)}>继续编辑</Button><Button danger onClick={discardAndContinue}>放弃修改并继续</Button></>}><div className="notice warn">当前页面存在尚未保存的配置草稿。离开、重载、重启或退出会丢失这些修改。</div></Modal><Modal open={confirmQuit} title="退出 RelayProxy" onClose={()=>setConfirmQuit(false)} footer={<><Button onClick={()=>setConfirmQuit(false)}>取消</Button><Button danger onClick={()=>{setConfirmQuit(false);void quitApp()}}>确认退出</Button></>}><div className="notice">退出后将停止当前代理进程和连接。</div></Modal>{toastState&&<div className={cx('toast show',toastState.t==='danger'&&'danger',toastState.t==='warn'&&'warn')}>{toastState.message}</div>}</div>
 }

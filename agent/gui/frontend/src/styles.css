@@ -367,21 +367,20 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .device-speed-target-identity .mono{overflow-wrap:anywhere}
 .device-speed-target>.field{flex:0 0 175px;min-width:140px}
 .device-speed-check-list{display:flex;flex-direction:column;gap:0;border:1px solid var(--line);background:var(--surface2);border-radius:10px;overflow:hidden}
-.device-speed-check{display:flex;align-items:center;gap:12px;min-height:51px;padding:10px 12px;border-bottom:1px solid var(--line);transition:background .16s ease}
+.device-speed-check{display:grid;grid-template-columns:24px minmax(85px,1fr) minmax(0,1.3fr) auto;align-items:center;gap:9px;min-height:40px;padding:7px 11px;border-bottom:1px solid var(--line);transition:background .16s ease;white-space:nowrap}
 .device-speed-check:last-child{border-bottom:0}
-.device-speed-check-icon{width:25px;height:25px;flex:0 0 25px;border-radius:50%;display:grid;place-items:center;background:var(--surface3);border:1px solid var(--line);color:var(--muted);font-size:15px;font-weight:750}
+.device-speed-check-icon{width:23px;height:23px;border-radius:50%;display:grid;place-items:center;background:var(--surface3);border:1px solid var(--line);color:var(--muted);font-size:14px;font-weight:750}
 .device-speed-check.is-checked .device-speed-check-icon{background:color-mix(in srgb,#16a34a 12%,var(--surface2));border-color:color-mix(in srgb,#16a34a 34%,var(--line));color:#16a34a}
 .device-speed-check.is-progress .device-speed-check-icon{border-color:var(--brand);color:var(--brand);animation:device-link-check-spin 1.2s linear infinite}
 .device-speed-check.is-failed .device-speed-check-icon{background:color-mix(in srgb,#dc2626 10%,var(--surface2));color:#dc2626;border-color:color-mix(in srgb,#dc2626 30%,var(--line))}
 .device-speed-check.is-candidate .device-speed-check-icon{color:var(--brand);border-color:var(--brand)}
-.device-speed-check-main{flex:1 1 auto;min-width:0;display:flex;flex-direction:column;gap:3px}
-.device-speed-check-main strong{font-size:12px;font-weight:700}
-.device-speed-check-main .mini{line-height:1.45;overflow-wrap:anywhere}
-.device-speed-check-state{flex:0 0 auto;font-size:11px;color:var(--muted);white-space:nowrap}
+.device-speed-check-label{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:12px;font-weight:700}
+.device-speed-check-detail{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;color:var(--muted)}
+.device-speed-check-state{font-size:11px;color:var(--muted);white-space:nowrap;text-align:right}
 .device-speed-check.is-checked .device-speed-check-state{color:#16a34a;font-weight:750}
 .device-speed-check.is-progress .device-speed-check-state{color:var(--brand);font-weight:750}
 .device-speed-check.is-failed .device-speed-check-state{color:#dc2626;font-weight:750}
 .device-speed-check-note{padding:4px 0}
 @keyframes device-link-check-spin{to{transform:rotate(360deg)}}
 @media(prefers-reduced-motion:reduce){.device-speed-check,.device-speed-check-icon{animation:none!important;transition:none!important}}
-@media(max-width:640px){.device-speed-target>.field{flex:1 1 100%}.device-speed-check{gap:9px;padding:9px}.device-speed-check-icon{flex-basis:24px;width:24px;height:24px}}
+@media(max-width:640px){.device-speed-target>.field{flex:1 1 100%}.device-speed-check{grid-template-columns:22px minmax(76px,1fr) minmax(0,1fr) auto;gap:6px;padding:7px 8px;min-height:38px}.device-speed-check-icon{width:22px;height:22px}.device-speed-check-label,.device-speed-check-detail{font-size:11px}.device-speed-check-state{font-size:10px}}

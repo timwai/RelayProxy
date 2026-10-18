@@ -676,9 +676,15 @@ function DeviceSpeedLinkDetails({exitID,exits,result,status,phase,revealCount}){
  const rows=deviceSpeedChecks({exitID,exit:matched,connected:online,phase,result,revealCount});
  const udp=Number(status?.nativeUdp?.associations||0);
  const stateLabel={checked:'通过',progress:'检测中',waiting:'待检测',candidate:'仅候选',unknown:'未确认',failed:'失败'};
+ const [checkExpanded,setCheckExpanded]=useState(true);
+ const passedCount=rows.filter(row=>row.state==='checked').length;
+ const summary=phase==='running'?'测速中':phase==='reviewing'?'结果核验中':phase==='failed'?'检测失败':phase==='done'?passedCount+'/'+rows.length+' 项通过':passedCount+'/'+rows.length+' 项已确认';
  return <section className="device-speed-evidence" aria-label="该设备链路检测进度">
-  <div className="device-speed-heading"><strong>链路逐项检查</strong><span className="mini">{matched?.name||matched?.deviceName||exitID||'未指定设备'}</span></div>
-  <div className="mini">测速响应按上行、下行统一返回；完成后逐行核验真实路径。未命中某条链路不代表该链路不可用。</div>
+  <button type="button" className="device-speed-check-toggle" aria-expanded={checkExpanded} aria-controls="device-speed-check-content" onClick={()=>setCheckExpanded(open=>!open)}>
+   <strong>链路逐项检查</strong><span className="device-speed-check-summary" role="status" aria-live="polite">{summary}</span><span className="device-speed-check-chevron" aria-hidden="true">{checkExpanded?'⌄':'›'}</span>
+  </button>
+  {checkExpanded&&<div id="device-speed-check-content" className="device-speed-check-content">
+  <div className="mini">目标：{matched?.name||matched?.deviceName||exitID||'未指定设备'} · 本次测速未使用的路径仅代表未确认，不代表不可用。</div>
   <div className="device-speed-check-list" role="list">
    {rows.map(row=><div key={row.id} role="listitem" className={'device-speed-check is-'+row.state} title={row.label+' · '+row.detail} aria-label={row.label+'，'+row.detail+'，'+stateLabel[row.state]}>
     <span className="device-speed-check-icon" aria-hidden="true">{row.state==='checked'?'✓':row.state==='progress'?'◌':row.state==='failed'?'×':row.state==='waiting'?'·':row.state==='candidate'?'i':'–'}</span>
@@ -697,6 +703,7 @@ function DeviceSpeedLinkDetails({exitID,exits,result,status,phase,revealCount}){
     {exitID&&status?.rdpTargetId===exitID&&<><Setting title="RDP TCP 路径" desc="当前活动 RDP 目标是这台设备">{rdpPathLabel(status.rdpPathTcp)}</Setting><Setting title="RDP UDP 路径" desc={status.rdpUdpReason||'当前活动 RDP 目标是这台设备'}>{rdpPathLabel(status.rdpPathUdp)}</Setting></>}
    </div>
   </details>
+  </div>}
  </section>;
 }
 

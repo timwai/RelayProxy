@@ -12,7 +12,7 @@ export function deviceSpeedLinkEvidence(exitID,exit,result){
  const publicInfo=exit?.direct?.public||{};
  const endpoints=Array.isArray(publicInfo.endpoints)?publicInfo.endpoints:[];
  const verifiedEndpoints=endpoints.filter(x=>x&&typeof x==='object'&&x.verified===true);
- const verifiedTest=!!exitID&&!!result&&!result.error&&result.exitId===exitID;
+ const verifiedTest=!!exitID&&!!result&&!result.error&&result.exitId===exitID&&!!(result.upload||result.up)&&!!(result.download||result.down);
  const upload=verifiedTest?(result.upload||result.up||{}):{};
  const download=verifiedTest?(result.download||result.down||{}):{};
  const paths=verifiedTest?[upload.path,download.path].filter(Boolean):[];

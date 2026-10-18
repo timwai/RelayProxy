@@ -1,5 +1,4 @@
 import React, {useCallback,useEffect,useMemo,useRef,useState} from 'react';
-import {createPortal} from 'react-dom';
 import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} from './bridge.js';
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
 import {buildDeviceCenter} from './deviceCenter.js';
@@ -74,19 +73,30 @@ function Card({title,eyebrow,action,children,className}){return <section classNa
 // The compact top bar already names the active page. Do not repeat a large
 // title and description before its content; actions get their own toolbar.
 function PageHead({actions}){
- const [target,setTarget]=useState(null);
- const [wide,setWide]=useState(()=>window.matchMedia('(min-width:1100px)').matches);
- useEffect(()=>setTarget(document.getElementById('agent-page-actions')),[]);
+ const [menuOpen,setMenuOpen]=useState(false);
+ const menuRef=useRef(null);
+ const entries=React.Children.toArray(actions?.type===React.Fragment?actions.props.children:actions).filter(Boolean);
  useEffect(()=>{
-  const media=window.matchMedia('(min-width:1100px)');
-  const update=()=>setWide(media.matches);
-  media.addEventListener?.('change',update);
-  return()=>media.removeEventListener?.('change',update);
- },[]);
- if(!actions)return null;
- const buttons=<div className="actions page-action-buttons" role="group" aria-label="当前页面快捷操作" tabIndex={0}>{actions}</div>;
- if(wide)return target?createPortal(buttons,target):null;
- return <div className="page-head page-actions-inline">{buttons}</div>;
+  if(!menuOpen)return;
+  const close=e=>{if(e.key==='Escape'||(e.type==='pointerdown'&&!menuRef.current?.contains(e.target)))setMenuOpen(false)};
+  document.addEventListener('pointerdown',close);
+  document.addEventListener('keydown',close);
+  return()=>{document.removeEventListener('pointerdown',close);document.removeEventListener('keydown',close)};
+ },[menuOpen]);
+ if(!entries.length)return null;
+ // Keep the most important action directly beside the page content.
+ // All remaining actions are reachable through a compact overflow menu.
+ const primaryIndex=entries.findIndex(item=>item?.props?.primary);
+ const chosen=primaryIndex>=0?primaryIndex:entries.length-1;
+ const primary=entries[chosen];
+ const secondary=entries.filter((_,i)=>i!==chosen);
+ return <div className="page-head page-actions-contextual" aria-label="页面操作">
+  <div className="page-context-primary">{primary}</div>
+  {secondary.length>0&&<div className="page-context-overflow" ref={menuRef}>
+   <button type="button" className="btn page-more-trigger" aria-label="更多页面操作" aria-expanded={menuOpen} aria-haspopup="menu" onClick={()=>setMenuOpen(v=>!v)}><Icon name="ellipsis"/></button>
+   {menuOpen&&<div className="page-more-menu" role="group" aria-label="更多页面操作">{secondary.map((action,index)=><div key={action.key??index} onClick={()=>setMenuOpen(false)}>{action}</div>)}</div>}
+  </div>}
+ </div>;
 }
 function Field({label,help,children,className}){return <label className={cx('field',className)}><span>{label}</span>{children}{help&&<small>{help}</small>}</label>}
 const Input=p=><input className="control" {...p}/>;

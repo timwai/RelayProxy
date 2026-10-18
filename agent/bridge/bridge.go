@@ -865,10 +865,10 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if err := config.NormalizeAgentConfig(cfg); err != nil {
 		return nil, fmt.Errorf("配置校验失败: %w", err)
 	}
+	if (cfg.SystemProxy.Enabled() || previousConfig.SystemProxy.Enabled()) && b.systemProxyManager == nil {
+		return nil, fmt.Errorf("macOS 系统代理管理器未启动，无法安全修改原系统代理配置")
+	}
 	if cfg.SystemProxy.Enabled() {
-		if b.systemProxyManager == nil {
-			return nil, fmt.Errorf("macOS 系统代理管理器未启动，配置未保存")
-		}
 		running := b.agent.Config()
 		if running.NetworkMode == "divert" {
 			return nil, fmt.Errorf("当前 Network Extension 正在运行，请先关闭并重启后再启用系统代理")
@@ -963,8 +963,6 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 			}
 			return nil, errors.Join(append([]error{fmt.Errorf("macOS 系统代理设置失败，已尝试回滚: %w", err)}, rollbackErrors...)...)
 		}
-	} else if cfg.SystemProxy.Enabled() {
-		return nil, fmt.Errorf("macOS 系统代理管理器未启动，无法应用")
 	}
 	// A selected Relay exit may need background path setup. This runs after
 	// atomic policy publication and does not change the routing snapshot.

@@ -110,7 +110,7 @@ function Overview({status,config,exits,traffic,history,onRefresh,onGoto}){
  <Card className="hero overview-hero">
   <div className="hero-glow"/>
   <div className="hero-status"><span className={cx('dot',connected?'online':'offline')}/><div className="grow"><div className="eyebrow">{connected?'CONNECTED':'DISCONNECTED'}</div><div className="big">{connected?'RelayProxy 已连接':'等待连接到 RelayProxy Server'}</div><div className="muted">{((connected?(config.runtime?.serverAddress||config.serverAddress):config.serverAddress)||'尚未配置服务器')+' · '+(status.transport||config.runtime?.transport||config.transport||'auto')}{connected&&config.runtime?.serverAddress&&config.runtime.serverAddress!==config.serverAddress?' · 已保存新 Server，待重启':''}</div></div><Badge tone={connected?'ok':/reject|denied|revoked|撤销|拒绝/i.test(approvalLabel)?'danger':'neutral'}>{approvalLabel}</Badge></div>
-  <div className="overview-current-exit"><div className="grow"><div className="mini">当前代理出口</div><strong>{exitName([...exits,...arr(config.customExits)],status.selectedExit||config.defaultExitId)}</strong></div><div className="overview-quick-links"><Button quiet onClick={()=>onGoto('exits')}>设备与链路检测 ›</Button><Button quiet onClick={()=>onGoto('routing')}>分流规则 ›</Button></div></div>
+  <div className="overview-current-exit"><div className="grow"><div className="mini">{status.selectedExit?'当前运行出口':'默认代理出口配置'}</div><strong>{exitName([...exits,...arr(config.customExits)],status.selectedExit||config.defaultExitId)}</strong></div><div className="overview-quick-links"><Button quiet onClick={()=>onGoto('exits')}>设备与链路检测 ›</Button><Button quiet onClick={()=>onGoto('routing')}>分流规则 ›</Button></div></div>
  </Card>
  <div className="cards-4"><Metric label="下载速度" value={fmtBytes(traffic?.download_rate||0,true)} hint={fmtBytes(traffic?.download||0)+' 累计'} series={history.down}/><Metric label="上传速度" value={fmtBytes(traffic?.upload_rate||0,true)} hint={fmtBytes(traffic?.upload||0)+' 累计'} series={history.up}/><Metric label="往返延迟" value={connected?((status.latency||0)+' ms'):'—'} hint="Server RTT" series={history.latency}/><Metric label="活跃连接" value={traffic?.active??status.activeStreams??0} hint={(traffic?.total||0)+' 累计连接'} series={history.active}/></div>
  <Card title="最近连接" eyebrow="LIVE TRAFFIC" action={<Button onClick={()=>onGoto('monitor')}>查看全部</Button>}><div className="recent-list">{arr(traffic?.connections).slice(0,3).map((x,i)=><div className="recent-row" key={x.id||i}><div className="app-mark">{String(x.process_name||x.process||'?').slice(0,1).toUpperCase()}</div><div className="grow"><strong>{x.process_name||x.process||'未知进程'}</strong><div className="mono mini">{(x.host||x.ip||'—')+(x.port?':'+x.port:'')}</div></div><div className="recent-rate"><b>{fmtBytes(x.download_rate||0,true)} ↓</b><span>{fmtBytes(x.upload_rate||0,true)} ↑</span></div><Badge tone={tone(x.state)}>{x.path||x.action||x.state||'—'}</Badge></div>)}{!arr(traffic?.connections).length&&<div className="empty compact-empty">暂无连接记录。</div>}</div></Card></>
@@ -221,8 +221,8 @@ function CustomExitManager({config,save,toast,dirty}){
 
 function ActiveProxyPath({status,config,exits,onGoto}){
  const connected=!!status.connected;
- const currentId=status.selectedExit||config.defaultExitId||'';
- const name=exitName([...exits,...arr(config.customExits)],currentId);
+ const currentId=status.selectedExit||'';
+ const name=currentId?exitName([...exits,...arr(config.customExits)],currentId):'未确认当前出口（可能使用自动选择）';
  const {path,directReady,p2pReady,relay}=proxyPathStatus(status);
  const udp=Number(status.nativeUdp?.associations||0);
  return <Card title="当前代理出口 · 链路诊断" eyebrow="ACTIVE PROXY PATH" action={<Button quiet onClick={()=>onGoto('diagnostics')}>完整诊断 ›</Button>}>

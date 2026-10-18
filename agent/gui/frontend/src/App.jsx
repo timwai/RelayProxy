@@ -722,6 +722,7 @@ function SpeedModal({open,exits,status,initialExit,onClose,toast}){
   if(!p.ok)throw new Error(p.message||'测速失败');
   const measurement=p.result||p;
   if(measurement.exitId!==requested)throw new Error('测速返回的出口与所选设备不一致，不能归属链路结果');
+  if(!(measurement.upload||measurement.up)||!(measurement.download||measurement.down))throw new Error('测速结果缺少完整的上下行数据，链路未确认');
   setResult(measurement);setPhase('reviewing');toast('出口测速完成');
  }catch(e){setResult({error:e.message,exitId:requested});setPhase('failed')}finally{setBusy(false)}};
  const calibrate=async()=>{if(busy||!exitReady)return;setBusy(true);setPhase('running');setRevealCount(0);setCalibration(null);setResult(null);setCalibrateStep(0);try{

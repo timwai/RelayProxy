@@ -146,3 +146,19 @@
  .file-share-tabs{flex:0 1 auto;max-width:100%;min-width:0;flex-wrap:nowrap}
  .file-share-header-actions{flex:0 1 auto;width:auto;max-width:100%;justify-content:flex-start}
 }
+
+/* File list is the landing view. Service toggles and UPnP remain available
+   beneath it in an explicitly discoverable compact disclosure. */
+.file-share-advanced{min-width:0;margin-top:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface2);overflow:hidden}
+.file-share-advanced>summary{display:flex;align-items:center;justify-content:space-between;gap:12px;cursor:pointer;padding:14px 17px;list-style:none;color:var(--text)}
+.file-share-advanced>summary::-webkit-details-marker{display:none}
+.file-share-advanced>summary>span{display:flex;flex-direction:column;min-width:0;gap:3px}
+.file-share-advanced>summary strong{font-size:13px}
+.file-share-advanced>summary small{color:var(--muted);font-size:11px;line-height:1.4}
+.file-share-advanced[open]>summary{border-bottom:1px solid var(--line)}
+.file-share-advanced>summary:hover{background:var(--surface3)}
+.file-share-advanced>summary:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
+.file-share-advanced-content{padding:14px;display:flex;flex-direction:column;gap:12px}
+.file-share-advanced-content>.cards-3{margin:0}
+.file-share-advanced-content>.card{margin:0;box-shadow:none}
+@media(max-width:640px){.file-share-advanced>summary{padding:12px}.file-share-advanced-content{padding:10px}}

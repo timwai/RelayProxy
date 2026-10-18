@@ -584,11 +584,11 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
   await commit(s=>({...s,shares:s.shares.filter(v=>v.id!==share.id)}));
  }
  const shares=state?.shares||[];
- const active=shares.filter(s=>s.enabled).length;
+ const activeShareCount=shares.filter(s=>s.enabled).length;
  return <><section className={'file-sharing-host '+(tab==='remote'?'is-remote':'')} hidden={!active}>
   {error&&<div className="notice danger file-share-error" role="alert">{error}</div>}
   {tab==='local'&&<>
-   <section className="card"><div className="card-head file-share-list-head"><div><div className="eyebrow">{shares.length} DIRECTORIES · {active} 已启用</div><h2>共享文件夹</h2></div><div className="file-share-list-actions"><span className={'badge '+(state?.enabled?'ok':'neutral')}>{state?.enabled?'共享已启用':'共享已关闭'}</span><button className="btn quiet" onClick={refresh} disabled={busy}>刷新</button><button className="btn" onClick={()=>{setTab('remote');void refreshPeers()}}><Icon name="devices" size={15}/> 浏览其他设备文件</button><button className="btn primary" onClick={()=>edit(null)} disabled={!state||busy}>＋ 添加共享文件夹</button></div></div>
+   <section className="card"><div className="card-head file-share-list-head"><div><div className="eyebrow">{shares.length} DIRECTORIES · {activeShareCount} 已启用</div><h2>共享文件夹</h2></div><div className="file-share-list-actions"><span className={'badge '+(state?.enabled?'ok':'neutral')}>{state?.enabled?'共享已启用':'共享已关闭'}</span><button className="btn quiet" onClick={refresh} disabled={busy}>刷新</button><button className="btn" onClick={()=>{setTab('remote');void refreshPeers()}}><Icon name="devices" size={15}/> 浏览其他设备文件</button><button className="btn primary" onClick={()=>edit(null)} disabled={!state||busy}>＋ 添加共享文件夹</button></div></div>
    {!state&&<div className="empty">正在读取本机文件共享配置…</div>}
    {state&&shares.length===0&&<div className="empty">还没有共享文件夹。添加本机目录后，再为设备设置只读或读写权限。</div>}
    {shares.map(share=><div className="file-share-item" key={share.id}>
@@ -602,7 +602,7 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
    <details className="file-share-advanced" id="file-share-options">
     <summary><span><strong>共享服务与直连设置</strong><small>管理共享开关、UPnP 端口映射及授权统计</small></span><Icon name="settings" size={17}/></summary>
     <div className="file-share-advanced-content">   <div className="cards-3">
-    <div className="metric"><div className="mini">共享文件夹</div><div className="metric-value">{shares.length}</div><div className="mini">{active} 个已启用</div></div>
+    <div className="metric"><div className="mini">共享文件夹</div><div className="metric-value">{shares.length}</div><div className="mini">{activeShareCount} 个已启用</div></div>
     <div className="metric"><div className="mini">设备权限</div><div className="metric-value">{shares.reduce((n,s)=>n+countPermissions(s),0)}</div><div className="mini">各共享文件夹独立授权</div></div>
     <div className="metric"><div className="mini">共享服务</div><div className="metric-value" style={{fontSize:19}}>{state?.enabled?'已开启':'已关闭'}</div><div className="mini">初始默认关闭</div></div>
    </div>

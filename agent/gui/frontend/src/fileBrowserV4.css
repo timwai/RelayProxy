@@ -271,3 +271,51 @@ html.file-browser-focus .main:has(> .file-browser-v4)>.file-browser-v4{margin-to
 @media(max-width:1150px){.v4-head{flex-wrap:wrap}.v4-head-actions{margin-left:auto}.v4-device-switch{flex-basis:225px}}
 @media(max-width:650px){.v4-head-title{flex-wrap:wrap;gap:7px}.v4-device-switch{flex:1 1 100%;min-width:0}.v4-head-location{flex:1 1 100%}.v4-head-actions{width:100%;justify-content:flex-end}}
 @media(max-width:640px){.v4-device-switch select{height:48px;min-height:48px;font-size:14px}}
+
+/* Compact single-line navigation: peer is the first breadcrumb. The picker
+   floats OVER the file list, never creating another top header row. */
+.file-browser-v4 .v4-unified-pathbar{position:relative;flex:0 0 auto;min-height:44px;max-height:52px;padding:5px 11px;gap:6px;z-index:9}
+.v4-unified-pathbar .v4-crumbs{gap:4px;scrollbar-width:none}
+.v4-unified-pathbar .v4-crumbs::-webkit-scrollbar{display:none}
+.v4-unified-pathbar .v4-crumbs button{font-size:12px;border-radius:7px;min-height:32px;padding:5px 6px}
+.v4-unified-pathbar .v4-crumbs button:hover{background:var(--surface3)}
+.v4-unified-pathbar .v4-crumbs button:focus-visible,.v4-path-actions button:focus-visible{outline:2px solid var(--brand);outline-offset:1px}
+.v4-unified-pathbar .v4-crumbs .v4-peer-trigger{display:inline-flex;align-items:center;justify-content:center;gap:6px;max-width:min(250px,52%);flex:0 0 auto;padding:5px 8px;background:var(--surface3);color:var(--text);border:1px solid var(--line2);border-radius:8px}
+.v4-peer-trigger>svg{color:var(--brand);flex:0 0 auto}
+.v4-peer-trigger-name{display:block;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:700}
+.v4-peer-trigger .v4-chevron{color:var(--muted);font-size:14px;margin-left:2px}
+.v4-path-actions{display:flex;align-items:center;flex:0 0 auto;gap:5px}
+.v4-path-actions>.btn{display:inline-flex;align-items:center;justify-content:center;min-width:32px;min-height:32px;padding:5px 7px}
+.v4-browser-more{font-size:23px;line-height:16px;padding-bottom:9px!important}
+.v4-path-meta,.v4-path-error{font-size:10px;max-width:90px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v4-path-meta{color:var(--muted)}.v4-path-error{color:var(--danger)}
+.v4-main .v4-peer-popover{position:absolute;z-index:35;width:min(328px,calc(100% - 16px));max-height:min(410px,70%);overflow:hidden;display:flex;flex-direction:column;border-radius:13px;border:1px solid var(--line2);background:var(--surface2);box-shadow:var(--shadow2);padding:9px}
+.v4-peer-search{display:flex;align-items:center;gap:8px;min-height:38px;border:1px solid var(--line2);background:var(--surface3);border-radius:9px;padding:0 10px;flex:0 0 auto}
+.v4-peer-search>svg{color:var(--muted)}
+.v4-peer-search input{min-width:0;width:100%;height:36px;border:0;background:transparent;outline:0;color:var(--text);font:inherit;font-size:12px}
+.v4-peer-search:focus-within{border-color:var(--brand)}
+.v4-peer-list{flex:1 1 auto;overflow-y:auto;min-height:0;padding:6px 0}
+.v4-peer-option{width:100%;display:flex;gap:10px;align-items:center;text-align:left;border:1px solid transparent;background:transparent;color:var(--text);border-radius:9px;padding:10px 8px;min-height:54px;cursor:pointer}
+.v4-peer-option:hover,.v4-peer-option:focus-visible{background:var(--surface3);border-color:var(--line)}
+.v4-peer-option.selected{background:color-mix(in srgb,var(--brand) 9%,var(--surface2))}
+.v4-peer-icon{width:35px;height:35px;flex:0 0 auto;display:grid;place-items:center;border-radius:9px;background:var(--surface3);color:var(--brand)}
+.v4-peer-info{min-width:0;flex:1;display:flex;flex-direction:column;gap:4px}
+.v4-peer-info strong{font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v4-peer-info small{color:var(--muted);font-size:10px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.v4-peer-current{font-size:16px;font-weight:700;color:var(--ok)}
+.v4-peer-empty{padding:22px 10px;text-align:center;color:var(--muted);font-size:12px}
+.v4-peer-popover-foot{padding:7px 6px 2px;border-top:1px solid var(--line);color:var(--muted);font-size:10px}
+.v4-browser-menu{position:absolute;z-index:36;right:8px;top:45px;min-width:192px;display:flex;flex-direction:column;gap:2px;border:1px solid var(--line2);border-radius:11px;background:var(--surface2);box-shadow:var(--shadow2);padding:6px}
+.v4-browser-menu>button,.v4-browser-menu>a{border:0;background:transparent;text-decoration:none;min-height:37px;display:flex;align-items:center;justify-content:flex-start;gap:10px;border-radius:7px;padding:8px 10px;color:var(--text);font-size:12px;cursor:pointer}
+.v4-browser-menu>button:hover,.v4-browser-menu>a:hover,.v4-browser-menu>button:focus-visible,.v4-browser-menu>a:focus-visible{background:var(--surface3);color:var(--brand);outline:none}
+@media(max-width:750px){
+ .v4-path-meta,.v4-path-error{display:none}
+ .v4-unified-pathbar .v4-crumbs .v4-peer-trigger{max-width:190px}
+ .v4-peer-trigger-name{max-width:135px}
+}
+@media(max-width:640px){
+ .file-browser-v4 .v4-unified-pathbar{min-height:48px;padding:6px 8px}
+ .v4-unified-pathbar .v4-crumbs .v4-peer-trigger{max-width:170px;min-height:38px}
+ .v4-path-actions>.btn{min-height:38px;min-width:38px}
+ .v4-main .v4-peer-popover{top:auto!important;bottom:8px;left:8px!important;right:8px;width:auto;max-height:min(420px,70%)}
+}

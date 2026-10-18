@@ -24,7 +24,7 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
  const [error,setError]=useState('');
  const [editor,setEditor]=useState(null);
  const [draft,setDraft]=useState(blank);
- const [device,setDevice]=useState('');
+ const [grantPickerOpen,setGrantPickerOpen]=useState(false),[grantQuery,setGrantQuery]=useState(''),[grantSelected,setGrantSelected]=useState([]);
  const [permission,setPermission]=useState('read');
  const [candidates,setCandidates]=useState([]);
  const [candidateError,setCandidateError]=useState('');
@@ -565,13 +565,13 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
   setFolderPickerError('');
   setEditor(share?'edit':'new');
   setDraft(share?{...share,permissions:{...share.permissions}}:blank());
-  setDevice('');setPermission('read');
+  setGrantPickerOpen(false);setGrantQuery('');setGrantSelected([]);setPermission('read');
  }
- function addPermission(){
-  const id=device.trim();
-  if(!id||!candidates.some(item=>item.deviceId===id))return;
-  setDraft(s=>({...s,permissions:{...(s.permissions||{}),[id]:permission}}));
-  setDevice('');
+ function addPermissions(){
+  const eligible=grantSelected.filter(id=>candidates.some(item=>item.deviceId===id&&!draft.permissions?.[id]));
+  if(!eligible.length)return;
+  setDraft(s=>({...s,permissions:{...(s.permissions||{}),...Object.fromEntries(eligible.map(id=>[id,permission]))}}));
+  setGrantSelected([]);setGrantQuery('');setGrantPickerOpen(false);
  }
  async function saveEditor(){
   const item={...draft,name:draft.name.trim(),rootPath:draft.rootPath.trim()};
@@ -641,7 +641,21 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
       {candidateError&&<div className="notice danger" role="alert">{candidateError}</div>}
       {candidatesLoading&&<div className="mini">正在读取 Server 已授权设备…</div>}
       {Object.entries(draft.permissions||{}).map(([id,perm])=><div className="file-share-permission" key={id}><span className="grow file-share-grantee"><b>{candidates.find(item=>item.deviceId===id)?.name||'历史授权设备'}</b><small className="mono">{id}</small></span><select className="control" value={perm} onChange={e=>setDraft(s=>({...s,permissions:{...s.permissions,[id]:e.target.value}}))}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn danger" onClick={()=>setDraft(s=>{const permissions={...s.permissions};delete permissions[id];return {...s,permissions}})}>移除</button></div>)}
-      <div className="file-share-permission"><select aria-label="选择已审批的访问设备" className="control" value={device} disabled={candidatesLoading||!candidates.length} onChange={e=>setDevice(e.target.value)}><option value="">选择已审批的设备…</option>{candidates.filter(item=>!draft.permissions?.[item.deviceId]).map(item=><option key={item.deviceId} value={item.deviceId}>{item.name||item.deviceId} · {item.online?'在线':'离线'} · {item.deviceId}</option>)}</select><select className="control" value={permission} onChange={e=>setPermission(e.target.value)}><option value="read">只读</option><option value="read_write">读写</option></select><button className="btn" onClick={addPermission} disabled={!device||!candidates.some(item=>item.deviceId===device)}>添加权限</button></div>
+      <button type="button" className="btn file-share-grant-trigger" aria-expanded={grantPickerOpen} aria-controls="file-share-grant-picker" onClick={()=>{setGrantPickerOpen(open=>!open);setGrantSelected([]);setGrantQuery('');void loadCandidates()}} disabled={busy}>
+       <Icon name="devices" size={16}/> {grantPickerOpen?'收起设备选择':'＋ 添加授权设备'} <span className="mini">支持搜索和批量授权</span>
+      </button>
+      {grantPickerOpen&&<section className="file-share-grant-picker" id="file-share-grant-picker" aria-label="选择已审批的访问设备">
+       <label className="file-share-grant-search"><span className="mini">搜索设备名称或 ID</span><input className="control" type="search" value={grantQuery} onChange={e=>setGrantQuery(e.target.value)} placeholder="搜索已审批设备…"/></label>
+       <div className="file-share-grant-list" aria-label="可添加的授权设备">
+        {candidates.filter(item=>!draft.permissions?.[item.deviceId]&&[item.name,item.deviceId].some(v=>String(v||'').toLowerCase().includes(grantQuery.trim().toLowerCase()))).map(item=><label className="file-share-grant-option" key={item.deviceId}>
+         <input type="checkbox" checked={grantSelected.includes(item.deviceId)} onChange={e=>setGrantSelected(prev=>e.target.checked?[...prev,item.deviceId]:prev.filter(id=>id!==item.deviceId))}/>
+         <span className="file-share-grant-device-icon"><Icon name="devices" size={18}/></span>
+         <span className="file-share-grant-device-info"><strong>{item.name||item.deviceId}</strong><small>{item.online?'在线':'离线 · 可预先授权'} · {item.deviceId.length>16?item.deviceId.slice(0,7)+'…'+item.deviceId.slice(-5):item.deviceId}</small></span>
+        </label>)}
+        {!candidatesLoading&&!candidates.some(item=>!draft.permissions?.[item.deviceId]&&[item.name,item.deviceId].some(v=>String(v||'').toLowerCase().includes(grantQuery.trim().toLowerCase())))&&<div className="file-share-grant-empty">{candidates.length?'没有符合条件的待授权设备':'暂无可授权设备，请先在 Server 审批文件访问能力'}</div>}
+       </div>
+       <div className="file-share-grant-footer"><label className="field"><span>批量授予权限</span><select className="control" value={permission} onChange={e=>setPermission(e.target.value)}><option value="read">只读（默认）</option><option value="read_write">读写</option></select></label><button type="button" className="btn primary" onClick={addPermissions} disabled={candidatesLoading||!grantSelected.some(id=>candidates.some(item=>item.deviceId===id&&!draft.permissions?.[id]))}>添加 {grantSelected.filter(id=>candidates.some(item=>item.deviceId===id&&!draft.permissions?.[id])).length} 台设备</button></div>
+      </section>}
      </div>
     </div>
     <div className="modal-foot"><button className="btn" onClick={()=>setEditor(null)} disabled={busy}>取消</button><button className="btn primary" disabled={busy} onClick={saveEditor}>{busy?'保存中…':'保存共享'}</button></div>

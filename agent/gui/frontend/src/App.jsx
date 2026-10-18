@@ -2,6 +2,8 @@ import React, {useCallback,useEffect,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} from './bridge.js';
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
+import {buildDeviceCenter} from './deviceCenter.js';
+import {onlyVerifiedFilePeers} from './fileShareVisibility.js';
 import {PROTOCOL_CHOICES,dropTargetIndex,moveRule,normalizeRuleLists,protocolChoice,protocolsFromChoice,ruleListText,splitRuleList} from './ruleLines.js';
 import {Icon} from './icons.jsx';
 import FileSharingPage from './FileSharingPage.jsx';
@@ -16,7 +18,7 @@ import {proxyPathStatus,rdpPathLabel} from './pathStatus.js';
 // Operational pages are always one click away. Frequently edited policies
 // live under Network Configuration; infrequent preferences live in Settings.
 const NAV=[
- {group:'工作台',items:[['overview','dashboard','运行概览'],['exits','globe','出口选择']]},
+ {group:'工作台',items:[['overview','dashboard','运行概览'],['exits','devices','设备中心']]},
  {group:'协作',items:[['files','folder','文件共享'],['rdp','monitor','远程桌面'],['messages','bell','消息']]},
  {group:'观察',items:[['monitor','activity','实时监控'],['diagnostics','terminal','诊断与日志']]},
  {group:'网络配置',items:[['routing','split','网络配置']]}
@@ -232,16 +234,63 @@ function CustomExitManager({config,save,toast,dirty}){
  </>;
 }
 
-function Exits({status,exits,selected,onSelect,onSpeed,onSpeedAll,config,onGoto}){
- const publicMeta=e=>{const p=e?.direct?.public,endpoints=arr(p?.endpoints),verified=endpoints.filter(x=>x.verified),first=verified[0]||endpoints[0];return {available:!!p?.available,transport:p?.transport||'',count:verified.length,endpoint:first?.dialAddress||first?.address||'',source:first?.source||''}};
- const customs=arr(config.customExits);
- const staleSelected=!!selected&&(selected.startsWith('local:')?!customs.some(e=>e.id===selected):!exits.some(e=>(e.deviceId||e.id)===selected));
- const inventoryLive=!!status.connected;
- return <><PageHead title="出口选择" desc="管理 Server 授权出口与本机自定义 SOCKS5 / HTTP 出口。" actions={<><Button onClick={()=>onGoto('proxy')}>管理自定义出口</Button><Button onClick={onSpeedAll}>全部测速</Button><Button primary onClick={()=>onSpeed(selected)}>单出口测速</Button></>}/>
- <div className={cx('notice',!inventoryLive&&'warn')}>{inventoryLive?'自动选择只在仅有一个授权在线出口时直接生效。原选择被撤销、删除或不再授权时会保留旧设备 ID，不会静默改选其他出口或 DIRECT。':'Relay 当前未连接。下面保留的是上一次成功审批得到的权威出口库存，用于排障和预选；在线状态需重连后重新确认。'}</div>
- <div className="exit-grid top-gap"><button className={cx('exit-card',!selected&&'selected')} onClick={()=>onSelect('')}><div className="flag">◎</div><div className="grow"><strong>自动选择</strong><div className="mini">仅一个授权在线出口时自动选择；不会绕过既定策略。</div></div><span className="radio"/></button>{staleSelected&&<button className="exit-card selected disabled" disabled><div className="flag">!</div><div className="grow"><div className="row"><strong>不可用旧选择</strong><Badge tone="danger">{selected.startsWith('local:')?'已停用 / 已删除':'已撤销 / 已删除'}</Badge></div><div className="mono mini">{selected}</div><div className="mini">{selected.startsWith('local:')?'本机出口不存在或已停用。请在网络配置中检查，或改选其他出口。':'Server 当前授权库存中已不存在此出口。请手动选择新的出口或切回自动选择。'}</div></div><span className="radio"/></button>}{exits.map(e=>{const id=e.deviceId||e.id,m=publicMeta(e),offline=inventoryLive&&e.online===false;return <button key={id} className={cx('exit-card',selected===id&&'selected',offline&&'disabled')} onClick={()=>!offline&&onSelect(id)}><div className="flag">↗</div><div className="grow"><div className="row"><strong>{e.name||id}</strong><Badge tone={!inventoryLive?'neutral':offline?'neutral':'ok'}>{!inventoryLive?'上次库存':offline?'离线':'在线'}</Badge>{m.available&&<Badge tone="blue">Public Direct</Badge>}</div><div className="mini">{e.identityName||e.authorizationSource||id}</div>{m.available&&<div className="exit-path-meta"><span>{m.transport||'QUIC'}</span><span>{m.count?m.count+' 个已验证端点':'端点可用'}</span>{m.endpoint&&<span className="mono">{m.endpoint}</span>}</div>}</div><span className="radio"/></button>})}{customs.map(e=><button key={e.id} type="button" className={cx('exit-card',selected===e.id&&'selected',!e.enabled&&'disabled')} disabled={!e.enabled} onClick={()=>onSelect(e.id)}><div className="flag">↗</div><div className="grow"><div className="row"><strong>{e.name||e.id}</strong><Badge tone={e.enabled?'blue':'neutral'}>{e.enabled?'本机出口':'已停用'}</Badge></div><div className="mini">{e.protocol?.toUpperCase()||'SOCKS5'} · {e.address||'未设置地址'}</div></div><span className="radio"/></button>)}</div>
- {!exits.length&&!customs.length&&<Card><div className="empty">当前没有可用出口。可前往网络配置添加本机出口，或在 Server 管理端申请设备出口授权。</div></Card>}
- <Card title="当前路径" eyebrow="LIVE PATH"><div className="cards-3 compact"><div><div className="mini">选择出口</div><strong>{exitName([...exits,...customs],selected)}</strong></div><div><div className="mini">Direct</div><strong>{status.connected?(status.directPath||status.directState||'—'):'offline'}</strong>{status.connected&&status.directEndpoint&&<div className="mono mini">{status.directEndpoint}</div>}</div><div><div className="mini">P2P</div><strong>{status.connected?(status.p2pPath||status.p2pState||'—'):'offline'}</strong>{status.connected&&status.p2pCandidateSummary&&<div className="mini">{status.p2pCandidateSummary}</div>}</div></div></Card></>
+function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,onGoto,onFiles,onConnectRDP,onRefresh}){
+ const [query,setQuery]=useState(''),[detail,setDetail]=useState('');
+ const devices=useMemo(()=>buildDeviceCenter({proxyExits:exits,rdpTargets:targets,filePeers}),[exits,targets,filePeers]);
+ const filtered=devices.filter(d=>!query.trim()||[d.name,d.id].some(x=>String(x).toLowerCase().includes(query.trim().toLowerCase())));
+ const selected=devices.find(d=>d.id===detail);
+ const proxyMeta=d=>{
+  const publicPath=d.proxy?.direct?.public||{};
+  const verified=arr(publicPath.endpoints).filter(x=>x.verified);
+  return {publicPath,verified};
+ };
+ const rdpEnabled=config.rdp?.enabled!==false&&config.runtime?.rdp?.enabled!==false&&arr(status.approvedCapabilities).includes('rdp.controller');
+ return <><PageHead actions={<><Button onClick={()=>onGoto('routing')}>分流规则与默认出口</Button><Button onClick={onRefresh}>刷新设备</Button><Button onClick={onSpeedAll}>批量测速</Button></>}/>
+ <div className="device-center-intro">
+  <div><strong>已授权设备</strong><span className="mini">按设备查看可用能力。卡片只提供操作，不修改全局代理出口。</span></div>
+  <div className="device-center-filter"><Input aria-label="搜索设备名称或 ID" placeholder="搜索设备名称 / ID" value={query} onChange={e=>setQuery(e.target.value)}/><span className="mini">{filtered.length} 台</span></div>
+ </div>
+ <div className="device-center-grid">
+  {filtered.map(d=>{
+   const meta=proxyMeta(d),name=d.name||d.id;
+   const online=status.connected&&d.online;
+   return <article className="device-center-card" key={d.id}>
+    <div className="device-center-card-head">
+     <div className="identity-icon"><Icon name="devices" size={21}/></div>
+     <button className="device-center-card-name" type="button" onClick={()=>setDetail(d.id)} title={'查看 '+name+' 的设备详情'}>
+      <strong>{name}</strong><span className="mini mono">{d.id}</span>
+     </button>
+     <Badge tone={online?'ok':'neutral'}>{online?'在线':status.connected?'离线':'未连接'}</Badge>
+    </div>
+    <div className="device-center-caps">
+     {d.proxy&&<Badge tone="blue"><Icon name="globe" size={12}/> 代理出口</Badge>}
+     {d.shares.length>0&&<Badge tone="blue"><Icon name="folder" size={12}/> {d.shares.length} 个共享目录</Badge>}
+     {d.rdp&&<Badge tone="blue"><Icon name="monitor" size={12}/> 远程桌面</Badge>}
+     {meta.publicPath?.available&&<Badge tone="ok">公网直连候选</Badge>}
+    </div>
+    <div className="device-center-card-actions" aria-label={name+' 快捷操作'}>
+     {d.shares.length>0&&<button type="button" className="device-quick-action" disabled={!online} title={online?'打开该设备已授权的共享文件':'设备当前不可访问'} aria-label={'打开 '+name+' 的共享文件'} onClick={()=>onFiles(d.id)}><Icon name="folder" size={18}/><span>共享文件</span></button>}
+     {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||!rdpEnabled} title={!rdpEnabled?'请在设置中启用远程桌面并确认控制端授权':online?'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>远程桌面</span></button>}
+     {d.proxy&&<button type="button" className="device-quick-action" disabled={!online} title={online?'测试此设备代理出口':'设备离线或未连接'} aria-label={'测速 '+name} onClick={()=>onSpeed(d.id)}><Icon name="activity" size={18}/><span>测速</span></button>}
+     <button type="button" className="device-quick-action" title={'查看 '+name+' 的授权与路径信息'} aria-label={'查看 '+name+' 详情'} onClick={()=>setDetail(d.id)}><Icon name="shield" size={18}/><span>设备详情</span></button>
+    </div>
+   </article>;
+  })}
+ </div>
+ {!filtered.length&&<Card><div className="empty">{devices.length?'没有符合搜索条件的设备。':'暂无已授权的远程设备。请检查 Server 授权、RDP 权限或文件目录 ACL。'}</div></Card>}
+ {arr(config.customExits).length>0&&<Card title="本机自定义代理" eyebrow="LOCAL PROXIES" action={<Button onClick={()=>onGoto('proxy')}>管理配置</Button>}><div className="device-center-local-list">{arr(config.customExits).map(x=><div className="device-center-local-row" key={x.id}><Icon name="swap" size={16}/><div className="grow"><strong>{x.name||x.id}</strong><div className="mini mono">{x.protocol?.toUpperCase()||'SOCKS5'} · {x.address}</div></div><Badge tone={x.enabled?'ok':'neutral'}>{x.enabled?'已启用':'已停用'}</Badge></div>)}</div><div className="mini">本机自定义代理不是远程设备；可在网络配置中管理，并在分流规则中指定为出口。</div></Card>}
+ <Modal open={!!selected} title={selected?.name||'设备详情'} onClose={()=>setDetail('')} footer={<Button onClick={()=>setDetail('')}>关闭</Button>}>
+  {selected&&<div className="stack">
+   <Setting title="设备 ID"><span className="mono mini">{selected.id}</span></Setting>
+   <Setting title="连接状态"><Badge tone={status.connected&&selected.online?'ok':'neutral'}>{status.connected&&selected.online?'在线':'离线 / 未连接'}</Badge></Setting>
+   <Setting title="代理出口">{selected.proxy?'已授权':'未提供'}</Setting>
+   <Setting title="远程桌面">{selected.rdp?'目标已授权':'未提供'}</Setting>
+   <Setting title="共享目录">{selected.shares.length?selected.shares.length+' 个已验证的授权目录':'未提供'}</Setting>
+   {selected.proxy&&<div className="notice">{proxyMeta(selected).publicPath?.available?'此设备提供公网直连候选，但实际路径取决于连接时协商。':'当前没有可确认的公网直连端点。'}{proxyMeta(selected).verified.length?' · '+proxyMeta(selected).verified.length+' 个已验证端点':''}。这里不使用其他出口的全局路径数据。</div>}
+   {!!selected.shares.length&&<div className="device-center-share-list">{selected.shares.map(s=><div key={s.id} className="device-center-share"><Icon name="folder" size={15}/><span className="grow">{s.name||s.id}</span><Badge>{s.permission==='read_write'?'读写':'只读'}</Badge></div>)}</div>}
+  </div>}
+ </Modal>
+ </>;
 }
 
 function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilities,toast}){

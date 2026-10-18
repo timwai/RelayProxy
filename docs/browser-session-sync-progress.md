@@ -1,3 +1,33 @@
+# Browser Session Sync 发布准入核查 · 2026-10-18 23:28（北京时间）
+
+> **当前有效快照；以下旧版“Draft / 未合并 / CI 待运行”等叙述均为历史记录。** 本次仅更新此文档，核对基准为 [`main@6b5344da`](https://github.com/timwai/RelayProxy/commit/6b5344dafad723493e0649196c48c72f28619d5a)。文档分支 `docs/browser-sync-progress-20261018` 从该 main 提交创建；不修改业务代码、不合并 main、不回写已合并的功能分支。
+
+## 2026-10-18 进度、证据与新增 CI 阻塞
+
+| 核查维度 | 结论与证据 | 影响及下一步 |
+|---|---|---|
+| PR / 分支 | [PR #194](https://github.com/timwai/RelayProxy/pull/194) 于 **2026-10-13 04:52:29 UTC** 合并；[PR #200](https://github.com/timwai/RelayProxy/pull/200) 于 **2026-10-13 05:39:15 UTC** 合并。旧 `feat/browser-session-sync` HEAD 为 `f4b2302`，不是现行开发基准；之前的 `docs/browser-sync-progress-20261013` 文档分支 HEAD `ffc01b7`，也不是当前 main。 | 以 main 当前代码与对应 SHA 的 CI 为准，不将已合并 PR 的旧 Draft 文字作为现状。 |
+| 最新 main | [`6b5344da`](https://github.com/timwai/RelayProxy/commit/6b5344dafad723493e0649196c48c72f28619d5a) 合并 [PR #215](https://github.com/timwai/RelayProxy/pull/215)，涉及 Windows 连接监控与 UI 设备名称展示；与上一版进度文档基准 `5e4ff5fd` 相比，未发现 `server/browser_sync/`、`browser/chrome-extension/` 直接实现文件变更。 | **Browser Sync P0/P1/P2 完成状态保持不变**；不能将主线其他功能或样式改动算成 Browser Sync 新交付。 |
+| **Go CI（最新 HEAD）** | [Go CI #39128159493](https://github.com/timwai/RelayProxy/actions/runs/39128159493) **失败**，步骤 `Test patched yamux` 中 `github.com/hashicorp/yamux` 的 `TestSendData_VeryLarge` 失败：日志显示 `keepalive failed: i/o deadline reached`、`stream closed`。前一 `03faca90` 的 [Go CI #39111853041](https://github.com/timwai/RelayProxy/actions/runs/39111853041) 成功。 | **新增当前主线 CI 发布阻塞（GATE-20261018-01）**。调查 yamux 大流量测试是否为时序/环境偶发或真实资源治理回归；保留原始失败日志，修复或确认原因后在**新 SHA** 重新运行 Go CI。不可把单次失败直接归因 Browser Sync。 |
+| **UI CI（最新 HEAD）** | [UI CI #39128159452](https://github.com/timwai/RelayProxy/actions/runs/39128159452) **整体失败**：`browser-sync-chromium`、`test`、macOS 桌面 job **成功**；Windows 桌面 `Test desktop packages` **失败**，`TestWindowsNetworkBrokerLiveNamedPipeRoundTrip` 和 `TestWinDivertLiveTCPReflection` 在 Windows Firewall 添加应用规则时报 `The application name could not be resolved`。前一 `03faca90` 的 [UI CI #39111853016](https://github.com/timwai/RelayProxy/actions/runs/39111853016) 同样是 Windows 桌面失败、Chromium/test/macOS 成功。 | **持续存在的主线 Windows CI 发布阻塞（GATE-20261018-02）**。检查防火墙规则的程序路径、`netsh advfirewall` 参数、CI runner 工作目录/权限及测试清理；修复后重跑 Windows job 和完整 UI CI。Browser Sync Chromium job 成功不等于整体 UI CI 成功。 |
+| **Android CI** | 最新可核对的 [Android Client #39111853014](https://github.com/timwai/RelayProxy/actions/runs/39111853014) 对应 `03faca90`，**成功**；在本次检查的最新 `6b5344da` main 工作流列表中未看到 Android Client 运行。 | **不能声称最新 main SHA 的 Android CI 已通过或失败**；如发布门槛要求三项同 SHA，通过补跑/触发 Android CI 核实。 |
+| Browser Sync 发布验收 | 现有 CI 含真实自动化 Chromium 双端 TLS/WSS、反代回归，但未发现足以关闭 P0 的人工 Windows/macOS Chrome 站点登录态、异常恢复、IndexedDB v3、独立密码学/安全审查证据。 | **P0 9 项：5 项已实现待验收（02/03/04/08/09）、2 项部分完成（05/06）、2 项未完成正式验收（01/07）；0 项正式验收通过。P1：4 项部分完成、1 项已替代、1 项未开始；P2：2 项已实现待验收、2 项未开始。继续不放行。** |
+
+### 发布门禁与恢复验收
+
+1. **GATE-20261018-01（新增）**：修复或隔离 `TestSendData_VeryLarge` 的根因，并在修复提交的 Go CI 上验证 `Test patched yamux` 成功。仅重试一次转绿不足以断言根因关闭；至少保留失败复现与回归依据。
+2. **GATE-20261018-02（持续）**：定位 Windows Firewall 应用名解析失败，修正测试/规则参数或程序路径，确保 `TestWindowsNetworkBrokerLiveNamedPipeRoundTrip` 与 `TestWinDivertLiveTCPReflection` 在 Windows runner 稳定通过。不能因与 Browser Sync 无直接关系而将**全仓 UI CI 失败**记为成功。
+3. **Browser Sync P0 不变**：真实桌面 Chrome A/B 与授权站点验证、私钥丢失后重新审批、MV3 恢复、复杂 Cookie/IndexedDB v3 冲突及回滚、Agent 网络出口边界与独立安全审查仍需明确证据。最新 Chromium 自动化通过只能作为相关自动化证据，不能升级人工验收状态。
+4. **新 SHA 证据**：下一次更新必须引用新 main SHA 的 Go/UI/Android 各自结果，区分工作流整体结论和 Browser Sync 单独 job 结论；不要把旧提交成功沿用到新提交。
+
+### 进度变更记录（追加，不覆盖历史）
+
+| 日期 | 代码基准 | 本次核查与证据 | P0/P1/P2 变化 | 处理 |
+|---|---|---|---|---|
+| 2026-10-18 23:28 +08 | [main `6b5344da`](https://github.com/timwai/RelayProxy/commit/6b5344dafad723493e0649196c48c72f28619d5a) | [Go #39128159493](https://github.com/timwai/RelayProxy/actions/runs/39128159493) yamux 大流量测试失败；[UI #39128159452](https://github.com/timwai/RelayProxy/actions/runs/39128159452) Windows Firewall 测试失败，但 Browser Sync Chromium/test/macOS jobs 成功；[Android #39111853014](https://github.com/timwai/RelayProxy/actions/runs/39111853014) 仅是旧 SHA 成功。PR #194/#200 已合并。 | **所有功能条目状态不变**，新增主线 CI 门禁 GATE-20261018-01、持续 GATE-20261018-02；上线仍不放行 | 仅在新文档分支记录，待相关业务负责人定位；无 Cookie/Token/密钥数据 |
+
+---
+
 > **2026-10-13 · Node 模拟 A/B 异步拒绝用例自审（最终 SHA 待验证）：** [UI CI #38349793659](https://github.com/timwai/RelayProxy/actions/runs/38349793659) 的旧 `envelope.test.mjs` 在明文篡改两处调用 `assert.rejects(decryptEncryptedOffer(...))` 时**未 await**，然后立即通过全局 `use(a)` 将模拟 Chrome Profile 从 B 切换回 A，导致 B 的异步解密沿用已切换的 `globalThis.indexedDB/chrome`，最终把来源设备与接收设备误判为同一个 ID。已补两个 `await assert.rejects`，强制前一 Profile 的异步工作结束后再切换；未修改生产加密/认证业务。此处与实际 Chromium“旧 ID+新密钥”非原子写入竞态**是两个不同问题**，两项都需要独立测试。最终 SHA 必须通过 Node + 两轮真实 Chromium WSS/反代、Go CI、跨平台 UI 构建后再合并 PR #200。
 
 > **2026-10-13 · 原子身份记录修复测试闭环补充（最新 HEAD CI 待核验）：** 已新增 `browser/chrome-extension/tests/device-identity.test.mjs`，直接用真实 WebCrypto P-256 加密/签名密钥和共享、可串行读写的模拟 IndexedDB，构造 12 个 Options/MV3 并发请求、删除权威 bundle 后重复 12 个并发请求，要求新/旧 Browser ID 不同、所有 Profile 内调用者使用同一新 ID 与公钥、挑战签名拒绝旧 ID；同时测试现有 Profile 同一事务合法迁移旧设备 ID 与两把私钥，以及旧记录缺一把/原子记录损坏都强制轮换。此前三个 Node 模拟 Profile（`envelope.test.mjs`、`full-state.test.mjs`、`server-api.test.mjs`、`session.test.mjs`）已全部改为尊重 `readwrite` 的 `get/put/delete` 与事务完成时序，避免旧 stub 因未实现 `IDBObjectStore.delete` 报错；不调整生产 E2EE/审批/出口授权策略。**真实 Chromium 双端 E2E** 在私钥丢失后并发调用 Options 页与 MV3 Worker 的新 bundle 初始化，核验两端取得相同新身份、旧签名不可继承、重新注册必须 pending。此前某一中间提交 UI CI 失败属旧 Mock/进度文档门禁，已逐项修复；最终 HEAD 的 Go/UI/Chromium/桌面测试仍需 GitHub Actions 结果。用户原需求为排查与修复，新的 PR #200 保持 Draft 待 CI，不在未验证时声称已进入 main。

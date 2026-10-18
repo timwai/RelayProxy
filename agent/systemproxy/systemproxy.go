@@ -13,18 +13,18 @@ import (
 
 // Settings is opt-in. Absent booleans default to true, while Mode defaults to off.
 type Settings struct {
-	Mode       string `yaml:"mode" json:"mode"`
-	AutoFollow *bool  `yaml:"auto_follow" json:"autoFollow,omitempty"`
-	HTTP       *bool  `yaml:"http" json:"http,omitempty"`
-	SOCKS5     *bool  `yaml:"socks5" json:"socks5,omitempty"`
-	ProxyIPLiterals *bool `yaml:"proxy_ip_literals" json:"proxyIpLiterals,omitempty"`
+	Mode            string `yaml:"mode" json:"mode"`
+	AutoFollow      *bool  `yaml:"auto_follow" json:"autoFollow,omitempty"`
+	HTTP            *bool  `yaml:"http" json:"http,omitempty"`
+	SOCKS5          *bool  `yaml:"socks5" json:"socks5,omitempty"`
+	ProxyIPLiterals *bool  `yaml:"proxy_ip_literals" json:"proxyIpLiterals,omitempty"`
 }
 
-func on(p *bool) bool              { return p == nil || *p }
-func (s Settings) Follow() bool    { return on(s.AutoFollow) }
-func (s Settings) UseHTTP() bool   { return on(s.HTTP) }
-func (s Settings) UseSOCKS5() bool { return on(s.SOCKS5) }
-func (s Settings) Enabled() bool   { return s.Mode == "system" }
+func on(p *bool) bool                 { return p == nil || *p }
+func (s Settings) Follow() bool       { return on(s.AutoFollow) }
+func (s Settings) UseHTTP() bool      { return on(s.HTTP) }
+func (s Settings) UseSOCKS5() bool    { return on(s.SOCKS5) }
+func (s Settings) Enabled() bool      { return s.Mode == "system" }
 func (s Settings) UseIPTargets() bool { return on(s.ProxyIPLiterals) }
 
 type ProxyState struct {
@@ -34,12 +34,12 @@ type ProxyState struct {
 	Authenticated bool   `json:"authenticated"`
 }
 type entry struct {
-	Service string     `json:"service"`
-	Kind    string     `json:"kind"`
-	Before  ProxyState `json:"before"`
-	Applied ProxyState `json:"applied"`
-	BeforeBypass []string `json:"beforeBypass,omitempty"`
-	AppliedBypass []string `json:"appliedBypass,omitempty"`
+	Service       string     `json:"service"`
+	Kind          string     `json:"kind"`
+	Before        ProxyState `json:"before"`
+	Applied       ProxyState `json:"applied"`
+	BeforeBypass  []string   `json:"beforeBypass,omitempty"`
+	AppliedBypass []string   `json:"appliedBypass,omitempty"`
 }
 type journal struct {
 	Version int     `json:"version"`
@@ -201,7 +201,9 @@ func (m *Manager) activate(service string) error {
 	if m.desired.UseIPTargets() {
 		var err error
 		previousBypass, err = m.backend.ReadBypass(service)
-		if err != nil { return fmt.Errorf("read system proxy bypass list: %w", err) }
+		if err != nil {
+			return fmt.Errorf("read system proxy bypass list: %w", err)
+		}
 		appliedBypass = filterIPBypass(previousBypass)
 	}
 	// Preflight all enabled types before mutating any system settings.
@@ -221,7 +223,9 @@ func (m *Manager) activate(service string) error {
 	}
 	if m.desired.UseIPTargets() && !reflect.DeepEqual(previousBypass, appliedBypass) {
 		m.records = append(m.records, entry{Service: service, Kind: "bypass", BeforeBypass: previousBypass, AppliedBypass: appliedBypass})
-		if err := m.saveJournal(); err != nil { return err }
+		if err := m.saveJournal(); err != nil {
+			return err
+		}
 		if err := m.backend.WriteBypass(service, appliedBypass); err != nil {
 			return fmt.Errorf("set IP bypass exceptions for %s: %w", service, err)
 		}

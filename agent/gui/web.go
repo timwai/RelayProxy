@@ -607,7 +607,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"accessMode": payload.AccessMode, "accessDomains": payload.AccessDomains, "accessCidrs": payload.AccessCIDRs,
 		"exitUpstream": payload.ExitUpstream, "rdp": payload.RDP, "p2p": payload.P2P, "direct": payload.Direct, "publicDirectAdvertise": cfg.Direct.Public.Advertise, "insecureTls": cfg.Server.InsecureTLS,
 		"networkMode": payload.NetworkMode, "platform": runtime.GOOS,
-		"systemProxy":       map[string]any{"mode": cfg.SystemProxy.Mode, "autoFollow": cfg.SystemProxy.Follow(), "http": cfg.SystemProxy.UseHTTP(), "socks5": cfg.SystemProxy.UseSOCKS5()},
+		"systemProxy":       map[string]any{"mode": cfg.SystemProxy.Mode, "autoFollow": cfg.SystemProxy.Follow(), "http": cfg.SystemProxy.UseHTTP(), "socks5": cfg.SystemProxy.UseSOCKS5(), "proxyIpLiterals": cfg.SystemProxy.UseIPTargets()},
 		"systemProxyStatus": b.SystemProxyStatus(),
 		"isAutostart":       payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,

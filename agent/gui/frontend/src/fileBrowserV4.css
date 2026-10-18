@@ -253,3 +253,21 @@ html.file-browser-focus .main:has(> .file-browser-v4)>.file-browser-v4{margin-to
    selection toolbar or shifting folder positions. */
 .v4-entry:focus-visible{outline:2px solid var(--brand);outline-offset:-2px;background:color-mix(in srgb,var(--brand) 7%,var(--surface2))}
 .v4-file-scroll>.v4-selection button:focus-visible,.v4-window-link:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+
+/* The sidebar is a folder tree for the selected host; host switching lives in
+   the explorer header instead of occupying one sidebar row per device. */
+.v4-tree-share{min-width:0;margin:3px 1px}
+.v4-tree-share>.v4-tree-folder{min-width:0}
+.v4-tree-share .v4-share{min-width:0;flex:1}
+.v4-head-title{display:flex;align-items:center;gap:14px;flex:1;min-width:0}
+.v4-device-switch{display:flex;align-items:center;gap:8px;flex:0 1 265px;min-width:145px;color:var(--brand)}
+.v4-device-switch>svg{flex:0 0 auto}
+.v4-device-switch select{min-width:0;width:100%;max-width:100%;height:44px;min-height:44px;font-size:13px}
+.v4-head-location{display:flex;flex-direction:column;gap:2px;flex:1;min-width:0}
+.v4-head-location h2{overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.v4-head-location small{max-width:100%;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.v4-tree-head{padding:12px 12px 10px}
+.v4-tree-scroll{padding:8px}
+@media(max-width:1150px){.v4-head{flex-wrap:wrap}.v4-head-actions{margin-left:auto}.v4-device-switch{flex-basis:225px}}
+@media(max-width:650px){.v4-head-title{flex-wrap:wrap;gap:7px}.v4-device-switch{flex:1 1 100%;min-width:0}.v4-head-location{flex:1 1 100%}.v4-head-actions{width:100%;justify-content:flex-end}}
+@media(max-width:640px){.v4-device-switch select{height:48px;min-height:48px;font-size:14px}}

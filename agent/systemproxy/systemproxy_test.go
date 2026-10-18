@@ -13,13 +13,14 @@ type fakeBackend struct {
 	states  map[string]ProxyState
 	pac     bool
 	fail    bool
+	failKind string
 }
 
 func (f *fakeBackend) CurrentService() (string, error)      { return f.current, nil }
 func key(s, k string) string                                { return s + "/" + k }
 func (f *fakeBackend) Read(s, k string) (ProxyState, error) { return f.states[key(s, k)], nil }
 func (f *fakeBackend) Write(s, k string, x ProxyState) error {
-	if f.fail {
+	if f.fail || f.failKind == k {
 		return errors.New("permission denied")
 	}
 	f.states[key(s, k)] = x
@@ -129,5 +130,21 @@ func TestRestoreFailurePreservesJournal(t *testing.T) {
 	f.fail = false
 	if err := m.Apply(Settings{}, 8080, 1080); err != nil {
 		t.Fatal(err)
+	}
+}
+
+func TestPartialActivationImmediatelyRollsBack(t *testing.T) {
+	f := &fakeBackend{current: "Wi-Fi", states: map[string]ProxyState{}}
+	m := newTestManager(t, f)
+	f.failKind = "secureweb"
+	err := m.Apply(Settings{Mode: "system"}, 8080, 1080)
+	if err == nil {
+		t.Fatal("expected partial activation error")
+	}
+	if got, _ := f.Read("Wi-Fi", "web"); got.Enabled {
+		t.Fatalf("partially configured HTTP proxy left active: %+v", got)
+	}
+	if s := m.Status(); s.Enabled || s.PendingRecovery != 0 {
+		t.Fatalf("failed activation should be disarmed and recovered: %+v", s)
 	}
 }

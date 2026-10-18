@@ -577,6 +577,9 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	// other tooling.
 	for _, field := range []**bool{
 		&cfg.Server.TLSEnabled,
+		&cfg.SystemProxy.AutoFollow,
+		&cfg.SystemProxy.HTTP,
+		&cfg.SystemProxy.SOCKS5,
 		&cfg.Proxy.SOCKS5.Enabled,
 		&cfg.Proxy.HTTP.Enabled,
 		&cfg.RDP.Enabled,

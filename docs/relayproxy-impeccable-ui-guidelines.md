@@ -184,3 +184,10 @@ Information architecture principle: **daily operations** are available from the 
 - At narrow widths, the device popover anchors at the bottom of the browser pane and overlays the file list instead of adding height. Left tree remains **only** the currently selected device's ACL-verified shares; right file list retains selection, upload/download, context menus and path navigation.
 - **Local folder permissions:** Replace the long native candidate-device dropdown inside the existing shared-folder editor with a nested **添加授权设备** disclosure. Search only `goGetFileShareCandidates` (Server-approved, identity-filtered candidates), select multiple devices, and apply an explicitly selected **只读 (default) / 读写** permission. Existing grants can still be edited or removed individually; never expose unapproved devices. This picker stays inside the editor, not the list header.
 - Tests: `compact-file-device-selection.test.js` and updated `content-first-navigation.test.js`, `file-sharing-workspace.test.js`. Native 800px, 125% scaling, browser focus-window and mobile popover positioning remain important visual acceptance cases.
+
+## Iteration 15: single-line per-link speed checks
+
+- Every row in the Device Center speed dialog now lays out **status icon | check name | concise evidence | result state** on **one nonwrapping horizontal line**. The previous two-line label/detail stack has been removed; full tooltips and accessible labels preserve untruncated diagnostic context.
+- Check rows use a compact 38–40px grid with independently truncated label/evidence cells, a fixed status area and reduced 22–23px icons. A separate narrow-screen grid keeps all four pieces on one row instead of increasing dialog height.
+- Only presentation changes: actual `goRunSpeedTest` execution, exact-exit evidence matching, check sequencing, failure/candidate semantics, per-direction throughput and BBR calibration remain unchanged.
+- Regression test: `agent/gui/frontend/src/speed-check-density.test.js`.

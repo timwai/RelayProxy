@@ -140,7 +140,7 @@ func (m *Manager) Apply(s Settings, httpPort, socksPort int) error {
 	if s.Mode != "" && s.Mode != "system" {
 		return fmt.Errorf("invalid system proxy mode %q", s.Mode)
 	}
-	if reflect.DeepEqual(m.desired, s) && m.httpPort == httpPort && m.socksPort == socksPort && (!s.Enabled() || m.activeService != "") {
+	if len(m.records) == 0 && reflect.DeepEqual(m.desired, s) && m.httpPort == httpPort && m.socksPort == socksPort && !s.Enabled() || len(m.records) > 0 && m.activeService != "" && reflect.DeepEqual(m.desired, s) && m.httpPort == httpPort && m.socksPort == socksPort && s.Enabled() {
 		return nil
 	}
 	if err := m.restore(); err != nil {

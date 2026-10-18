@@ -6,9 +6,35 @@
   const actions = {PROXY:'代理',DIRECT:'直连',REJECT:'阻断'};
   const ruleNames = {default:'默认动作',global_proxy:'全局代理',direct:'全局直连',exclude:'排除进程','loop-guard':'回环保护'};
   let snapshot = {connections:[]}, paused = false, page = 0, selected = null, sort = 'started_at', descending = true;
+  let exitNames = new Map(), pollCount = 0;
   const pageSize = 200;
   const text = value => String(value == null ? '' : value);
   const isActive = row => row.state === 'active' || row.state === 'connecting';
+  const exitLabel = id => exitNames.get(id) || id;
+  function connectionPath(record) {
+    const path = text(record.path).trim();
+    const action = text(record.action).toUpperCase();
+    const id = text(record.exit_id).trim();
+    if (action !== 'PROXY' || !id) return path || action || '—';
+    const name = exitLabel(id);
+    if (path.includes(id)) return path.split(id).join(name);
+    return (path && path.toUpperCase() !== 'PROXY' ? path : 'PROXY') + ' · ' + name;
+  }
+  async function refreshExitNames() {
+    if (typeof window.goGetProxyExits !== 'function') return;
+    try {
+      const raw = await window.goGetProxyExits();
+      const exits = typeof raw === 'string' ? JSON.parse(raw) : raw;
+      if (!Array.isArray(exits)) return;
+      const names = new Map();
+      exits.forEach(exit => {
+        const id = text(exit && (exit.deviceId || exit.id)).trim();
+        const name = text(exit && (exit.name || exit.deviceName)).trim();
+        if (id && name) names.set(id, name);
+      });
+      exitNames = names;
+    } catch (_) { /* An unavailable inventory must not interrupt traffic polling. */ }
+  }
   function bytes(value, rate = false) {
     let n = Math.max(0,Number(value)||0), unit = 0;
     const units = ['B','KB','MB','GB','TB'];
@@ -66,8 +92,8 @@
     if (!record) return;
     const values = [
       ['进程',record.process || '未识别'],['Windows 服务',serviceNames(record).join(', ') || '—'],['进程别名',(record.process_aliases || []).join(', ') || '—'],['本地端点',record.source || '未知'],['目标',record.host || record.ip || '未知'],
-      ['目标 IP',record.ip || '由出口解析，未返回 IP'],['域名来源',record.domain_source === 'requested' ? '应用请求' : record.domain_source === 'dns' ? 'DNS 应答关联' : '未知'],['出口',record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地')],
-      ['传输路径',record.path || '未记录'],
+      ['目标 IP',record.ip || '由出口解析，未返回 IP'],['域名来源',record.domain_source === 'requested' ? '应用请求' : record.domain_source === 'dns' ? 'DNS 应答关联' : '未知'],['出口',record.exit_id ? exitLabel(record.exit_id) : (record.action === 'PROXY' ? '自动选择' : '本地')],
+      ['传输路径',connectionPath(record)],
       ['命中规则',ruleNames[record.rule] || record.rule || '未命名规则'],['开始时间',new Date(record.started_at).toLocaleString()],['计数方式',record.accounting === 'packet' ? '数据包载荷（含重传）' : '传输载荷']
     ];
     $('details-grid').replaceChildren();
@@ -80,7 +106,7 @@
     const rows = snapshot.connections.filter(row => {
       if (state !== 'all' && row.state !== state) return false;
       if (protocol && row.protocol !== protocol || action && row.action !== action) return false;
-      return !query || [row.process,row.process_name,row.process_aliases,row.services,row.pid,row.host,row.ip,row.port,row.rule,row.source,row.exit_id,row.path].some(value => text(value).toLowerCase().includes(query));
+      return !query || [row.process,row.process_name,row.process_aliases,row.services,row.pid,row.host,row.ip,row.port,row.rule,row.source,row.exit_id,row.path,connectionPath(row)].some(value => text(value).toLowerCase().includes(query));
     });
     rows.sort((a,b) => {
       const x = sortValue(a,sort), y = sortValue(b,sort);
@@ -121,6 +147,7 @@
   async function poll() {
     try {
       if (!paused) {
+        if (pollCount++ % 10 === 0) await refreshExitNames();
         if (typeof window.goGetConnections !== 'function') throw new Error('监控尚未连接到 Agent');
         const raw = await window.goGetConnections();
         if (!raw) return;

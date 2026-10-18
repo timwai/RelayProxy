@@ -128,14 +128,14 @@ function Overview({status,config,exits,traffic,history,onRefresh,onGoto}){
  const connected=!!status.connected;
  const approval=String(status.approvalState||''),approvalLower=approval.toLowerCase();
  const approvalLabel=connected?(approval||'已连接'):(/pending|wait|approval|待审批/.test(approvalLower)||/reject|denied|revoked|撤销|拒绝/.test(approvalLower)?approval:'未连接');
- return <><PageHead actions={<><Button onClick={onRefresh}>刷新</Button><Button primary onClick={()=>onGoto('exits')}>查看设备</Button></>}/>
+ return <><PageHead actions={<Button onClick={onRefresh}>刷新</Button>}/>
  <Card className="hero overview-hero">
   <div className="hero-glow"/>
   <div className="hero-status"><span className={cx('dot',connected?'online':'offline')}/><div className="grow"><div className="eyebrow">{connected?'CONNECTED':'DISCONNECTED'}</div><div className="big">{connected?'RelayProxy 已连接':'等待连接到 RelayProxy Server'}</div><div className="muted">{((connected?(config.runtime?.serverAddress||config.serverAddress):config.serverAddress)||'尚未配置服务器')+' · '+(status.transport||config.runtime?.transport||config.transport||'auto')}{connected&&config.runtime?.serverAddress&&config.runtime.serverAddress!==config.serverAddress?' · 已保存新 Server，待重启':''}</div></div><Badge tone={connected?'ok':/reject|denied|revoked|撤销|拒绝/i.test(approvalLabel)?'danger':'neutral'}>{approvalLabel}</Badge></div>
-  <div className="overview-current-exit"><div className="grow"><div className="mini">{status.selectedExit?'当前运行出口':'默认代理出口配置'}</div><strong>{exitName([...exits,...arr(config.customExits)],status.selectedExit||config.defaultExitId)}</strong></div><div className="overview-quick-links"><Button quiet onClick={()=>onGoto('exits')}>设备与链路检测 ›</Button><Button quiet onClick={()=>onGoto('routing')}>分流规则 ›</Button></div></div>
+  <div className="overview-current-exit"><div className="grow"><div className="mini">{status.selectedExit?'当前运行出口':'默认代理出口配置'}</div><strong>{exitName([...exits,...arr(config.customExits)],status.selectedExit||config.defaultExitId)}</strong></div></div>
  </Card>
  <div className="cards-4"><Metric label="下载速度" value={fmtBytes(traffic?.download_rate||0,true)} hint={fmtBytes(traffic?.download||0)+' 累计'} series={history.down}/><Metric label="上传速度" value={fmtBytes(traffic?.upload_rate||0,true)} hint={fmtBytes(traffic?.upload||0)+' 累计'} series={history.up}/><Metric label="往返延迟" value={connected?((status.latency||0)+' ms'):'—'} hint="Server RTT" series={history.latency}/><Metric label="活跃连接" value={traffic?.active??status.activeStreams??0} hint={(traffic?.total||0)+' 累计连接'} series={history.active}/></div>
- <Card title="最近连接" eyebrow="LIVE TRAFFIC" action={<Button onClick={()=>onGoto('monitor')}>查看全部</Button>}><div className="recent-list">{arr(traffic?.connections).slice(0,3).map((x,i)=><div className="recent-row" key={x.id||i}><div className="app-mark">{String(x.process_name||x.process||'?').slice(0,1).toUpperCase()}</div><div className="grow"><strong>{x.process_name||x.process||'未知进程'}</strong><div className="mono mini">{(x.host||x.ip||'—')+(x.port?':'+x.port:'')}</div></div><div className="recent-rate"><b>{fmtBytes(x.download_rate||0,true)} ↓</b><span>{fmtBytes(x.upload_rate||0,true)} ↑</span></div><Badge tone={tone(x.state)}>{x.path||x.action||x.state||'—'}</Badge></div>)}{!arr(traffic?.connections).length&&<div className="empty compact-empty">暂无连接记录。</div>}</div></Card></>
+ <Card title="最近连接" eyebrow="LIVE TRAFFIC"><div className="recent-list">{arr(traffic?.connections).slice(0,3).map((x,i)=><div className="recent-row" key={x.id||i}><div className="app-mark">{String(x.process_name||x.process||'?').slice(0,1).toUpperCase()}</div><div className="grow"><strong>{x.process_name||x.process||'未知进程'}</strong><div className="mono mini">{(x.host||x.ip||'—')+(x.port?':'+x.port:'')}</div></div><div className="recent-rate"><b>{fmtBytes(x.download_rate||0,true)} ↓</b><span>{fmtBytes(x.upload_rate||0,true)} ↑</span></div><Badge tone={tone(x.state)}>{x.path||x.action||x.state||'—'}</Badge></div>)}{!arr(traffic?.connections).length&&<div className="empty compact-empty">暂无连接记录。</div>}</div></Card></>
 }
 
 function Devices({status,config,setv,save,dirty,onRefresh,toast}){
@@ -252,7 +252,7 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
   return {publicPath,verified};
  };
  const rdpEnabled=config.rdp?.enabled!==false&&config.runtime?.rdp?.enabled!==false&&arr(status.approvedCapabilities).includes('rdp.controller');
- return <><PageHead actions={<><Button onClick={()=>onGoto('routing')}>分流规则与默认出口</Button><Button onClick={onRefresh}>刷新设备</Button><Button disabled={!status.connected||!exits.some(x=>x.online!==false)} onClick={onSpeedAll}>批量测速</Button></>}/>
+ return <><PageHead actions={<><Button onClick={onRefresh}>刷新设备</Button><Button disabled={!status.connected||!exits.some(x=>x.online!==false)} onClick={onSpeedAll}>批量测速</Button></>}/>
  <div className="device-center-intro">
   <div><strong>已授权设备</strong><span className="mini">按设备查看可用能力。卡片只提供操作，不修改全局代理出口。</span></div>
   <div className="device-center-filter"><Input aria-label="搜索设备名称或 ID" placeholder="搜索设备名称 / ID" value={query} onChange={e=>setQuery(e.target.value)}/><span className="mini">{filtered.length} 台</span></div>
@@ -279,13 +279,13 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
      {d.shares.length>0&&<button type="button" className="device-quick-action" disabled={!online} title={online?'打开该设备已授权的共享文件':'设备当前不可访问'} aria-label={'打开 '+name+' 的共享文件'} onClick={()=>onFiles(d.id)}><Icon name="folder" size={18}/><span>共享文件</span></button>}
      {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||d.rdp.online===false||!rdpEnabled} title={!rdpEnabled?'请在设置中启用远程桌面并确认控制端授权':online?'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>远程桌面</span></button>}
      {d.proxy&&<button type="button" className="device-quick-action" disabled={!online||d.proxy.online===false} title={online?'测试此设备代理出口':'设备离线或未连接'} aria-label={'测速 '+name} onClick={()=>onSpeed(d.id)}><Icon name="activity" size={18}/><span>测速</span></button>}
-     <button type="button" className="device-quick-action" title={'查看 '+name+' 的授权与路径信息'} aria-label={'查看 '+name+' 详情'} onClick={()=>setDetail(d.id)}><Icon name="shield" size={18}/><span>设备详情</span></button>
+     
     </div>
    </article>;
   })}
  </div>
  {!filtered.length&&<Card><div className="empty">{devices.length?'没有符合搜索条件的设备。':'暂无已授权的远程设备。请检查 Server 授权、RDP 权限或文件目录 ACL。'}</div></Card>}
- {arr(config.customExits).length>0&&<Card title="本机自定义代理" eyebrow="LOCAL PROXIES" action={<Button onClick={()=>onGoto('proxy')}>管理配置</Button>}><div className="device-center-local-list">{arr(config.customExits).map(x=><div className="device-center-local-row" key={x.id}><Icon name="swap" size={16}/><div className="grow"><strong>{x.name||x.id}</strong><div className="mini mono">{x.protocol?.toUpperCase()||'SOCKS5'} · {x.address}</div></div><Badge tone={x.enabled?'ok':'neutral'}>{x.enabled?'已启用':'已停用'}</Badge></div>)}</div><div className="mini">本机自定义代理不是远程设备；可在网络配置中管理，并在分流规则中指定为出口。</div></Card>}
+ {arr(config.customExits).length>0&&<Card title="本机自定义代理" eyebrow="LOCAL PROXIES"><div className="device-center-local-list">{arr(config.customExits).map(x=><div className="device-center-local-row" key={x.id}><Icon name="swap" size={16}/><div className="grow"><strong>{x.name||x.id}</strong><div className="mini mono">{x.protocol?.toUpperCase()||'SOCKS5'} · {x.address}</div></div><Badge tone={x.enabled?'ok':'neutral'}>{x.enabled?'已启用':'已停用'}</Badge></div>)}</div><div className="mini">本机自定义代理不是远程设备；可在网络配置中管理，并在分流规则中指定为出口。</div></Card>}
  <Modal open={!!selected} title={selected?.name||'设备详情'} onClose={()=>setDetail('')} footer={<Button onClick={()=>setDetail('')}>关闭</Button>}>
   {selected&&<div className="stack">
    <Setting title="设备 ID"><span className="mono mini">{selected.id}</span></Setting>
@@ -413,7 +413,7 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
   onDragEnd:endDrag,onMouseUp:()=>{armed.current=false}});
  const edit=i=>setEditing({index:i,rule:JSON.parse(JSON.stringify(i>=0?rules[i]:{name:'新规则',enabled:true,action:'PROXY',exit_id:'',datagram_required:false,handle_direct:false,processes:[],targets:[],ports:[],protocols:['tcp','udp']}))});
  const saveEditor=()=>{const n=[...rules],rule=normalizeRuleLists(editing.rule);if(editing.index<0)n.push(rule);else n[editing.index]=rule;commit(n);setEditing(null)};
- return <><PageHead title="分流规则" desc="按进程、域名/IP、端口和协议从上到下匹配，第一条命中的规则生效。DNS 解析与防泄漏已归入独立页面。" actions={<><Button onClick={()=>onGoto('dns')}>DNS 设置 ›</Button><Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button><Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button></>}/>
+ return <><PageHead title="分流规则" actions={<><Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button><Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button></>}/>
  <Card title="规则列表" eyebrow={rules.length+' RULES'}><div className="rule-table"><div className="rule-row rule-head"><span>#</span><span>规则</span><span>匹配条件</span><span>动作</span><span>启用</span><span>操作</span></div>{rules.map((x,i)=><div className={cx('rule-row',!x.enabled&&'disabled',dragging===i&&'dragging',dropAt&&dropAt.i===i&&dragging!==i&&(dropAt.after?'drop-after':'drop-before'))} key={(x.name||'rule')+'-'+i} {...dragProps(i)}><span className="drag" role="button" tabIndex={-1} aria-label={'拖动调整顺序：'+(x.name||'规则 '+(i+1))} title="拖动调整顺序" onMouseDown={()=>{armed.current=true}}>⋮⋮</span><div><div className="row"><strong>{x.name||'规则 '+(i+1)}</strong></div><div className="mini">优先级 {i+1}</div></div><div className="chips">{arr(x.processes).slice(0,2).map(v=><span className="chip" key={'p'+v}>{v}</span>)}{arr(x.targets).slice(0,2).map(v=><span className="chip" key={'t'+v}>{v}</span>)}{arr(x.ports).slice(0,1).map(v=><span className="chip" key={'o'+v}>{v}</span>)}{!arr(x.processes).length&&!arr(x.targets).length&&!arr(x.ports).length&&<span className="mini">任意流量</span>}</div><div><Badge tone={x.action==='REJECT'?'danger':x.action==='DIRECT'?'blue':'ok'}>{x.action||'PROXY'}</Badge>{x.exit_id&&<div className="mini">{exitName(exits,x.exit_id)}</div>}</div><div><Switch checked={!!x.enabled} label={(x.enabled?'停用':'启用')+' '+(x.name||'规则 '+(i+1))} onChange={v=>toggle(i,v)}/></div><div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>move(i,-1)}>↑</Button><Button quiet disabled={i===rules.length-1} onClick={()=>move(i,1)}>↓</Button><Button quiet onClick={()=>edit(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除这条分流规则？')&&commit(rules.filter((_,n)=>n!==i))}>删除</Button></div></div>)}{!rules.length&&<div className="empty">尚无规则。切换到规则模式前请先添加规则。</div>}</div></Card>
  <Card title="规则订阅" eyebrow={subs.length+' SUBSCRIPTIONS'} action={<Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button>}>
   <div className="mini">支持 GFWList（Base64 / Adblock 主机规则）、域名和 IP/CIDR 文本列表。按上到下顺序匹配：手动规则优先 → 订阅 → 默认动作。仅在规则模式生效，每 6 小时自动更新；下载失败继续使用本地已缓存的最后成功版本。URL 路径、正则和 Adblock 修饰符不会被扩大为整个域名匹配。</div>
@@ -482,7 +482,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const fakeConfigured=!!r.fake_ip_enabled;
  const fakeApplied=divertRunning&&protection.fakeIpEnabled===true;
  const preset=currentDNSPreset(r);
- return <><PageHead title="DNS 设置" desc="自动协调 DNS 解析与分流。通常只需使用自动模式。" actions={<Button onClick={()=>onGoto('routing')}>分流规则 ›</Button>}/>
+ return <><PageHead title="DNS 设置"/>
  <Card title="DNS 处理模式" eyebrow="DNS POLICY">
   <Field label="解析模式" help="切换模式会统一更新内部 DNS 选项，旧版配置仍可使用。">
    <Select value={preset} onChange={e=>change(applyDNSPreset(r,e.target.value))}>
@@ -531,7 +531,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
     </Field>
    </div>
    <div className="notice warn top-gap">这些开关不等于完整的 DNS 防泄漏保证。环回 DNS、应用私有 DoH 与 Agent/驱动退出后的网络保护，需要独立验证。</div>
-   <div className="actions end top-gap"><Button onClick={()=>onGoto('proxy')}>透明代理设置 ›</Button><Button onClick={()=>onGoto('diagnostics')}>诊断与日志 ›</Button></div>
+   
   </Card>
  </>}
  <Card title="加密 DNS 出口连通性" eyebrow="DNS PROBE">
@@ -581,7 +581,7 @@ function RDPSettingsPage({status,config,setv,save,dirty,toast,onGoto}){
  const controllerApproved=arr(status.approvedCapabilities).includes('rdp.controller');
  const saveRDP=async()=>{await save({rdp:{enabled:desiredEnabled}})};
  const restart=async()=>{try{const r=parseMutation(await call('goRestart'));if(!r.ok)throw new Error(r.message||'重启客户端失败')}catch(e){toast(e.message,'danger')}};
- return <><PageHead title="远程桌面设置" actions={<Button onClick={()=>onGoto('rdp')}>返回远程桌面</Button>}/>
+ return <><PageHead title="远程桌面设置"/>
  <Card title="RDP 客户端能力" eyebrow="CONTROLLER"><Setting title="启用远程桌面" desc="关闭时 Agent 不会向 Server 申请 rdp.controller，因此授权设备列表会为空。"><Switch checked={desiredEnabled} onChange={v=>setv('rdp.enabled',v)} label="启用远程桌面"/></Setting><Setting title="当前运行状态" desc={runtimeEnabled?'Agent 正在申请 RDP 能力':'当前进程未启用 RDP；保存后需要重启客户端'}><Badge tone={runtimeEnabled?'ok':'neutral'}>{runtimeEnabled?'已启用':'未启用'}</Badge></Setting><Setting title="Server 控制端授权" desc={status.connected?(controllerApproved?'当前会话已获得 rdp.controller':'当前会话没有 rdp.controller；请检查 Server 设备能力审批'):'连接 Server 后才能确认当前授权'}><Badge tone={controllerApproved?'ok':status.connected?'warn':'neutral'}>{controllerApproved?'已授权':status.connected?'未授权':'未连接'}</Badge></Setting>{dirty&&<SaveBar dirty label="保存 RDP 设置" hint="RDP 开关属于启动设置；保存后需重启客户端重新申请 Server 能力。" onSave={saveRDP}/>} {!dirty&&config.restartRequired&&arr(config.restartFields).some(x=>String(x).includes('RDP'))&&<div className="actions end top-gap"><Button primary onClick={restart}>重启客户端应用 RDP 设置</Button></div>}</Card>
  </>;
 }
@@ -601,7 +601,7 @@ function MessagesPage({messages,refresh,clear,toast}){
 function MessageSettingsPage({config,setv,save,onGoto}){
  const[preview,setPreview]=useState('');
  const timeout=Number(config?.verificationPopupTimeoutSec??15);
- return <><PageHead title="消息设置" actions={<Button onClick={()=>onGoto('messages')}>返回消息中心</Button>}/>
+ return <><PageHead title="消息设置"/>
  <div className="cards-2">
   <Card title="弹窗策略" eyebrow="LOCAL PRESENTATION">
    <Setting title="消息弹窗自动关闭" desc="0 表示不自动关闭；支持的桌面端会使用系统原生弹窗。"><div className="row"><Input type="number" min="0" max="3600" value={timeout} onChange={e=>setv('verificationPopupTimeoutSec',Number(e.target.value))}/><span className="mini">秒</span></div></Setting>

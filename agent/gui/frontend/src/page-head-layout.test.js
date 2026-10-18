@@ -27,8 +27,8 @@ test('narrow Agent windows show controls from the left without a blank right-onl
  assert.match(styles,/\.main\{flex:1 1 auto;height:0;[\s\S]*?padding:14px 20px 26px/);
 });
 
-test('narrow file-sharing layout keeps actions in the same left-starting flow as tabs',()=>{
+test('file sharing is tab-free and local folder actions remain accessible on narrow layouts',()=>{
  const css=read('./fileSharing.css');
- assert.match(css,/\.file-share-tabs\{flex:0 1 auto;max-width:100%;min-width:0;flex-wrap:nowrap\}/);
- assert.match(css,/\.file-share-header-actions\{flex:0 1 auto;width:auto;max-width:100%;justify-content:flex-start\}/);
+ assert.match(css,/\.file-share-list-actions\{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap/);
+ assert.match(css,/\.file-sharing-host\.is-remote:not\(\[hidden\]\)\{display:flex;flex-direction:column/);
 });

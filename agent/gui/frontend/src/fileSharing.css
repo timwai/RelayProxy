@@ -169,8 +169,11 @@
 .file-sharing-host:not([hidden]){min-width:0}
 .file-sharing-host:not(.is-remote)>*+*{margin-top:12px}
 .file-share-list-head{align-items:center;flex-wrap:wrap;gap:10px}
-.file-share-list-actions{display:flex;align-items:center;justify-content:flex-end;flex-wrap:wrap;gap:7px}
-.file-share-list-actions>.btn{display:inline-flex;align-items:center;gap:6px;white-space:nowrap}
+.file-share-list-actions{display:flex;align-items:center;justify-content:flex-start;flex:1 1 auto;min-width:0;max-width:100%;flex-wrap:nowrap;gap:7px;overflow-x:auto;overflow-y:hidden;overscroll-behavior-x:contain;scrollbar-width:thin;padding:3px 2px 5px}
+.file-share-list-actions>.btn{display:inline-flex;align-items:center;gap:6px;flex:0 0 auto;white-space:nowrap}
+.file-share-list-actions>.badge{flex:0 0 auto;white-space:nowrap}
+.file-share-list-actions:focus-visible{outline:2px solid var(--brand);outline-offset:-2px;border-radius:8px}
+.file-share-list-head>div:first-child{flex:0 0 auto}
 .file-share-remote-back{display:flex;align-items:center;gap:10px;padding:0 0 6px;flex:0 0 auto}
 .file-share-remote-back .btn{display:inline-flex;align-items:center;gap:6px}
 .file-sharing-host.is-remote:not([hidden]){display:flex;flex-direction:column;flex:1 1 auto;min-height:0}
@@ -180,7 +183,7 @@
 html.file-browser-focus .file-sharing-host>.file-share-remote-back{display:none}
 html.file-browser-focus .main>.file-sharing-host.is-remote{flex:1 1 auto;min-height:0;height:100%}
 html.file-browser-focus .file-sharing-host>.file-browser-v4{flex:1 1 auto;min-height:0;height:100%;border:0;border-radius:0;margin:0}
-@media(max-width:800px){.file-share-list-actions{width:100%;justify-content:flex-start}.file-sharing-host.is-remote>.file-browser-v4{min-height:0}}
+@media(max-width:800px){.file-share-list-actions{width:100%;justify-content:flex-start;flex-wrap:nowrap;overflow-x:auto}.file-sharing-host.is-remote>.file-browser-v4{min-height:0}}
 @media(max-width:500px){.file-share-list-actions .btn{font-size:11px}.file-share-remote-back{padding-bottom:5px}}
 
 /* Searchable authorization choices live INSIDE the existing folder editor,

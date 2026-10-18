@@ -46,6 +46,7 @@ export default function FileSharingPage({toast,initialDevice=''}) {
  const completedUploads=useRef(new Set());
  const peersRef=useRef([]);
  const initialDeviceRef=useRef(initialDevice);
+ const initialAutoSelected=useRef(false);
  const peerRefreshSerial=useRef(0);
  const selectedRemote=useRef({device:'',share:''});
  const directoryCache=useRef(createDirectoryCache());
@@ -237,6 +238,15 @@ export default function FileSharingPage({toast,initialDevice=''}) {
     initialWindowTarget.current=null;
     setRemoteShares(authorizedPeer.shares);
     void openRemoteDir(initial.device,initial.share,initial.path);
+   }
+   // On first discovery, reveal a verified device's folder tree immediately.
+   // Never silently switch devices after a later ACL revocation.
+   if(!initialAutoSelected.current){
+    if(initialPeerID||initial){initialAutoSelected.current=true}
+    else if(!selectedRemote.current.device&&result.length>0){
+     initialAutoSelected.current=true;
+     void openRemoteDevice(result[0].deviceId);
+    }
    }
    const selected=selectedRemote.current;
    if(selected.device){

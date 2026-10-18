@@ -572,7 +572,20 @@ export default function FileSharingPage({toast,initialDevice=''}) {
    </div>
   </div>
   {tab==='local'&&<>
-   <div className="cards-3">
+   <section className="card"><div className="card-head"><div><div className="eyebrow">{shares.length} DIRECTORIES · {active} 已启用</div><h2>共享文件夹</h2></div><span className={'badge '+(state?.enabled?'ok':'neutral')}>{state?.enabled?'共享服务运行中':'共享服务已关闭'}</span></div>
+   {!state&&<div className="empty">正在读取本机文件共享配置…</div>}
+   {state&&shares.length===0&&<div className="empty">还没有共享文件夹。添加本机目录后，再为设备设置只读或读写权限。</div>}
+   {shares.map(share=><div className="file-share-item" key={share.id}>
+    <div className="file-share-folder"><FileGlyph name={share.name} isDir/></div>
+    <div className="grow file-share-detail"><b>{share.name}</b><div className="mono mini" title={share.rootPath}>{share.rootPath}</div><div className="mini">{countPermissions(share)} 台设备已授权 · {share.enabled?'目录已启用':'目录已停用'}</div></div>
+    <span className={'badge '+(share.enabled?'ok':'neutral')}>{share.enabled?'已启用':'已停用'}</span>
+    <button type="button" role="switch" aria-label={'启用 '+share.name} aria-checked={share.enabled} className={'switch '+(share.enabled?'on':'')} disabled={busy} onClick={()=>commit(s=>({...s,shares:s.shares.map(v=>v.id===share.id?{...v,enabled:!v.enabled}:v)}))}><span/></button>
+    <div className="file-share-ops"><button className="btn" onClick={()=>edit(share)} disabled={busy}>编辑 / 权限</button><button className="btn danger" onClick={()=>remove(share)} disabled={busy}>移除</button></div>
+   </div>)}
+   </section>
+   <details className="file-share-advanced" id="file-share-options">
+    <summary><span><strong>共享服务与直连设置</strong><small>管理共享开关、UPnP 端口映射及授权统计</small></span><Icon name="settings" size={17}/></summary>
+    <div className="file-share-advanced-content">   <div className="cards-3">
     <div className="metric"><div className="mini">共享文件夹</div><div className="metric-value">{shares.length}</div><div className="mini">{active} 个已启用</div></div>
     <div className="metric"><div className="mini">设备权限</div><div className="metric-value">{shares.reduce((n,s)=>n+countPermissions(s),0)}</div><div className="mini">各共享文件夹独立授权</div></div>
     <div className="metric"><div className="mini">共享服务</div><div className="metric-value" style={{fontSize:19}}>{state?.enabled?'已开启':'已关闭'}</div><div className="mini">初始默认关闭</div></div>
@@ -588,17 +601,8 @@ export default function FileSharingPage({toast,initialDevice=''}) {
     <div className="mini">默认关闭。启用后尝试独立映射文件专用 TCP 与 QUIC/UDP 端口；只有公网可路由的 WAN 地址才会公布，仍须 Server 审批、一次性票据与 TLS 指纹校验。关闭后同时撤销两种映射。映射成功不代表跨运营商公网可达，也不代表完成 NAT 打洞。</div>
     {state?.directUpnpEnabled&&<><div className="file-share-upnp-status" role="status"><b>TCP</b><span>{!state?.enabled?'共享服务未开启':upnpStateLabel[directStatus?.mappingState]||'读取映射状态中…'}</span>{directStatus?.publicAddress&&<span className="mono">{directStatus.publicAddress}</span>}{directStatus?.reason&&<span className="mini" title={directStatus.reason}>{directStatus.reason}</span>}</div><div className="file-share-upnp-status" role="status"><b>QUIC / UDP</b><span>{!state?.enabled?'共享服务未开启':upnpStateLabel[directStatus?.quicMappingState]||'读取映射状态中…'}</span>{directStatus?.quicPublicAddress&&<span className="mono">{directStatus.quicPublicAddress}</span>}{directStatus?.quicReason&&<span className="mini" title={directStatus.quicReason}>{directStatus.quicReason}</span>}</div></>}
    </section>
-   <section className="card"><div className="card-head"><div><div className="eyebrow">{shares.length} DIRECTORIES</div><h2>共享文件夹</h2></div></div>
-   {!state&&<div className="empty">正在读取本机文件共享配置…</div>}
-   {state&&shares.length===0&&<div className="empty">还没有共享文件夹。添加本机目录后，再为设备设置只读或读写权限。</div>}
-   {shares.map(share=><div className="file-share-item" key={share.id}>
-    <div className="file-share-folder"><FileGlyph name={share.name} isDir/></div>
-    <div className="grow file-share-detail"><b>{share.name}</b><div className="mono mini" title={share.rootPath}>{share.rootPath}</div><div className="mini">{countPermissions(share)} 台设备已授权 · {share.enabled?'目录已启用':'目录已停用'}</div></div>
-    <span className={'badge '+(share.enabled?'ok':'neutral')}>{share.enabled?'已启用':'已停用'}</span>
-    <button type="button" role="switch" aria-label={'启用 '+share.name} aria-checked={share.enabled} className={'switch '+(share.enabled?'on':'')} disabled={busy} onClick={()=>commit(s=>({...s,shares:s.shares.map(v=>v.id===share.id?{...v,enabled:!v.enabled}:v)}))}><span/></button>
-    <div className="file-share-ops"><button className="btn" onClick={()=>edit(share)} disabled={busy}>编辑 / 权限</button><button className="btn danger" onClick={()=>remove(share)} disabled={busy}>移除</button></div>
-   </div>)}
-   </section>
+</div>
+   </details>
   </>}
   {tab==='remote'&&<FileBrowserV4
     peers={peers} device={remoteDevice} share={remoteShare} path={remotePath} shares={remoteShares}

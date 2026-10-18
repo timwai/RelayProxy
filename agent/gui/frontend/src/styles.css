@@ -235,3 +235,42 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .settings-navigation:focus-within{scrollbar-color:var(--brand) transparent}
 .settings-nav-item[aria-current="page"]{font-weight:750}
 @media(max-width:820px){.crumb .nav-category-crumb{display:none}}
+
+/* Device Center: capability actions belong to the remote device, not to
+   global default-exit configuration. Keep the cards keyboard accessible. */
+.device-center-intro{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:14px}
+.device-center-intro>div:first-child{display:flex;flex-direction:column;gap:3px;min-width:0}
+.device-center-intro>div:first-child strong{font-size:14px}
+.device-center-filter{display:flex;align-items:center;gap:9px;min-width:min(310px,100%)}
+.device-center-filter .control{flex:1 1 auto;min-width:0}
+.device-center-filter>.mini{white-space:nowrap}
+.device-center-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,310px),1fr));gap:12px;margin-bottom:14px}
+.device-center-card{display:flex;flex-direction:column;gap:13px;min-width:0;border:1px solid var(--line);background:var(--surface2);border-radius:14px;padding:15px;box-shadow:0 4px 16px rgba(8,24,56,.035)}
+.device-center-card:hover{border-color:color-mix(in srgb,var(--brand) 36%,var(--line))}
+.device-center-card-head{display:flex;align-items:center;gap:11px;min-width:0}
+.device-center-card-head .identity-icon{flex:0 0 auto}
+.device-center-card-name{display:flex;flex-direction:column;gap:4px;text-align:left;min-width:0;flex:1 1 auto;border:0;padding:0;background:transparent;cursor:pointer}
+.device-center-card-name strong{font-size:14px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.device-center-card-name .mini{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;max-width:100%}
+.device-center-card-head>.badge{flex:0 0 auto}
+.device-center-caps{display:flex;align-items:center;align-content:flex-start;gap:6px;flex-wrap:wrap;min-height:26px}
+.device-center-caps .badge{display:inline-flex;gap:5px;align-items:center}
+.device-center-card-actions{display:flex;gap:5px;flex-wrap:wrap;border-top:1px solid var(--line);padding-top:11px}
+.device-quick-action{border:1px solid transparent;background:transparent;border-radius:9px;color:var(--muted);display:flex;align-items:center;justify-content:center;flex:1 1 65px;min-height:49px;gap:5px;flex-direction:column;padding:5px;cursor:pointer}
+.device-quick-action span{font-size:11px;white-space:nowrap}
+.device-quick-action:hover:not(:disabled){color:var(--brand);border-color:var(--line);background:var(--surface3)}
+.device-quick-action:focus-visible,.device-center-card-name:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.device-quick-action:disabled{opacity:.45;cursor:not-allowed}
+.device-center-local-list{display:flex;flex-direction:column;gap:2px}
+.device-center-local-row,.device-center-share{display:flex;align-items:center;gap:10px;padding:10px 3px;border-bottom:1px solid var(--line)}
+.device-center-local-row:last-child,.device-center-share:last-child{border-bottom:0}
+.device-center-local-row .grow{min-width:0}
+.device-center-local-row .mono{overflow-wrap:anywhere}
+.device-center-share-list{display:flex;flex-direction:column;gap:0}
+@media(max-width:640px){
+ .device-center-grid{grid-template-columns:minmax(0,1fr)}
+ .device-center-intro{align-items:stretch;flex-direction:column}
+ .device-center-filter{width:100%}
+ .device-center-card{padding:12px}
+ .device-quick-action{min-height:48px}
+}

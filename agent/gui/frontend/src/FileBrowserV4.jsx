@@ -28,7 +28,9 @@ export default function FileBrowserV4({
  const box=useRef(null),input=useRef(null),menuRef=useRef(null),dialogRef=useRef(null),dragInfo=useRef(null),uploadTarget=useRef(null),touchTimer=useRef(null);
  useDialogFocus(!!dialog,dialogRef,()=>setDialog(null));
  const writable=!!canWrite&&!loading&&!uploading;
- const activeShare=shares.find(x=>x.id===share);
+ const selectedPeer=peers.find(x=>x.deviceId===device);
+ const visibleShares=selectedPeer?shares.filter(item=>selectedPeer.shares.some(allowed=>allowed.id===item.id)):[];
+ const activeShare=visibleShares.find(x=>x.id===share);
  const filtered=[...entries].filter(x=>x.name.toLocaleLowerCase().includes(query.toLocaleLowerCase())).sort((a,b)=>{
   if(a.isDir!==b.isDir)return a.isDir?-1:1;
   if(sort==='size')return (b.size||0)-(a.size||0)||a.name.localeCompare(b.name);
@@ -261,37 +263,44 @@ export default function FileBrowserV4({
  return <section className={'file-browser-v4 '+(details?'has-details ':'')+(treeOpen?'tree-open ':'')} ref={box}
   style={{'--file-tree-width':treeWidth+'px','--file-detail-width':detailWidth+'px'}} aria-label="远程文件浏览器">
   <aside className="v4-tree">
-   <div className="v4-tree-head"><strong>已授权设备</strong><button className="btn quiet" onClick={onRefresh} title="刷新设备"><Icon name="activity"/></button></div>
-   <div className="v4-tree-scroll">{peers.length===0&&<div className="file-browser-aside-empty">暂无在线且授权访问的共享目录</div>}
-    {peers.map(d=><div className="v4-device" key={d.deviceId}>
-     <button className={'v4-device-row '+(device===d.deviceId?'active':'')} onClick={()=>openDevice(d.deviceId)}>
-      <Icon name="devices" size={17}/><span>{d.name||d.deviceId}</span><small>{d.shares.length} 个共享</small></button>
-     {device===d.deviceId&&<div className="v4-shares">{d.shares.map(s=><div key={s.id}>
-      <div className="v4-tree-folder">
-       <button className="v4-tree-expand" aria-label={'展开 '+s.name} onClick={()=>void toggleTree(d.deviceId,s.id,'.')}>
-        {expanded.has(treeKey(d.deviceId,s.id,'.'))?'⌄':'›'}</button>
-       <button className={'v4-share '+(share===s.id?'active':'')}
-        onClick={()=>navigate(d.deviceId,s.id,'.')}
-        onContextMenu={e=>showMenu(e,'tree',null,{path:'.',share:s.id,device:d.deviceId,permission:s.permission})}
-        onDragOver={e=>dragOver(e,'share-'+s.id,acceptTarget(d.deviceId,s.id))}
-        onDragLeave={()=>setDropTarget('')}
-        onDrop={e=>handleDrop(e,'.',s.id,d.deviceId)}>
-        <FileGlyph name={s.name} isDir variant="tree"/><span>{s.name}</span><small>{s.permission==='read_write'?'读写':'只读'}</small>
-       </button></div>
-       {renderTreeBranch(d.deviceId,s.id,'.')}
-      </div>)}</div>}
+   <div className="v4-tree-head"><strong>文件夹目录树</strong><button className="btn quiet" onClick={onRefresh} aria-label="刷新共享目录" title="刷新共享目录"><Icon name="activity"/></button></div>
+   <div className="v4-tree-scroll">
+    {!device&&<div className="file-browser-aside-empty">从顶部选择设备后，这里只显示该设备已授权的目录树。</div>}
+    {device&&!selectedPeer&&<div className="file-browser-aside-empty">当前设备未授权或已离线，请从顶部重新选择。</div>}
+    {selectedPeer&&visibleShares.length===0&&<div className="file-browser-aside-empty">该设备没有可访问的共享目录。</div>}
+    {selectedPeer&&visibleShares.map(s=><div className="v4-tree-share" key={s.id}>
+     <div className="v4-tree-folder">
+      <button className="v4-tree-expand" aria-label={'展开 '+s.name} onClick={()=>void toggleTree(device,s.id,'.')}>
+       {expanded.has(treeKey(device,s.id,'.'))?'⌄':'›'}</button>
+      <button className={'v4-share '+(share===s.id?'active':'')}
+       onClick={()=>navigate(device,s.id,'.')}
+       onContextMenu={e=>showMenu(e,'tree',null,{path:'.',share:s.id,device,permission:s.permission})}
+       onDragOver={e=>dragOver(e,'share-'+s.id,acceptTarget(device,s.id))}
+       onDragLeave={()=>setDropTarget('')}
+       onDrop={e=>handleDrop(e,'.',s.id,device)}>
+       <FileGlyph name={s.name} isDir variant="tree"/><span>{s.name}</span><small>{s.permission==='read_write'?'读写':'只读'}</small>
+      </button>
+     </div>
+     {renderTreeBranch(device,s.id,'.')}
     </div>)}
-   </div><div className="v4-tree-foot"><Icon name="shield" size={15}/>仅显示共享所有者实际授权的目录</div>
+   </div>
+   <div className="v4-tree-foot"><Icon name="shield" size={15}/>仅显示当前设备授权的目录</div>
   </aside>
-  <div className="v4-splitter v4-tree-split" role="separator" tabIndex={0} aria-label="调整设备树宽度"
+  <div className="v4-splitter v4-tree-split" role="separator" tabIndex={0} aria-label="调整文件夹目录树宽度"
    onPointerDown={e=>resize(e,'tree')} onDoubleClick={()=>setTreeWidth(248)}
    onKeyDown={e=>{if(e.key==='ArrowLeft'||e.key==='ArrowRight'){e.preventDefault();setTreeWidth(v=>within(v+(e.key==='ArrowRight'?16:-16),190,420))}}}/>
   <div className="v4-main">
    <div className="v4-head">
-    <div className="v4-head-title"><div className="eyebrow">REMOTE FILE EXPLORER</div><h2>{rootName}</h2>
-     <small>{deviceName} · {canWrite?'读写':'只读'}{warmStatus?' · '+warmStatus:''}{error?' · '+error:''}</small></div>
+    <div className="v4-head-title">
+     <label className="v4-device-switch"><Icon name="devices" size={17}/><select value={device||''} aria-label="切换共享设备" onChange={e=>{setTreeOpen(false);openDevice(e.target.value)}}>
+      <option value="" disabled>选择共享设备…</option>
+      {peers.map(peer=><option key={peer.deviceId} value={peer.deviceId}>{peer.name||peer.deviceId} · {peer.shares.length} 个共享目录</option>)}
+     </select></label>
+     <div className="v4-head-location"><h2>{share?rootName:'请选择共享文件夹'}</h2>
+      <small>{deviceName} · {share?(canWrite?'读写':'只读'):'待选择目录'}{warmStatus?' · '+warmStatus:''}{error?' · '+error:''}</small></div>
+    </div>
     <div className="v4-head-actions">
-     <button className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} title="选择设备"><Icon name="devices"/></button>
+     <button className="btn v4-show-tree" onClick={()=>setTreeOpen(v=>!v)} title="显示文件夹目录树" aria-label="显示文件夹目录树"><Icon name="folder"/></button>
      {hasBridge('goOpenFileBrowserWindow')&&
       <button className="btn" onClick={openNativeWindow} title="通过 Wails 打开原生独立文件浏览器"><Icon name="monitor"/> <span className="v4-optional">独立窗口</span></button>}
      <a className="btn v4-window-link" href={focus?returnToAppURL():newWindowURL()}
@@ -413,7 +422,7 @@ export default function FileBrowserV4({
      <div className="v4-detail-actions">{!preview.isDir&&<button className="btn primary" onClick={()=>onDownload(preview)}>下载文件</button>}
       {canWrite&&<button className="btn" onClick={()=>requestRename(preview)}>重命名</button>}</div>
     </div>:<div className="v4-placeholder">选择文件查看详情</div>}</aside></>}
-  {treeOpen&&<button className="v4-tree-shade" onClick={()=>setTreeOpen(false)} aria-label="关闭设备列表"/>}
+  {treeOpen&&<button className="v4-tree-shade" onClick={()=>setTreeOpen(false)} aria-label="关闭文件夹目录树"/>}
   {menu&&<div className="file-v4-context" ref={menuRef} role="menu"
     style={{left:menu.x,top:menu.y}}>{itemsForMenu().map(([key,title])=>
     <button key={key} className={key==='remove'?'danger':''} role="menuitem" onClick={()=>{

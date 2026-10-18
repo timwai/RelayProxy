@@ -103,6 +103,12 @@ func (m *Manager) monitor() {
 						err = m.activate(service)
 					}
 					if err != nil {
+						// On an authorization or partial-write failure, immediately
+						// unwind all changes and avoid repeated privilege prompts.
+						if rollbackErr := m.restore(); rollbackErr != nil {
+							err = errors.Join(err, fmt.Errorf("system proxy rollback: %w", rollbackErr))
+						}
+						m.desired = Settings{}
 						m.lastError = err.Error()
 					} else {
 						m.lastError = ""
@@ -116,7 +122,14 @@ func (m *Manager) monitor() {
 func (m *Manager) Status() Status {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	return Status{Enabled: m.desired.Enabled(), Service: m.activeService, Applied: len(m.records), PendingRecovery: len(m.records), LastError: m.lastError}
+	pending := 0
+	applied := 0
+	if m.desired.Enabled() && m.activeService != "" {
+		applied = len(m.records)
+	} else {
+		pending = len(m.records)
+	}
+	return Status{Enabled: m.desired.Enabled(), Service: m.activeService, Applied: applied, PendingRecovery: pending, LastError: m.lastError}
 }
 func (m *Manager) Apply(s Settings, httpPort, socksPort int) error {
 	m.mu.Lock()
@@ -149,6 +162,10 @@ func (m *Manager) Apply(s Settings, httpPort, socksPort int) error {
 		err = m.activate(service)
 	}
 	if err != nil {
+		if rollbackErr := m.restore(); rollbackErr != nil {
+			err = errors.Join(err, fmt.Errorf("system proxy rollback: %w", rollbackErr))
+		}
+		m.desired = Settings{}
 		m.lastError = err.Error()
 		return err
 	}
@@ -201,7 +218,8 @@ func (m *Manager) activate(service string) error {
 		// Write-ahead journal is durable before the first privileged mutation.
 		m.records = append(m.records, entry{Service: service, Kind: t.kind, Before: original, Applied: desired})
 		if err = m.saveJournal(); err != nil {
-			m.records = m.records[:len(m.records)-1]
+			// Preserve the in-memory recovery entry if persistence fails.
+			// No system mutation has happened for this entry yet.
 			return err
 		}
 		if err = m.backend.Write(service, t.kind, desired); err != nil {

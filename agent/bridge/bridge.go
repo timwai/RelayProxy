@@ -482,11 +482,11 @@ type ConfigUpdate struct {
 		} `json:"access"`
 	} `json:"exit"`
 	SystemProxy struct {
-		Mode       *string `json:"mode"`
-		AutoFollow *bool   `json:"autoFollow"`
-		HTTP       *bool   `json:"http"`
-		SOCKS5     *bool   `json:"socks5"`
-		ProxyIPLiterals *bool `json:"proxyIpLiterals"`
+		Mode            *string `json:"mode"`
+		AutoFollow      *bool   `json:"autoFollow"`
+		HTTP            *bool   `json:"http"`
+		SOCKS5          *bool   `json:"socks5"`
+		ProxyIPLiterals *bool   `json:"proxyIpLiterals"`
 	} `json:"systemProxy"`
 	Network struct {
 		Mode             *string   `json:"mode"` // "" (off) | "divert"

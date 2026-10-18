@@ -11,7 +11,8 @@ test('global title and page actions occupy one header row on spacious desktop wi
  assert.match(app,/getElementById\('agent-page-actions'\)/);
  assert.match(app,/if\(wide\)return target\?createPortal\(buttons,target\):null/);
  assert.match(app,/<div id="agent-page-actions" className="topbar-page-actions"\/>/);
- assert.match(app,/<header className="topbar"><div className="crumb"><b>\{title\}<\/b>/);
+ assert.match(app,/<header className="topbar"><div className="crumb">\{category&&/);
+ assert.match(app,/<b>\{title\}<\/b>/);
  assert.match(app,/<PageHead title="分流规则"[^\n]*DNS 设置 ›[^\n]*＋ 新建规则/);
  assert.match(styles,/\.topbar-page-actions \.page-action-buttons\{display:flex;align-items:center;flex-wrap:nowrap/);
 });

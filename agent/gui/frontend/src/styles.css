@@ -275,3 +275,31 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
  .device-center-card{padding:12px}
  .device-quick-action{min-height:48px}
 }
+
+/* Overview is for immediate health, not duplicate per-feature diagnostics.
+   Device Center owns the expanded path table and per-device test context. */
+.overview-hero{min-height:0;padding:21px 24px;overflow:hidden}
+.overview-hero .hero-glow{pointer-events:none}
+.overview-hero .hero-status{align-items:flex-start;gap:12px}
+.overview-hero .hero-status .grow{min-width:0}
+.overview-hero .hero-status .muted{overflow-wrap:anywhere}
+.overview-current-exit{position:relative;z-index:1;display:flex;align-items:center;flex-wrap:wrap;justify-content:space-between;gap:12px;margin-top:17px;padding-top:13px;border-top:1px solid var(--line)}
+.overview-current-exit .grow{min-width:0}
+.overview-current-exit strong{display:block;margin-top:3px;font-size:14px;overflow-wrap:anywhere}
+.overview-quick-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.device-path-summary{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.device-path-summary .grow{min-width:0}
+.device-path-summary strong{display:block;margin:3px 0;font-size:14px;overflow-wrap:anywhere}
+.device-path-details{margin-top:11px;border-top:1px solid var(--line);padding-top:10px}
+.device-path-details summary{cursor:pointer;color:var(--brand);font-size:12px;font-weight:700;min-height:32px;align-content:center}
+.device-path-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px;margin-top:7px}
+.device-path-grid>.setting{min-width:0}
+.device-path-grid>.setting .grow{min-width:0}
+.device-path-grid>.setting .mini{overflow-wrap:anywhere}
+@media(max-width:760px){
+ .overview-hero{padding:16px}
+ .overview-current-exit{align-items:flex-start;flex-direction:column}
+ .overview-quick-links{width:100%;justify-content:flex-start}
+ .device-path-grid{grid-template-columns:1fr}
+ .device-path-summary{align-items:flex-start}
+}

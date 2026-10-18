@@ -40,7 +40,7 @@ test('Settings only includes low-frequency preferences and device identity',()=>
 });
 
 test('legacy page IDs remain reachable and each group keeps active state',()=>{
- assert.match(src,/const PAGE_IDS=new Set\(\[\.\.\.NAV\.flatMap\(group=>group.items.map\(item=>item\[0\]\)\),\.\.\.CONFIG_IDS,\.\.\.SETTINGS_IDS,'settings'\]\)/);
+ assert.match(src,/const PAGE_IDS\s*=\s*new Set\(\[\.\.\.NAV\.flatMap\(group=>group.items.map\(item=>item\[0\]\)\),\.\.\.CONFIG_IDS,\.\.\.SETTINGS_IDS,'settings'\]\)/);
  assert.match(src,/if \(PAGE_IDS.has\(requested\)\) return requested/);
  assert.match(src,/CONFIG_IDS\.has\(page\)&&<ConfigNavigation/);
  assert.match(src,/SETTINGS_IDS\.has\(page\)&&<SettingsNavigation/);

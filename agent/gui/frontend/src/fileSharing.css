@@ -208,3 +208,16 @@ html.file-browser-focus .file-sharing-host>.file-browser-v4{flex:1 1 auto;min-he
 .file-share-grant-footer>.field>.control{min-width:0;min-height:44px;width:100%}
 .file-share-grant-footer>.btn{min-height:44px}
 @media(max-width:640px){.file-share-grant-trigger{flex-wrap:wrap}.file-share-grant-trigger .mini{margin-left:0}.file-share-grant-picker{padding:9px}.file-share-grant-footer>.field{flex:1 1 100%}.file-share-grant-footer>.btn{flex:1 1 100%}}
+
+
+/* Compact file-sharing commands share the existing heading row. */
+.file-share-list-head{flex-wrap:nowrap;min-width:0}
+.file-share-list-head>div:first-child{min-width:0;flex:1 1 auto}
+.file-share-list-actions{flex:0 0 auto;width:auto;max-width:50%;min-width:0;justify-content:flex-end;overflow:visible;padding:0;gap:6px}
+.file-share-actions-menu{position:relative;flex:0 0 auto}
+.file-share-actions-menu>summary{display:grid;place-items:center;list-style:none;width:34px;height:34px;min-width:34px;cursor:pointer}
+.file-share-actions-menu>summary::-webkit-details-marker{display:none}
+.file-share-actions-dropdown{position:absolute;right:0;top:calc(100% + 5px);z-index:75;padding:6px;min-width:160px;background:var(--surface2);border:1px solid var(--line2);border-radius:11px;box-shadow:var(--shadow2)}
+.file-share-actions-dropdown>.btn{width:100%;justify-content:flex-start;white-space:nowrap}
+@media(max-width:800px){.file-share-list-head{flex-wrap:nowrap}.file-share-list-actions{width:auto;max-width:55%;justify-content:flex-end;overflow:visible}}
+@media(max-width:500px){.file-share-list-actions>.btn.primary{max-width:112px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}}

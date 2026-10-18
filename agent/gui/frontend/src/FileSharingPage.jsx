@@ -13,9 +13,9 @@ const empty=()=>({revision:0,enabled:false,directUpnpEnabled:false,shares:[]});
 const upnpStateLabel={disabled:'已关闭',not_approved:'等待 Server 审批',awaiting_request:'等待文件直连请求',discovering:'正在发现路由器',mapped:'已取得公网候选地址',private_wan:'网关 WAN 为内网或 CGNAT',unavailable:'映射不可用'};
 const countPermissions=share=>Object.values(share.permissions||{}).filter(v=>v==='read'||v==='read_write').length;
 
-export default function FileSharingPage({toast}) {
+export default function FileSharingPage({toast,initialDevice=''}) {
  const [state,setState]=useState(null);
- const [tab,setTab]=useState(new URLSearchParams(window.location.search).has('filesWindow')?'remote':'local');
+ const [tab,setTab]=useState(initialDevice||new URLSearchParams(window.location.search).has('filesWindow')?'remote':'local');
  const [directStatus,setDirectStatus]=useState(null);
  const [warmStatus,setWarmStatus]=useState('');
  const [busy,setBusy]=useState(false);
@@ -45,6 +45,7 @@ export default function FileSharingPage({toast}) {
  const completedSaves=useRef(new Set());
  const completedUploads=useRef(new Set());
  const peersRef=useRef([]);
+ const initialDeviceRef=useRef(initialDevice);
  const peerRefreshSerial=useRef(0);
  const selectedRemote=useRef({device:'',share:''});
  const directoryCache=useRef(createDirectoryCache());
@@ -218,6 +219,18 @@ export default function FileSharingPage({toast}) {
    if(JSON.stringify(peersRef.current)!==JSON.stringify(result))setTreeRevision(n=>n+1);
    peersRef.current=result;
    setPeers(result);
+   // Device Center deep link: only traverse this device if the current Agent
+   // has verified at least one readable share. Unapproved hosts fail closed.
+   const initialPeerID=initialDeviceRef.current;
+   if(initialPeerID){
+    initialDeviceRef.current='';
+    const peer=result.find(x=>x.deviceId===initialPeerID);
+    if(peer){
+     setTab('remote');
+     if(peer.shares.length===1)void openRemoteDir(peer.deviceId,peer.shares[0].id,'.');
+     else void openRemoteDevice(peer.deviceId);
+    }else setRemoteError('该设备当前没有经过授权验证的可访问共享目录。');
+   }
    const initial=initialWindowTarget.current;
    const authorizedPeer=initial&&result.find(p=>p.deviceId===initial.device);
    if(authorizedPeer?.shares?.some(x=>x.id===initial.share)){

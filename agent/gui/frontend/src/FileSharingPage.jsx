@@ -1,4 +1,5 @@
 import React, {useCallback,useEffect,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
 import {call,callJSON} from './bridge.js';
 import {Icon} from './icons.jsx';
 import {createDirectoryCache} from './fileBrowserCache.js';
@@ -13,7 +14,7 @@ const empty=()=>({revision:0,enabled:false,directUpnpEnabled:false,shares:[]});
 const upnpStateLabel={disabled:'已关闭',not_approved:'等待 Server 审批',awaiting_request:'等待文件直连请求',discovering:'正在发现路由器',mapped:'已取得公网候选地址',private_wan:'网关 WAN 为内网或 CGNAT',unavailable:'映射不可用'};
 const countPermissions=share=>Object.values(share.permissions||{}).filter(v=>v==='read'||v==='read_write').length;
 
-export default function FileSharingPage({toast,initialDevice=''}) {
+export default function FileSharingPage({toast,initialDevice='',active=true,navigationTarget=null,transferOpen=false,onTransferOpenChange,onTransferSummary}) {
  const [state,setState]=useState(null);
  const [tab,setTab]=useState(initialDevice||new URLSearchParams(window.location.search).has('filesWindow')?'remote':'local');
  const [directStatus,setDirectStatus]=useState(null);
@@ -47,6 +48,7 @@ export default function FileSharingPage({toast,initialDevice=''}) {
  const peersRef=useRef([]);
  const initialDeviceRef=useRef(initialDevice);
  const initialAutoSelected=useRef(false);
+ const lastNavigationSerial=useRef(null);
  const peerRefreshSerial=useRef(0);
  const selectedRemote=useRef({device:'',share:''});
  const directoryCache=useRef(createDirectoryCache());
@@ -68,6 +70,7 @@ export default function FileSharingPage({toast,initialDevice=''}) {
  useEffect(()=>{selectedRemote.current={device:remoteDevice,share:remoteShare}},[remoteDevice,remoteShare]);
 
  const [transfers,setTransfers]=useState([]);
+ useEffect(()=>{onTransferSummary?.(transfers.filter(t=>t.state==='running').length,transfers.length)},[transfers,onTransferSummary]);
  const [transferError,setTransferError]=useState('');
  const uploadCancelRef=useRef(false);
  const [uploading,setUploading]=useState(false);
@@ -317,25 +320,36 @@ export default function FileSharingPage({toast,initialDevice=''}) {
     })();
    }
   }catch(e){setTransferError(e.message||String(e))}
- },[]);
+ },[onTransferSummary]);
  useEffect(()=>{
-  if(tab!=='remote')return;
+  if(!active)return;
+  const requested=navigationTarget?.device;
+  if(requested&&navigationTarget.serial!==lastNavigationSerial.current){
+   lastNavigationSerial.current=navigationTarget.serial;
+   initialDeviceRef.current=requested;
+   initialAutoSelected.current=true;
+   setTab('remote');
+   void refreshPeers();
+  }else if(!requested&&!new URLSearchParams(window.location.search).has('filesWindow')){
+   setTab('local');
+  }
+ },[active,navigationTarget?.serial,refreshPeers]);
+ useEffect(()=>{
+  if(tab!=='remote'||!active)return;
   void refreshPeers();
   const timer=setInterval(()=>void refreshPeers(),15000);
   return ()=>{
    clearInterval(timer);
    peerRefreshSerial.current+=1; // discard responses after leaving the file browser
   };
- },[tab,refreshPeers]);
+ },[tab,active,refreshPeers]);
  useEffect(()=>{
-  if(tab==='transfers'||tab==='remote')void refreshTransfers();
-  // A browser-selected Save As handle must still be fulfilled when the
-  // user switches between the remote explorer and transfers tabs.
-  const timer=setInterval(()=>{
-   if(tab==='transfers'||tab==='remote'||saveHandles.current.size>0)void refreshTransfers();
-  },900);
+  void refreshTransfers();
+  // Keep the transfer owner mounted across all Agent pages: Save As handles
+  // and upload-completion directory refresh survive route changes.
+  const timer=setInterval(()=>void refreshTransfers(),1200);
   return ()=>clearInterval(timer);
- },[tab,refreshTransfers]);
+ },[refreshTransfers]);
  async function openRemoteDevice(id){
   const verified=peersRef.current.find(peer=>peer.deviceId===id);
   if(!verified)return;

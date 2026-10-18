@@ -13,28 +13,31 @@ import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 import {proxyPathStatus,rdpPathLabel} from './pathStatus.js';
 
-// Daily operations stay in the sidebar; detailed controls live in Settings.
+// Operational pages are always one click away. Frequently edited policies
+// live under Network Configuration; infrequent preferences live in Settings.
 const NAV=[
- {group:'工作台',items:[['overview','dashboard','运行概览'],['connection','route','连接与路径'],['exits','globe','出口选择']]},
+ {group:'工作台',items:[['overview','dashboard','运行概览'],['exits','globe','出口选择']]},
  {group:'协作',items:[['files','folder','文件共享'],['rdp','monitor','远程桌面'],['messages','bell','消息']]},
- {group:'观察',items:[['monitor','activity','实时监控']]}
+ {group:'观察',items:[['monitor','activity','实时监控'],['diagnostics','terminal','诊断与日志']]},
+ {group:'网络配置',items:[['routing','split','网络配置']]}
+];
+const CONFIG_SECTIONS=[
+ ['routing','split','分流规则','进程、域名、规则订阅和指定出口'],
+ ['dns','shield','DNS 与防泄漏','自动解析、DNS 出口和防泄漏'],
+ ['proxy','swap','代理与自定义出口','SOCKS5、HTTP、透明代理和本机出口'],
+ ['connection','route','连接策略','传输协议、P2P 与公网直连'],
+ ['exitshare','share','出口共享','共享能力、上游出口与访问控制']
 ];
 const SETTINGS_SECTIONS=[
- ['devices','devices','设备与身份','设备信息、身份与审批'],
- ['proxy','swap','本机代理','SOCKS5、HTTP、透明代理'],
- ['routing','split','分流规则','规则与订阅'],
- ['dns','shield','DNS 与防泄漏','DNS 策略与接管'],
- ['rdp-settings','monitor','远程桌面设置','控制端启用与授权状态'],
- ['message-settings','bell','消息设置','弹窗策略与测试预览'],
- ['exitshare','share','本机出口共享','共享本机网络出口'],
- ['diagnostics','terminal','诊断与日志','诊断工具与日志']
+ ['devices','devices','设备与身份','设备标识、身份与审批状态'],
+ ['rdp-settings','monitor','远程桌面偏好','控制端启用与授权状态'],
+ ['message-settings','bell','消息与弹窗','关闭时间与弹窗预览']
 ];
+const CONFIG_IDS=new Set(CONFIG_SECTIONS.map(x=>x[0]));
 const SETTINGS_IDS=new Set(SETTINGS_SECTIONS.map(x=>x[0]));
-const PAGE_NAMES=Object.fromEntries([...NAV.flatMap(g=>g.items),...SETTINGS_SECTIONS].map(x=>[x[0],x[2]]));
-// The browser's /connections bookmark and shareable ?page=... links should
-// open the same React route as the desktop shell. Never trust arbitrary page
-// names or persist unknown values into the navigation state.
-const PAGE_IDS = new Set([...NAV.flatMap(group => group.items.map(item => item[0])),...SETTINGS_IDS,'settings']);
+const PAGE_NAMES=Object.fromEntries([...NAV.flatMap(g=>g.items),...CONFIG_SECTIONS,...SETTINGS_SECTIONS].map(x=>[x[0],x[2]]));
+const PAGE_IDS=new Set([...NAV.flatMap(group=>group.items.map(item=>item[0])),...CONFIG_IDS,...SETTINGS_IDS,'settings']);
+// Preserve all existing ?page=... bookmarks and stored page IDs.
 function initialPage() {
  const requested = new URLSearchParams(window.location.search).get('page');
  if (PAGE_IDS.has(requested)) return requested;

@@ -166,3 +166,12 @@ Information architecture principle: **daily operations** are available from the 
 - Tests added: `file-sharing-workspace.test.js`, `secondary-controls.test.js`; updated `content-first-navigation.test.js`, `page-head-layout.test.js`.
 
 **Acceptance / known scope:** Verify Windows/macOS file browser full-window and separate-window layout, Save As completion after navigating away from files, repeated reentry from Device Center, transfer drawer keyboard focus / Escape, and empty-share startup. The persistent transfer owner is an Agent React lifecycle implementation; it does not change Server/API semantics or attempt to persist browser file handles across full page reloads.
+
+## Iteration 13: fixed target and progressive link checklist in device speed modal
+
+- Device Center's **测速** shortcut always binds the speed dialog to the selected device ID; remove the redundant device/proxy selector and automatic/default option. Show device name and ID as **read-only** context and keep the test-duration input.
+- Check **device authorization/online state**, then show the verified public-direct candidate count (an announced candidate does *not* prove the route works). The actual `goRunSpeedTest(exitId,duration)` invocation remains a single bidirectional RPC; this UI does **not** invent separate streaming probes.
+- During that RPC, display a running check row for **双向链路测速** and leave Public Direct, P2P QUIC, Relay, upload and download evidence marked **待检测**. After the full response returns and the `exitId` matches, reveal each of these five check results one row at a time. Only a path the measured upload/download used gets a green check; a candidate is labelled **仅候选**, all other paths **未确认**, not failures.
+- A failed test or wrong returned device ID displays the failure on the test step, leaving transport rows unverified. No fallback to another authorized or default proxy when the selected target disappears. Keep the existing five-round BBR calibration and the aggregate batch speed-test dialog.
+- The local UPnP, Native UDP and control-session information stays in an explicit **本机网络环境** disclosure and is never passed off as a particular device's measured path.
+- See `deviceSpeedChecks.js`, `deviceSpeedChecks.test.js` and updated `overview-scope.test.js`; ensure narrow Wails dialogs maintain visible device context, keyboard focus, and reduced-motion support.

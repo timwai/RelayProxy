@@ -78,7 +78,7 @@ export function fileIconKind(name,isDir=false){
  if(lower.startsWith('.env.'))return 'config';
  // Multi-part TAR archives keep their actual container icon. A bare .gz
  // or .xz remains a compressed stream instead of being labeled TAR.
- if(/\\.tar\\.(?:gz|bz2|xz|zst|zstd)$/.test(lower))return 'tar';
+ if(/\.tar\.(?:gz|bz2|xz|zst|zstd)$/.test(lower))return 'tar';
  const dot=lower.lastIndexOf('.');
  if(dot<0||dot===lower.length-1)return 'file';
  return byExtension[lower.slice(dot+1)]||'file';

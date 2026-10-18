@@ -582,7 +582,7 @@ export default function FileSharingPage({toast,initialDevice=''}) {
    </div>
   </div>
   {tab==='local'&&<>
-   <section className="card"><div className="card-head"><div><div className="eyebrow">{shares.length} DIRECTORIES · {active} 已启用</div><h2>共享文件夹</h2></div><span className={'badge '+(state?.enabled?'ok':'neutral')}>{state?.enabled?'共享服务运行中':'共享服务已关闭'}</span></div>
+   <section className="card"><div className="card-head"><div><div className="eyebrow">{shares.length} DIRECTORIES · {active} 已启用</div><h2>共享文件夹</h2></div><span className={'badge '+(state?.enabled?'ok':'neutral')}>{state?.enabled?'共享已启用':'共享已关闭'}</span></div>
    {!state&&<div className="empty">正在读取本机文件共享配置…</div>}
    {state&&shares.length===0&&<div className="empty">还没有共享文件夹。添加本机目录后，再为设备设置只读或读写权限。</div>}
    {shares.map(share=><div className="file-share-item" key={share.id}>

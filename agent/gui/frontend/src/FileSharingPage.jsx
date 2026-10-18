@@ -227,7 +227,7 @@ export default function FileSharingPage({toast,initialDevice=''}) {
     const peer=result.find(x=>x.deviceId===initialPeerID);
     if(peer){
      setTab('remote');
-     if(peer.shares.length===1)void openRemoteDir(peer.deviceId,peer.shares[0].id,'.');
+     if(peer.shares.length===1){setRemoteShares(peer.shares);void openRemoteDir(peer.deviceId,peer.shares[0].id,'.')}
      else void openRemoteDevice(peer.deviceId);
     }else setRemoteError('该设备当前没有经过授权验证的可访问共享目录。');
    }
@@ -257,7 +257,7 @@ export default function FileSharingPage({toast,initialDevice=''}) {
      }
     }
    }
-   setRemoteError('');
+   if(!initialPeerID||result.some(peer=>peer.deviceId===initialPeerID))setRemoteError('');
   }catch(e){
    if(seq!==peerRefreshSerial.current)return;
    navigationSerial.current+=1;

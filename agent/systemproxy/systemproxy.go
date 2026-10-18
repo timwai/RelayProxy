@@ -100,6 +100,7 @@ func (m *Manager) Apply(s Settings,httpPort,socksPort int) error {
  m.mu.Lock();defer m.mu.Unlock()
  if m.closed {return errors.New("system proxy manager closed")}
  if s.Mode!=""&&s.Mode!="system" {return fmt.Errorf("invalid system proxy mode %q",s.Mode)}
+ if reflect.DeepEqual(m.desired,s)&&m.httpPort==httpPort&&m.socksPort==socksPort&&(!s.Enabled()||m.activeService!="") {return nil}
  if err:=m.restore();err!=nil {m.lastError=err.Error();return err}
  m.desired=s
  m.httpPort=httpPort;m.socksPort=socksPort
@@ -150,7 +151,8 @@ func (m *Manager) restore() error {
   e:=m.records[i]
   current,err:=m.backend.Read(e.Service,e.Kind)
   if err!=nil {remaining=append(remaining,e);problems=append(problems,fmt.Errorf("read %s/%s: %w",e.Service,e.Kind,err));continue}
-  if reflect.DeepEqual(current,e.Applied) {
+  intermediate:=e.Applied;intermediate.Enabled=e.Before.Enabled
+  if reflect.DeepEqual(current,e.Applied)||reflect.DeepEqual(current,intermediate) {
    if err=m.backend.Write(e.Service,e.Kind,e.Before);err!=nil {
     remaining=append(remaining,e);problems=append(problems,fmt.Errorf("restore %s/%s: %w",e.Service,e.Kind,err))
    }

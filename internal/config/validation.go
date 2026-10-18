@@ -383,6 +383,7 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 	out.SystemProxy.AutoFollow = cloneBool(c.SystemProxy.AutoFollow)
 	out.SystemProxy.HTTP = cloneBool(c.SystemProxy.HTTP)
 	out.SystemProxy.SOCKS5 = cloneBool(c.SystemProxy.SOCKS5)
+	out.SystemProxy.ProxyIPLiterals = cloneBool(c.SystemProxy.ProxyIPLiterals)
 	out.Proxy.SOCKS5.Enabled = cloneBool(c.Proxy.SOCKS5.Enabled)
 	out.Proxy.CustomExits = routing.CloneCustomExits(c.Proxy.CustomExits)
 	out.Server.TLSEnabled = cloneBool(c.Server.TLSEnabled)

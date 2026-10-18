@@ -36,7 +36,7 @@ const SETTINGS_SECTIONS=[
 const CONFIG_IDS=new Set(CONFIG_SECTIONS.map(x=>x[0]));
 const SETTINGS_IDS=new Set(SETTINGS_SECTIONS.map(x=>x[0]));
 const PAGE_NAMES=Object.fromEntries([...NAV.flatMap(g=>g.items),...CONFIG_SECTIONS,...SETTINGS_SECTIONS].map(x=>[x[0],x[2]]));
-const PAGE_IDS=new Set([...NAV.flatMap(group=>group.items.map(item=>item[0])),...CONFIG_IDS,...SETTINGS_IDS,'settings']);
+const PAGE_IDS = new Set([...NAV.flatMap(group=>group.items.map(item=>item[0])),...CONFIG_IDS,...SETTINGS_IDS,'settings']);
 // Preserve all existing ?page=... bookmarks and stored page IDs.
 function initialPage() {
  const requested = new URLSearchParams(window.location.search).get('page');

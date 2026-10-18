@@ -93,9 +93,9 @@ func enabledValue(s string) bool {
 
 func (darwinBackend) Read(service, kind string) (ProxyState, error) {
 	op, ok := map[string]string{
-		"web": "-getwebproxy",
+		"web":       "-getwebproxy",
 		"secureweb": "-getsecurewebproxy",
-		"socks": "-getsocksfirewallproxy",
+		"socks":     "-getsocksfirewallproxy",
 	}[kind]
 	if !ok {
 		return ProxyState{}, fmt.Errorf("unknown proxy kind %q", kind)
@@ -138,9 +138,9 @@ func (darwinBackend) Validate(service string) error {
 
 func (darwinBackend) Write(service, kind string, s ProxyState) error {
 	pair, ok := map[string][2]string{
-		"web": {"-setwebproxy", "-setwebproxystate"},
+		"web":       {"-setwebproxy", "-setwebproxystate"},
 		"secureweb": {"-setsecurewebproxy", "-setsecurewebproxystate"},
-		"socks": {"-setsocksfirewallproxy", "-setsocksfirewallproxystate"},
+		"socks":     {"-setsocksfirewallproxy", "-setsocksfirewallproxystate"},
 	}[kind]
 	if !ok {
 		return fmt.Errorf("unknown proxy kind %q", kind)
@@ -148,8 +148,14 @@ func (darwinBackend) Write(service, kind string, s ProxyState) error {
 	if s.Authenticated {
 		return fmt.Errorf("restoring authenticated proxies is not supported")
 	}
-	// Before switching enabled state, restore the original endpoint. When
-	// networksetup refuses to clear an unset endpoint, retain the journal.
+	// Restore disabled proxy state before editing the endpoint, so a failure
+	// to clear an initially unset host cannot leave a stale active proxy.
+	if !s.Enabled {
+		if err := runWrite(pair[1], service, "off"); err != nil {
+			return err
+		}
+	}
+	// When networksetup refuses to clear an unset endpoint, retain the journal.
 	if s.Host == "" && s.Port == 0 {
 		if err := runWrite(pair[0], service, "", "0", "off"); err != nil {
 			return err

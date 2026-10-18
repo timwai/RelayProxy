@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"hash/fnv"
 	"log"
 	"net"
 	"net/netip"
@@ -139,23 +140,13 @@ func StartController(parent context.Context, target Target, options ControllerOp
 		return nil, errors.New("RDP TCP dialer is required")
 	}
 	ctx, cancel := context.WithCancel(parent)
-	tcpListener, err := net.Listen("tcp", "127.0.0.1:0")
+	udpEnabled := options.DialUDP != nil && (options.SupportsUDP == nil || options.SupportsUDP())
+	tcpListener, udpConn, err := listenControllerPorts(target.DeviceID, udpEnabled)
 	if err != nil {
 		cancel()
 		return nil, fmt.Errorf("listen RDP controller TCP: %w", err)
 	}
 	port := tcpListener.Addr().(*net.TCPAddr).Port
-	udpEnabled := options.DialUDP != nil && (options.SupportsUDP == nil || options.SupportsUDP())
-	var udpConn *net.UDPConn
-	if udpEnabled {
-		udpConn, err = net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: port})
-		if err != nil {
-			_ = tcpListener.Close()
-			cancel()
-			return nil, fmt.Errorf("listen RDP controller UDP: %w", err)
-		}
-		tunnel.TuneUDPConn(udpConn)
-	}
 	connection := &Connection{Target: target, ListenAddr: fmt.Sprintf("127.0.0.1:%d", port), UDPEnabled: udpEnabled, TCPListener: tcpListener, UDPConn: udpConn, cancel: cancel, done: make(chan struct{}), onClose: options.OnClose}
 	go connection.serveTCP(ctx, options.DialTCP)
 	if udpEnabled {
@@ -176,6 +167,51 @@ func StartController(parent context.Context, target Target, options ControllerOp
 		}(ctx, connection.ListenAddr)
 	}
 	return connection, nil
+}
+
+// A device gets the same local loopback port across sessions and agent restarts.
+// Probe nearby ports when another process owns the preferred port. The final
+// ephemeral fallback keeps RDP usable even if the stable range is exhausted.
+func preferredControllerPort(deviceID string) int {
+	h := fnv.New32a()
+	_, _ = h.Write([]byte(deviceID))
+	return 40000 + int(h.Sum32()%20000)
+}
+
+func listenControllerPorts(deviceID string, withUDP bool) (net.Listener, *net.UDPConn, error) {
+	base := preferredControllerPort(deviceID)
+	var lastErr error
+	for i := 0; i <= 32; i++ {
+		port := (base-40000+i)%20000 + 40000
+		tcp, udp, err := listenControllerPort(port, withUDP)
+		if err == nil {
+			return tcp, udp, nil
+		}
+		lastErr = err
+	}
+	tcp, udp, err := listenControllerPort(0, withUDP)
+	if err == nil {
+		return tcp, udp, nil
+	}
+	return nil, nil, fmt.Errorf("listen RDP controller (stable ports unavailable: %v): %w", lastErr, err)
+}
+
+func listenControllerPort(port int, withUDP bool) (net.Listener, *net.UDPConn, error) {
+	tcp, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	if err != nil {
+		return nil, nil, err
+	}
+	if !withUDP {
+		return tcp, nil, nil
+	}
+	actualPort := tcp.Addr().(*net.TCPAddr).Port
+	udp, err := net.ListenUDP("udp", &net.UDPAddr{IP: net.ParseIP("127.0.0.1"), Port: actualPort})
+	if err != nil {
+		_ = tcp.Close()
+		return nil, nil, err
+	}
+	tunnel.TuneUDPConn(udp)
+	return tcp, udp, nil
 }
 
 func rdpClientLaunchSpec(goos, address string) (string, []string, bool) {

@@ -680,9 +680,10 @@ function DeviceSpeedLinkDetails({exitID,exits,result,status,phase,revealCount}){
   <div className="device-speed-heading"><strong>链路逐项检查</strong><span className="mini">{matched?.name||matched?.deviceName||exitID||'未指定设备'}</span></div>
   <div className="mini">测速响应按上行、下行统一返回；完成后逐行核验真实路径。未命中某条链路不代表该链路不可用。</div>
   <div className="device-speed-check-list" role="list">
-   {rows.map(row=><div key={row.id} role="listitem" className={'device-speed-check is-'+row.state}>
+   {rows.map(row=><div key={row.id} role="listitem" className={'device-speed-check is-'+row.state} title={row.label+' · '+row.detail} aria-label={row.label+'，'+row.detail+'，'+stateLabel[row.state]}>
     <span className="device-speed-check-icon" aria-hidden="true">{row.state==='checked'?'✓':row.state==='progress'?'◌':row.state==='failed'?'×':row.state==='waiting'?'·':row.state==='candidate'?'i':'–'}</span>
-    <div className="device-speed-check-main"><strong>{row.label}</strong><span className="mini">{row.detail}</span></div>
+    <strong className="device-speed-check-label">{row.label}</strong>
+    <span className="device-speed-check-detail">{row.detail}</span>
     <span className="device-speed-check-state">{stateLabel[row.state]}</span>
    </div>)}
   </div>

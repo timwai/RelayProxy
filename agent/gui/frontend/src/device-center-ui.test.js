@@ -29,8 +29,8 @@ test('default exit is configured and saved with routing without changing rules p
 
 test('file shortcut uses only ACL-verified shares and never unapproved host entries',()=>{
  assert.match(app,/onlyVerifiedFilePeers\(await callJSON\('goGetFileSharePeers',\[\]\)\)/);
- assert.match(app,/initialDevice=\{fileTarget\?\.device\|\|''\}/);
- assert.match(files,/export default function FileSharingPage\(\{toast,initialDevice=''\}\)/);
+ assert.match(app,/navigationTarget=\{fileTarget\}/);
+ assert.match(files,/export default function FileSharingPage\(\{toast,initialDevice='',active=true,navigationTarget=null/);
  assert.match(files,/const peer=result\.find\(x=>x\.deviceId===initialPeerID\)/);
  assert.match(files,/if\(peer\.shares\.length===1\)\{setRemoteShares\(peer\.shares\);void openRemoteDir/);
  assert.match(files,/else void openRemoteDevice\(peer\.deviceId\)/);

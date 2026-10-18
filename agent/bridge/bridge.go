@@ -486,6 +486,7 @@ type ConfigUpdate struct {
 		AutoFollow *bool   `json:"autoFollow"`
 		HTTP       *bool   `json:"http"`
 		SOCKS5     *bool   `json:"socks5"`
+		ProxyIPLiterals *bool `json:"proxyIpLiterals"`
 	} `json:"systemProxy"`
 	Network struct {
 		Mode             *string   `json:"mode"` // "" (off) | "divert"
@@ -764,6 +765,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.SystemProxy.SOCKS5 != nil {
 		cfg.SystemProxy.SOCKS5 = config.BoolPtr(*in.SystemProxy.SOCKS5)
+	}
+	if in.SystemProxy.ProxyIPLiterals != nil {
+		cfg.SystemProxy.ProxyIPLiterals = config.BoolPtr(*in.SystemProxy.ProxyIPLiterals)
 	}
 	if in.Network.Mode != nil {
 		mode := strings.ToLower(strings.TrimSpace(*in.Network.Mode))

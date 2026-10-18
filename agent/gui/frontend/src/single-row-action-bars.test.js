@@ -11,7 +11,7 @@ test('PageHead uses a primary action and a compact overflow menu',()=>{
  assert.match(app,/className="page-more-menu"/);
  assert.match(app,/aria-label="更多页面操作"/);
  assert.match(styles,/\.page-head\.page-actions-contextual\{[^}]*flex-wrap:nowrap/);
- assert.doesNotMatch(app,/createPortal/);
+ assert.match(app,/createPortal\(controls,host\)/);
 });
 
 test('sharing header keeps the primary add-folder control first and all actions unwrapped',()=>{

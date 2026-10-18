@@ -42,7 +42,7 @@ test('per-device speed dialog owns measured link modes and separates local gatew
  assert.match(speed,/本机 Native UDP/);
  assert.match(speed,/status\?\.rdpTargetId===exitID/);
  assert.match(speed,/measurement\.exitId!==requested/);
- assert.match(speed,/title="设备双向测速与链路信息"/);
+ assert.match(speed,/title="出口双向测速 · 设备链路信息"/);
  assert.match(css,/\.device-speed-path-list\{display:grid;grid-template-columns:repeat\(2,minmax\(0,1fr\)\)/);
 });
  

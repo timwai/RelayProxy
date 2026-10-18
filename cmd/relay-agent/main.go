@@ -25,6 +25,7 @@ import (
 	"relayproxy/agent/gui"
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"
+	"relayproxy/agent/systemproxy"
 	"relayproxy/internal/config"
 	"relayproxy/internal/congestion"
 	"relayproxy/internal/deviceidentity"
@@ -359,12 +360,28 @@ func main() {
 	if err := agent.Start(); err != nil {
 		startupFatal(wantGUI, "[Agent] Failed to start agent: %v", err)
 	}
-	defer agent.Close()
+    defer agent.Close()
+
+    // Install/restore the macOS system proxy only after both local listeners
+    // have started. A write-ahead journal recovers an unclean previous exit.
+    var systemProxyManager *systemproxy.Manager
+    if runtime.GOOS == "darwin" {
+        systemProxyManager,err = systemproxy.New(*configPath)
+        if err != nil {
+            log.Printf("[SystemProxy] recovery journal unavailable; system proxy not enabled: %v",err)
+        } else {
+            defer func(){if e:=systemProxyManager.Close();e!=nil{log.Printf("[SystemProxy] restore on exit: %v",e)}}()
+            if e:=systemProxyManager.Apply(cfgFile.SystemProxy,cfgFile.Proxy.HTTP.Port,cfgFile.Proxy.SOCKS5.Port);e!=nil {
+                log.Printf("[SystemProxy] system proxy not fully enabled: %v",e)
+            }
+        }
+    }
 
 	log.Printf("[Agent] Running with automatic server approval. SOCKS5: %s, HTTP: %s", socksListen, httpListen)
 
 	// Initialize UIBridge (the only surface the desktop UI talks to)
 	uiBridge := bridge.NewUIBridge(agent, *configPath)
+    uiBridge.AttachSystemProxyManager(systemProxyManager)
 	gui.Version = Version
 
 	// The browser UI uses the same embedded page and UIBridge as the native

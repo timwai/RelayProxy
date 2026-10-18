@@ -14,7 +14,6 @@ import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
 import {routingPagePatch,dnsPagePatch} from './configPatches.js';
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 import {rdpPathLabel} from './pathStatus.js';
-import {deviceSpeedLinkEvidence} from './deviceSpeedLink.js';
 import {DEVICE_SPEED_REVIEW_STEPS,deviceSpeedChecks} from './deviceSpeedChecks.js';
 
 // Operational pages are always one click away. Frequently edited policies
@@ -701,37 +700,50 @@ function DeviceSpeedLinkDetails({exitID,exits,result,status,phase,revealCount}){
 }
 
 function SpeedModal({open,exits,status,initialExit,onClose,toast}){
- const[exitID,setExitID]=useState(''),[duration,setDuration]=useState(3),[busy,setBusy]=useState(false),[result,setResult]=useState(null),[calibration,setCalibration]=useState(null),[calibrateStep,setCalibrateStep]=useState(0);
- const exitsRef=useRef(exits);exitsRef.current=exits;
- useEffect(()=>{if(!open)return;setResult(null);setCalibration(null);setCalibrateStep(0);setExitID(exitUsable(exitsRef.current,initialExit)?initialExit:'')},[open,initialExit]);
- useEffect(()=>{if(open&&exitID&&!exitUsable(exits,exitID)){setExitID('');setResult(null);setCalibration(null)}},[open,exitID,exits]);
- const changeExit=id=>{if(busy)return;setExitID(id);setResult(null);setCalibration(null);setCalibrateStep(0)};
- const run=async()=>{if(busy)return;const requested=exitID;setBusy(true);setResult(null);setCalibration(null);try{
+ // Device Center is the source of truth. Never silently use the automatic
+ // default exit when the requested device is offline or has lost authorization.
+ const exitID=initialExit||'';
+ const matched=arr(exits).find(x=>(x.deviceId||x.id)===exitID);
+ const exitReady=!!status?.connected&&exitUsable(exits,exitID);
+ const[duration,setDuration]=useState(3),[busy,setBusy]=useState(false),[result,setResult]=useState(null),[calibration,setCalibration]=useState(null),[calibrateStep,setCalibrateStep]=useState(0);
+ const[phase,setPhase]=useState('idle'),[revealCount,setRevealCount]=useState(0);
+ useEffect(()=>{if(!open)return;setResult(null);setCalibration(null);setCalibrateStep(0);setPhase('idle');setRevealCount(0)},[open,exitID]);
+ // The speed RPC has no streamed sub-step results. After the actual response
+ // returns, check and reveal each evidence row without fake probe timings.
+ useEffect(()=>{
+  if(phase!=='reviewing')return;
+  if(revealCount>=DEVICE_SPEED_REVIEW_STEPS){setPhase('done');return}
+  const id=setTimeout(()=>setRevealCount(n=>n+1),190);
+  return()=>clearTimeout(id);
+ },[phase,revealCount]);
+ const close=()=>{if(!busy&&phase!=='reviewing')onClose()};
+ const run=async()=>{if(busy||!exitReady)return;const requested=exitID;setBusy(true);setPhase('running');setRevealCount(0);setResult(null);setCalibration(null);try{
   const p=parseMutation(await call('goRunSpeedTest',requested,Number(duration)));
   if(!p.ok)throw new Error(p.message||'测速失败');
   const measurement=p.result||p;
-  if(requested&&measurement.exitId!==requested)throw new Error('测速返回的出口与所选设备不一致，不能归属链路结果');
-  setResult(measurement);toast('出口测速完成');
- }catch(e){setResult({error:e.message})}finally{setBusy(false)}};
- const calibrate=async()=>{if(busy)return;setBusy(true);setCalibration(null);setResult(null);setCalibrateStep(0);try{
+  if(measurement.exitId!==requested)throw new Error('测速返回的出口与所选设备不一致，不能归属链路结果');
+  setResult(measurement);setPhase('reviewing');toast('出口测速完成');
+ }catch(e){setResult({error:e.message,exitId:requested});setPhase('failed')}finally{setBusy(false)}};
+ const calibrate=async()=>{if(busy||!exitReady)return;setBusy(true);setPhase('running');setRevealCount(0);setCalibration(null);setResult(null);setCalibrateStep(0);try{
   const records=[];const requested=exitID;
   for(let i=0;i<BRUTAL_CALIBRATION_ROUNDS;i++){
    const payload=parseMutation(await call('goRunSpeedTest',requested,3));
    if(!payload.ok)throw new Error(payload.message||'BBR 测速失败');
    const measurement=payload.result||payload;
-   if(requested&&measurement.exitId!==requested)throw new Error('出口在测速期间发生切换');
+   if(measurement.exitId!==requested)throw new Error('出口在测速期间发生切换');
    validateBrutalCalibrationSample(measurement);
    records.push(measurement);
    if(i>0&&records[0].exitId!==measurement.exitId)throw new Error('出口在测速期间发生切换');
    setCalibrateStep(i+1);
   }
-  setCalibration(proposeBrutalFromSpeedTests(records));setResult(records.at(-1));toast('BBR 保守带宽候选值已计算');
- }catch(e){setCalibration({error:e.message});toast('未能生成安全候选值','danger')}finally{setBusy(false)}};
+  setCalibration(proposeBrutalFromSpeedTests(records));setResult(records.at(-1));setPhase('reviewing');toast('BBR 保守带宽候选值已计算');
+ }catch(e){setCalibration({error:e.message});setResult({error:e.message,exitId});setPhase('failed');toast('未能生成安全候选值','danger')}finally{setBusy(false)}};
  const leg=(label,v={})=><div><div className="eyebrow">{label}</div><div className="big small-big">{Number(v.megabitsPerSecond??v.mbps??0).toFixed(2)} Mbps</div><div className="mini">{(v.path||'—')+' · '+fmtBytes(v.bytesPerSecond||0,true)}</div>{v.quic&&<div className="mini">丢包 {Number(v.quic.sent_packet_loss_pct||0).toFixed(2)}% · RTT {Number(v.quic.smoothed_rtt_ms||v.quic.latest_rtt_ms||0).toFixed(1)} ms · RTT 抖动 {Number(v.quic.rtt_deviation_ms||0).toFixed(1)} ms · GSO {v.quic.gso?'ON':'OFF'}{v.quic.congestion_controller?' · '+v.quic.congestion_controller:''}{v.quic.brutal_fallback_reason&&<div className="notice warn">Brutal 已自动退回 BBR：{v.quic.brutal_fallback_reason}</div>}{(v.quic.udp_read_buffer_bytes||v.quic.udp_write_buffer_bytes)?<div>UDP 缓冲：读取 {fmtBytes(v.quic.udp_read_buffer_bytes||0)} · 写入 {fmtBytes(v.quic.udp_write_buffer_bytes||0)}</div>:null}</div>}</div>;
- const resolvedExit=exitID||(result&&!result.error&&result.exitId)||'';
- return <Modal open={open} title="出口双向测速 · 设备链路信息" wide onClose={onClose} footer={<><Button onClick={onClose}>关闭</Button><Button disabled={busy} onClick={calibrate}>{busy&&calibrateStep?'校准中 '+calibrateStep+'/'+BRUTAL_CALIBRATION_ROUNDS:'5 轮 BBR 保守校准'}</Button><Button primary disabled={busy} onClick={run}>{busy?'测速中…':'开始测速'}</Button></>}>
-  <div className="form-grid"><Field label="测试设备 / 代理出口"><Select value={exitID} disabled={busy} onChange={e=>changeExit(e.target.value)}><option value="">当前 / 自动出口</option>{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false}>{x.name||x.deviceId}{x.online===false?' · 离线':''}</option>)}</Select></Field><Field label="每方向时长（秒）"><Input type="number" min="1" max="30" disabled={busy} value={duration} onChange={e=>setDuration(Number(e.target.value))}/></Field></div>
-  <DeviceSpeedLinkDetails exitID={resolvedExit} exits={exits} result={result} status={status}/>
+ const reviewing=phase==='reviewing';
+ return <Modal open={open} title="出口双向测速 · 设备链路信息" wide onClose={close} footer={<><Button disabled={busy||reviewing} onClick={close}>关闭</Button><Button disabled={busy||reviewing||!exitReady} onClick={calibrate}>{busy&&calibrateStep?'校准中 '+calibrateStep+'/'+BRUTAL_CALIBRATION_ROUNDS:'5 轮 BBR 保守校准'}</Button><Button primary disabled={busy||reviewing||!exitReady} onClick={run}>{busy?'测速中…':reviewing?'核验中…':'开始测速'}</Button></>}>
+  <div className="device-speed-target"><div className="device-speed-target-identity"><Icon name="devices" size={18}/><div><span className="mini">当前测速设备（由设备卡片指定）</span><strong>{matched?.name||matched?.deviceName||exitID||'未选择设备'}</strong><span className="mono mini">{exitID||'无设备 ID'}</span></div></div><Field label="每方向时长（秒）"><Input type="number" min="1" max="30" disabled={busy||reviewing} value={duration} onChange={e=>setDuration(Number(e.target.value))}/></Field></div>
+  {!exitReady&&<div className="notice warn" role="alert">该设备当前不在线或未获得代理出口授权，已阻止自动回退到其他出口。请返回设备中心刷新授权。</div>}
+  <DeviceSpeedLinkDetails exitID={exitID} exits={exits} result={result} status={status} phase={phase} revealCount={revealCount}/>
   {calibration&&<div className={cx('speed-result',calibration.error&&'error')}>{calibration.error?calibration.error:<><div className="notice warn">仅验证本机 BBR 发送侧，无法确认服务端发送侧的控制器或真实链路容量；共享公平性、负载 RTT 与 Hysteria2 实网对照仍须单独验收。本功能不会应用配置。</div><div>当前 Relay BBR 五轮候选：上行 <b>{calibration.upload.candidateMbps} Mbps</b> · 下行 <b>{calibration.download.candidateMbps} Mbps</b></div><div className="mini">最低分位吞吐：上行 {calibration.upload.bbrP10Mbps} Mbps / 下行 {calibration.download.bbrP10Mbps} Mbps；预留 40% 带宽余量。</div></>}</div>}
   {result&&<div className={cx('speed-result',result.error&&'error')}>{result.error?result.error:<>{leg('上行',result.upload||result.up)}{leg('下行',result.download||result.down)}</>}</div>}
  </Modal>;

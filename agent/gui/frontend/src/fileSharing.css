@@ -182,3 +182,26 @@ html.file-browser-focus .main>.file-sharing-host.is-remote{flex:1 1 auto;min-hei
 html.file-browser-focus .file-sharing-host>.file-browser-v4{flex:1 1 auto;min-height:0;height:100%;border:0;border-radius:0;margin:0}
 @media(max-width:800px){.file-share-list-actions{width:100%;justify-content:flex-start}.file-sharing-host.is-remote>.file-browser-v4{min-height:0}}
 @media(max-width:500px){.file-share-list-actions .btn{font-size:11px}.file-share-remote-back{padding-bottom:5px}}
+
+/* Searchable authorization choices live INSIDE the existing folder editor,
+   so neither the shared-folder list nor file explorer gains a header row. */
+.file-share-grant-trigger{display:flex;gap:9px;align-items:center;justify-content:flex-start;width:100%;min-height:44px;margin-top:12px;border:1px dashed var(--line2);background:var(--surface3);text-align:left}
+.file-share-grant-trigger>svg{flex:0 0 auto;color:var(--brand)}
+.file-share-grant-trigger .mini{margin-left:auto}
+.file-share-grant-picker{border:1px solid var(--line);border-radius:12px;padding:12px;margin-top:8px;background:var(--surface3);display:flex;flex-direction:column;gap:10px}
+.file-share-grant-search{display:flex;gap:6px;flex-direction:column}
+.file-share-grant-search .control{width:100%;min-width:0;min-height:44px}
+.file-share-grant-list{display:flex;flex-direction:column;gap:3px;max-height:250px;overflow-y:auto}
+.file-share-grant-option{display:flex;align-items:center;gap:10px;padding:9px 10px;min-height:54px;border:1px solid transparent;border-radius:9px;cursor:pointer}
+.file-share-grant-option:hover,.file-share-grant-option:focus-within{background:var(--surface2);border-color:var(--line)}
+.file-share-grant-option>input{width:16px;height:16px;flex:0 0 auto;accent-color:var(--brand)}
+.file-share-grant-device-icon{display:grid;place-items:center;flex:0 0 35px;width:35px;height:35px;border-radius:9px;background:var(--surface2);color:var(--brand)}
+.file-share-grant-device-info{display:flex;flex-direction:column;gap:4px;flex:1;min-width:0}
+.file-share-grant-device-info strong{font-size:12px;overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.file-share-grant-device-info small{font-size:10px;color:var(--muted);overflow:hidden;white-space:nowrap;text-overflow:ellipsis}
+.file-share-grant-empty{padding:16px;text-align:center;color:var(--muted);font-size:12px}
+.file-share-grant-footer{border-top:1px solid var(--line);padding-top:11px;display:flex;align-items:flex-end;justify-content:space-between;gap:10px;flex-wrap:wrap}
+.file-share-grant-footer>.field{flex:0 1 180px;min-width:140px}
+.file-share-grant-footer>.field>.control{min-width:0;min-height:44px;width:100%}
+.file-share-grant-footer>.btn{min-height:44px}
+@media(max-width:640px){.file-share-grant-trigger{flex-wrap:wrap}.file-share-grant-trigger .mini{margin-left:0}.file-share-grant-picker{padding:9px}.file-share-grant-footer>.field{flex:1 1 100%}.file-share-grant-footer>.btn{flex:1 1 100%}}

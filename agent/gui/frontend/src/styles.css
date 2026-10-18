@@ -227,3 +227,11 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 @media(max-width:640px){
  select:not([multiple]):not([size]){min-height:48px;height:48px;font-size:14px}
 }
+
+/* Clear scope of low-frequency Settings versus editable Network Configuration. */
+.crumb .nav-category-crumb{font-weight:600;color:var(--brand);white-space:nowrap}
+.main>.settings-navigation+*{margin-top:0}
+.settings-navigation{scrollbar-gutter:stable}
+.settings-navigation:focus-within{scrollbar-color:var(--brand) transparent}
+.settings-nav-item[aria-current="page"]{font-weight:750}
+@media(max-width:820px){.crumb .nav-category-crumb{display:none}}

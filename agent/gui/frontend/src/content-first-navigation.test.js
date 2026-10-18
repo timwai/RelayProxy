@@ -21,7 +21,7 @@ test('routing rules and subscriptions render before folded global policy',()=>{
 });
 
 test('local file sharing leads with folder cards, keeps service switches available below',()=>{
- const page=fragment(sharing,"  {tab==='local'&&<>","  {tab==='remote'&&<><div className=\"file-share-remote-back\"");
+ const page=fragment(sharing,"  {tab==='local'&&<>","  {tab==='remote'&&<FileBrowserV4");
  const folder=page.indexOf('DIRECTORIES ·');
  const prefs=page.indexOf('<details className="file-share-advanced"');
  const metrics=page.indexOf('<div className="cards-3">');
@@ -35,15 +35,15 @@ test('local file sharing leads with folder cards, keeps service switches availab
 
 test('remote browser sidebar contains only the ACL-filtered tree for the selected device',()=>{
  const tree=fragment(browser,'  <aside className="v4-tree">','  <div className="v4-splitter v4-tree-split"');
- const head=fragment(browser,'  <div className="v4-head">','   <div className="v4-tools">');
+ const head=fragment(browser,'   <div className="v4-tools v4-unified-pathbar">','   <div className="v4-toolbar">');
  assert.match(tree,/visibleShares\.map\(s=><div className="v4-tree-share"/);
  assert.match(tree,/renderTreeBranch\(device,s\.id,'\.'\)/);
  assert.doesNotMatch(tree,/peers\.map\(/);
  assert.doesNotMatch(tree,/v4-device-row/);
  assert.match(head,/aria-label="切换共享设备"/);
- assert.match(head,/peers\.map\(peer=><option key=\{peer\.deviceId\}/);
+ assert.match(browser,/availablePeers\.map\(peer=><button type="button" key=\{peer\.deviceId\}/);
  assert.match(browser,/const visibleShares=selectedPeer\?shares\.filter\(item=>selectedPeer\.shares\.some\(allowed=>allowed\.id===item\.id\)\):\[\]/);
- assert.match(browserCSS,/\.v4-device-switch select\{min-width:0;width:100%;max-width:100%;height:44px/);
+ assert.match(browserCSS,/\.v4-unified-pathbar \.v4-crumbs \.v4-peer-trigger/);
 });
 
 test('initial default selection respects authorization and does not jump to another device after revocation',()=>{

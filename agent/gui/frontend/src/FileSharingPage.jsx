@@ -7,6 +7,7 @@ import {onlyVerifiedFilePeers} from './fileShareVisibility.js';
 import './fileSharing.css';
 import FileBrowserV4 from './FileBrowserV4.jsx';
 import FileGlyph from './FileGlyph.jsx';
+import useDialogFocus from './useDialogFocus.js';
 
 const formatFileBytes=n=>{const num=Math.max(0,Number(n)||0);if(num<1024)return num.toFixed(0)+' B';const units=['KiB','MiB','GiB','TiB'];const power=Math.min(4,Math.floor(Math.log(num)/Math.log(1024)));return (num/1024**power).toFixed(1)+' '+units[power-1]};
 const blank=()=>({id:'',name:'',rootPath:'',enabled:true,permissions:{}});
@@ -49,6 +50,8 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
  const initialDeviceRef=useRef(initialDevice);
  const initialAutoSelected=useRef(false);
  const lastNavigationSerial=useRef(null);
+ const drawerRef=useRef(null);
+ useDialogFocus(transferOpen,drawerRef,()=>onTransferOpenChange?.(false));
  const peerRefreshSerial=useRef(0);
  const selectedRemote=useRef({device:'',share:''});
  const directoryCache=useRef(createDirectoryCache());
@@ -647,7 +650,7 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
  </section>
  {transferOpen&&document.getElementById('agent-file-transfer-portal')&&createPortal(
   <div className="global-transfer-shade" onMouseDown={e=>e.target===e.currentTarget&&onTransferOpenChange?.(false)}>
-   <section className="global-transfer-panel" role="dialog" aria-modal="false" aria-label="文件传输任务">
+   <section ref={drawerRef} tabIndex={-1} className="global-transfer-panel" role="dialog" aria-modal="true" aria-label="文件传输任务">
     <div className="global-transfer-panel-head"><div><strong>文件传输任务</strong><span className="mini">{transfers.filter(t=>t.state==='running').length} 项进行中 · {transfers.length} 项记录</span></div><div className="actions"><button type="button" className="btn quiet" onClick={refreshTransfers}>刷新</button>{transfers.some(t=>t.state!=='running')&&<button type="button" className="btn" onClick={clearInactiveTransfers}>清除已结束</button>}<button type="button" className="btn" onClick={()=>onTransferOpenChange?.(false)} aria-label="关闭传输任务">关闭</button></div></div>
    
    {transferError&&<div className="notice danger" role="alert">{transferError}</div>}

@@ -158,6 +158,18 @@ html.file-browser-focus .main>*+*{margin-top:0}
 .v4-file-glyph>svg{width:30px;height:30px;display:block;overflow:visible;flex:0 0 auto}
 .v4-glyph-folder{--fg-color:#368df2;--fg-folder-back:#8ec9fe;--fg-folder-front:#388ff2;--fg-folder-edge:#236fd0}
 .v4-glyph-pdf{--fg-color:#e4545d}
+.v4-glyph-word{--fg-color:#2256a5}
+.v4-glyph-excel{--fg-color:#168056}
+.v4-glyph-powerpoint{--fg-color:#d26035}
+.v4-glyph-zip{--fg-color:#c58b35}
+.v4-glyph-rar{--fg-color:#8755bb}
+.v4-glyph-sevenzip{--fg-color:#5577bc}
+.v4-glyph-tar{--fg-color:#9d7957}
+.v4-glyph-compressed{--fg-color:#8f8b42}
+.v4-glyph-windows{--fg-color:#2178cc}
+.v4-glyph-android{--fg-color:#428e60}
+.v4-glyph-apple{--fg-color:#647891}
+.v4-glyph-package{--fg-color:#9977bd}
 .v4-glyph-document{--fg-color:#4386df}
 .v4-glyph-spreadsheet{--fg-color:#1faa79}
 .v4-glyph-presentation{--fg-color:#ec8744}

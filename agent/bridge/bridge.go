@@ -852,6 +852,19 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if err := config.NormalizeAgentConfig(cfg); err != nil {
 		return nil, fmt.Errorf("配置校验失败: %w", err)
 	}
+    if cfg.SystemProxy.Enabled() {
+        if b.systemProxyManager == nil {return nil,fmt.Errorf("macOS 系统代理管理器未启动，配置未保存")}
+        running:=b.agent.Config()
+        if running.NetworkMode=="divert" {return nil,fmt.Errorf("当前 Network Extension 正在运行，请先关闭并重启后再启用系统代理")}
+        if cfg.SystemProxy.UseHTTP() {
+            addr:=net.JoinHostPort(cfg.Proxy.HTTP.Listen,strconv.Itoa(cfg.Proxy.HTTP.Port))
+            if addr!=running.HTTPListen || !running.IsHTTPEnabled() {return nil,fmt.Errorf("HTTP 监听设置尚未生效，请先保存并重启客户端后启用系统代理")}
+        }
+        if cfg.SystemProxy.UseSOCKS5() {
+            addr:=net.JoinHostPort(cfg.Proxy.SOCKS5.Listen,strconv.Itoa(cfg.Proxy.SOCKS5.Port))
+            if addr!=running.SOCKS5Listen || !running.IsSOCKS5Enabled() {return nil,fmt.Errorf("SOCKS5 监听设置尚未生效，请先保存并重启客户端后启用系统代理")}
+        }
+    }
 	if cfg.Network.Mode == "divert" {
 		if err := divert.Preflight(cfg.DivertConfig()); err != nil {
 			return nil, fmt.Errorf("无法启用系统透明代理，配置未保存: %w", err)

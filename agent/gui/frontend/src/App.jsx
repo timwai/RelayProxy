@@ -56,7 +56,7 @@ const EMPTY={
  exitUpstream:{mode:'',address:'',username:'',password:''},
  rdp:{enabled:true,address:'127.0.0.1:3389'},
  p2p:{enabled:true,mode:'auto',punchTimeoutMs:1200,keepaliveSec:10,idleTimeoutSec:120,maxExitSessions:4,fallback:true,upnpAllowed:false},publicDirectAdvertise:'',
- networkMode:'',network:{mode:'',exclude_processes:[]},systemProxy:{mode:'',autoFollow:true,http:true,socks5:true},systemProxyStatus:{},platform:'',networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
+ networkMode:'',network:{mode:'',exclude_processes:[]},systemProxy:{mode:'',autoFollow:true,http:true,socks5:true,proxyIpLiterals:true},systemProxyStatus:{},platform:'',networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
  verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,dns_exit_id:'',dns_upstreams:[],doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
 };
 
@@ -337,6 +337,7 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
    <Setting title="自动跟随活动网络" desc="Wi-Fi / 有线网络切换时恢复旧服务，并配置新的活动服务。"><Switch checked={sys.autoFollow!==false} onChange={v=>setv('systemProxy.autoFollow',v)}/></Setting>
    <Setting title="HTTP / HTTPS" desc={httpAddr}><Switch checked={sys.http!==false} onChange={v=>setv('systemProxy.http',v)}/></Setting>
    <Setting title="SOCKS5" desc={socksAddr}><Switch checked={sys.socks5!==false} onChange={v=>setv('systemProxy.socks5',v)}/></Setting>
+   <Setting title="代理 IP 地址目标" desc="临时移除系统绕过列表中的 IP / CIDR 例外，保护 localhost 和链路本地地址；关闭或退出时恢复原列表。"><Switch checked={sys.proxyIpLiterals!==false} onChange={v=>setv('systemProxy.proxyIpLiterals',v)}/></Setting>
    <div className="mini top-gap">启用前持久保存原系统代理；正常退出、关闭或网络切换时仅恢复 RelayProxy 设置的值。意外退出后下一次启动尝试恢复。可能提示 macOS 管理员授权。</div>
    {sysStatus.service&&<div className="setting top-gap"><div className="grow"><b>当前网络服务</b><span className="mono mini">{sysStatus.service}</span></div></div>}
    {sysStatus.pendingRecovery>0&&<div className="notice warn top-gap">尚有 {sysStatus.pendingRecovery} 项代理设置等待安全恢复。</div>}
@@ -355,7 +356,7 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
   <Field label="排除进程" help="这些进程的流量不经透明代理；可用换行、逗号或分号分隔，如 steam.exe, Teams.exe"><Textarea rows="5" value={ruleListText(config.network?.exclude_processes)} onChange={e=>setv('network.exclude_processes',e.target.value)}/></Field>
   <div className="actions top-gap"><Button disabled={repairing} onClick={repair}>{repairing?'修复中…':'安装 / 修复服务'}</Button><Button onClick={onService}>高级维护 / 卸载</Button></div>
  </Card>}
- <SaveBar dirty={dirty} label="保存代理设置" hint="保存本地监听和系统代理设置；macOS 系统代理可即时应用，监听地址与端口仍需重启生效。" onSave={()=>save({systemProxy:isMac?{mode:sys.mode||'',autoFollow:sys.autoFollow!==false,http:sys.http!==false,socks5:sys.socks5!==false}:undefined,proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
+ <SaveBar dirty={dirty} label="保存代理设置" hint="保存本地监听和系统代理设置；macOS 系统代理可即时应用，监听地址与端口仍需重启生效。" onSave={()=>save({systemProxy:isMac?{mode:sys.mode||'',autoFollow:sys.autoFollow!==false,http:sys.http!==false,socks5:sys.socks5!==false,proxyIpLiterals:sys.proxyIpLiterals!==false}:undefined,proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
  <CustomExitManager config={config} save={save} toast={toast} dirty={dirty}/></>
 }
 

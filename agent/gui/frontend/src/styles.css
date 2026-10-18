@@ -411,3 +411,30 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
  .topbar-page-actions .page-action-buttons>.btn{padding-inline:7px;font-size:11px}
  .page-head.page-actions-inline>.page-action-buttons>.btn{min-height:34px;padding-inline:9px}
 }
+
+
+/* Contextual page commands: one primary command plus an overflow menu.
+   Never move commands into the global application topbar or wrap them. */
+.page-head.page-actions-contextual{
+ display:flex;align-items:center;justify-content:flex-end;
+ flex-wrap:nowrap;gap:6px;min-width:0;max-width:100%;
+ margin:0 0 10px;overflow:visible;
+}
+.page-actions-contextual .page-context-primary{min-width:0;display:flex;align-items:center}
+.page-actions-contextual .page-context-primary>.btn{max-width:100%;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.page-actions-contextual .page-context-overflow{position:relative;flex:0 0 auto}
+.page-actions-contextual .page-more-trigger{width:34px;min-width:34px;min-height:34px;padding:0;display:grid;place-items:center}
+.page-actions-contextual .page-more-menu{
+ position:absolute;right:0;top:calc(100% + 5px);z-index:70;
+ display:flex;flex-direction:column;gap:3px;min-width:180px;
+ padding:6px;border:1px solid var(--line2);border-radius:11px;
+ background:var(--surface2);box-shadow:var(--shadow2);
+}
+.page-actions-contextual .page-more-menu>div{display:flex;min-width:0}
+.page-actions-contextual .page-more-menu .btn{
+ flex:1 1 auto;justify-content:flex-start;min-width:0;white-space:nowrap;
+}
+@media(max-width:640px){
+ .page-head.page-actions-contextual{margin-bottom:7px}
+ .page-actions-contextual .page-context-primary>.btn{max-width:min(56vw,180px)}
+}

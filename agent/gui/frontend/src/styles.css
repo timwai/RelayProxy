@@ -287,21 +287,10 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .overview-current-exit .grow{min-width:0}
 .overview-current-exit strong{display:block;margin-top:3px;font-size:14px;overflow-wrap:anywhere}
 .overview-quick-links{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.device-path-summary{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
-.device-path-summary .grow{min-width:0}
-.device-path-summary strong{display:block;margin:3px 0;font-size:14px;overflow-wrap:anywhere}
-.device-path-details{margin-top:11px;border-top:1px solid var(--line);padding-top:10px}
-.device-path-details summary{cursor:pointer;color:var(--brand);font-size:12px;font-weight:700;min-height:32px;align-content:center}
-.device-path-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));column-gap:22px;margin-top:7px}
-.device-path-grid>.setting{min-width:0}
-.device-path-grid>.setting .grow{min-width:0}
-.device-path-grid>.setting .mini{overflow-wrap:anywhere}
 @media(max-width:760px){
  .overview-hero{padding:16px}
  .overview-current-exit{align-items:flex-start;flex-direction:column}
  .overview-quick-links{width:100%;justify-content:flex-start}
- .device-path-grid{grid-template-columns:1fr}
- .device-path-summary{align-items:flex-start}
 }
 
 /* Routing policy remains editable without pushing the high-frequency rules
@@ -316,3 +305,25 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .routing-strategy-disclosure>summary:hover{background:var(--surface3)}
 .routing-strategy-disclosure>.card{border:0;border-top:1px solid var(--line);border-radius:0;box-shadow:none;margin:0}
 @media(max-width:640px){.routing-strategy-disclosure>summary{padding:12px}}
+
+/* Speed-test path evidence is scoped to the selected exit, not a global
+   current-exit dashboard. Local UPnP and UDP are identified separately. */
+.device-speed-evidence{border:1px solid var(--line);border-radius:12px;background:var(--surface3);margin:13px 0;padding:14px;display:flex;flex-direction:column;gap:10px}
+.device-speed-heading{display:flex;align-items:baseline;gap:10px;justify-content:space-between;flex-wrap:wrap}
+.device-speed-heading strong{font-size:14px}
+.device-speed-heading .mini{overflow-wrap:anywhere}
+.device-speed-evidence>.notice{margin:0;font-size:11px;line-height:1.6}
+.device-speed-path-list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:7px 20px}
+.device-speed-path-list>.setting{min-width:0;border-bottom:1px solid var(--line);padding:8px 2px}
+.device-speed-path-list>.setting>.grow{min-width:0}
+.device-speed-path-list>.setting .mini{overflow-wrap:anywhere;line-height:1.45}
+.device-speed-path-list>.setting>.badge{flex:0 0 auto;max-width:52%;text-align:center;white-space:normal}
+.device-speed-local{border-top:1px solid var(--line);padding-top:7px}
+.device-speed-local>summary{cursor:pointer;padding:5px 3px;font-size:12px;font-weight:650;color:var(--brand)}
+.device-speed-local>summary:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.device-speed-local .device-speed-path-list{margin-top:7px}
+@media(max-width:760px){
+ .device-speed-evidence{padding:11px}
+ .device-speed-path-list{grid-template-columns:minmax(0,1fr)}
+ .device-speed-path-list>.setting>.badge{max-width:52%}
+}

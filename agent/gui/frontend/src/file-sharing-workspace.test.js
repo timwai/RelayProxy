@@ -23,7 +23,9 @@ test('local list is the landing view without tab row, while remote browsing is a
  assert.match(files,/tab==='local'&&<>/);
  assert.match(files,/file-share-list-head/);
  assert.match(files,/浏览其他设备文件/);
- assert.match(files,/file-share-remote-back/);
+ assert.doesNotMatch(files,/className="file-share-remote-back"/);
+ assert.match(files,/onBackToShares=\{\(\)=>setTab\('local'\)\}/);
+ assert.match(browser,/返回我的共享/);
  assert.match(files,/setTab\('local'\)/);
  assert.match(files,/onlyVerifiedFilePeers\(raw\)/);
  assert.match(files,/const requested=navigationTarget\?\.device/);

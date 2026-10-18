@@ -327,3 +327,18 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
  .device-speed-path-list{grid-template-columns:minmax(0,1fr)}
  .device-speed-path-list>.setting>.badge{max-width:52%}
 }
+
+/* Persistent transfer drawer is available from every Agent page. The file
+   controller is deliberately never unmounted when browsing another page. */
+.global-transfer-trigger{display:inline-flex;align-items:center;gap:6px;min-height:34px;padding:5px 9px;color:var(--muted);border:1px solid var(--line);border-radius:9px;background:var(--surface2);font-size:12px;font-weight:650;white-space:nowrap;cursor:pointer}
+.global-transfer-trigger:hover,.global-transfer-trigger[aria-expanded="true"]{border-color:var(--brand);color:var(--brand)}
+.global-transfer-trigger:focus-visible{outline:2px solid var(--brand);outline-offset:2px}
+.global-transfer-count{border-radius:999px;min-width:18px;min-height:18px;display:grid;place-items:center;background:var(--brand);color:#fff;font-size:10px;padding:0 4px}
+.global-transfer-shade{position:fixed;inset:0;z-index:9000;background:rgba(6,18,35,.32);display:flex;align-items:flex-start;justify-content:flex-end;padding:48px 16px 14px}
+.global-transfer-panel{width:min(560px,100%);max-height:min(80dvh,840px);min-height:140px;overflow-y:auto;border-radius:15px;background:var(--surface2);border:1px solid var(--line);box-shadow:var(--shadow);padding:15px;display:flex;flex-direction:column;gap:11px}
+.global-transfer-panel-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;padding:2px 1px 12px;border-bottom:1px solid var(--line);flex-wrap:wrap}
+.global-transfer-panel-head>div:first-child{display:flex;flex-direction:column;gap:3px}
+.global-transfer-panel-head strong{font-size:15px}
+.global-transfer-panel-head .actions{display:flex;flex-wrap:wrap;gap:5px}
+.global-transfer-panel:focus-visible{outline:2px solid var(--brand)}
+@media(max-width:640px){.global-transfer-shade{padding:45px 8px 8px}.global-transfer-panel{max-height:calc(100dvh - 55px);padding:11px}.global-transfer-trigger{padding:6px;min-height:38px}.global-transfer-trigger>span:not(.global-transfer-count){display:none}}

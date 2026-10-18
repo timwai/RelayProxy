@@ -5,7 +5,7 @@ import {deviceSpeedLinkEvidence} from './deviceSpeedLink.js';
 // The Agent speed RPC returns both directions together, so results are
 // revealed one row at a time only AFTER the response, never simulated as
 // separate in-flight network probes.
-export function deviceSpeedChecks({exitID,exit,phase='idle',result=null,revealCount=0}={}){
+export function deviceSpeedChecks({exitID,exit,connected=true,phase='idle',result=null,revealCount=0}={}){
  const evidence=deviceSpeedLinkEvidence(exitID,exit,result);
  const verified=evidence.verifiedTest;
  const failed=phase==='failed'||!!result?.error||(!!result&&result.exitId!==exitID);

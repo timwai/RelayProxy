@@ -38,6 +38,8 @@ type entry struct {
 	Kind    string     `json:"kind"`
 	Before  ProxyState `json:"before"`
 	Applied ProxyState `json:"applied"`
+	BeforeBypass []string `json:"beforeBypass,omitempty"`
+	AppliedBypass []string `json:"appliedBypass,omitempty"`
 }
 type journal struct {
 	Version int     `json:"version"`
@@ -48,6 +50,8 @@ type backend interface {
 	Read(service, kind string) (ProxyState, error)
 	Write(service, kind string, state ProxyState) error
 	Validate(service string) error
+	ReadBypass(service string) ([]string, error)
+	WriteBypass(service string, patterns []string) error
 }
 type Status struct {
 	Enabled         bool   `json:"enabled"`
@@ -191,6 +195,15 @@ func (m *Manager) activate(service string) error {
 		{"secureweb", m.desired.UseHTTP(), m.httpPort},
 		{"socks", m.desired.UseSOCKS5(), m.socksPort},
 	}
+	// Preflight the existing bypass list, retaining hostname and loopback
+	// exceptions while allowing literal IP destinations through this proxy.
+	var previousBypass, appliedBypass []string
+	if m.desired.UseIPTargets() {
+		var err error
+		previousBypass, err = m.backend.ReadBypass(service)
+		if err != nil { return fmt.Errorf("read system proxy bypass list: %w", err) }
+		appliedBypass = filterIPBypass(previousBypass)
+	}
 	// Preflight all enabled types before mutating any system settings.
 	for _, t := range targets {
 		if t.enabled {
@@ -204,6 +217,13 @@ func (m *Manager) activate(service string) error {
 			if original.Authenticated {
 				return fmt.Errorf("%s uses authenticated proxy; refusing to overwrite credentials", t.kind)
 			}
+		}
+	}
+	if m.desired.UseIPTargets() && !reflect.DeepEqual(previousBypass, appliedBypass) {
+		m.records = append(m.records, entry{Service: service, Kind: "bypass", BeforeBypass: previousBypass, AppliedBypass: appliedBypass})
+		if err := m.saveJournal(); err != nil { return err }
+		if err := m.backend.WriteBypass(service, appliedBypass); err != nil {
+			return fmt.Errorf("set IP bypass exceptions for %s: %w", service, err)
 		}
 	}
 	for _, t := range targets {
@@ -242,6 +262,23 @@ func (m *Manager) restore() error {
 	var problems []error
 	for i := len(m.records) - 1; i >= 0; i-- {
 		e := m.records[i]
+		if e.Kind == "bypass" {
+			current, err := m.backend.ReadBypass(e.Service)
+			if err != nil {
+				remaining = append(remaining, e)
+				problems = append(problems, fmt.Errorf("read %s/bypass: %w", e.Service, err))
+				continue
+			}
+			if reflect.DeepEqual(current, e.AppliedBypass) {
+				if err := m.backend.WriteBypass(e.Service, e.BeforeBypass); err != nil {
+					remaining = append(remaining, e)
+					problems = append(problems, fmt.Errorf("restore %s/bypass: %w", e.Service, err))
+				}
+			} else if !reflect.DeepEqual(current, e.BeforeBypass) {
+				problems = append(problems, fmt.Errorf("%s/bypass changed externally: preserved current value", e.Service))
+			}
+			continue
+		}
 		current, err := m.backend.Read(e.Service, e.Kind)
 		if err != nil {
 			remaining = append(remaining, e)

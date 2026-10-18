@@ -254,7 +254,7 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
   {filtered.map(d=>{
    const meta=proxyMeta(d),name=d.name||d.id;
    const online=status.connected&&d.online;
-   return <article className="device-center-card" key={d.id}>
+   return <article className="device-center-card" key={d.id} onClick={e=>{if(!e.target.closest('button'))setDetail(d.id)}}>
     <div className="device-center-card-head">
      <div className="identity-icon"><Icon name="devices" size={21}/></div>
      <button className="device-center-card-name" type="button" onClick={()=>setDetail(d.id)} title={'查看 '+name+' 的设备详情'}>

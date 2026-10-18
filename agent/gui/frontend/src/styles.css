@@ -136,3 +136,20 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
  .settings-nav-item{flex:0 0 130px}
  .settings-nav-item small{display:none}
 }
+
+
+/* Keep primary page actions on one line in compact desktop windows. */
+.page-head.page-actions-toolbar{min-width:0;max-width:100%;overflow:hidden}
+.page-head.page-actions-toolbar>.actions{
+  flex:1 1 auto;
+  min-width:0;
+  max-width:100%;
+  flex-wrap:nowrap;
+  justify-content:flex-end;
+  overflow-x:auto;
+  overflow-y:hidden;
+  scrollbar-width:thin;
+  -webkit-overflow-scrolling:touch;
+}
+.page-head.page-actions-toolbar>.actions>*{flex-shrink:0;white-space:nowrap}
+.page-head.page-actions-toolbar>.actions::-webkit-scrollbar{height:4px}

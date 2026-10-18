@@ -1,4 +1,5 @@
-import React, {useCallback,useEffect,useMemo,useRef,useState} from 'react';
+import React, {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
+import {createPortal} from 'react-dom';
 import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} from './bridge.js';
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
 import {buildDeviceCenter} from './deviceCenter.js';
@@ -74,7 +75,16 @@ function Card({title,eyebrow,action,children,className}){return <section classNa
 // title and description before its content; actions get their own toolbar.
 function PageHead({actions}){
  const [menuOpen,setMenuOpen]=useState(false);
+ const [host,setHost]=useState(null);
  const menuRef=useRef(null);
+ useLayoutEffect(()=>{
+  // The page's first card heading provides an existing row for its actions.
+  // No dedicated toolbar is added above the content.
+  const root=document.querySelector('.workspace .main');
+  const heading=root?.querySelector('.card-head');
+  const fallback=document.querySelector('.topbar .top-actions');
+  setHost(heading||fallback||null);
+ },[]);
  const entries=React.Children.toArray(actions?.type===React.Fragment?actions.props.children:actions).filter(Boolean);
  useEffect(()=>{
   if(!menuOpen)return;
@@ -90,13 +100,14 @@ function PageHead({actions}){
  const chosen=primaryIndex>=0?primaryIndex:entries.length-1;
  const primary=entries[chosen];
  const secondary=entries.filter((_,i)=>i!==chosen);
- return <div className="page-head page-actions-contextual" aria-label="页面操作">
+ const controls=<div className="page-head page-actions-contextual" aria-label="页面操作">
   <div className="page-context-primary">{primary}</div>
   {secondary.length>0&&<div className="page-context-overflow" ref={menuRef}>
    <button type="button" className="btn page-more-trigger" aria-label="更多页面操作" aria-expanded={menuOpen} aria-haspopup="menu" onClick={()=>setMenuOpen(v=>!v)}><span aria-hidden="true">···</span></button>
    {menuOpen&&<div className="page-more-menu" role="group" aria-label="更多页面操作">{secondary.map((action,index)=><div key={action.key??index} onClick={()=>setMenuOpen(false)}>{action}</div>)}</div>}
   </div>}
  </div>;
+ return host?createPortal(controls,host):null;
 }
 function Field({label,help,children,className}){return <label className={cx('field',className)}><span>{label}</span>{children}{help&&<small>{help}</small>}</label>}
 const Input=p=><input className="control" {...p}/>;

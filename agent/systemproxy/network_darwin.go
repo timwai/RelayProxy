@@ -174,3 +174,28 @@ func (darwinBackend) Write(service, kind string, s ProxyState) error {
 	}
 	return nil
 }
+
+func (darwinBackend) ReadBypass(service string) ([]string, error) {
+	output, err := runRead("-getproxybypassdomains", service)
+	if err != nil { return nil, err }
+	value := strings.TrimSpace(output)
+	// networksetup emits this English status when no bypass domains exist.
+	if value == "" || strings.Contains(value, "aren't any bypass domains set") ||
+		strings.Contains(value, "There are no bypass domains") {
+		return []string{}, nil
+	}
+	var patterns []string
+	for _, line := range strings.Split(value, "\n") {
+		line = strings.TrimSpace(line)
+		if line != "" { patterns = append(patterns, line) }
+	}
+	return patterns, nil
+}
+
+func (darwinBackend) WriteBypass(service string, patterns []string) error {
+	if len(patterns) == 0 {
+		return runWrite("-setproxybypassdomains", service, "Empty")
+	}
+	args := append([]string{"-setproxybypassdomains", service}, patterns...)
+	return runWrite(args...)
+}

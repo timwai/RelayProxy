@@ -438,3 +438,20 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
  .page-head.page-actions-contextual{margin-bottom:7px}
  .page-actions-contextual .page-context-primary>.btn{max-width:min(56vw,180px)}
 }
+
+
+/* Page commands share the existing card-heading row, never a new row. */
+.card-head>.page-head.page-actions-contextual,
+.top-actions>.page-head.page-actions-contextual{
+ flex:0 1 auto;margin:0;padding:0;min-width:0;
+ align-self:center;justify-content:flex-end;
+}
+.card-head>.page-head.page-actions-contextual>.page-context-primary>.btn{
+ min-height:32px;padding:0 10px;
+}
+.card-head>.page-head.page-actions-contextual .page-more-trigger{min-height:32px;height:32px}
+.card-head>div:first-child{min-width:0}
+@media(max-width:640px){
+ .card-head>.page-head.page-actions-contextual{margin:0;max-width:60%}
+ .card-head>.page-head.page-actions-contextual>.page-context-primary>.btn{max-width:120px}
+}

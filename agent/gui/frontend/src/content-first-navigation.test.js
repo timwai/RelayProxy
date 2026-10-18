@@ -21,7 +21,7 @@ test('routing rules and subscriptions render before folded global policy',()=>{
 });
 
 test('local file sharing leads with folder cards, keeps service switches available below',()=>{
- const page=fragment(sharing,"  {tab==='local'&&<>","  {tab==='remote'&&<FileBrowserV4");
+ const page=fragment(sharing,"  {tab==='local'&&<>","  {tab==='remote'&&<><div className=\"file-share-remote-back\"");
  const folder=page.indexOf('DIRECTORIES ·');
  const prefs=page.indexOf('<details className="file-share-advanced"');
  const metrics=page.indexOf('<div className="cards-3">');

@@ -84,7 +84,7 @@ function PageHead({actions}){
   return()=>media.removeEventListener?.('change',update);
  },[]);
  if(!actions)return null;
- const buttons=<div className="actions page-action-buttons">{actions}</div>;
+ const buttons=<div className="actions page-action-buttons" role="group" aria-label="当前页面快捷操作" tabIndex={0}>{actions}</div>;
  if(wide)return target?createPortal(buttons,target):null;
  return <div className="page-head page-actions-inline">{buttons}</div>;
 }

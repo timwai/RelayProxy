@@ -206,3 +206,11 @@ Information architecture principle: **daily operations** are available from the 
 - **Windows installers, Android APK/AAB, Apple app bundles/IPA, Linux packages** receive distinct scalable SVG marks. Existing image, media, PDF, typography, design, developer and data icon families remain intact. Unknown types retain the document fallback; directory type always takes precedence over its name.
 - The shared `FileGlyph` remains used throughout V4 file list, grid, details and directory tree. Changes are visual/extension-only, require no file content reads or additional RPCs, and preserve dark theme/focus mode and existing transfer/security behavior.
 - Add classification coverage and `office-and-archive-icons.test.js` to guard iconic shape/color distinctions and suffix precedence.
+
+## Iteration 18: single-row top actions on narrow windows
+
+- The Agent's PageHead switches its action group from the topbar to inline display below 1100px; that inline variant previously used `flex-wrap:wrap` and created multiple action rows. Both modes now enforce `flex-wrap:nowrap`, zero minimum flex width, and horizontal **inner** scrolling when buttons exceed the available viewport. The page never grows wider, and the actions area is keyboard-focusable and labeled.
+- Shared-folder list actions use the same no-wrap pattern, keeping the primary **添加共享文件夹** button first. Secondary browse/refresh and service state remain reachable by scrolling that small action region instead of pushing the folder list down.
+- File Browser V4's search, sort, view, details, create-folder and upload controls remain on one line, with the search field retaining usable minimum width; this region scrolls independently of the directory tree and file list.
+- The topbar's title and transfer-task control remain separate from page-action overflow. No control is removed and no file, proxy or transfer API behavior changes.
+- `single-row-action-bars.test.js` protects the nowrap/overflow behavior; `page-head-layout.test.js` updated for the file-sharing header. Small Wails window and zoomed browser visual QA recommended.

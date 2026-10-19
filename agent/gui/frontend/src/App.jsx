@@ -744,7 +744,7 @@ function DeviceSpeedLinkDetails({exitID,exits,result,status,phase,revealCount}){
     <Setting title="本机 UPnP 映射" desc={status?.upnpError||status?.upnpAddress||'仅反映本机网关；映射成功不代表远端设备可达'}><Badge tone={status?.upnpState==='MAPPED'?'ok':status?.upnpState==='FAILED'||status?.upnpState==='DEGRADED'?'danger':'neutral'}>{status?.upnpState||'DISABLED'}</Badge></Setting>
     <Setting title="本机 Native UDP" desc="当前活动的数据报 Association">{udp+' 个'}</Setting>
     <Setting title="Server Relay 控制会话" desc="仅代表 Agent 控制连接，并非这台设备测速路径"><Badge tone={online?'blue':'neutral'}>{online?'在线':'离线'}</Badge></Setting>
-    {exitID&&status?.rdpTargetId===exitID&&<><Setting title="RDP TCP 路径" desc="当前活动 RDP 目标是这台设备">{rdpPathLabel(status.rdpPathTcp)}</Setting><Setting title="RDP UDP 路径" desc={status.rdpUdpReason||'当前活动 RDP 目标是这台设备'}>{rdpPathLabel(status.rdpPathUdp)}</Setting></>}
+    {arr(status?.rdpSessions).filter(s=>s.deviceId===exitID).map(s=><React.Fragment key={s.deviceId}><Setting title="RDP TCP 路径" desc="这台设备的独立 RDP 会话">{rdpPathLabel(s.pathTcp)}</Setting><Setting title="RDP UDP 路径" desc={s.udpReason||'这台设备的独立 RDP 会话'}>{rdpPathLabel(s.pathUdp)}</Setting></React.Fragment>)}
    </div>
   </details>
   </div>}

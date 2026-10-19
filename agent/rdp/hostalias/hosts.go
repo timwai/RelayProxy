@@ -38,10 +38,14 @@ func Alias(name, deviceID string) string {
 		} else if out.Len() > 0 {
 			out.WriteByte('-')
 		}
-		if out.Len() >= 44 { break }
+		if out.Len() >= 44 {
+			break
+		}
 	}
 	label = strings.Trim(out.String(), "-")
-	if label == "" { label = "device" }
+	if label == "" {
+		label = "device"
+	}
 	hash := sha256.Sum256([]byte(deviceID))
 	return label + "-" + hex.EncodeToString(hash[:4]) + suffix
 }
@@ -49,7 +53,9 @@ func Alias(name, deviceID string) string {
 // Ensure adds one canonical hosts record and returns its DNS name. A denied
 // administrator prompt is reported to the caller, which should use 127.0.0.1.
 func Ensure(name, deviceID string) (string, error) {
-	if strings.TrimSpace(deviceID) == "" { return "", errors.New("missing RDP device identity") }
+	if strings.TrimSpace(deviceID) == "" {
+		return "", errors.New("missing RDP device identity")
+	}
 	alias := Alias(name, deviceID)
 	err := writeHosts(hostsPath(), alias)
 	if err != nil && os.IsPermission(err) {
@@ -58,17 +64,23 @@ func Ensure(name, deviceID string) (string, error) {
 		}
 		// Re-read after privileged helper. Never claim a hostname was installed
 		// solely because the elevation process exited with status zero.
-		if verifyErr := verifyHosts(hostsPath(), alias); verifyErr != nil { return "", verifyErr }
+		if verifyErr := verifyHosts(hostsPath(), alias); verifyErr != nil {
+			return "", verifyErr
+		}
 		return alias, nil
 	}
-	if err != nil { return "", err }
+	if err != nil {
+		return "", err
+	}
 	return alias, nil
 }
 
 // RunHelper is used only by the admin-elevated copy of relay-agent. It rejects
 // arbitrary hostnames, IPs and paths before touching the system hosts file.
 func RunHelper(alias string) error {
-	if !validAlias.MatchString(alias) { return errors.New("invalid RelayProxy RDP hosts alias") }
+	if !validAlias.MatchString(alias) {
+		return errors.New("invalid RelayProxy RDP hosts alias")
+	}
 	return writeHosts(hostsPath(), alias)
 }
 
@@ -76,7 +88,9 @@ func hostsPath() string {
 	switch runtime.GOOS {
 	case "windows":
 		root := os.Getenv("SystemRoot")
-		if root == "" { root = `C:\Windows` }
+		if root == "" {
+			root = `C:\Windows`
+		}
 		return filepath.Join(root, "System32", "drivers", "etc", "hosts")
 	default:
 		return "/etc/hosts"
@@ -86,9 +100,13 @@ func hostsPath() string {
 func inspectHosts(data []byte, alias string) (bool, error) {
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(strings.SplitN(line, "#", 2)[0])
-		if len(fields) < 2 { continue }
+		if len(fields) < 2 {
+			continue
+		}
 		for _, host := range fields[1:] {
-			if !strings.EqualFold(host, alias) { continue }
+			if !strings.EqualFold(host, alias) {
+				continue
+			}
 			if fields[0] != "127.0.0.1" {
 				return false, fmt.Errorf("hosts name %q already maps to %s", alias, fields[0])
 			}
@@ -100,29 +118,49 @@ func inspectHosts(data []byte, alias string) (bool, error) {
 
 func verifyHosts(path, alias string) error {
 	data, err := os.ReadFile(path)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	found, err := inspectHosts(data, alias)
-	if err != nil { return err }
-	if !found { return fmt.Errorf("hosts alias %s not present after update", alias) }
+	if err != nil {
+		return err
+	}
+	if !found {
+		return fmt.Errorf("hosts alias %s not present after update", alias)
+	}
 	return nil
 }
 
 func writeHosts(path, alias string) error {
-	if !validAlias.MatchString(alias) { return errors.New("unsafe RDP hosts alias") }
+	if !validAlias.MatchString(alias) {
+		return errors.New("unsafe RDP hosts alias")
+	}
 	data, err := os.ReadFile(path)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	found, err := inspectHosts(data, alias)
-	if err != nil || found { return err }
+	if err != nil || found {
+		return err
+	}
 	// O_APPEND retains unrelated entries, comments, line endings and ACLs.
 	f, err := os.OpenFile(path, os.O_APPEND|os.O_WRONLY, 0)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	defer f.Close()
 	newline := "\n"
-	if strings.Contains(string(data), "\r\n") { newline = "\r\n" }
+	if strings.Contains(string(data), "\r\n") {
+		newline = "\r\n"
+	}
 	prefix := ""
-	if len(data) > 0 && data[len(data)-1] != '\n' { prefix = newline }
+	if len(data) > 0 && data[len(data)-1] != '\n' {
+		prefix = newline
+	}
 	_, err = f.WriteString(prefix + "127.0.0.1 " + alias + " # RelayProxy RDP" + newline)
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	return f.Sync()
 }
 
@@ -130,7 +168,9 @@ func writeHosts(path, alias string) error {
 // helper. No mutable temporary scripts or user-provided shell commands.
 func elevate(alias string) error {
 	exe, err := os.Executable()
-	if err != nil { return err }
+	if err != nil {
+		return err
+	}
 	arg := "--_rdp-hosts-add=" + alias
 	switch runtime.GOOS {
 	case "windows":
@@ -139,18 +179,24 @@ func elevate(alias string) error {
 			psQuote(exe) + " -ArgumentList " + psQuote(arg) +
 			" -Verb RunAs -Wait -PassThru; exit $p.ExitCode"
 		out, e := exec.Command("powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script).CombinedOutput()
-		if e != nil { return fmt.Errorf("Windows UAC: %w (%s)", e, strings.TrimSpace(string(out))) }
+		if e != nil {
+			return fmt.Errorf("Windows UAC: %w (%s)", e, strings.TrimSpace(string(out)))
+		}
 		return nil
 	case "darwin":
 		shellQuote := func(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'" }
 		command := shellQuote(exe) + " " + shellQuote(arg)
 		appleQuote := "\"" + strings.ReplaceAll(strings.ReplaceAll(command, "\\", "\\\\"), "\"", "\\\"") + "\""
 		out, e := exec.Command("/usr/bin/osascript", "-e", "do shell script "+appleQuote+" with administrator privileges").CombinedOutput()
-		if e != nil { return fmt.Errorf("macOS 管理员授权: %w (%s)", e, strings.TrimSpace(string(out))) }
+		if e != nil {
+			return fmt.Errorf("macOS 管理员授权: %w (%s)", e, strings.TrimSpace(string(out)))
+		}
 		return nil
 	default:
 		out, e := exec.Command("pkexec", exe, arg).CombinedOutput()
-		if e != nil { return fmt.Errorf("无法通过 pkexec 修改 hosts: %w (%s)", e, strings.TrimSpace(string(out))) }
+		if e != nil {
+			return fmt.Errorf("无法通过 pkexec 修改 hosts: %w (%s)", e, strings.TrimSpace(string(out)))
+		}
 		return nil
 	}
 }

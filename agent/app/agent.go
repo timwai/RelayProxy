@@ -1944,47 +1944,42 @@ func dialRDPUDPHappy(ctx context.Context, direct, relay func(context.Context) (n
 	}
 }
 
+// DisconnectRDPTarget stops only this device's RDP listener.
+func (a *Agent) DisconnectRDPTarget(targetID string) {
+	a.rdpConnectMu.Lock()
+	defer a.rdpConnectMu.Unlock()
+	a.mu.Lock()
+	conn := a.rdpConnections[targetID]
+	delete(a.rdpConnections, targetID)
+	if a.rdpActiveTarget == targetID { a.rdpActiveTarget = "" }
+	a.mu.Unlock()
+	if conn != nil { _ = conn.Close() }
+}
+
+// DisconnectRDP is the legacy all-sessions shutdown operation.
 func (a *Agent) DisconnectRDP() {
 	a.rdpConnectMu.Lock()
 	defer a.rdpConnectMu.Unlock()
-
 	a.mu.Lock()
-	conn := a.rdpConnection
-	p2pSession := a.rdpSession
-	a.rdpConnection = nil
-	a.rdpSession = nil
+	connections := a.rdpConnections
+	a.rdpConnections = nil
+	a.rdpActiveTarget = ""
 	a.mu.Unlock()
-	if conn != nil {
-		_ = conn.Close()
-	}
-	if p2pSession != nil {
-		_ = p2pSession.Close()
-	}
+	for _, conn := range connections { _ = conn.Close() }
 }
 
 func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	a.mu.Lock()
-	if a.epoch != epoch || a.readySession != sess {
-		a.mu.Unlock()
-		return
-	}
-	conn := a.rdpConnection
-	p2pSession := a.rdpSession
+	if a.epoch != epoch || a.readySession != sess { a.mu.Unlock(); return }
+	connections := a.rdpConnections
 	p2pManager := a.rdpP2P
-	a.rdpConnection = nil
-	a.rdpSession = nil
+	a.rdpConnections = nil
+	a.rdpActiveTarget = ""
 	a.rdpP2P = nil
 	a.rdpTargets = nil
 	a.mu.Unlock()
-	if conn != nil {
-		_ = conn.Close()
-	}
-	if p2pSession != nil {
-		_ = p2pSession.Close()
-	}
-	if p2pManager != nil {
-		_ = p2pManager.Close()
-	}
+	for _, conn := range connections { _ = conn.Close() }
+	if p2pManager != nil { _ = p2pManager.Close() }
 }
 
 // SetP2PPowerConstrained switches the active direct-path manager to its mobile
@@ -2079,15 +2074,16 @@ func (a *Agent) closeRuntime() error {
 		a.epoch++
 		a.handshakeOK.Store(false)
 		a.readySession = nil
-		socks, httpSrv, divertSrv, ctrl, rdpConn := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnection
+		socks, httpSrv, divertSrv, ctrl, rdpConnections := a.socksServer, a.httpServer, a.divertSrv, a.ctrlStream, a.rdpConnections
 		browserLocalSrv := a.browserLocalServer
 		fileDirect := a.fileDirect
 		a.fileDirect = nil
-		rdpSession, rdpP2P, proxyP2P := a.rdpSession, a.rdpP2P, a.proxyP2P
+		rdpP2P, proxyP2P := a.rdpP2P, a.proxyP2P
 		exitHandler := a.exitHandler
-		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnection = nil, nil, nil, nil
+		a.socksServer, a.httpServer, a.ctrlStream, a.rdpConnections = nil, nil, nil, nil
+		a.rdpActiveTarget = ""
 		a.browserLocalServer = nil
-		a.rdpSession, a.rdpP2P, a.proxyP2P, a.exitHandler = nil, nil, nil, nil
+		a.rdpP2P, a.proxyP2P, a.exitHandler = nil, nil, nil
 		a.rdpTargets = nil
 		a.cancel()
 		a.mu.Unlock()
@@ -2110,12 +2106,7 @@ func (a *Agent) closeRuntime() error {
 		if ctrl != nil {
 			errs = append(errs, ctrl.Close())
 		}
-		if rdpConn != nil {
-			errs = append(errs, rdpConn.Close())
-		}
-		if rdpSession != nil {
-			errs = append(errs, rdpSession.Close())
-		}
+		for _, conn := range rdpConnections { errs = append(errs, conn.Close()) }
 		if rdpP2P != nil {
 			errs = append(errs, rdpP2P.Close())
 		}

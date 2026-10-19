@@ -26,6 +26,7 @@ import (
 	"relayproxy/agent/fileshare"
 	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/agent/rdp"
+	"relayproxy/agent/rdp/hostalias"
 	rdpp2p "relayproxy/agent/rdp/p2p"
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
@@ -296,6 +297,8 @@ type RDPSessionStatus struct {
 	DeviceID   string `json:"deviceId"`
 	Name       string `json:"name"`
 	ListenAddr string `json:"listenAddr"`
+	HostAlias  string `json:"hostAlias,omitempty"`
+	HostsError string `json:"hostsError,omitempty"`
 	UDPEnabled bool   `json:"udpEnabled"`
 	UDPActive  bool   `json:"udpActive"`
 	UDPReason  string `json:"udpReason,omitempty"`
@@ -1547,10 +1550,10 @@ func (a *Agent) Status() AgentStatus {
 				udpReason = "当前传输不提供 RDP UDP"
 			}
 		}
-		item := RDPSessionStatus{DeviceID: id, Name: conn.Target.Name, ListenAddr: conn.ListenAddr, UDPEnabled: udpEnabled, UDPActive: udpActive, UDPReason: udpReason, PathTCP: tcpPath, PathUDP: udpPath}
+		item := RDPSessionStatus{DeviceID: id, Name: conn.Target.Name, ListenAddr: conn.ClientAddress(), HostAlias: conn.HostAlias, HostsError: conn.HostsError, UDPEnabled: udpEnabled, UDPActive: udpActive, UDPReason: udpReason, PathTCP: tcpPath, PathUDP: udpPath}
 		st.RDPSessions = append(st.RDPSessions, item)
 		if id == a.rdpActiveTarget {
-			st.RDPListenAddr, st.RDPTargetID = conn.ListenAddr, id
+			st.RDPListenAddr, st.RDPTargetID = conn.ClientAddress(), id
 			st.RDPUDPEnabled, st.RDPUDPActive, st.RDPUDPReason = udpEnabled, udpActive, udpReason
 			st.RDPPathTCP, st.RDPPathUDP = tcpPath, udpPath
 		}
@@ -1742,9 +1745,13 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 		return rdp.Target{}, errors.New("RDP target is offline")
 	}
 	if existing := a.rdpConnections[targetID]; existing != nil {
-		target.ListenAddr = existing.ListenAddr
+		target.ListenAddr = existing.ClientAddress()
+		target.HostAlias, target.HostsError = existing.HostAlias, existing.HostsError
 		a.rdpActiveTarget = targetID
 		a.mu.Unlock()
+		if autoLaunch {
+			existing.Launch()
+		}
 		return target, nil
 	}
 	p2pManager := a.rdpP2P
@@ -1794,12 +1801,20 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 				_ = directSession.Close()
 			}
 		},
-	}, autoLaunch)
+	}, false)
 	if err != nil {
 		if directSession != nil {
 			_ = directSession.Close()
 		}
 		return rdp.Target{}, err
+	}
+	// Hosts writes may require a one-time admin prompt. If permission is
+	// refused, the existing loopback RDP tunnel remains fully usable.
+	if alias, hostsErr := hostalias.Ensure(target.Name, targetID); hostsErr == nil {
+		conn.HostAlias = alias
+	} else {
+		conn.HostsError = hostsErr.Error()
+		log.Printf("[RDP] 无法注册设备 %s 的 hosts 别名，继续使用 127.0.0.1: %v", targetID, hostsErr)
 	}
 	a.mu.Lock()
 	stillApproved := slices.ContainsFunc(a.rdpTargets, func(candidate rdp.Target) bool {
@@ -1839,7 +1854,11 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 			go conn.Close()
 		})
 	}
-	target.ListenAddr = conn.ListenAddr
+	target.ListenAddr = conn.ClientAddress()
+	target.HostAlias, target.HostsError = conn.HostAlias, conn.HostsError
+	if autoLaunch {
+		conn.Launch()
+	}
 	return target, nil
 }
 

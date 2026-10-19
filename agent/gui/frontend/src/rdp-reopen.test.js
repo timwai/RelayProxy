@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 
 const read=path=>readFileSync(new URL(path,import.meta.url),'utf8');
 const app=read('./App.jsx');
+const css=read('./styles.css');
 const section=(start,end)=>{const i=app.indexOf(start),j=app.indexOf(end,i);assert.ok(i>=0&&j>i);return app.slice(i,j)};
 
 test('active RDP sessions offer a visible, independent reopen-client action',()=>{
@@ -36,4 +37,12 @@ test('Agent reuses the current target listener and launches only a new local cli
  assert.match(reuse,/if autoLaunch \{/);
  assert.match(reuse,/existing\.Launch\(\)/);
  assert.doesNotMatch(reuse,/\.Close\(\)|StartController\(/);
+});
+
+test('RDP session action layout wraps within narrow windows',()=>{
+ const page=section('function RDPPage(','function RDPSettingsPage(');
+ assert.match(page,/className="target-row rdp-session-row"/);
+ assert.match(page,/className="target-row rdp-authorized-row"/);
+ assert.match(css,/\.rdp-session-row,\.rdp-authorized-row\{flex-wrap:wrap/);
+ assert.match(css,/\.rdp-session-row>\.btn,\.rdp-authorized-row>\.btn\{white-space:nowrap/);
 });

@@ -25,6 +25,8 @@ type Target struct {
 	Name       string `json:"name"`
 	Online     bool   `json:"online"`
 	ListenAddr string `json:"listenAddr,omitempty"`
+	HostAlias string `json:"hostAlias,omitempty"`
+	HostsError string `json:"hostsError,omitempty"`
 }
 
 type ControllerOptions struct {
@@ -37,6 +39,8 @@ type ControllerOptions struct {
 type Connection struct {
 	Target      Target
 	ListenAddr  string `json:"listenAddr"`
+	HostAlias string `json:"hostAlias,omitempty"`
+	HostsError string `json:"hostsError,omitempty"`
 	UDPEnabled  bool   `json:"udpEnabled"`
 	TCPListener net.Listener
 	UDPConn     *net.UDPConn
@@ -53,6 +57,33 @@ type Connection struct {
 }
 
 func (c *Connection) Addr() string { return c.ListenAddr }
+
+// ClientAddress prefers the friendly hosts alias only after its mapping was
+// successfully installed. The listener itself always stays on 127.0.0.1.
+func (c *Connection) ClientAddress() string {
+	if c.HostAlias == "" { return c.ListenAddr }
+	_, port, err := net.SplitHostPort(c.ListenAddr)
+	if err != nil { return c.ListenAddr }
+	return net.JoinHostPort(c.HostAlias, port)
+}
+
+// Launch opens a desktop after the Agent has installed its hosts alias. A
+// stopped controller must not unexpectedly launch a stale RDP connection.
+func (c *Connection) Launch() {
+	go func() {
+		timer := time.NewTimer(350 * time.Millisecond)
+		defer timer.Stop()
+		select {
+		case <-c.done: return
+		case <-timer.C:
+		}
+		select { case <-c.done: return; default: }
+		if err := launchRDPClient(runtime.GOOS, c.ClientAddress()); err != nil {
+			log.Printf("[RDP] 启动本机 RDP 客户端失败: %v", err)
+		}
+	}()
+}
+
 
 // PathStatus describes accepted data connections, rather than successful
 // candidates that may subsequently lose a race to the relay.
@@ -154,20 +185,7 @@ func StartController(parent context.Context, target Target, options ControllerOp
 	if udpEnabled {
 		go connection.serveUDP(ctx, options.DialUDP)
 	}
-	if autoLaunch {
-		go func(ctx context.Context, address string) {
-			timer := time.NewTimer(350 * time.Millisecond)
-			defer timer.Stop()
-			select {
-			case <-ctx.Done():
-				return
-			case <-timer.C:
-			}
-			if err := launchRDPClient(runtime.GOOS, address); err != nil {
-				log.Printf("[RDP] 启动本机 RDP 客户端失败: %v", err)
-			}
-		}(ctx, connection.ListenAddr)
-	}
+	if autoLaunch { connection.Launch() }
 	return connection, nil
 }
 

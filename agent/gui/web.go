@@ -424,9 +424,16 @@ func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
 }
 
 func (w *WebServer) disconnectRDPTarget(rw http.ResponseWriter, r *http.Request) {
-	var in struct { TargetID string `json:"targetId"` }
-	if err := decodeWebJSON(rw, r, &in); err != nil { return }
-	if strings.TrimSpace(in.TargetID) == "" { writeWebError(rw, errors.New("RDP target id is required")); return }
+	var in struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := decodeWebJSON(rw, r, &in); err != nil {
+		return
+	}
+	if strings.TrimSpace(in.TargetID) == "" {
+		writeWebError(rw, errors.New("RDP target id is required"))
+		return
+	}
 	w.bridge.DisconnectRDPTarget(in.TargetID)
 	writeWebJSON(rw, map[string]bool{"ok": true})
 }

@@ -203,6 +203,10 @@ func (b *UIBridge) DisconnectRDP() {
 	b.agent.DisconnectRDP()
 }
 
+func (b *UIBridge) DisconnectRDPTarget(targetID string) {
+	b.agent.DisconnectRDPTarget(strings.TrimSpace(targetID))
+}
+
 // GetLogs returns recent running logs
 func (b *UIBridge) GetLogs(limit int) []app.LogEntry {
 	return app.GlobalLogBuffer.Get(limit)

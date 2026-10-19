@@ -348,6 +348,9 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .message-type-filter{display:flex;align-items:center;gap:6px;flex:0 0 185px}
 .message-type-filter .control{min-width:0;width:100%}
 .message-filter-compact .message-search{flex:1 1 260px;min-width:0}
+.message-filter-actions{display:flex;align-items:center;justify-content:flex-end;gap:6px;flex:0 0 auto}
+.message-filter-actions .btn{white-space:nowrap;min-height:34px}
+.message-filter-actions .btn:disabled{opacity:.48;cursor:not-allowed}
 .monitor-stats-disclosure{margin-top:12px;border:1px solid var(--line);border-radius:12px;background:var(--surface2)}
 .monitor-stats-disclosure>summary{list-style:none;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:13px 16px;cursor:pointer}
 .monitor-stats-disclosure>summary::-webkit-details-marker{display:none}
@@ -355,7 +358,7 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .monitor-stats-disclosure>summary:focus-visible{outline:2px solid var(--brand);outline-offset:-2px}
 .monitor-stats-disclosure>summary:hover{background:var(--surface3)}
 .monitor-stats-disclosure>.cards-4{padding:12px}
-@media(max-width:760px){.message-filter-compact{flex-wrap:wrap}.message-type-filter{flex:1 1 100%}.message-filter-compact .message-search{flex:1 1 100%}.monitor-stats-disclosure>summary{padding:11px}}
+@media(max-width:760px){.message-filter-compact{flex-wrap:wrap}.message-type-filter{flex:1 1 100%}.message-filter-compact .message-search{flex:1 1 100%}.message-filter-actions{margin-left:auto;align-self:flex-end}.monitor-stats-disclosure>summary{padding:11px}}
 
 /* Device-owned speed modal: the target is fixed by the card; only verified
    evidence gets a tick. Rows resolve progressively after the single RPC. */

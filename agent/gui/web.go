@@ -258,6 +258,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/proxy/exits", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetProxyExits()) })
 	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
 	mux.HandleFunc("POST /api/rdp/connect", w.connectRDP)
+	mux.HandleFunc("POST /api/rdp/disconnect-target", w.disconnectRDPTarget)
 	mux.HandleFunc("POST /api/rdp/disconnect", func(rw http.ResponseWriter, _ *http.Request) {
 		w.bridge.DisconnectRDP()
 		writeWebJSON(rw, map[string]bool{"ok": true})
@@ -419,8 +420,22 @@ func (w *WebServer) connectRDP(rw http.ResponseWriter, r *http.Request) {
 		writeWebError(rw, err)
 		return
 	}
-	status := w.bridge.GetStatus()
-	writeWebJSON(rw, map[string]any{"ok": true, "target": target, "listenAddr": status.RDPListenAddr})
+	writeWebJSON(rw, map[string]any{"ok": true, "target": target, "listenAddr": target.ListenAddr})
+}
+
+func (w *WebServer) disconnectRDPTarget(rw http.ResponseWriter, r *http.Request) {
+	var in struct {
+		TargetID string `json:"targetId"`
+	}
+	if err := decodeWebJSON(rw, r, &in); err != nil {
+		return
+	}
+	if strings.TrimSpace(in.TargetID) == "" {
+		writeWebError(rw, errors.New("RDP target id is required"))
+		return
+	}
+	w.bridge.DisconnectRDPTarget(in.TargetID)
+	writeWebJSON(rw, map[string]bool{"ok": true})
 }
 
 func (w *WebServer) probeDNS(rw http.ResponseWriter, _ *http.Request) {
@@ -676,6 +691,7 @@ const webBridgeJS = `(function () {
     }
     return body;
   };
+  window.goDisconnectRDPTarget = function (targetId) { return json('/api/rdp/disconnect-target', 'POST', {targetId:targetId}); };
   window.goDisconnectRDP = function () { return json('/api/rdp/disconnect', 'POST', {}); };
   window.goGetLogs = function () { return request('/api/logs'); };
   window.goClearLogs = function () { return request('/api/logs', {method:'DELETE'}); };

@@ -147,6 +147,17 @@ func (s *WailsService) ConnectRDP(targetID string, autoLaunch bool) (string, err
 	return rdpActionResponse(map[string]any{"target": target}, err), nil
 }
 
+func (s *WailsService) DisconnectRDPTarget(targetID string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	if strings.TrimSpace(targetID) == "" {
+		return `{"ok":false,"message":"RDP target id is required"}`, nil
+	}
+	s.owner.bridge.DisconnectRDPTarget(targetID)
+	return rdpActionResponse(nil, nil), nil
+}
+
 func (s *WailsService) DisconnectRDP() (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil

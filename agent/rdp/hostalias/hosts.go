@@ -98,6 +98,7 @@ func hostsPath() string {
 }
 
 func inspectHosts(data []byte, alias string) (bool, error) {
+	found := false
 	for _, line := range strings.Split(string(data), "\n") {
 		fields := strings.Fields(strings.SplitN(line, "#", 2)[0])
 		if len(fields) < 2 {
@@ -110,10 +111,10 @@ func inspectHosts(data []byte, alias string) (bool, error) {
 			if fields[0] != "127.0.0.1" {
 				return false, fmt.Errorf("hosts name %q already maps to %s", alias, fields[0])
 			}
-			return true, nil
+			found = true
 		}
 	}
-	return false, nil
+	return found, nil
 }
 
 func verifyHosts(path, alias string) error {

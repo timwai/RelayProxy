@@ -24,28 +24,7 @@ const aliasPrefix = "relayproxy-"
 
 // Each alias is a single DNS label instead of a *.test hostname. Keep its
 // total length below 63 bytes including the stable device-ID hash.
-var validAlias = regexp.MustCompile(`^relayproxy-[a-z0-9][a-z0-9-]{0,39}-[a-f0-9]{8}// Package hostalias manages friendly local names for RDP loopback listeners.
-// Hosts records are intentionally persistent, so reconnecting the same device
-// does not require another privilege prompt. Only RelayProxy-prefixed local
-// aliases are written; existing hosts records are never overwritten.
-package hostalias
-
-import (
-	"crypto/sha256"
-	"encoding/hex"
-	"errors"
-	"fmt"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"regexp"
-	"runtime"
-	"strings"
-
-	"golang.org/x/net/idna"
-)
-
-)
+var validAlias = regexp.MustCompile(`^relayproxy-[a-z0-9][a-z0-9-]{0,39}-[a-f0-9]{8}$`)
 
 // Alias creates a deterministic DNS label from a device name and identity.
 // The ID checksum keeps separate devices with the same display name distinct.

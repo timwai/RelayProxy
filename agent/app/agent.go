@@ -1695,7 +1695,7 @@ func (a *Agent) RDPTargets() []rdp.Target {
 	return append([]rdp.Target{}, a.rdpTargets...)
 }
 
-// ConnectRDP starts the loopback TCP/UDP listener for one approved target.
+// ConnectRDP starts an independent loopback TCP/UDP listener for an approved target.
 // The server remains the authority: this method only accepts IDs from the
 // current server-provided target list.
 func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error) {
@@ -1722,19 +1722,15 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 		a.mu.Unlock()
 		return rdp.Target{}, errors.New("RDP target is offline")
 	}
-	old := a.rdpConnection
-	oldP2P := a.rdpSession
-	a.rdpConnection = nil
-	a.rdpSession = nil
+	if existing := a.rdpConnections[targetID]; existing != nil {
+		target.ListenAddr = existing.ListenAddr
+		a.rdpActiveTarget = targetID
+		a.mu.Unlock()
+		return target, nil
+	}
 	p2pManager := a.rdpP2P
 	sess := a.readySession
 	a.mu.Unlock()
-	if old != nil {
-		_ = old.Close()
-	}
-	if oldP2P != nil {
-		_ = oldP2P.Close()
-	}
 	var directSession *rdpp2p.Session
 	var err error
 	if p2pManager != nil {
@@ -1801,27 +1797,23 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 		}
 		return rdp.Target{}, errors.New("relay session ended while starting RDP")
 	}
-	a.rdpConnection = conn
-	a.rdpSession = directSession
+	if a.rdpConnections == nil { a.rdpConnections = make(map[string]*rdp.Connection) }
+	a.rdpConnections[targetID] = conn
+	a.rdpActiveTarget = targetID
 	a.mu.Unlock()
 	if directSession != nil {
 		directSession.SetOnClose(func() {
 			a.mu.Lock()
-			if a.rdpSession != directSession {
-				a.mu.Unlock()
-				return
-			}
-			active := a.rdpConnection
-			a.rdpConnection = nil
-			a.rdpSession = nil
+			active := a.rdpConnections[targetID]
+			if active != conn { a.mu.Unlock(); return }
+			delete(a.rdpConnections, targetID)
+			if a.rdpActiveTarget == targetID { a.rdpActiveTarget = "" }
 			a.mu.Unlock()
-			if active != nil {
-				// The callback can run from Connection.Close's OnClose hook;
-				// close asynchronously to avoid re-entering that sync.Once.
-				go active.Close()
-			}
+			// Connection.Close may trigger this callback; avoid re-entering closeOnce.
+			go conn.Close()
 		})
 	}
+	target.ListenAddr = conn.ListenAddr
 	return target, nil
 }
 

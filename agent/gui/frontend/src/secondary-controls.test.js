@@ -27,3 +27,20 @@ test('monitor shows connection list before collapsible aggregates and retains al
  assert.match(page,/className="cards-4"><Metric label="活跃连接"/);
  assert.match(css,/\.monitor-stats-disclosure>summary/);
 });
+
+test('messages expose clear history directly beside filters instead of hidden page overflow',()=>{
+ const page=slice('function MessagesPage(','function MessageSettingsPage(');
+ assert.match(page,/<PageHead title="消息中心"[^\n]*\/?>/);
+ assert.doesNotMatch(page,/<PageHead[^\n]*actions=\{/);
+ assert.match(page,/className="message-filter-actions" aria-label="消息操作"/);
+ assert.match(page,/<Button onClick=\{refresh\}>刷新<\/Button>/);
+ assert.match(page,/<Button danger disabled=\{!messages\.length\} onClick=\{clear\}>清空历史<\/Button>/);
+ assert.match(css,/\.message-filter-actions\{display:flex;align-items:center/);
+ assert.match(css,/@media\(max-width:760px\)\{[^\n]*?\.message-filter-actions\{margin-left:auto/);
+});
+
+test('clear history continues to call backend and only updates local count after success',()=>{
+ assert.match(app,/confirm\('清空本设备的消息历史？'\)/);
+ assert.match(app,/await call\('goClearMessages'\);messageIDs\.current\.clear\(\);setMessages\(\[\]\);setUnreadMessages\(0\)/);
+ assert.match(app,/清空消息失败/);
+});

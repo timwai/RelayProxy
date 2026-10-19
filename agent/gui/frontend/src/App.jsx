@@ -1,6 +1,7 @@
 import React, {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} from './bridge.js';
+import {showWindowsCapture,showWindowsService} from './platformProxy.js';
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
 import {connectionPathLabel} from './connectionPathLabel.js';
 import {buildDeviceCenter} from './deviceCenter.js';
@@ -305,8 +306,9 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
 function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilities,toast}){
  const sys=config.systemProxy||EMPTY.systemProxy,sysStatus=config.systemProxyStatus||{},isMac=config.platform==='darwin';
  const s=config.socks5||EMPTY.socks5,h=config.http||EMPTY.http,rs=config.runtime?.socks5||s,rh=config.runtime?.http||h,caps=config.networkCapabilities||{},[service,setService]=useState(null),[repairing,setRepairing]=useState(false);
- const windowsCaptureAvailable=config.platform==='windows'&&hasBridge('goGetNetworkServiceStatus');
- const refreshService=useCallback(async()=>{if(!hasBridge('goGetNetworkServiceStatus'))return null;try{const x=await callJSON('goGetNetworkServiceStatus',{});setService(x||{});return x}catch{return null}},[]);
+ const networkServiceBridgeAvailable=hasBridge('goGetNetworkServiceStatus');
+ const windowsCaptureAvailable=showWindowsCapture(config.platform,networkServiceBridgeAvailable);
+ const refreshService=useCallback(async()=>{if(!networkServiceBridgeAvailable)return null;try{const x=await callJSON('goGetNetworkServiceStatus',{});setService(x||{});return x}catch{return null}},[networkServiceBridgeAvailable]);
  useEffect(()=>{onRefreshCapabilities?.();refreshService()},[onRefreshCapabilities,refreshService]);
  const interceptReady=!!(caps.tcp&&caps.udp&&caps.ipv6&&caps.process_identity&&caps.original_destination&&caps.reply_injection&&caps.loop_bypass&&!caps.unavailable_reason);
  const canToggleIntercept=interceptReady||config.networkMode==='divert';
@@ -344,19 +346,19 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
    {sysStatus.lastError&&<div className="notice warn top-gap">{sysStatus.lastError}</div>}
    <div className="notice top-gap">系统代理不会捕获所有应用的 UDP / QUIC 流量；已有认证代理、PAC 或自动代理发现配置不会被静默覆盖。</div>
   </Card>}
- {windowsCaptureAvailable&&<Card title="Windows 系统透明代理" eyebrow="WINDOWS NETWORK CAPTURE" action={<Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'运行条件已满足':service?.installed?'服务需修复':'服务未安装'}</Badge>}>
+ {windowsCaptureAvailable&&<Card title="Windows 系统透明代理" eyebrow="WINDOWS NETWORK CAPTURE" action={<Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'运行条件已满足':service?.installed?'服务需修复':service?'服务未安装':'服务状态待检查'}</Badge>}>
   <Setting title="接管系统流量" desc="使用 WinDivert 按进程与分流规则处理本机 TCP / UDP。"><Switch checked={config.networkMode==='divert'} disabled={!canToggleIntercept} onChange={v=>{setv('networkMode',v?'divert':'');setv('network.mode',v?'divert':'')}}/></Setting>
   {!interceptReady&&<div className="notice warn top-gap"><b>当前系统透明代理尚不可用。</b> {caps.unavailable_reason||'此构建缺少完整的 TCP / UDP / IPv6 / 进程识别或回注能力。'}{config.networkMode==='divert'?' 你仍可关闭已保存的透明代理模式。':' 请修复 Network Service，或继续使用 SOCKS5 / HTTP Proxy。'}</div>}
   <div className="cards-3 compact top-gap">
-   <div><div className="mini">Network Service</div><strong>{service?.ready?'就绪':service?.running?'运行中':service?.installed?'已安装':'未安装'}</strong><div className="mini">{service?.autoStartKnown?(service?.autoStart?'Automatic':'非自动启动'):'启动类型未知'}</div></div>
+   <div><div className="mini">Network Service</div><strong>{service?.ready?'就绪':service?.running?'运行中':service?.installed?'已安装':'尚未取得状态'}</strong><div className="mini">{service?.autoStartKnown?(service?.autoStart?'Automatic':'非自动启动'):'启动类型未知'}</div></div>
    <div><div className="mini">抓包后端</div><strong>{status.divertDiagnostics?.captureBackend||'WinDivert'}</strong><div className="mini">{status.divertDiagnostics?.captureState||status.divertStage||'idle'}</div></div>
    <div><div className="mini">数据面</div><strong>{Number(status.divertDiagnostics?.captured||0)} / {Number(status.divertDiagnostics?.classified||0)}</strong><div className="mini">抓包 / 分类 · PROXY {Number(status.divertDiagnostics?.proxy||0)}</div></div>
   </div>
   {(status.divertError||service?.message)&&<div className={cx('notice','top-gap',status.divertError&&'danger')}>{status.divertError||service?.message}</div>}
   <Field label="排除进程" help="这些进程的流量不经透明代理；可用换行、逗号或分号分隔，如 steam.exe, Teams.exe"><Textarea rows="5" value={ruleListText(config.network?.exclude_processes)} onChange={e=>setv('network.exclude_processes',e.target.value)}/></Field>
-  <div className="actions top-gap"><Button disabled={repairing} onClick={repair}>{repairing?'修复中…':'安装 / 修复服务'}</Button><Button onClick={onService}>高级维护 / 卸载</Button></div>
+  {networkServiceBridgeAvailable&&<div className="actions top-gap"><Button disabled={repairing} onClick={repair}>{repairing?'修复中…':'安装 / 修复服务'}</Button><Button onClick={onService}>高级维护 / 卸载</Button></div>}
  </Card>}
- <SaveBar dirty={dirty} label="保存代理设置" hint="保存本地监听和系统代理设置；macOS 系统代理可即时应用，监听地址与端口仍需重启生效。" onSave={()=>save({systemProxy:isMac?{mode:sys.mode||'',autoFollow:sys.autoFollow!==false,http:sys.http!==false,socks5:sys.socks5!==false,proxyIpLiterals:sys.proxyIpLiterals!==false}:undefined,proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
+ <SaveBar dirty={dirty} label="保存代理设置" hint="保存本地监听和透明代理设置；监听参数及 Windows 透明代理开关需重启生效，macOS 系统代理设置可即时应用。" onSave={()=>save({systemProxy:isMac?{mode:sys.mode||'',autoFollow:sys.autoFollow!==false,http:sys.http!==false,socks5:sys.socks5!==false,proxyIpLiterals:sys.proxyIpLiterals!==false}:undefined,proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
  <CustomExitManager config={config} save={save} toast={toast} dirty={dirty}/></>
 }
 
@@ -691,7 +693,8 @@ function ConfigNavigation({page,onGoto}){return <SectionNavigation page={page} o
 
 function SettingsPage({config,setv,save,toast,onReload,onRestart,onQuit,onGoto,dirty,onConfigRefresh,onRefreshCapabilities}){
  const[service,setService]=useState(null);
- const windowsServiceAvailable=config.platform==='windows'&&hasBridge("goGetNetworkServiceStatus");
+ const windowsServiceAvailable=showWindowsService(config.platform,hasBridge('goGetNetworkServiceStatus'));
+
  useEffect(()=>{if(windowsServiceAvailable)callJSON('goGetNetworkServiceStatus',{}).then(setService).catch(()=>{})},[windowsServiceAvailable]);
  const act=async(name,msg)=>{if(name==='goUninstallNetworkService'&&dirty){toast('当前有未保存修改，请先保存或放弃后再卸载 Network Service','danger');return}try{const r=parseMutation(await call(name));if(!r.ok&&r.message)throw new Error(r.message);if(name==='goUninstallNetworkService'&&onConfigRefresh)await onConfigRefresh();if(onRefreshCapabilities)await onRefreshCapabilities();toast(r.message||msg);if(hasBridge('goGetNetworkServiceStatus'))setService(await callJSON('goGetNetworkServiceStatus',{}))}catch(e){toast(e.message,'danger')}};
  const auto=async v=>{try{const r=parseMutation(await call('goSetAutostart',v));if(!r.ok&&r.message)throw new Error(r.message);setv('isAutostart',v,false);toast(v?'已启用开机自启':'已关闭开机自启')}catch(e){toast(e.message,'danger')}};

@@ -44,6 +44,7 @@
   window.goGetRDPTargets = () => invoke('GetRDPTargets');
   window.goConnectRDP = (targetID, autoLaunch) => invoke('ConnectRDP', targetID, autoLaunch);
   window.goDisconnectRDP = () => invoke('DisconnectRDP');
+  window.goDisconnectRDPTarget = (targetID) => invoke('DisconnectRDPTarget', targetID);
   window.goGetLogs = () => invoke('GetLogs');
   window.goGetMessages = () => invoke('GetMessages');
   window.goClearMessages = () => invoke('ClearMessages');

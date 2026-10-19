@@ -46,6 +46,10 @@ jobs:
           fi
       - name: Check modules
         run: go mod tidy -diff
+      - name: Cross-compile Windows RDP hosts UAC helper (AMD64 and ARM64)
+        run: |
+          GOOS=windows GOARCH=amd64 go build ./agent/rdp/hostalias
+          GOOS=windows GOARCH=arm64 go build ./agent/rdp/hostalias
       - name: Test patched yamux
         working-directory: third_party/yamux
         run: |

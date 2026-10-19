@@ -54,6 +54,9 @@ func runDesktopUI(b *bridge.UIBridge, opts gui.Options) (err error) {
 }
 
 func main() {
+	// The Windows GUI invokes this narrow helper through hidden ShellExecuteExW
+	// with UAC consent. Handle it before parsing desktop/console flags so the
+	// elevated process never starts a UI or a second Agent instance.
 	if len(os.Args) == 2 && strings.HasPrefix(os.Args[1], "--_rdp-hosts-add=") {
 		if err := hostalias.RunHelper(strings.TrimPrefix(os.Args[1], "--_rdp-hosts-add=")); err != nil {
 			fmt.Fprintf(os.Stderr, "[RDP] hosts helper: %v\n", err)

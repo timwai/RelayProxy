@@ -3,11 +3,11 @@ package rdp
 import "testing"
 
 func TestRDPFriendlyHostsNameKeepsLoopbackListenerAndPort(t *testing.T) {
-	conn := &Connection{ListenAddr: "127.0.0.1:41389", HostAlias: "office-pc-01234567.relayproxy.test"}
+	conn := &Connection{ListenAddr: "127.0.0.1:41389", HostAlias: "relayproxy-office-pc-01234567"}
 	if conn.Addr() != "127.0.0.1:41389" {
 		t.Fatalf("listener should stay on loopback, got %q", conn.Addr())
 	}
-	if got := conn.ClientAddress(); got != "office-pc-01234567.relayproxy.test:41389" {
+	if got := conn.ClientAddress(); got != "relayproxy-office-pc-01234567:41389" {
 		t.Fatalf("desktop address = %q", got)
 	}
 	conn.HostAlias = ""

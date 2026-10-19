@@ -21,9 +21,9 @@ import (
 )
 
 type Target struct {
-	DeviceID string `json:"deviceId"`
-	Name     string `json:"name"`
-	Online   bool   `json:"online"`
+	DeviceID   string `json:"deviceId"`
+	Name       string `json:"name"`
+	Online     bool   `json:"online"`
 	ListenAddr string `json:"listenAddr,omitempty"`
 }
 

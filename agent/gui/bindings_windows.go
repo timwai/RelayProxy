@@ -217,6 +217,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		Port    int    `json:"port"`
 	}
 	payload := struct {
+		Platform                    string              `json:"platform"`
 		ConfigPath                  string              `json:"configPath"`
 		ServerAddress               string              `json:"serverAddress"`
 		QUICPort                    int                 `json:"quicPort"`
@@ -258,6 +259,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		RestartFields               []string            `json:"restartFields"`
 		ReloadPending               bool                `json:"reloadPending"`
 	}{
+		Platform:       "windows",
 		ConfigPath:     a.bridge.ConfigPath(),
 		ServerAddress:  cfg.Server.Address,
 		QUICPort:       cfg.Server.QUICPort,

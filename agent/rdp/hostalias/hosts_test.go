@@ -119,7 +119,7 @@ func TestConflictingDuplicateHostsMappingIsNeverTrusted(t *testing.T) {
 func TestMigratesOnlyOwnedLegacyRecord(t *testing.T) {
 	alias := Alias("Office PC", "device-001")
 	old := legacyAlias(alias)
-	data := []byte("# local records\r\n127.0.0.1 localhost\r\n127.0.0.1 "+old+" # RelayProxy RDP\r\n192.0.2.2 internal.example\r\n")
+	data := []byte("# local records\r\n127.0.0.1 localhost\r\n127.0.0.1 " + old + " # RelayProxy RDP\r\n192.0.2.2 internal.example\r\n")
 	got, changed, err := updateHosts(data, alias)
 	if err != nil || !changed {
 		t.Fatalf("migration changed=%v err=%v", changed, err)
@@ -142,7 +142,7 @@ func TestMigratesOnlyOwnedLegacyRecord(t *testing.T) {
 func TestLegacyCleanupNeverTouchesUnownedRecords(t *testing.T) {
 	alias := Alias("Office PC", "device-001")
 	old := legacyAlias(alias)
-	data := []byte("127.0.0.1 "+old+" # personal override\n203.0.113.1 unrelated.example\n")
+	data := []byte("127.0.0.1 " + old + " # personal override\n203.0.113.1 unrelated.example\n")
 	result, _, err := updateHosts(data, alias)
 	if err != nil || !strings.HasPrefix(string(result), string(data)) {
 		t.Fatalf("personal hosts record was modified: %q %v", result, err)
@@ -152,7 +152,7 @@ func TestLegacyCleanupNeverTouchesUnownedRecords(t *testing.T) {
 func TestLegacyCleanupIfNewMappingAlreadyExists(t *testing.T) {
 	alias := Alias("Office PC", "device-001")
 	old := legacyAlias(alias)
-	data := []byte("127.0.0.1 "+alias+" # RelayProxy RDP\n127.0.0.1 "+old+" # RelayProxy RDP\n")
+	data := []byte("127.0.0.1 " + alias + " # RelayProxy RDP\n127.0.0.1 " + old + " # RelayProxy RDP\n")
 	result, changed, err := updateHosts(data, alias)
 	if err != nil || !changed || strings.Contains(string(result), old) {
 		t.Fatalf("old alias still present: %q, changed=%v err=%v", result, changed, err)
@@ -165,7 +165,7 @@ func TestLegacyCleanupIfNewMappingAlreadyExists(t *testing.T) {
 func TestRejectConflictingNewAliasDuringMigration(t *testing.T) {
 	alias := Alias("Office PC", "device-001")
 	old := legacyAlias(alias)
-	data := []byte("203.0.113.12 "+alias+"\n127.0.0.1 "+old+" # RelayProxy RDP\n")
+	data := []byte("203.0.113.12 " + alias + "\n127.0.0.1 " + old + " # RelayProxy RDP\n")
 	if _, changed, err := updateHosts(data, alias); err == nil || changed {
 		t.Fatal("conflicting hostname should block migration")
 	}

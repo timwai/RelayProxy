@@ -297,7 +297,7 @@ type RDPSessionStatus struct {
 	DeviceID   string `json:"deviceId"`
 	Name       string `json:"name"`
 	ListenAddr string `json:"listenAddr"`
-	HostAlias string `json:"hostAlias,omitempty"`
+	HostAlias  string `json:"hostAlias,omitempty"`
 	HostsError string `json:"hostsError,omitempty"`
 	UDPEnabled bool   `json:"udpEnabled"`
 	UDPActive  bool   `json:"udpActive"`
@@ -1749,7 +1749,9 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 		target.HostAlias, target.HostsError = existing.HostAlias, existing.HostsError
 		a.rdpActiveTarget = targetID
 		a.mu.Unlock()
-		if autoLaunch { existing.Launch() }
+		if autoLaunch {
+			existing.Launch()
+		}
 		return target, nil
 	}
 	p2pManager := a.rdpP2P
@@ -1854,7 +1856,9 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 	}
 	target.ListenAddr = conn.ClientAddress()
 	target.HostAlias, target.HostsError = conn.HostAlias, conn.HostsError
-	if autoLaunch { conn.Launch() }
+	if autoLaunch {
+		conn.Launch()
+	}
 	return target, nil
 }
 

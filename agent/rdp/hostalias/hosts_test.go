@@ -106,3 +106,12 @@ func TestCommentedHostDoesNotCountAsInstalled(t *testing.T) {
 		t.Fatalf("comment was treated as alias: %v %v", found, err)
 	}
 }
+
+func TestConflictingDuplicateHostsMappingIsNeverTrusted(t *testing.T) {
+	alias := Alias("office", "device-id")
+	data := []byte("127.0.0.1 " + alias + "\n203.0.113.3 " + alias + "\n")
+	found, err := inspectHosts(data, alias)
+	if err == nil || found {
+		t.Fatalf("conflicting duplicate should fail: found=%v err=%v", found, err)
+	}
+}

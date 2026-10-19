@@ -254,6 +254,8 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
   return {publicPath,verified};
  };
  const rdpEnabled=config.rdp?.enabled!==false&&config.runtime?.rdp?.enabled!==false&&arr(status.approvedCapabilities).includes('rdp.controller');
+ const activeRDPTargets=new Set(arr(status.rdpSessions).map(s=>s.deviceId).filter(Boolean));
+ if(!activeRDPTargets.size&&status.rdpTargetId)activeRDPTargets.add(status.rdpTargetId);
  return <><PageHead actions={<><Button onClick={onRefresh}>刷新设备</Button><Button disabled={!status.connected||!exits.some(x=>x.online!==false)} onClick={onSpeedAll}>批量测速</Button></>}/>
  <div className="device-center-intro">
   <div><strong>已授权设备</strong><span className="mini">按设备查看可用能力。卡片只提供操作，不修改全局代理出口。</span></div>
@@ -279,7 +281,7 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
     </div>
     <div className="device-center-card-actions" aria-label={name+' 快捷操作'}>
      
-     {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||d.rdp.online===false||!rdpEnabled} title={!rdpEnabled?'请在设置中启用远程桌面并确认控制端授权':online?'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>远程桌面</span></button>}
+     {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||d.rdp.online===false||!rdpEnabled} title={!rdpEnabled?'请在设置中启用远程桌面并确认控制端授权':online?activeRDPTargets.has(d.id)?'复用现有 RDP 入口，再次打开本地远程桌面':'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>{activeRDPTargets.has(d.id)?'再次打开':'远程桌面'}</span></button>}
      {d.proxy&&<button type="button" className="device-quick-action" disabled={!online||d.proxy.online===false} title={online?'测试此设备代理出口':'设备离线或未连接'} aria-label={'测速 '+name} onClick={()=>onSpeed(d.id)}><Icon name="activity" size={18}/><span>测速</span></button>}
      
     </div>
@@ -584,7 +586,7 @@ function RDPPage({status,config,targets,refreshTargets,refreshStatus,toast}){
  const controllerApproved=arr(status.approvedCapabilities).includes('rdp.controller');
  const sessions=arr(status.rdpSessions).length?arr(status.rdpSessions):(status.rdpTargetId?[{deviceId:status.rdpTargetId,listenAddr:status.rdpListenAddr,udpEnabled:status.rdpUdpEnabled,udpActive:status.rdpUdpActive,udpReason:status.rdpUdpReason,pathTcp:status.rdpPathTcp,pathUdp:status.rdpPathUdp}]:[]);
  const activeByID=new Map(sessions.map(s=>[s.deviceId,s]));
- const connect=async id=>{setBusy(id);try{const r=parseMutation(await call('goConnectRDP',id,true));if(!r.ok)throw new Error(r.message||'RDP 连接失败');toast(r.target?.hostsError?'RDP 已建立，hosts 别名未写入：'+r.target.hostsError:'RDP 本地入口已建立',r.target?.hostsError?'warn':undefined);await refreshStatus()}catch(e){toast(e.message,'danger')}finally{setBusy('')}};
+ const connect=async id=>{const reopening=activeByID.has(id);setBusy(id);try{const r=parseMutation(await call('goConnectRDP',id,true));if(!r.ok)throw new Error(r.message||'RDP 连接失败');toast(r.target?.hostsError?'RDP 已建立，hosts 别名未写入：'+r.target.hostsError:reopening?'已请求再次打开本地远程桌面':'RDP 本地入口已建立',r.target?.hostsError?'warn':undefined);await refreshStatus()}catch(e){toast(e.message,'danger')}finally{setBusy('')}};
  const disconnect=async id=>{setBusy(id);try{const r=parseMutation(await call('goDisconnectRDPTarget',id));if(!r.ok)throw new Error(r.message||'RDP 断开失败');await refreshStatus();toast('该设备的 RDP 已断开')}catch(e){toast(e.message,'danger')}finally{setBusy('')}};
  const disconnectAll=async()=>{setBusy('all');try{const r=parseMutation(await call('goDisconnectRDP'));if(!r.ok)throw new Error(r.message||'RDP 断开失败');await refreshStatus();toast('全部 RDP 会话已断开')}catch(e){toast(e.message,'danger')}finally{setBusy('')}};
  const copy=async value=>{if(!value)return;try{if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',String(value));else await navigator.clipboard.writeText(String(value));toast('已复制 RDP 本地入口')}catch(e){toast(e.message,'danger')}};
@@ -592,9 +594,9 @@ function RDPPage({status,config,targets,refreshTargets,refreshStatus,toast}){
  {!desiredEnabled&&<div className="notice warn"><b>RDP 已在本机配置中关闭。</b> 请在「设置 → 远程桌面设置」中开启、保存并重启客户端，之后才会重新申请 rdp.controller。</div>}
  {desiredEnabled&&runtimeEnabled&&status.connected&&!controllerApproved&&<div className="notice warn"><b>Server 未授予当前设备 rdp.controller。</b> 请在 Server 设备授权中启用“RDP 控制端”；授权变更后 Agent 会重新连接并刷新列表。</div>}
  {sessions.length>0&&<Card title="当前 RDP 会话" eyebrow={sessions.length+' ACTIVE SESSIONS'} action={sessions.length>1?<Button danger disabled={!!busy} onClick={disconnectAll}>断开全部</Button>:null}>
-  <div className="target-list">{sessions.map(s=>{const id=s.deviceId,name=s.name||targets.find(t=>(t.deviceId||t.id)===id)?.name||id;return <div className="target-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{name}</strong><div className="mono mini">{s.listenAddr||'准备中'}</div><div className="mini">TCP {rdpPathLabel(s.pathTcp)} · UDP {rdpPathLabel(s.pathUdp)} · {s.udpActive?'UDP Active':s.udpEnabled?'UDP Ready':'TCP Only'}</div>{s.udpReason&&<div className="mini">{s.udpReason}</div>}{s.hostsError&&<div className="mini">hosts：{s.hostsError}（已回退本地 IP）</div>}</div><Badge tone="ok">已连接</Badge><Button quiet disabled={!s.listenAddr} onClick={()=>copy(s.listenAddr)}>复制地址</Button><Button danger disabled={!!busy} onClick={()=>disconnect(id)}>{busy===id?'断开中…':'断开'}</Button></div>})}</div>
+  <div className="target-list">{sessions.map(s=>{const id=s.deviceId,name=s.name||targets.find(t=>(t.deviceId||t.id)===id)?.name||id;return <div className="target-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{name}</strong><div className="mono mini">{s.listenAddr||'准备中'}</div><div className="mini">TCP {rdpPathLabel(s.pathTcp)} · UDP {rdpPathLabel(s.pathUdp)} · {s.udpActive?'UDP Active':s.udpEnabled?'UDP Ready':'TCP Only'}</div>{s.udpReason&&<div className="mini">{s.udpReason}</div>}{s.hostsError&&<div className="mini">hosts：{s.hostsError}（已回退本地 IP）</div>}</div><Badge tone="ok">已连接</Badge><Button primary disabled={!!busy||!status.connected} title="复用现有本地端口，再次唤起远程桌面客户端" onClick={()=>connect(id)}>{busy===id?'打开中…':'再次打开'}</Button><Button quiet disabled={!s.listenAddr} onClick={()=>copy(s.listenAddr)}>复制地址</Button><Button danger disabled={!!busy} onClick={()=>disconnect(id)}>{busy===id?'断开中…':'断开'}</Button></div>})}</div>
  </Card>}
- <Card title="已授权设备" eyebrow={targets.length+' TARGETS'}><div className="target-list">{targets.map(x=>{const id=x.deviceId||x.id,active=activeByID.get(id);return <div className="target-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{x.name||id}</strong><div className="mono mini">{id}</div></div>{active&&<Badge tone="blue">已建立入口</Badge>}<Badge tone={x.online?'ok':'neutral'}>{x.online?'在线':'离线'}</Badge><Button primary disabled={!x.online||!!busy||!!active} onClick={()=>connect(id)}>{active?'已连接':busy===id?'连接中…':'连接'}</Button></div>})}{!targets.length&&<div className="empty">{!desiredEnabled?'本机 RDP 功能已关闭。':!runtimeEnabled?'RDP 设置等待重启生效。':status.connected&&!controllerApproved?'当前设备未获得 Server 的 rdp.controller 授权。':'当前没有 Server 授权的 RDP 目标设备。'}</div>}</div></Card></>
+ <Card title="已授权设备" eyebrow={targets.length+' TARGETS'}><div className="target-list">{targets.map(x=>{const id=x.deviceId||x.id,active=activeByID.get(id);return <div className="target-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{x.name||id}</strong><div className="mono mini">{id}</div></div>{active&&<Badge tone="blue">已建立入口</Badge>}<Badge tone={x.online?'ok':'neutral'}>{x.online?'在线':'离线'}</Badge><Button primary disabled={!x.online||!status.connected||!!busy} title={active?'复用现有本地端口，再次唤起远程桌面客户端':'连接此设备'} onClick={()=>connect(id)}>{busy===id?'打开中…':active?'再次打开':'连接'}</Button></div>})}{!targets.length&&<div className="empty">{!desiredEnabled?'本机 RDP 功能已关闭。':!runtimeEnabled?'RDP 设置等待重启生效。':status.connected&&!controllerApproved?'当前设备未获得 Server 的 rdp.controller 授权。':'当前没有 Server 授权的 RDP 目标设备。'}</div>}</div></Card></>
 }
 
 function RDPSettingsPage({status,config,setv,save,dirty,toast,onGoto}){
@@ -867,7 +869,7 @@ export default function App(){
   if(!status.connected||!target||target.online===false||config.rdp?.enabled===false||config.runtime?.rdp?.enabled===false||!arr(status.approvedCapabilities).includes('rdp.controller')){toast('远程桌面目标当前不可连接，请检查设备状态与控制端授权','warn');return}
   try{const result=parseMutation(await call('goConnectRDP',deviceID,true));
    if(!result.ok)throw new Error(result.message||'RDP 连接失败');
-   await refreshStatus();toast(result.target?.hostsError?'远程桌面已连接，hosts 别名未写入：'+result.target.hostsError:'已连接远程桌面',result.target?.hostsError?'warn':undefined);
+   await refreshStatus();toast(result.target?.hostsError?'远程桌面已连接，hosts 别名未写入：'+result.target.hostsError:arr(status.rdpSessions).some(s=>s.deviceId===deviceID)||status.rdpTargetId===deviceID?'已请求再次打开本地远程桌面':'已连接远程桌面',result.target?.hostsError?'warn':undefined);
    requestPage('rdp');
   }catch(e){toast(e.message||String(e),'danger')}
  },[targets,status,config.rdp,config.runtime,refreshStatus,requestPage,toast]);

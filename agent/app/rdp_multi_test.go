@@ -16,7 +16,9 @@ func newTestRDPConnection(t *testing.T, id string) *rdp.Connection {
 		rdp.ControllerOptions{DialTCP: func(context.Context, string) (net.Conn, error) {
 			return nil, errors.New("test only: no remote RDP dial")
 		}, SupportsUDP: func() bool { return false }}, false)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	t.Cleanup(func() { _ = conn.Close() })
 	return conn
 }
@@ -24,7 +26,9 @@ func newTestRDPConnection(t *testing.T, id string) *rdp.Connection {
 func assertRDPListener(t *testing.T, address string, shouldListen bool) {
 	t.Helper()
 	conn, err := net.DialTimeout("tcp", address, 200*time.Millisecond)
-	if conn != nil { _ = conn.Close() }
+	if conn != nil {
+		_ = conn.Close()
+	}
 	if (err == nil) != shouldListen {
 		t.Fatalf("RDP listener %s accepting=%v; want %v (err=%v)", address, err == nil, shouldListen, err)
 	}
@@ -40,7 +44,9 @@ func TestRDPConcurrentSessionsDisconnectOnlySelectedTarget(t *testing.T) {
 	a.rdpConnections[second.Target.DeviceID] = second
 	a.rdpActiveTarget = second.Target.DeviceID
 
-	if first.ListenAddr == second.ListenAddr { t.Fatalf("separate devices shared port %s", first.ListenAddr) }
+	if first.ListenAddr == second.ListenAddr {
+		t.Fatalf("separate devices shared port %s", first.ListenAddr)
+	}
 	assertRDPListener(t, first.ListenAddr, true)
 	assertRDPListener(t, second.ListenAddr, true)
 
@@ -53,7 +59,9 @@ func TestRDPConcurrentSessionsDisconnectOnlySelectedTarget(t *testing.T) {
 
 	a.DisconnectRDP()
 	assertRDPListener(t, first.ListenAddr, false)
-	if len(a.rdpConnections) != 0 { t.Fatalf("all sessions should be cleared: %+v", a.rdpConnections) }
+	if len(a.rdpConnections) != 0 {
+		t.Fatalf("all sessions should be cleared: %+v", a.rdpConnections)
+	}
 }
 
 func TestRDPDisconnectUnknownTargetPreservesExistingSession(t *testing.T) {

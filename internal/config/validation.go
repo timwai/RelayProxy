@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"runtime"
 	"slices"
 	"strconv"
 	"strings"
@@ -102,6 +103,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.P2P.Mode = strings.ToLower(strings.TrimSpace(c.P2P.Mode))
 	c.Direct.Public.Advertise = strings.TrimSpace(c.Direct.Public.Advertise)
 	c.Network.Mode = strings.ToLower(strings.TrimSpace(c.Network.Mode))
+	c.SystemProxy.Mode = strings.ToLower(strings.TrimSpace(c.SystemProxy.Mode))
 	// The short-lived global handle_direct_connections setting was replaced by
 	// per-routing-rule handle_direct. Keep accepting old files, then drop it.
 	c.Network.HandleDirectConnections = nil
@@ -248,6 +250,26 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 			return fmt.Errorf("web.token 必须留空或至少包含 32 字节")
 		}
 	}
+	if c.SystemProxy.Mode != "" && c.SystemProxy.Mode != "system" {
+		return fmt.Errorf("system_proxy.mode 必须是空或 system")
+	}
+	if c.SystemProxy.Enabled() {
+		if runtime.GOOS != "darwin" {
+			return fmt.Errorf("system_proxy 只支持 macOS")
+		}
+		if c.Network.Mode == "divert" {
+			return fmt.Errorf("系统代理与 Network Extension 透明接管不能同时启用")
+		}
+		if !c.SystemProxy.UseHTTP() && !c.SystemProxy.UseSOCKS5() {
+			return fmt.Errorf("system_proxy 至少启用 HTTP 或 SOCKS5")
+		}
+		if c.SystemProxy.UseHTTP() && (c.Proxy.HTTP.Enabled != nil && !*c.Proxy.HTTP.Enabled || !localListenerCoversLoopback(c.Proxy.HTTP.Listen)) {
+			return fmt.Errorf("system_proxy.http 要求本机 HTTP 代理已启用并包含回环地址")
+		}
+		if c.SystemProxy.UseSOCKS5() && (c.Proxy.SOCKS5.Enabled != nil && !*c.Proxy.SOCKS5.Enabled || !localListenerCoversLoopback(c.Proxy.SOCKS5.Listen)) {
+			return fmt.Errorf("system_proxy.socks5 要求本机 SOCKS5 代理已启用并包含回环地址")
+		}
+	}
 	if c.GUI.Theme != "dark" && c.GUI.Theme != "light" && c.GUI.Theme != "system" {
 		return fmt.Errorf("gui.theme 必须是 dark / light / system")
 	}
@@ -358,6 +380,10 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 		}
 		return BoolPtr(*v)
 	}
+	out.SystemProxy.AutoFollow = cloneBool(c.SystemProxy.AutoFollow)
+	out.SystemProxy.HTTP = cloneBool(c.SystemProxy.HTTP)
+	out.SystemProxy.SOCKS5 = cloneBool(c.SystemProxy.SOCKS5)
+	out.SystemProxy.ProxyIPLiterals = cloneBool(c.SystemProxy.ProxyIPLiterals)
 	out.Proxy.SOCKS5.Enabled = cloneBool(c.Proxy.SOCKS5.Enabled)
 	out.Proxy.CustomExits = routing.CloneCustomExits(c.Proxy.CustomExits)
 	out.Server.TLSEnabled = cloneBool(c.Server.TLSEnabled)

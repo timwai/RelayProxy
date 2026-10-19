@@ -21,6 +21,7 @@ import (
 	"relayproxy/agent/rdp"
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
+	"relayproxy/agent/systemproxy"
 	"relayproxy/internal/config"
 	"relayproxy/internal/protocol"
 )
@@ -38,6 +39,7 @@ type UIBridge struct {
 	messageTap          func(app.Message)
 	writeConfig         func(string, *config.AgentConfigFile) error
 	ensureDivertService func() error
+	systemProxyManager  *systemproxy.Manager
 	syncAutoStart       func(string, bool) (func() error, error)
 	setAutoStart        func(string, bool, bool) error
 }
@@ -80,6 +82,23 @@ func NewUIBridge(agent *app.Agent, configPath string) *UIBridge {
 		}
 	})
 	return b
+}
+
+// AttachSystemProxyManager lets the desktop and Web UI apply system proxy
+// settings without restarting Agent listeners. The process owns its lifecycle.
+func (b *UIBridge) AttachSystemProxyManager(m *systemproxy.Manager) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.systemProxyManager = m
+}
+func (b *UIBridge) SystemProxyStatus() systemproxy.Status {
+	b.mu.RLock()
+	m := b.systemProxyManager
+	b.mu.RUnlock()
+	if m == nil {
+		return systemproxy.Status{}
+	}
+	return m.Status()
 }
 
 // ---------------------------------------------------------------------------
@@ -462,6 +481,13 @@ type ConfigUpdate struct {
 			CIDRs   *[]string `json:"cidrs"`   // CIDR / single IP / range, one per line
 		} `json:"access"`
 	} `json:"exit"`
+	SystemProxy struct {
+		Mode            *string `json:"mode"`
+		AutoFollow      *bool   `json:"autoFollow"`
+		HTTP            *bool   `json:"http"`
+		SOCKS5          *bool   `json:"socks5"`
+		ProxyIPLiterals *bool   `json:"proxyIpLiterals"`
+	} `json:"systemProxy"`
 	Network struct {
 		Mode             *string   `json:"mode"` // "" (off) | "divert"
 		ExcludeProcesses *[]string `json:"excludeProcesses"`
@@ -728,6 +754,21 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		cfg.Exit.Access.CIDRs = cleanLines(*in.Exit.Access.CIDRs)
 	}
 
+	if in.SystemProxy.Mode != nil {
+		cfg.SystemProxy.Mode = strings.ToLower(strings.TrimSpace(*in.SystemProxy.Mode))
+	}
+	if in.SystemProxy.AutoFollow != nil {
+		cfg.SystemProxy.AutoFollow = config.BoolPtr(*in.SystemProxy.AutoFollow)
+	}
+	if in.SystemProxy.HTTP != nil {
+		cfg.SystemProxy.HTTP = config.BoolPtr(*in.SystemProxy.HTTP)
+	}
+	if in.SystemProxy.SOCKS5 != nil {
+		cfg.SystemProxy.SOCKS5 = config.BoolPtr(*in.SystemProxy.SOCKS5)
+	}
+	if in.SystemProxy.ProxyIPLiterals != nil {
+		cfg.SystemProxy.ProxyIPLiterals = config.BoolPtr(*in.SystemProxy.ProxyIPLiterals)
+	}
 	if in.Network.Mode != nil {
 		mode := strings.ToLower(strings.TrimSpace(*in.Network.Mode))
 		switch mode {
@@ -828,6 +869,27 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if err := config.NormalizeAgentConfig(cfg); err != nil {
 		return nil, fmt.Errorf("配置校验失败: %w", err)
 	}
+	if (cfg.SystemProxy.Enabled() || previousConfig.SystemProxy.Enabled()) && b.systemProxyManager == nil {
+		return nil, fmt.Errorf("macOS 系统代理管理器未启动，无法安全修改原系统代理配置")
+	}
+	if cfg.SystemProxy.Enabled() {
+		running := b.agent.Config()
+		if running.NetworkMode == "divert" {
+			return nil, fmt.Errorf("当前 Network Extension 正在运行，请先关闭并重启后再启用系统代理")
+		}
+		if cfg.SystemProxy.UseHTTP() {
+			addr := net.JoinHostPort(cfg.Proxy.HTTP.Listen, strconv.Itoa(cfg.Proxy.HTTP.Port))
+			if addr != running.HTTPListen || !running.IsHTTPEnabled() {
+				return nil, fmt.Errorf("HTTP 监听设置尚未生效，请先保存并重启客户端后启用系统代理")
+			}
+		}
+		if cfg.SystemProxy.UseSOCKS5() {
+			addr := net.JoinHostPort(cfg.Proxy.SOCKS5.Listen, strconv.Itoa(cfg.Proxy.SOCKS5.Port))
+			if addr != running.SOCKS5Listen || !running.IsSOCKS5Enabled() {
+				return nil, fmt.Errorf("SOCKS5 监听设置尚未生效，请先保存并重启客户端后启用系统代理")
+			}
+		}
+	}
 	if cfg.Network.Mode == "divert" {
 		if err := divert.Preflight(cfg.DivertConfig()); err != nil {
 			return nil, fmt.Errorf("无法启用系统透明代理，配置未保存: %w", err)
@@ -882,6 +944,29 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 			}
 		}
 		return nil, errors.Join(append([]error{fmt.Errorf("配置未应用: %w", err)}, rollbackErrors...)...)
+	}
+	// Configure macOS system proxy after the normal policy has been published.
+	// Revert both disk and live routing policy when OS authorization is refused.
+	if b.systemProxyManager != nil {
+		old := previousConfig.SystemProxy
+		if err := b.systemProxyManager.Apply(cfg.SystemProxy, cfg.Proxy.HTTP.Port, cfg.Proxy.SOCKS5.Port); err != nil {
+			var rollbackErrors []error
+			if !reload {
+				if e := b.writeConfig(path, previousConfig); e != nil {
+					rollbackErrors = append(rollbackErrors, e)
+				}
+			}
+			previousDivert := previousConfig.DivertConfig()
+			previousDivert.Mode = b.agent.Config().NetworkMode
+			if e := b.agent.ApplyClientConfig(previousConfig.Routing, previousDivert, previousConfig.Proxy.CustomExits, previousConfig.Proxy.DefaultExitID); e != nil {
+				rollbackErrors = append(rollbackErrors, e)
+			}
+			b.agent.SelectExit(previousConfig.Proxy.DefaultExitID)
+			if e := b.systemProxyManager.Apply(old, previousConfig.Proxy.HTTP.Port, previousConfig.Proxy.SOCKS5.Port); e != nil {
+				rollbackErrors = append(rollbackErrors, e)
+			}
+			return nil, errors.Join(append([]error{fmt.Errorf("macOS 系统代理设置失败，已尝试回滚: %w", err)}, rollbackErrors...)...)
+		}
 	}
 	// A selected Relay exit may need background path setup. This runs after
 	// atomic policy publication and does not change the routing snapshot.

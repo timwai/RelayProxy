@@ -10,6 +10,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"relayproxy/agent/routing"
+	"relayproxy/agent/systemproxy"
 	"relayproxy/internal/proxy"
 )
 
@@ -215,6 +216,8 @@ type AgentConfigFile struct {
 			CIDRs   []string `yaml:"cidrs"`   // IP ranges: CIDR / single IP / "start-end"
 		} `yaml:"access"`
 	} `yaml:"exit"`
+
+	SystemProxy systemproxy.Settings `yaml:"system_proxy"`
 
 	Network struct {
 		// Mode: "" (off, use SOCKS5/HTTP) or "divert" (system intercept via
@@ -574,6 +577,10 @@ func applyAgentDefaults(cfg *AgentConfigFile) {
 	// other tooling.
 	for _, field := range []**bool{
 		&cfg.Server.TLSEnabled,
+		&cfg.SystemProxy.AutoFollow,
+		&cfg.SystemProxy.HTTP,
+		&cfg.SystemProxy.SOCKS5,
+		&cfg.SystemProxy.ProxyIPLiterals,
 		&cfg.Proxy.SOCKS5.Enabled,
 		&cfg.Proxy.HTTP.Enabled,
 		&cfg.RDP.Enabled,

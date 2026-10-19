@@ -23,6 +23,7 @@ import (
 	"relayproxy/agent/exit"
 	"relayproxy/agent/fileshare"
 	"relayproxy/agent/gui"
+	"relayproxy/agent/rdp/hostalias"
 	"relayproxy/agent/singleton"
 	"relayproxy/agent/startup"
 	"relayproxy/agent/systemproxy"
@@ -53,6 +54,13 @@ func runDesktopUI(b *bridge.UIBridge, opts gui.Options) (err error) {
 }
 
 func main() {
+	if len(os.Args) == 2 && strings.HasPrefix(os.Args[1], "--_rdp-hosts-add=") {
+		if err := hostalias.RunHelper(strings.TrimPrefix(os.Args[1], "--_rdp-hosts-add=")); err != nil {
+			fmt.Fprintf(os.Stderr, "[RDP] hosts helper: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 	if len(os.Args) > 1 && os.Args[1] == "install" {
 		if err := runInstall(os.Args[2:], os.Stdin, os.Stdout); err != nil && !errors.Is(err, flag.ErrHelp) {
 			fmt.Fprintf(os.Stderr, "[Install] %v\n", err)

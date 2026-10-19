@@ -15,12 +15,12 @@ func TestAliasStableDistinctAndUnicode(t *testing.T) {
 	if a == Alias("Office PC", "device-002") {
 		t.Fatal("same-name devices must not collide")
 	}
-	if !strings.HasPrefix(a, "office-pc-") || !validAlias.MatchString(a) {
+	if !strings.HasPrefix(a, "relayproxy-office-pc-") || !validAlias.MatchString(a) {
 		t.Fatalf("bad alias %q", a)
 	}
 	for _, name := range []string{"工作电脑", "My PC!  01", "🤖", strings.Repeat("verylongname", 15)} {
 		value := Alias(name, "dev-001")
-		if !validAlias.MatchString(value) {
+		if !validAlias.MatchString(value) || len(value) > 63 || strings.Contains(value, ".test") {
 			t.Fatalf("%q -> invalid alias %q", name, value)
 		}
 	}
@@ -89,7 +89,7 @@ func TestHostsCollisionRejectedWithoutChangingExistingContent(t *testing.T) {
 }
 
 func TestHostAliasValidationGuardsElevatedHelper(t *testing.T) {
-	for _, alias := range []string{"localhost", "127.0.0.1", "victim.test", "a.relayproxy.test", "x-01234567.relayproxy.test; rm -rf /", "../etc/hosts"} {
+	for _, alias := range []string{"localhost", "127.0.0.1", "victim.test", "a.relayproxy.test", "x-01234567.relayproxy.test; rm -rf /", "../etc/hosts", "office-pc-01234567", "relayproxy-office-pc.relayproxy.test", "relayproxy-office-pc-01234567.test", "relayproxy-office-pc-abcdefghX"} {
 		if validAlias.MatchString(alias) {
 			t.Fatalf("unsafe helper alias accepted %q", alias)
 		}
@@ -113,5 +113,60 @@ func TestConflictingDuplicateHostsMappingIsNeverTrusted(t *testing.T) {
 	found, err := inspectHosts(data, alias)
 	if err == nil || found {
 		t.Fatalf("conflicting duplicate should fail: found=%v err=%v", found, err)
+	}
+}
+
+func TestMigratesOnlyOwnedLegacyRecord(t *testing.T) {
+	alias := Alias("Office PC", "device-001")
+	old := legacyAlias(alias)
+	data := []byte("# local records\r\n127.0.0.1 localhost\r\n127.0.0.1 "+old+" # RelayProxy RDP\r\n192.0.2.2 internal.example\r\n")
+	got, changed, err := updateHosts(data, alias)
+	if err != nil || !changed {
+		t.Fatalf("migration changed=%v err=%v", changed, err)
+	}
+	if strings.Contains(string(got), ".relayproxy.test") {
+		t.Fatalf("old host was not removed: %s", got)
+	}
+	if strings.Count(string(got), "127.0.0.1 "+alias+" # RelayProxy RDP") != 1 {
+		t.Fatalf("new hosts mapping was not installed: %s", got)
+	}
+	if !strings.Contains(string(got), "192.0.2.2 internal.example\r\n") {
+		t.Fatal("third party hosts record changed")
+	}
+	second, changed, err := updateHosts(got, alias)
+	if err != nil || changed || string(second) != string(got) {
+		t.Fatalf("second migration changed=%v err=%v", changed, err)
+	}
+}
+
+func TestLegacyCleanupNeverTouchesUnownedRecords(t *testing.T) {
+	alias := Alias("Office PC", "device-001")
+	old := legacyAlias(alias)
+	data := []byte("127.0.0.1 "+old+" # personal override\n203.0.113.1 unrelated.example\n")
+	result, _, err := updateHosts(data, alias)
+	if err != nil || !strings.HasPrefix(string(result), string(data)) {
+		t.Fatalf("personal hosts record was modified: %q %v", result, err)
+	}
+}
+
+func TestLegacyCleanupIfNewMappingAlreadyExists(t *testing.T) {
+	alias := Alias("Office PC", "device-001")
+	old := legacyAlias(alias)
+	data := []byte("127.0.0.1 "+alias+" # RelayProxy RDP\n127.0.0.1 "+old+" # RelayProxy RDP\n")
+	result, changed, err := updateHosts(data, alias)
+	if err != nil || !changed || strings.Contains(string(result), old) {
+		t.Fatalf("old alias still present: %q, changed=%v err=%v", result, changed, err)
+	}
+	if strings.Count(string(result), alias) != 1 {
+		t.Fatal("new alias duplicated")
+	}
+}
+
+func TestRejectConflictingNewAliasDuringMigration(t *testing.T) {
+	alias := Alias("Office PC", "device-001")
+	old := legacyAlias(alias)
+	data := []byte("203.0.113.12 "+alias+"\n127.0.0.1 "+old+" # RelayProxy RDP\n")
+	if _, changed, err := updateHosts(data, alias); err == nil || changed {
+		t.Fatal("conflicting hostname should block migration")
 	}
 }

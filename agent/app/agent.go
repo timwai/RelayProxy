@@ -293,14 +293,14 @@ var ErrRestartRequired = errors.New("agent role change requires restart")
 
 // RDPSessionStatus describes one independent per-device RDP tunnel.
 type RDPSessionStatus struct {
-	DeviceID string `json:"deviceId"`
-	Name string `json:"name"`
+	DeviceID   string `json:"deviceId"`
+	Name       string `json:"name"`
 	ListenAddr string `json:"listenAddr"`
-	UDPEnabled bool `json:"udpEnabled"`
-	UDPActive bool `json:"udpActive"`
-	UDPReason string `json:"udpReason,omitempty"`
-	PathTCP string `json:"pathTcp"`
-	PathUDP string `json:"pathUdp"`
+	UDPEnabled bool   `json:"udpEnabled"`
+	UDPActive  bool   `json:"udpActive"`
+	UDPReason  string `json:"udpReason,omitempty"`
+	PathTCP    string `json:"pathTcp"`
+	PathUDP    string `json:"pathUdp"`
 }
 
 type Agent struct {
@@ -680,7 +680,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 		if oldControl != nil {
 			_ = oldControl.Close()
 		}
-		for _, conn := range oldRDP { _ = conn.Close() }
+		for _, conn := range oldRDP {
+			_ = conn.Close()
+		}
 		if oldP2P != nil {
 			_ = oldP2P.Close()
 		}
@@ -695,7 +697,9 @@ func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel
 	if oldControl != nil {
 		_ = oldControl.Close()
 	}
-	for _, conn := range oldRDP { _ = conn.Close() }
+	for _, conn := range oldRDP {
+		_ = conn.Close()
+	}
 	if oldP2P != nil {
 		_ = oldP2P.Close()
 	}
@@ -1097,18 +1101,25 @@ func rdpTargetsFromProtocol(targets []protocol.RDPTarget) []rdp.Target {
 func (a *Agent) refreshRDPTargets(sess tunnel.TunnelSession, epoch uint64, targets []protocol.RDPTarget) {
 	refreshed := rdpTargetsFromProtocol(targets)
 	a.mu.Lock()
-	if a.epoch != epoch || a.readySession != sess { a.mu.Unlock(); return }
+	if a.epoch != epoch || a.readySession != sess {
+		a.mu.Unlock()
+		return
+	}
 	a.rdpTargets = refreshed
 	var revoked []*rdp.Connection
 	for id, conn := range a.rdpConnections {
 		if !slices.ContainsFunc(refreshed, func(target rdp.Target) bool { return target.DeviceID == id }) {
 			revoked = append(revoked, conn)
 			delete(a.rdpConnections, id)
-			if a.rdpActiveTarget == id { a.rdpActiveTarget = "" }
+			if a.rdpActiveTarget == id {
+				a.rdpActiveTarget = ""
+			}
 		}
 	}
 	a.mu.Unlock()
-	for _, conn := range revoked { _ = conn.Close() }
+	for _, conn := range revoked {
+		_ = conn.Close()
+	}
 }
 
 // sendRDPControlRequest uses one short-lived stream per rendezvous operation.
@@ -1516,17 +1527,25 @@ func (a *Agent) Status() AgentStatus {
 	sess, handler, divertSrv, proxyP2P, proxyDirect := a.readySession, a.exitHandler, a.divertSrv, a.proxyP2P, a.proxyDirect
 	st.RDPSessions = make([]RDPSessionStatus, 0, len(a.rdpConnections))
 	ids := make([]string, 0, len(a.rdpConnections))
-	for id := range a.rdpConnections { ids = append(ids, id) }
+	for id := range a.rdpConnections {
+		ids = append(ids, id)
+	}
 	sort.Strings(ids)
 	for _, id := range ids {
 		conn := a.rdpConnections[id]
 		udpEnabled, udpActive, udpReason := conn.UDPStatus()
 		tcpPath, udpPath := conn.PathStatus()
 		if udpEnabled {
-			if udpActive { udpReason = "UDP 已建立，路径：" + udpPath } else if udpReason == "" { udpReason = "UDP 已监听，等待 RDP 客户端发起数据" }
+			if udpActive {
+				udpReason = "UDP 已建立，路径：" + udpPath
+			} else if udpReason == "" {
+				udpReason = "UDP 已监听，等待 RDP 客户端发起数据"
+			}
 		} else {
 			udpPath = "disabled"
-			if udpReason == "" { udpReason = "当前传输不提供 RDP UDP" }
+			if udpReason == "" {
+				udpReason = "当前传输不提供 RDP UDP"
+			}
 		}
 		item := RDPSessionStatus{DeviceID: id, Name: conn.Target.Name, ListenAddr: conn.ListenAddr, UDPEnabled: udpEnabled, UDPActive: udpActive, UDPReason: udpReason, PathTCP: tcpPath, PathUDP: udpPath}
 		st.RDPSessions = append(st.RDPSessions, item)
@@ -1797,7 +1816,9 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 		}
 		return rdp.Target{}, errors.New("relay session ended while starting RDP")
 	}
-	if a.rdpConnections == nil { a.rdpConnections = make(map[string]*rdp.Connection) }
+	if a.rdpConnections == nil {
+		a.rdpConnections = make(map[string]*rdp.Connection)
+	}
 	a.rdpConnections[targetID] = conn
 	a.rdpActiveTarget = targetID
 	a.mu.Unlock()
@@ -1805,9 +1826,14 @@ func (a *Agent) ConnectRDP(targetID string, autoLaunch bool) (rdp.Target, error)
 		directSession.SetOnClose(func() {
 			a.mu.Lock()
 			active := a.rdpConnections[targetID]
-			if active != conn { a.mu.Unlock(); return }
+			if active != conn {
+				a.mu.Unlock()
+				return
+			}
 			delete(a.rdpConnections, targetID)
-			if a.rdpActiveTarget == targetID { a.rdpActiveTarget = "" }
+			if a.rdpActiveTarget == targetID {
+				a.rdpActiveTarget = ""
+			}
 			a.mu.Unlock()
 			// Connection.Close may trigger this callback; avoid re-entering closeOnce.
 			go conn.Close()
@@ -1951,9 +1977,13 @@ func (a *Agent) DisconnectRDPTarget(targetID string) {
 	a.mu.Lock()
 	conn := a.rdpConnections[targetID]
 	delete(a.rdpConnections, targetID)
-	if a.rdpActiveTarget == targetID { a.rdpActiveTarget = "" }
+	if a.rdpActiveTarget == targetID {
+		a.rdpActiveTarget = ""
+	}
 	a.mu.Unlock()
-	if conn != nil { _ = conn.Close() }
+	if conn != nil {
+		_ = conn.Close()
+	}
 }
 
 // DisconnectRDP is the legacy all-sessions shutdown operation.
@@ -1965,12 +1995,17 @@ func (a *Agent) DisconnectRDP() {
 	a.rdpConnections = nil
 	a.rdpActiveTarget = ""
 	a.mu.Unlock()
-	for _, conn := range connections { _ = conn.Close() }
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
 }
 
 func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	a.mu.Lock()
-	if a.epoch != epoch || a.readySession != sess { a.mu.Unlock(); return }
+	if a.epoch != epoch || a.readySession != sess {
+		a.mu.Unlock()
+		return
+	}
 	connections := a.rdpConnections
 	p2pManager := a.rdpP2P
 	a.rdpConnections = nil
@@ -1978,8 +2013,12 @@ func (a *Agent) clearRDPState(sess tunnel.TunnelSession, epoch uint64) {
 	a.rdpP2P = nil
 	a.rdpTargets = nil
 	a.mu.Unlock()
-	for _, conn := range connections { _ = conn.Close() }
-	if p2pManager != nil { _ = p2pManager.Close() }
+	for _, conn := range connections {
+		_ = conn.Close()
+	}
+	if p2pManager != nil {
+		_ = p2pManager.Close()
+	}
 }
 
 // SetP2PPowerConstrained switches the active direct-path manager to its mobile
@@ -2106,7 +2145,9 @@ func (a *Agent) closeRuntime() error {
 		if ctrl != nil {
 			errs = append(errs, ctrl.Close())
 		}
-		for _, conn := range rdpConnections { errs = append(errs, conn.Close()) }
+		for _, conn := range rdpConnections {
+			errs = append(errs, conn.Close())
+		}
 		if rdpP2P != nil {
 			errs = append(errs, rdpP2P.Close())
 		}

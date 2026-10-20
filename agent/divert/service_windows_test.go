@@ -432,3 +432,84 @@ func TestWindowsNetworkPipeConnectCanBeCanceled(t *testing.T) {
 		t.Fatal("pending pipe connect did not cancel")
 	}
 }
+
+func TestWindowsServiceReceiveReturnsBrokenPipeWithoutReusingCapture(t *testing.T) {
+	reader, writer, err := os.Pipe()
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = writer.Close()
+	device := &windowsServicePacketDevice{file: reader}
+	defer device.Close()
+	done := make(chan error, 1)
+	go func() {
+		_, _, err := device.Receive(make([]byte, 2048))
+		done <- err
+	}()
+	select {
+	case err := <-done:
+		if err == nil {
+			t.Fatal("broken pipe was treated as an active capture")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Receive tried to reconnect inside the old interceptor")
+	}
+}
+
+func TestWindowsServiceHandshakeTimesOutIfBrokerStopsReplying(t *testing.T) {
+	sid, err := currentWindowsUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf(`\\.\pipe\RelayProxy-Test-Handshake-%d-%d`, os.Getpid(), time.Now().UnixNano())
+	handle, err := createWindowsNetworkPipeNamed(name, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, done := make(chan struct{}), make(chan error, 1)
+	defer close(stop)
+	go func() {
+		if err := connectWindowsNetworkPipe(handle, stop); err != nil {
+			_ = windows.CloseHandle(handle)
+			done <- err
+			return
+		}
+		server := os.NewFile(uintptr(handle), name)
+		defer server.Close()
+		if _, err := readNetworkFrame(server); err != nil {
+			done <- err
+			return
+		}
+		if err := writeNetworkFrame(server, nil, networkFrame{kind: networkFrameReady}); err != nil {
+			done <- err
+			return
+		}
+		// Consume the second Hello, then remain alive without answering it.
+		if _, err := readNetworkFrame(server); err != nil {
+			done <- err
+			return
+		}
+		_, err := readNetworkFrame(server)
+		done <- err
+	}()
+	client, err := connectWindowsServicePipeNamed(name, "outbound", []uint16{45001})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = client.Close()
+		select {
+		case <-done:
+		case <-time.After(time.Second):
+			t.Error("handshake worker leaked")
+		}
+	}()
+	started := time.Now()
+	err = handshakeWindowsServicePipe(client, "outbound", []uint16{45001}, 50*time.Millisecond)
+	if !errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("handshake error=%v, want deadline exceeded", err)
+	}
+	if time.Since(started) > time.Second {
+		t.Fatal("stalled broker held startup beyond the handshake deadline")
+	}
+}

@@ -91,6 +91,7 @@ func main() {
 	backgroundLogFlag := flag.String("log-file", "", "Background log file (default: ~/.relayproxy/logs/relay-agent.log)")
 	backgroundChildFlag := flag.Bool("_background-child", false, "Internal detached child process")
 	startupHelperFlag := flag.String(startup.HelperFlagName(), "", "Internal Windows startup helper action")
+	replacementHelperFlag := flag.String(singleton.ReplacementHelperFlagName(), "", "Internal Windows instance replacement helper")
 	networkServiceFlag := flag.Bool(divert.NetworkServiceModeFlagName(), false, "Internal Windows network service mode")
 	networkServiceSIDFlag := flag.String(divert.NetworkServiceSIDFlagName(), "", "Internal Windows network service allowed SID")
 	networkServiceHelperFlag := flag.String(divert.NetworkServiceHelperFlagName(), "", "Internal Windows network service helper action")
@@ -107,6 +108,14 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+
+	if *replacementHelperFlag != "" {
+		if err := singleton.RunReplacementHelper(*replacementHelperFlag); err != nil {
+			fmt.Fprintf(os.Stderr, "[Agent] 替换旧客户端失败: %v\n", err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *networkServiceFlag {
 		if err := divert.RunWindowsNetworkService(*networkServiceSIDFlag); err != nil {
@@ -189,94 +198,95 @@ func main() {
 		log.Println("==================================================")
 	}
 
-	// Single-instance enforcement (Windows Named Mutex). The desktop window and
-	// the headless process share one mutex so a second launch can never start a
-	// second pair of local proxy listeners.
-	instanceLock, err := singleton.Acquire("RelayProxyAgent_Instance")
-	if err != nil {
-		log.Printf("[Agent] Notice: %v", err)
-		if wantGUI {
-			// Surface the instance that is already running instead of failing
-			// silently when the user double-clicks the icon again.
-			if !gui.ActivateExistingWindow() {
-				gui.ShowStartupError(errors.New("已有 RelayProxy Agent 实例正在运行，但没有可激活的桌面窗口。请先在任务管理器结束旧的 relay-agent/RelayProxy 进程后重试。"), "")
+	var cfgFile *config.AgentConfigFile
+	var networkMode string
+	// Validate configuration and finish service installation/UAC before replacing
+	// an existing client. Cancelling preparation must leave that client running.
+	instanceLock, err := singleton.AcquireForStartup(singleton.AgentInstanceName, func(replacing bool) error {
+		var err error
+		configExplicit := false
+		configDirExplicit := false
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "config":
+				configExplicit = true
+			case "config-dir":
+				configDirExplicit = true
 			}
+		})
+		*configPath, err = resolveConfigPath(*configPath, *configDir, configExplicit, configDirExplicit)
+		if err != nil {
+			return fmt.Errorf("[Config] Failed to resolve configuration path: %w", err)
 		}
-		log.Println("[Agent] Another instance is already active. Exiting.")
-		return
-	}
-	defer instanceLock.Release()
-
-	configExplicit := false
-	configDirExplicit := false
-	flag.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "config":
-			configExplicit = true
-		case "config-dir":
-			configDirExplicit = true
+		cfgFile, err = loadOrCreateAgentConfig(*configPath)
+		if err != nil {
+			return fmt.Errorf("[Config] Failed to load configuration %s: %w", *configPath, err)
 		}
-	})
-	*configPath, err = resolveConfigPath(*configPath, *configDir, configExplicit, configDirExplicit)
-	if err != nil {
-		startupFatal(wantGUI, "[Config] Failed to resolve configuration path: %v", err)
-	}
-	cfgFile, err := loadOrCreateAgentConfig(*configPath)
-	if err != nil {
-		startupFatal(wantGUI, "[Config] Failed to load configuration %s: %v", *configPath, err)
-	}
-	log.Printf("[Config] Loaded %s", *configPath)
-	// Apply CLI flag overrides
-	if *serverFlag != "" {
-		cfgFile.Server.Address = *serverFlag
-	}
-	if *exitFlag != "" {
-		cfgFile.Proxy.DefaultExitID = *exitFlag
-	}
-	flag.Visit(func(f *flag.Flag) {
-		switch f.Name {
-		case "web-listen":
-			cfgFile.Web.Listen = *webListenFlag
-		case "web-port":
-			if webPortFlag < 1 || webPortFlag > 65535 {
-				startupFatal(wantGUI, "[Config] --web-port must be between 1 and 65535")
+		log.Printf("[Config] Loaded %s", *configPath)
+		// Apply CLI flag overrides
+		if *serverFlag != "" {
+			cfgFile.Server.Address = *serverFlag
+		}
+		if *exitFlag != "" {
+			cfgFile.Proxy.DefaultExitID = *exitFlag
+		}
+		flag.Visit(func(f *flag.Flag) {
+			switch f.Name {
+			case "web-listen":
+				cfgFile.Web.Listen = *webListenFlag
+			case "web-port":
+				if webPortFlag < 1 || webPortFlag > 65535 {
+					err = errors.New("[Config] --web-port must be between 1 and 65535")
+					return
+				}
+				cfgFile.Web.Port = webPortFlag
 			}
-			cfgFile.Web.Port = webPortFlag
+		})
+		if err != nil {
+			return err
 		}
-	})
-	if noWebFlag {
-		cfgFile.Web.Enabled = config.BoolPtr(false)
-	}
-	if err := config.NormalizeAgentConfig(cfgFile); err != nil {
-		startupFatal(wantGUI, "[Config] Invalid startup configuration: %v", err)
-	}
-	networkMode := cfgFile.Network.Mode
-	if runtime.GOOS == "windows" && runtime.GOARCH != "amd64" && networkMode == "divert" {
-		// WinDivert currently ships only x64 binaries. Keep the ARM64 Agent
-		// usable with SOCKS5/HTTP instead of exiting before the UI can explain
-		// why transparent interception is unavailable.
-		log.Printf("[Agent] network.mode=divert is unavailable on Windows %s; starting with SOCKS5/HTTP only", runtime.GOARCH)
-		networkMode = ""
-	}
-	if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" && networkMode == "divert" {
-		switch {
-		case divert.PlatformServiceReady():
-			log.Println("[Agent] RelayProxy Network Service is ready; transparent proxy will run without GUI elevation")
-		case wantGUI && !startMinimized:
-			if err := divert.EnsurePlatformService(); err != nil {
-				// Keep the desktop usable after a cancelled/failed UAC prompt.
-				// The saved configuration remains "divert", so the UI still
-				// shows that a restart/repair is required.
-				log.Printf("[Agent] RelayProxy Network Service unavailable: %v; starting without transparent interception", err)
-				networkMode = ""
-			}
-		case startMinimized:
-			// Login startup must never produce a surprise UAC prompt. The
-			// service is installed once from an interactive settings change.
-			log.Println("[Agent] RelayProxy Network Service is not ready; skipping transparent interception during login startup")
+		if noWebFlag {
+			cfgFile.Web.Enabled = config.BoolPtr(false)
+		}
+		if err := config.NormalizeAgentConfig(cfgFile); err != nil {
+			return fmt.Errorf("[Config] Invalid startup configuration: %w", err)
+		}
+		networkMode = cfgFile.Network.Mode
+		if runtime.GOOS == "windows" && runtime.GOARCH != "amd64" && networkMode == "divert" {
+			// WinDivert currently ships only x64 binaries. Keep the ARM64 Agent
+			// usable with SOCKS5/HTTP instead of exiting before the UI can explain
+			// why transparent interception is unavailable.
+			log.Printf("[Agent] network.mode=divert is unavailable on Windows %s; starting with SOCKS5/HTTP only", runtime.GOARCH)
 			networkMode = ""
 		}
+		if runtime.GOOS == "windows" && runtime.GOARCH == "amd64" && networkMode == "divert" {
+			switch {
+			case divert.PlatformServiceReady():
+				log.Println("[Agent] RelayProxy Network Service is ready; transparent proxy will run without GUI elevation")
+			case wantGUI && !startMinimized:
+				if err := divert.EnsurePlatformService(); err != nil {
+					if replacing {
+						return fmt.Errorf("Network Service 准备失败，保留旧客户端并取消本次启动: %w", err)
+					}
+					// Keep the desktop usable after a cancelled/failed UAC prompt.
+					// The saved configuration remains "divert", so the UI still
+					// shows that a restart/repair is required.
+					log.Printf("[Agent] RelayProxy Network Service unavailable: %v; starting without transparent interception", err)
+					networkMode = ""
+				}
+			case startMinimized:
+				// Login startup must never produce a surprise UAC prompt. The
+				// service is installed once from an interactive settings change.
+				log.Println("[Agent] RelayProxy Network Service is not ready; skipping transparent interception during login startup")
+				networkMode = ""
+			}
+		}
+		return nil
+	})
+	if err != nil {
+		startupFatal(wantGUI, "[Agent] 启动客户端失败: %v", err)
 	}
+	defer instanceLock.Release()
 
 	identityPath := filepath.Join(filepath.Dir(*configPath), "device-identity.json")
 	deviceIdentity, err := deviceidentity.LoadOrCreate(identityPath)
@@ -450,8 +460,7 @@ func main() {
 			MinimizeToTray: cfgFile.IsMinimizeToTray(),
 			Theme:          cfgFile.GUI.Theme,
 			WebURL:         webURL,
-			// Keep the native window title stable. The single-instance activation
-			// path uses it to find a window that may currently be hidden in the tray.
+			// Keep the native window title stable for platform window lookup.
 			Title: gui.DefaultWindowTitle,
 		})
 		switch {

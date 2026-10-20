@@ -100,7 +100,11 @@ func (r *StreamRouter) handleOpenRDPTCP(ctx context.Context, header *protocol.St
 	target.ActiveStreams.Add(1)
 	defer clientSession.ActiveStreams.Add(-1)
 	defer target.ActiveStreams.Add(-1)
-	up, down := r.pipeStreams(ctx, clientStream, targetStream, clientSession, target)
+	// RDP's main TCP connection can stay quiet while UDP carries the desktop.
+	// Its lifetime follows the endpoints/session, not the generic proxy timer.
+	up, down := tunnel.Pipe(ctx, clientStream, targetStream, 0, func(up bool, n int) {
+		recordTransfer(clientSession, target, up, n)
+	})
 	r.emitAudit(&repository.ConnectionAudit{UserID: clientSession.OwnerUserID, ClientDeviceID: clientSession.DeviceID, ExitDeviceID: target.DeviceID, Protocol: "rdp", TargetHost: "127.0.0.1", TargetPort: 3389, StartedAt: time.Now(), EndedAt: time.Now(), BytesUp: up, BytesDown: down, Result: "SUCCESS"})
 }
 

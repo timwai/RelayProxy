@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"sync"
@@ -18,6 +19,7 @@ import (
 
 const dataWireOverhead = 24 + 16
 const punchKeepInterval = 10 * time.Second
+const missedKeepaliveLimit = 3
 const punchSelectionWindow = 120 * time.Millisecond
 
 // Bound endpoint-dependent NAT address learning even for an authenticated peer.
@@ -306,22 +308,25 @@ func WritePunchAck(conn *net.UDPConn, addr *net.UDPAddr, request secure.PunchPac
 // deliberately ignores caller-provided destinations: the coordinator's
 // candidate exchange fixed the peer address for this session.
 type PacketConn struct {
-	conn       *net.UDPConn
-	remote     *net.UDPAddr
-	remotePort netip.AddrPort
-	sessionID  uint64
-	key        []byte
-	encode     *secure.DataCodec
-	decode     *secure.DataCodec
-	readMu     sync.Mutex
-	writeMu    sync.Mutex
-	closeOnce  sync.Once
-	done       chan struct{}
-	packetID   atomic.Uint32
-	reassembly *Reassembler
-	readFrame  []byte
-	readWire   []byte
-	writeWire  []byte
+	conn        *net.UDPConn
+	remote      *net.UDPAddr
+	remotePort  netip.AddrPort
+	sessionID   uint64
+	key         []byte
+	encode      *secure.DataCodec
+	decode      *secure.DataCodec
+	readMu      sync.Mutex
+	writeMu     sync.Mutex
+	closeOnce   sync.Once
+	done        chan struct{}
+	packetID    atomic.Uint32
+	lastReceive atomic.Int64
+	keepMu      sync.Mutex
+	keepNonces  map[uint64]struct{}
+	reassembly  *Reassembler
+	readFrame   []byte
+	readWire    []byte
+	writeWire   []byte
 }
 
 func NewPacketConn(result *UDPResult) (*PacketConn, error) {
@@ -358,7 +363,9 @@ func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, 
 		readFrame:  make([]byte, protocol.UDPFragmentHeaderSize+protocol.UDPFragmentPayload),
 		readWire:   make([]byte, secure.MaxDataPayload+dataWireOverhead),
 		writeWire:  make([]byte, secure.MaxDataPayload+dataWireOverhead),
+		keepNonces: make(map[uint64]struct{}, missedKeepaliveLimit),
 	}
+	c.lastReceive.Store(time.Now().UnixNano())
 	if keepInterval > 0 {
 		go c.keepaliveLoop(keepInterval)
 	}
@@ -368,6 +375,10 @@ func newPacketConn(result *UDPResult, keepInterval time.Duration) (*PacketConn, 
 func (c *PacketConn) keepaliveLoop(interval time.Duration) {
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
+	// Closing the socket wakes the blocked RDP reader and allows its existing
+	// association replacement / relay race to run. UDP writes alone cannot
+	// detect a path that silently stops delivering packets.
+	defer c.Close()
 	var nonce uint64
 	if err := binary.Read(rand.Reader, binary.BigEndian, &nonce); err != nil {
 		nonce = uint64(time.Now().UnixNano())
@@ -377,9 +388,18 @@ func (c *PacketConn) keepaliveLoop(interval time.Duration) {
 		case <-c.done:
 			return
 		case <-ticker.C:
+			if time.Since(time.Unix(0, c.lastReceive.Load())) >= missedKeepaliveLimit*interval {
+				log.Printf("[RDP] UDP direct path stopped responding, closing association session=%d", c.sessionID)
+				return
+			}
 			nonce++
+			c.keepMu.Lock()
+			delete(c.keepNonces, nonce-missedKeepaliveLimit)
+			c.keepNonces[nonce] = struct{}{}
+			c.keepMu.Unlock()
 			packet := secure.PunchPacket{Type: secure.PunchKeep, SessionID: c.sessionID, Nonce: nonce}.Encode(c.key)
 			if _, err := c.conn.WriteToUDPAddrPort(packet, c.remotePort); err != nil {
+				log.Printf("[RDP] UDP direct path keepalive failed session=%d: %v", c.sessionID, err)
 				return
 			}
 		}
@@ -399,10 +419,23 @@ func (c *PacketConn) ReadFrom(buffer []byte) (int, net.Addr, error) {
 		if remote != c.remotePort {
 			continue
 		}
+		if packet, err := secure.DecodePunchPacket(wire[:n], c.key); err == nil {
+			if packet.SessionID == c.sessionID && packet.Type == secure.PunchAck {
+				c.keepMu.Lock()
+				_, pending := c.keepNonces[packet.Nonce]
+				delete(c.keepNonces, packet.Nonce)
+				c.keepMu.Unlock()
+				if pending {
+					c.lastReceive.Store(time.Now().UnixNano())
+				}
+			}
+			continue
+		}
 		decoded, err := c.decode.DecodeTo(wire[:n], c.readFrame)
 		if err != nil {
 			continue
 		}
+		c.lastReceive.Store(time.Now().UnixNano())
 		assembled, complete, err := c.reassembly.Feed(c.readFrame[:decoded], buffer)
 		if _, short := err.(ioErrShortBuffer); short {
 			return 0, c.remote, err

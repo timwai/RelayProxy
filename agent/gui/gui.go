@@ -39,8 +39,7 @@ var ErrExternalUI = errors.New("management UI opened externally")
 // -ldflags "-X relayproxy/agent/gui.Version=x.y.z".
 var Version = "1.0.0"
 
-// DefaultWindowTitle is intentionally stable across releases. The second
-// instance uses it to locate and activate the first instance's native window.
+// DefaultWindowTitle is intentionally stable across releases for native window lookup.
 const (
 	DefaultWindowTitle  = "RelayProxy"
 	DefaultWindowWidth  = 1100

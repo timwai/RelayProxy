@@ -28,6 +28,7 @@ const (
 	windowsNetworkServiceName          = "RelayProxyNetwork"
 	windowsNetworkServiceDisplayName   = "RelayProxy Network Service"
 	windowsNetworkPipeName             = `\\.\pipe\RelayProxyNetwork-v5`
+	windowsNetworkHandshakeTimeout     = 15 * time.Second
 	windowsTransparentFirewallRuleName = "RelayProxy Transparent Proxy"
 
 	networkServiceModeFlagName   = "relayproxy-network-service"
@@ -37,10 +38,9 @@ const (
 	networkServiceHelperInstall = "install"
 	networkServiceHelperRemove  = "remove"
 
-	windowsServiceCaptureReady        = 1
-	windowsServiceCaptureReconnecting = 2
-	windowsServiceCaptureActive       = 3
-	windowsServiceCaptureClosed       = 4
+	windowsServiceCaptureReady  = 1
+	windowsServiceCaptureActive = 3
+	windowsServiceCaptureClosed = 4
 
 	pipeAccessDuplex        = 0x00000003
 	pipeRejectRemoteClients = 0x00000008
@@ -56,15 +56,10 @@ type networkHello struct {
 }
 
 type windowsServicePacketDevice struct {
-	filter       string
-	tcpPorts     []uint16
 	fileMu       sync.RWMutex
-	reconnectMu  sync.Mutex
 	file         *os.File
 	writeMu      sync.Mutex
-	closed       atomic.Bool
 	captureState atomic.Uint32
-	reconnects   atomic.Uint64
 	closeOnce    sync.Once
 	closeErr     error
 }
@@ -611,29 +606,38 @@ func connectWindowsServicePipeNamed(pipeName, filter string, tcpPorts []uint16) 
 		_ = windows.CloseHandle(handle)
 		return nil, errors.New("无法打开 RelayProxy Network Service 管道")
 	}
-	helloPayload, err := json.Marshal(networkHello{Filter: filter, TCPPorts: tcpPorts})
-	if err != nil {
+	if err := handshakeWindowsServicePipe(file, filter, tcpPorts, windowsNetworkHandshakeTimeout); err != nil {
 		_ = file.Close()
 		return nil, err
 	}
+	return file, nil
+}
+
+func handshakeWindowsServicePipe(file *os.File, filter string, tcpPorts []uint16, timeout time.Duration) error {
+	// A live but unresponsive service must not block recovery or Agent shutdown
+	// forever. These overlapped handles support the Go runtime's IO deadlines.
+	if err := file.SetDeadline(time.Now().Add(timeout)); err != nil {
+		return err
+	}
+	defer file.SetDeadline(time.Time{})
+	helloPayload, err := json.Marshal(networkHello{Filter: filter, TCPPorts: tcpPorts})
+	if err != nil {
+		return err
+	}
 	if err := writeNetworkFrame(file, nil, networkFrame{kind: networkFrameHello, payload: helloPayload}); err != nil {
-		_ = file.Close()
-		return nil, err
+		return err
 	}
 	reply, err := readNetworkFrame(file)
 	if err != nil {
-		_ = file.Close()
-		return nil, err
+		return err
 	}
 	switch reply.kind {
 	case networkFrameReady:
-		return file, nil
+		return nil
 	case networkFrameError:
-		_ = file.Close()
-		return nil, errors.New(strings.TrimSpace(string(reply.payload)))
+		return errors.New(strings.TrimSpace(string(reply.payload)))
 	default:
-		_ = file.Close()
-		return nil, fmt.Errorf("RelayProxy Network Service 返回未知握手帧 %d", reply.kind)
+		return fmt.Errorf("RelayProxy Network Service 返回未知握手帧 %d", reply.kind)
 	}
 }
 
@@ -643,7 +647,7 @@ func openWindowsServicePacketDevice(filter string, tcpPorts []uint16) (*windowsS
 	if err != nil {
 		return nil, err
 	}
-	device := &windowsServicePacketDevice{filter: filter, tcpPorts: ports, file: file}
+	device := &windowsServicePacketDevice{file: file}
 	device.captureState.Store(windowsServiceCaptureReady)
 	return device, nil
 }
@@ -656,17 +660,14 @@ func (d *windowsServicePacketDevice) PacketDeviceDiagnostics() packetDeviceDiagn
 	switch d.captureState.Load() {
 	case windowsServiceCaptureReady:
 		state = "waiting_first_capture"
-	case windowsServiceCaptureReconnecting:
-		state = "reconnecting"
 	case windowsServiceCaptureActive:
 		state = "capturing"
 	case windowsServiceCaptureClosed:
 		state = "closed"
 	}
 	return packetDeviceDiagnostics{
-		Backend:    "windows-network-service",
-		State:      state,
-		Reconnects: d.reconnects.Load(),
+		Backend: "windows-network-service",
+		State:   state,
 	}
 }
 
@@ -680,91 +681,36 @@ func (d *windowsServicePacketDevice) currentFile() *os.File {
 	return file
 }
 
-func (d *windowsServicePacketDevice) reconnect(expected *os.File) error {
-	if d == nil || d.closed.Load() {
-		return netClosedError()
-	}
-	d.captureState.Store(windowsServiceCaptureReconnecting)
-	d.reconnects.Add(1)
-	d.reconnectMu.Lock()
-	defer d.reconnectMu.Unlock()
-	if d.closed.Load() {
-		return netClosedError()
-	}
-	if current := d.currentFile(); current != nil && current != expected {
-		return nil
-	}
-	d.fileMu.Lock()
-	if d.file == expected && d.file != nil {
-		_ = d.file.Close()
-		d.file = nil
-	}
-	d.fileMu.Unlock()
-
-	deadline := time.Now().Add(20 * time.Second)
-	var lastErr error
-	for time.Now().Before(deadline) {
-		if d.closed.Load() {
-			return netClosedError()
-		}
-		file, err := connectWindowsServicePipe(d.filter, d.tcpPorts)
-		if err == nil {
-			d.fileMu.Lock()
-			if d.closed.Load() {
-				d.fileMu.Unlock()
-				_ = file.Close()
-				return netClosedError()
-			}
-			d.file = file
-			d.fileMu.Unlock()
-			d.captureState.Store(windowsServiceCaptureReady)
-			return nil
-		}
-		lastErr = err
-		time.Sleep(250 * time.Millisecond)
-	}
-	return fmt.Errorf("RelayProxy Network Service 自动重连失败: %w", lastErr)
-}
-
 func (*windowsServicePacketDevice) deferUDPClassification() {}
 
 func (d *windowsServicePacketDevice) Receive(buffer []byte) (int, packetMetadata, error) {
-	for attempt := 0; attempt < 2; attempt++ {
-		file := d.currentFile()
-		if file == nil {
-			return 0, packetMetadata{}, errors.New("RelayProxy Network Service packet device is closed")
-		}
-		frame, err := readNetworkFrame(file)
-		if err != nil {
-			if attempt == 0 && !d.closed.Load() {
-				if reconnectErr := d.reconnect(file); reconnectErr == nil {
-					continue
-				} else {
-					return 0, packetMetadata{}, errors.Join(err, reconnectErr)
-				}
-			}
-			return 0, packetMetadata{}, err
-		}
-		if frame.kind == networkFrameError {
-			return 0, packetMetadata{}, errors.New(strings.TrimSpace(string(frame.payload)))
-		}
-		if frame.kind != networkFrameCapture {
-			return 0, packetMetadata{}, fmt.Errorf("RelayProxy Network Service returned unexpected frame %d", frame.kind)
-		}
-		if len(frame.payload) > len(buffer) {
-			return 0, packetMetadata{}, fmt.Errorf("captured packet %d exceeds receive buffer %d", len(frame.payload), len(buffer))
-		}
-		copy(buffer, frame.payload)
-		d.captureState.Store(windowsServiceCaptureActive)
-		outbound := frame.flags&networkFrameFlagOutbound != 0
-		return len(frame.payload), packetMetadata{
-			outbound:         outbound,
-			capturedOutbound: outbound,
-			ifIndex:          frame.ifIndex,
-			subIfIndex:       frame.subIfIndex,
-		}, nil
+	file := d.currentFile()
+	if file == nil {
+		return 0, packetMetadata{}, errors.New("RelayProxy Network Service packet device is closed")
 	}
-	return 0, packetMetadata{}, errors.New("RelayProxy Network Service receive retry exhausted")
+	frame, err := readNetworkFrame(file)
+	if err != nil {
+		// A replacement broker has a new capture session.
+		// Let the interceptor release old flows before the Agent re-arms it;
+		// reconnecting here would mix old asynchronous injections with new capture.
+		return 0, packetMetadata{}, err
+	}
+	if frame.kind == networkFrameError {
+		return 0, packetMetadata{}, errors.New(strings.TrimSpace(string(frame.payload)))
+	}
+	if frame.kind != networkFrameCapture {
+		return 0, packetMetadata{}, fmt.Errorf("RelayProxy Network Service returned unexpected frame %d", frame.kind)
+	}
+	if len(frame.payload) > len(buffer) {
+		return 0, packetMetadata{}, fmt.Errorf("captured packet %d exceeds receive buffer %d", len(frame.payload), len(buffer))
+	}
+	copy(buffer, frame.payload)
+	d.captureState.Store(windowsServiceCaptureActive)
+	outbound := frame.flags&networkFrameFlagOutbound != 0
+	return len(frame.payload), packetMetadata{
+		outbound: outbound, capturedOutbound: outbound,
+		ifIndex: frame.ifIndex, subIfIndex: frame.subIfIndex,
+	}, nil
 }
 
 func (d *windowsServicePacketDevice) writeTransactionFrame(frame networkFrame) error {
@@ -802,7 +748,6 @@ func (d *windowsServicePacketDevice) Close() error {
 		return nil
 	}
 	d.closeOnce.Do(func() {
-		d.closed.Store(true)
 		d.captureState.Store(windowsServiceCaptureClosed)
 		d.fileMu.Lock()
 		if d.file != nil {

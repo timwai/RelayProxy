@@ -148,3 +148,58 @@ func TestFinalizeFailureReleasesCapture(t *testing.T) {
 		})
 	}
 }
+
+func TestCaptureFailureCanRearmWithoutRelayReconnect(t *testing.T) {
+	for _, failure := range []string{"receive", "inject", "complete"} {
+		t.Run(failure, func(t *testing.T) {
+			var ready atomic.Bool
+			ready.Store(true)
+			s := newTestServer(t, Options{ProxyReady: ready.Load, Config: Config{DefaultAction: ActionDirect}})
+			device := newTestPacketDevice()
+			var previous *packetInterceptor
+			if err := s.start(func(s *Server) (systemInterceptor, error) {
+				var adapter packetDevice = device
+				if failure == "complete" {
+					adapter = &failingFinalizeDevice{device}
+				}
+				previous = newPacketInterceptor(s, adapter, nil, nil)
+				previous.start()
+				return previous, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			route, err := s.ClassifyFlow(testFlow(ProtoUDP, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if failure == "receive" {
+				_ = device.Close()
+			} else {
+				device.failSend.Store(failure == "inject")
+				device.incoming <- capturedTestPacket{data: []byte("unparseable packet"), meta: packetMetadata{outbound: true}}
+			}
+			select {
+			case <-previous.ctx.Done():
+			case <-time.After(2 * time.Second):
+				t.Fatal("capture failure was not released")
+			}
+			replacement := newTestPacketDevice()
+			if err := s.start(func(s *Server) (systemInterceptor, error) {
+				i := newPacketInterceptor(s, replacement, nil, nil)
+				i.start()
+				return i, nil
+			}); err != nil {
+				t.Fatal(err)
+			}
+			// A late cleanup from the failed interceptor must not pause its successor.
+			s.pause(previous)
+			if !s.Running() || route.udp.ctx.Err() == nil || s.ctx.Err() != nil {
+				t.Fatal("recovery retained stale flows or stopped the replacement")
+			}
+			replacement.incoming <- capturedTestPacket{data: []byte("fresh packet")}
+			if got := expectInterceptedPacket(t, replacement); string(got.data) != "fresh packet" {
+				t.Fatal("replacement capture did not forward packets")
+			}
+		})
+	}
+}

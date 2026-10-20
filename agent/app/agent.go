@@ -597,9 +597,9 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 
 // Serialize capture changes independently of Agent.mu: platform shutdown may
 // wait for workers that still need Agent state to cancel their tunnel dials.
-func (a *Agent) syncDivert() {
+func (a *Agent) syncDivert() error {
 	if a.divertSrv == nil {
-		return
+		return nil
 	}
 	a.divertMu.Lock()
 	defer a.divertMu.Unlock()
@@ -615,16 +615,17 @@ func (a *Agent) syncDivert() {
 	if !a.handshakeOK.Load() || a.closed.Load() {
 		a.divertSrv.Pause()
 		a.setDivertStage("waiting_relay", nil)
-		return
+		return nil
 	}
 	if a.divertSrv.Running() {
-		return
+		return nil
 	}
+	recovering := a.divertSrv.Diagnostics().LastError != ""
 	a.setDivertStage("starting", nil)
 	if err := a.divertSrv.Start(); err != nil {
 		a.setDivertStage("error", err)
 		log.Printf("[Agent] Transparent proxy not armed: %v", err)
-		return
+		return err
 	}
 	a.mu.RLock()
 	currentEpoch := a.epoch
@@ -632,9 +633,13 @@ func (a *Agent) syncDivert() {
 	if currentEpoch != epoch || !a.handshakeOK.Load() || a.closed.Load() {
 		a.divertSrv.Pause()
 		a.setDivertStage("waiting_relay", nil)
-		return
+		return nil
 	}
 	a.setDivertStage("running", nil)
+	if recovering {
+		log.Printf("[Agent] Transparent proxy capture recovered")
+	}
+	return nil
 }
 
 func (a *Agent) onTunnelStateChange(oldState, newState tunnel.State, sess tunnel.TunnelSession) {
@@ -1500,6 +1505,15 @@ func (a *Agent) Start() (err error) {
 	}
 	a.mu.Lock()
 	a.started = true
+	if a.divertSrv != nil {
+		// A broker/driver failure does not necessarily disconnect the Relay.
+		// Reconcile capture independently of tunnel state callbacks as well.
+		a.wg.Add(1)
+		go func() {
+			defer a.wg.Done()
+			maintainDivert(a.ctx, a.syncDivert)
+		}()
+	}
 	a.mu.Unlock()
 	a.ConnectTunnel()
 	return nil

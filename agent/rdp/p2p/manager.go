@@ -389,7 +389,8 @@ func (m *Manager) handleTCP(conn net.Conn) {
 		return
 	}
 	item.pathTCP.Store("tcp_p2p")
-	_, _ = tunnel.Pipe(m.ctx, accepted, local, 30*time.Minute, nil)
+	// The lease owns this connection; quiet TCP can accompany active RDP UDP.
+	_, _ = tunnel.Pipe(m.ctx, accepted, local, 0, nil)
 	_ = accepted.Close()
 	_ = local.Close()
 }
@@ -974,35 +975,59 @@ func (s *Session) isExpired() bool {
 }
 
 func (s *Session) renewLoop() {
-	interval := s.manager.lease / 2
+	interval := s.manager.lease / 3
 	if interval < 5*time.Second {
 		interval = 5 * time.Second
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
+	timer := time.NewTimer(0)
+	defer timer.Stop()
+	delay := interval
 	for {
+		// Never wait (or block in a renewal) beyond the last granted lease.
+		// A transient signaling failure must not tear down working data paths.
+		expires := time.UnixMilli(s.ExpiresAt.Load())
+		timer.Reset(max(0, min(delay, time.Until(expires))))
 		select {
 		case <-s.closed:
 			return
 		case <-s.manager.ctx.Done():
 			return
-		case <-ticker.C:
+		case <-timer.C:
 			if s.isExpired() {
+				log.Printf("[RDP] direct session %d lease expired", s.ID)
 				s.removeLocal()
 				return
 			}
-			ctx, cancel := context.WithTimeout(s.manager.ctx, 5*time.Second)
+			ctx, cancel := context.WithDeadline(s.manager.ctx, minDeadline(time.Now().Add(5*time.Second), expires))
 			response, err := s.manager.send(ctx, protocol.RDPControlMessage{Type: protocol.RDPControlLeaseRenew, SessionID: s.ID, ControllerID: s.ControllerID, TargetID: s.TargetID, SessionToken: append([]byte(nil), s.Token...)})
 			cancel()
-			if err != nil || response.Type == protocol.RDPControlError {
+			if err != nil {
+				log.Printf("[RDP] direct session %d lease renewal failed, retrying within current lease: %v", s.ID, err)
+				delay = time.Second
+				continue
+			}
+			if response.Type == protocol.RDPControlError && response.ErrorCode != "AUTH_UNAVAILABLE" {
+				log.Printf("[RDP] direct session %d lease renewal rejected: %s", s.ID, response.ErrorCode)
 				s.removeLocal()
 				return
 			}
-			if response.LeaseExpiresAt > 0 {
-				s.ExpiresAt.Store(response.LeaseExpiresAt)
+			if response.Type != protocol.RDPControlLeaseAck || response.SessionID != s.ID || response.LeaseExpiresAt <= time.Now().UnixMilli() {
+				// A failed authorization lookup or malformed reply grants no extra
+				// time. Retry only while the existing authorization is still valid.
+				delay = time.Second
+				continue
 			}
+			s.ExpiresAt.Store(response.LeaseExpiresAt)
+			delay = interval
 		}
 	}
+}
+
+func minDeadline(a, b time.Time) time.Time {
+	if a.Before(b) {
+		return a
+	}
+	return b
 }
 
 func (s *Session) removeLocal() {

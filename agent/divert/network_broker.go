@@ -26,7 +26,8 @@ const (
 
 	// Idle capture is harmless. Only an outstanding packet may time out: the
 	// kernel is diverting other host traffic while the Agent owns this packet.
-	networkCaptureTimeout = 5 * time.Second
+	networkCaptureTimeout    = 5 * time.Second
+	networkErrorWriteTimeout = 100 * time.Millisecond
 )
 
 var errNetworkCaptureTimeout = errors.New("packet handling timed out; capture released")
@@ -116,6 +117,7 @@ func serveNetworkPacketsWithTimeout(pipe io.ReadWriteCloser, device packetDevice
 	stop := make(chan struct{})
 	var stopOnce sync.Once
 	var stopErr error
+	var writeMu sync.Mutex
 	shutdown := func(err error) {
 		stopOnce.Do(func() {
 			stopErr = err
@@ -123,6 +125,14 @@ func serveNetworkPacketsWithTimeout(pipe io.ReadWriteCloser, device packetDevice
 			// Release machine-wide capture before interrupting pipe IO. This
 			// also unblocks Receive/Send when the Agent is alive but unresponsive.
 			_ = device.Shutdown()
+			if err != nil {
+				// Preserve watchdog/driver errors when the client is still reading.
+				// A stalled reader or capture writer must not delay capture release
+				// or keep the next Agent connection waiting indefinitely.
+				timer := time.AfterFunc(networkErrorWriteTimeout, func() { _ = pipe.Close() })
+				_ = writeNetworkFrame(pipe, &writeMu, networkFrame{kind: networkFrameError, payload: []byte(err.Error())})
+				timer.Stop()
+			}
 			_ = pipe.Close()
 		})
 	}
@@ -151,7 +161,7 @@ func serveNetworkPacketsWithTimeout(pipe io.ReadWriteCloser, device packetDevice
 				} else {
 					timer.Reset(timeout)
 				}
-				if err := writeNetworkFrame(pipe, nil, networkFrame{kind: networkFrameCapture,
+				if err := writeNetworkFrame(pipe, &writeMu, networkFrame{kind: networkFrameCapture,
 					flags: flags, ifIndex: meta.ifIndex, subIfIndex: meta.subIfIndex, payload: buffer[:n]}); err != nil {
 					timer.Stop()
 					return err

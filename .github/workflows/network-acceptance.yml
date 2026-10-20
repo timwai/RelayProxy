@@ -83,6 +83,10 @@ jobs:
         shell: bash
         run: |
           go test ./agent/divert ./agent/routing -run 'Test(FakeIP|Fake|DoH|DNS|Linux|Windows|Darwin)' -count=1 -v -timeout=5m
+      - name: Execute Windows client process takeover tests
+        if: runner.os == 'Windows'
+        shell: bash
+        run: go test ./agent/singleton -count=1 -v -timeout=90s
       - name: Limitations
         shell: bash
         run: |

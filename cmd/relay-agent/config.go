@@ -141,8 +141,9 @@ func isPackagedExample(contents []byte) bool {
 		bytes.Contains(contents, []byte("identity_id: a1b2c3d4e5f6g7h8"))
 }
 
-// loadOrCreateAgentConfig runs before the agent starts, under its instance
-// lock. Existing or invalid files are never replaced by generated defaults.
+// loadOrCreateAgentConfig runs during startup preparation, before replacing an
+// existing client. First launches hold the instance lock while creating defaults.
+// Existing or invalid files are never replaced by generated defaults.
 // Legacy discovery is done by resolveConfigPath; this function only loads.
 func loadOrCreateAgentConfig(path string) (*config.AgentConfigFile, error) {
 	cfg, err := config.LoadAgentConfig(path)

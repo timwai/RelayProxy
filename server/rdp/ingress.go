@@ -463,7 +463,8 @@ func (m *IngressManager) handleTCP(ctx context.Context, ep *ingressEndpoint, con
 	}
 	_ = stream.SetDeadline(time.Time{})
 	_ = conn.SetDeadline(time.Time{})
-	up, down := tunnel.Pipe(ctx, conn, stream, 30*time.Minute, nil)
+	// A quiet TCP channel is normal when RDP uses its UDP side channels.
+	up, down := tunnel.Pipe(ctx, conn, stream, 0, nil)
 	entry.Result = "FORWARDED"
 	entry.Reason = ""
 	entry.BytesUp, entry.BytesDown = up, down

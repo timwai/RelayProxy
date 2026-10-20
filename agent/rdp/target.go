@@ -67,7 +67,9 @@ func handleTargetTCP(ctx context.Context, stream tunnel.TunnelStream, req protoc
 		return err
 	}
 	_ = stream.SetDeadline(time.Time{})
-	_, _ = tunnel.Pipe(ctx, stream, local, 10*time.Minute, nil)
+	// UDP activity does not refresh TCP deadlines. The main RDP connection
+	// must survive a quiet TCP channel until its endpoint or session closes.
+	_, _ = tunnel.Pipe(ctx, stream, local, 0, nil)
 	return nil
 }
 

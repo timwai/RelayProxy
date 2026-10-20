@@ -171,3 +171,46 @@ func TestNetworkBrokerDoesNotTimeOutIdleOrCompletedCapture(t *testing.T) {
 		}
 	}
 }
+
+func TestNetworkBrokerReportsCaptureTimeoutBeforeClosingPipe(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	device := newTestPacketDevice()
+	done := make(chan error, 1)
+	go func() { done <- serveNetworkPacketsWithTimeout(server, device, 50*time.Millisecond) }()
+	_ = client.SetDeadline(time.Now().Add(2 * time.Second))
+	device.incoming <- capturedTestPacket{data: []byte("capture")}
+	if _, err := readNetworkFrame(client); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := readNetworkFrame(client)
+	if err != nil || frame.kind != networkFrameError || string(frame.payload) != errNetworkCaptureTimeout.Error() {
+		t.Fatalf("watchdog reason was lost: frame=%+v err=%v", frame, err)
+	}
+	select {
+	case <-device.done:
+	default:
+		t.Fatal("error reporting preceded release of system capture")
+	}
+	if err := <-done; !errors.Is(err, errNetworkCaptureTimeout) {
+		t.Fatalf("shutdown reason=%v", err)
+	}
+}
+
+func TestNetworkBrokerReportsDriverInjectionFailure(t *testing.T) {
+	server, client := net.Pipe()
+	defer client.Close()
+	device := newTestPacketDevice()
+	device.failSend.Store(true)
+	done := make(chan error, 1)
+	go func() { done <- serveNetworkPackets(server, device) }()
+	_ = client.SetDeadline(time.Now().Add(2 * time.Second))
+	if err := writeNetworkFrame(client, nil, networkFrame{kind: networkFrameInject, payload: []byte("reply")}); err != nil {
+		t.Fatal(err)
+	}
+	frame, err := readNetworkFrame(client)
+	if err != nil || frame.kind != networkFrameError || string(frame.payload) != "forced packet injection failure" {
+		t.Fatalf("driver failure was lost: frame=%+v err=%v", frame, err)
+	}
+	<-done
+}

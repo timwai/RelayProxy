@@ -323,7 +323,9 @@ func (c *Connection) handleTCP(ctx context.Context, local net.Conn, dial func(co
 		}
 		c.mu.Unlock()
 	}()
-	_, _ = tunnel.Pipe(ctx, local, remote, 10*time.Minute, nil)
+	// RDP can carry its active channels over UDP while keeping TCP quiet.
+	// Keep the main connection until an endpoint closes or the session ends.
+	_, _ = tunnel.Pipe(ctx, local, remote, 0, nil)
 }
 
 func (c *Connection) serveUDP(ctx context.Context, dial func(context.Context, string) (net.PacketConn, error)) {

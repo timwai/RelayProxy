@@ -229,10 +229,22 @@ type PushMessageReceipt struct {
 	Error     string `json:"error,omitempty"`
 }
 
+// BatteryStatus is optional, low-frequency device telemetry piggybacked on
+// an existing authenticated heartbeat. Older clients do not send this field.
+type BatteryStatus struct {
+	Level    int  `json:"level"`
+	Charging bool `json:"charging"`
+}
+
+func (b BatteryStatus) Valid() bool {
+	return b.Level >= 0 && b.Level <= 100
+}
+
 // PingMessage for heartbeat
 type PingMessage struct {
 	Timestamp   int64           `json:"timestamp"`
 	Diagnostics json.RawMessage `json:"diagnostics,omitempty"`
+	Battery     *BatteryStatus  `json:"battery,omitempty"`
 }
 
 // PongMessage for heartbeat response

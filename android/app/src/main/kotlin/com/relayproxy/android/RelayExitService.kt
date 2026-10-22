@@ -385,7 +385,7 @@ class RelayExitService : Service() {
                     }
                 })
                 created.setPowerConstrained(shouldUseP2PLowPowerProfile())
-                created.setHeartbeatMultiplier(heartbeatMultiplier())
+                created.setHeartbeatMultiplier(heartbeatMultiplier().toLong())
                 created.start()
                 val accepted = synchronized(this) {
                     if (!destroyed && generation == coreGeneration && core == null) {
@@ -508,7 +508,7 @@ class RelayExitService : Service() {
     private fun applyP2PPowerProfile() {
         val constrained = shouldUseP2PLowPowerProfile()
         core?.setPowerConstrained(constrained)
-        core?.setHeartbeatMultiplier(heartbeatMultiplier())
+        core?.setHeartbeatMultiplier(heartbeatMultiplier().toLong())
     }
 
     private fun createNotificationChannel() {

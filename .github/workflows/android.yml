@@ -101,7 +101,8 @@ jobs:
         run: |
           gradle -p android :app:testDebugUnitTest \
             --tests 'com.relayproxy.android.PowerAwarePollPolicyTest' \
-            --tests 'com.relayproxy.android.CoreDemandTest'
+            --tests 'com.relayproxy.android.CoreDemandTest' \
+            --tests 'com.relayproxy.android.NotificationRefreshPolicyTest'
 
       - name: Build debug APK
         run: gradle -p android :app:assembleDebug

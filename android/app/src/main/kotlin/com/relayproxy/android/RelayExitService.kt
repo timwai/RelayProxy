@@ -11,6 +11,7 @@ import android.content.res.Configuration
 import android.content.Intent
 import android.content.IntentFilter
 import android.os.Build
+import android.os.BatteryManager
 import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
@@ -94,6 +95,10 @@ class RelayExitService : Service() {
     private lateinit var powerManager: PowerManager
     private lateinit var messageOverlayController: MessageOverlayController
     private var powerReceiverRegistered = false
+    private var batteryReceiverRegistered = false
+    private data class BatteryReading(val level: Int, val charging: Boolean)
+    @Volatile
+    private var batteryReading: BatteryReading? = null
     private var coreGeneration = 0L
     private val messageDrainPending = AtomicBoolean(false)
 
@@ -105,6 +110,27 @@ class RelayExitService : Service() {
 
     @Volatile
     private var activeNetworkMode: String? = null
+
+    private val batteryReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            if (intent?.action != Intent.ACTION_BATTERY_CHANGED) return
+            val level = intent.getIntExtra(BatteryManager.EXTRA_LEVEL, -1)
+            val scale = intent.getIntExtra(BatteryManager.EXTRA_SCALE, -1)
+            val status = intent.getIntExtra(BatteryManager.EXTRA_STATUS, -1)
+            if (level < 0 || scale <= 0 || level > scale ||
+                status == BatteryManager.BATTERY_STATUS_UNKNOWN
+            ) return
+            val percent = ((level.toLong() * 100 + scale / 2) / scale).toInt()
+            val charging = status == BatteryManager.BATTERY_STATUS_CHARGING ||
+                status == BatteryManager.BATTERY_STATUS_FULL
+            val next = BatteryReading(percent, charging)
+            if (batteryReading == next) return
+            batteryReading = next
+            // Only change in-memory Core state. Network transmission waits for
+            // the next already-scheduled Ping, without a radio wakeup.
+            core?.setBatteryStatus(percent.toLong(), charging)
+        }
+    }
 
     private val powerStateReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context?, intent: Intent?) {
@@ -133,6 +159,12 @@ class RelayExitService : Service() {
         powerManager = getSystemService(PowerManager::class.java)
         messageOverlayController = MessageOverlayController(this, ::showMessageNotification)
         registerPowerStateReceiver()
+        // ACTION_BATTERY_CHANGED is sticky and event-driven; no battery poll,
+        // timer or additional network connection is needed.
+        runCatching {
+            registerReceiver(batteryReceiver, IntentFilter(Intent.ACTION_BATTERY_CHANGED))
+            batteryReceiverRegistered = true
+        }
         createNotificationChannel()
     }
 
@@ -205,6 +237,10 @@ class RelayExitService : Service() {
             messageOverlayController.dismissAll()
         }
         unregisterPowerStateReceiver()
+        if (batteryReceiverRegistered) {
+            batteryReceiverRegistered = false
+            runCatching { unregisterReceiver(batteryReceiver) }
+        }
         if (activeInstance === this) {
             activeInstance = null
         }
@@ -386,6 +422,7 @@ class RelayExitService : Service() {
                 })
                 created.setPowerConstrained(shouldUseP2PLowPowerProfile())
                 created.setHeartbeatMultiplier(heartbeatMultiplier().toLong())
+                batteryReading?.let { created.setBatteryStatus(it.level.toLong(), it.charging) }
                 created.start()
                 val accepted = synchronized(this) {
                     if (!destroyed && generation == coreGeneration && core == null) {
@@ -399,6 +436,9 @@ class RelayExitService : Service() {
                     runCatching { created.stop() }
                     return@executeCoreTask
                 }
+                // Replay the latest event once published, closing the small
+                // window between the initial snapshot and Core assignment.
+                batteryReading?.let { created.setBatteryStatus(it.level.toLong(), it.charging) }
                 if (networkAtStart != networkRevision || activeNetworkMode == null) {
                     created.networkChanged(activeNetworkMode != null)
                 }

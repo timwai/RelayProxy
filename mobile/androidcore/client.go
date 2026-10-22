@@ -1384,7 +1384,13 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 			if pong.ProxyExits != nil {
 				c.refreshProxyExits(sess, *pong.ProxyExits, pong.ProxyExitRevision)
 			}
-			timer.Reset(interval())
+			// Don't add the Pong RTT onto the next interval. The gateway
+			// measures liveness from successive incoming Pings.
+			next := interval() - time.Since(lastSent)
+			if next < 0 {
+				next = 0
+			}
+			timer.Reset(next)
 		}
 	}
 }

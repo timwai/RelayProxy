@@ -430,7 +430,7 @@ func TestMessageListenerSignalsQueuedAndNewMessages(t *testing.T) {
 
 type drainingMessageListener struct {
 	client *Client
-	calls int
+	calls  int
 }
 
 func (l *drainingMessageListener) OnMessage() {

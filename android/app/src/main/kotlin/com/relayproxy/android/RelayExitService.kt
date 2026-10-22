@@ -55,6 +55,7 @@ class RelayExitService : Service() {
         fun setUiVisible(visible: Boolean) {
             uiVisible = visible
             activeInstance?.requestRefreshSoon()
+            activeInstance?.applyP2PPowerProfile()
         }
 
         fun refreshGlobalMessageOverlaySetting() {
@@ -88,6 +89,8 @@ class RelayExitService : Service() {
     @Volatile
     private var networkBinder: NetworkBinder? = null
     private var lastNotificationText: String? = null
+    private var lastNotificationState: String? = null
+    private var lastNotificationUpdateMs = 0L
     private lateinit var powerManager: PowerManager
     private lateinit var messageOverlayController: MessageOverlayController
     private var powerReceiverRegistered = false
@@ -236,6 +239,8 @@ class RelayExitService : Service() {
         val startingText = "正在启动"
         startForeground(NOTIFICATION_ID, buildNotification(startingText))
         lastNotificationText = startingText
+        lastNotificationState = "STARTING"
+        lastNotificationUpdateMs = SystemClock.elapsedRealtime()
         scheduleRefresh(0)
         if (core != null || networkBinder != null) return
 
@@ -380,6 +385,7 @@ class RelayExitService : Service() {
                     }
                 })
                 created.setPowerConstrained(shouldUseP2PLowPowerProfile())
+                created.setHeartbeatMultiplier(heartbeatMultiplier())
                 created.start()
                 val accepted = synchronized(this) {
                     if (!destroyed && generation == coreGeneration && core == null) {
@@ -447,6 +453,8 @@ class RelayExitService : Service() {
                     .toString()
                 serviceStartedAtElapsed = 0
                 lastNotificationText = null
+                lastNotificationState = null
+                lastNotificationUpdateMs = 0L
                 stopForeground(STOP_FOREGROUND_REMOVE)
                 stopSelfResult(startId)
             }
@@ -490,9 +498,17 @@ class RelayExitService : Service() {
             !powerManager.isInteractive ||
             activeNetworkMode == NetworkBinder.MODE_CELLULAR
 
+    private fun heartbeatMultiplier(): Int = when {
+        powerManager.isDeviceIdleMode || powerManager.isPowerSaveMode -> 2
+        !powerManager.isInteractive -> 2
+        activeNetworkMode == NetworkBinder.MODE_CELLULAR && !uiVisible -> 2
+        else -> 1
+    }
+
     private fun applyP2PPowerProfile() {
         val constrained = shouldUseP2PLowPowerProfile()
         core?.setPowerConstrained(constrained)
+        core?.setHeartbeatMultiplier(heartbeatMultiplier())
     }
 
     private fun createNotificationChannel() {
@@ -626,10 +642,22 @@ class RelayExitService : Service() {
             else -> "$state · $approval"
         }
 
-        if (!force && text == lastNotificationText) {
+        val now = SystemClock.elapsedRealtime()
+        if (!NotificationRefreshPolicy.shouldPost(
+                force = force,
+                previousText = lastNotificationText,
+                previousState = lastNotificationState,
+                newText = text,
+                newState = state,
+                lastPostedMs = lastNotificationUpdateMs,
+                nowMs = now,
+            )
+        ) {
             return
         }
         lastNotificationText = text
+        lastNotificationState = state
+        lastNotificationUpdateMs = now
         getSystemService(NotificationManager::class.java)
             .notify(NOTIFICATION_ID, buildNotification(text))
     }

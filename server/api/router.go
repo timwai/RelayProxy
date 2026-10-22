@@ -1251,11 +1251,15 @@ func (r *Router) handleListDevices(w http.ResponseWriter, req *http.Request) {
 	for _, d := range dbDevices {
 		online := false
 		var transport string
+		var battery *session.DeviceBattery
 		rdpUDPReady := false
 		if sess, ok := r.sessions.Get(d.ID); ok {
 			online = true
 			transport = string(sess.Transport)
 			rdpUDPReady = tunnel.PeerSupportsDatagrams(sess.Tunnel)
+			if d.Platform == "android" {
+				battery = sess.BatterySnapshot()
+			}
 		}
 		status := "offline"
 		if online {
@@ -1284,6 +1288,7 @@ func (r *Router) handleListDevices(w http.ResponseWriter, req *http.Request) {
 			"approvedCapabilities":  d.ApprovedCapabilities,
 			"transport":             transport,
 			"rdpUdpReady":           rdpUDPReady,
+			"battery":               battery,
 			"lastSeenAt":            d.LastSeenAt,
 		})
 	}

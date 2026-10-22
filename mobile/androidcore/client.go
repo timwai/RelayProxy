@@ -181,6 +181,7 @@ type Client struct {
 	powerConstrained    bool
 	heartbeatMultiplier atomic.Int32
 	heartbeatWake       chan struct{}
+	batteryStatus       atomic.Pointer[protocol.BatteryStatus]
 	proxyP2P            *proxyp2p.Manager
 	proxyDirect         *publicDirectClientManager
 	proxyExitRevision   uint64
@@ -755,6 +756,22 @@ func (c *Client) SetPowerConstrained(constrained bool) {
 	if manager != nil {
 		manager.SetPowerConstrained(constrained)
 	}
+}
+
+// SetBatteryStatus caches the last valid Android battery reading; the next
+// existing heartbeat carries it. This never opens a connection or sends a
+// separate request. Gomobile maps int parameters to Kotlin Long.
+func (c *Client) SetBatteryStatus(level int, charging bool) {
+	if c == nil || level < 0 || level > 100 {
+		return
+	}
+	c.mu.RLock()
+	closed := c.closed
+	c.mu.RUnlock()
+	if closed {
+		return
+	}
+	c.batteryStatus.Store(&protocol.BatteryStatus{Level: level, Charging: charging})
 }
 
 // SetHeartbeatMultiplier adjusts the control heartbeat cadence when Android
@@ -1369,7 +1386,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 		case <-timer.C:
 			lastSent = time.Now()
 			// The server and read budgets still use the negotiated interval.
-			pong, rtt, err := tunnel.Heartbeat(ctx, ctrl, sess, negotiatedInterval, lastRTT, protocol.PingMessage{Timestamp: lastSent.UnixMilli()})
+			pong, rtt, err := tunnel.Heartbeat(ctx, ctrl, sess, negotiatedInterval, lastRTT, protocol.PingMessage{Timestamp: lastSent.UnixMilli(), Battery: c.batteryStatus.Load()})
 			if err != nil {
 				c.setLastError(fmt.Errorf("heartbeat failed: %w", err))
 				_ = sess.Close()

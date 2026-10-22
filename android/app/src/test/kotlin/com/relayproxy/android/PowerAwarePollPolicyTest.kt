@@ -28,6 +28,13 @@ class PowerAwarePollPolicyTest {
     }
 
     @Test
+    fun screenOffChecksVpnHealthButSkipsStatistics() {
+        assertEquals(false, PowerAwarePollPolicy.shouldCollectVpnStats(false, false))
+        assertEquals(true, PowerAwarePollPolicy.shouldCollectVpnStats(true, false))
+        assertEquals(true, PowerAwarePollPolicy.shouldCollectVpnStats(false, true))
+    }
+
+    @Test
     fun stoppedServiceNeverRefreshes() {
         assertEquals(0L, PowerAwarePollPolicy.relayRefreshMs(true, true, "STOPPED", 0))
         assertEquals(0L, PowerAwarePollPolicy.relayRefreshMs(false, false, "STOPPED", 0))

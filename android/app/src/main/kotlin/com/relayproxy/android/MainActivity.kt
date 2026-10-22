@@ -2518,9 +2518,14 @@ class MainActivity : Activity() {
             upnpAllowed = settingUpnpSwitch.isChecked,
             vpnIpv6Enabled = settingIpv6Switch.isChecked,
         )
+        val wasRunning = store.shouldRunCore(current)
         store.save(updated)
-        notifyServiceReconfigure()
-        Toast.makeText(this, "设置已保存，底层网络隧道已热重载", Toast.LENGTH_SHORT).show()
+        notifyServiceReconfigure(wasRunning)
+        Toast.makeText(
+            this,
+            if (store.shouldRunCore(updated)) "设置已保存，网络配置已更新" else "设置已保存，后台连接已关闭",
+            Toast.LENGTH_SHORT,
+        ).show()
         renderStatus()
     }
 
@@ -2923,9 +2928,9 @@ class MainActivity : Activity() {
     private fun startVpnFlow() {
         val store = ConfigStore(this)
         val config = store.load()
-        if (config.serverAddress.isBlank()) {
+        if (!store.hasConnectionConfig(config)) {
             switchTab(TAB_SETTINGS)
-            Toast.makeText(this, "请先填写 Relay Server 地址与身份凭证", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, "请先填写有效的 Relay Server 地址与身份 ID", Toast.LENGTH_LONG).show()
             return
         }
         val consent = VpnService.prepare(this)
@@ -2966,9 +2971,9 @@ class MainActivity : Activity() {
             startService(Intent(this, RelayExitService::class.java).setAction(RelayExitService.ACTION_STOP))
         } else {
             val config = store.load()
-            if (config.serverAddress.isBlank()) {
+            if (!store.hasConnectionConfig(config)) {
                 switchTab(TAB_SETTINGS)
-                Toast.makeText(this, "请先填写 Relay Server 地址", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, "请先填写有效的 Relay Server 地址与身份 ID", Toast.LENGTH_LONG).show()
                 return
             }
             store.setDesiredRunning(true)
@@ -2984,7 +2989,7 @@ class MainActivity : Activity() {
 
     private fun connectControlChannel() {
         val store = ConfigStore(this)
-        if (!store.hasConnectionConfig()) return
+        if (!store.shouldRunCore()) return
         val intent = Intent(this, RelayExitService::class.java).setAction(RelayExitService.ACTION_CONNECT)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(intent)
@@ -2993,9 +2998,14 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun notifyServiceReconfigure() {
-        startService(Intent(this, RelayExitService::class.java).setAction(RelayExitService.ACTION_RECONFIGURE))
-        if (ConfigStore(this).isVpnDesiredRunning()) {
+    private fun notifyServiceReconfigure(wasRunning: Boolean = false) {
+        val store = ConfigStore(this)
+        // Settings may have disabled the last active proxy; notify the old
+        // service once so it can release its Core and network callbacks.
+        if (wasRunning || store.shouldRunCore()) {
+            startService(Intent(this, RelayExitService::class.java).setAction(RelayExitService.ACTION_RECONFIGURE))
+        }
+        if (store.isVpnDesiredRunning()) {
             startService(Intent(this, RelayVpnService::class.java).setAction(RelayVpnService.ACTION_RECONFIGURE))
         }
     }

@@ -961,6 +961,7 @@ func (g *Gateway) handleControlChannel(dev *session.DeviceSession) {
 		}
 		dev.TouchHeartbeat()
 		dev.SetDiagnostics(ping.Diagnostics)
+		dev.SetBatteryStatus(ping.Battery)
 		if g.cfg.OnDeviceHeartbeat != nil {
 			g.cfg.OnDeviceHeartbeat(dev.DeviceID)
 		}

@@ -95,6 +95,9 @@ class RelayExitService : Service() {
     private val messageDrainPending = AtomicBoolean(false)
 
     @Volatile
+    private var networkRevision = 0L
+
+    @Volatile
     private var destroyed = false
 
     @Volatile
@@ -265,17 +268,26 @@ class RelayExitService : Service() {
             autoSwitch = config.autoNetworkSwitch,
             onAvailable = onAvailable@{ activeMode ->
                 if (networkBinder !== binder || destroyed) return@onAvailable
+                networkRevision++
                 activeNetworkMode = activeMode
                 RelayVpnService.updateUnderlyingNetwork(this, NetworkBinder.currentProcessNetwork())
-                startCore(relayConfig ?: config)
+                val running = core
+                if (running != null) {
+                    executeCoreTask { runCatching { running.networkChanged(true) } }
+                } else {
+                    startCore(relayConfig ?: config)
+                }
                 applyP2PPowerProfile()
                 requestRefreshSoon()
             },
             onLost = onLost@{
                 if (networkBinder !== binder || destroyed) return@onLost
+                networkRevision++
                 activeNetworkMode = null
                 RelayVpnService.updateUnderlyingNetwork(this, NetworkBinder.currentProcessNetwork())
-                stopCoreOnly()
+                core?.let { running ->
+                    executeCoreTask { runCatching { running.networkChanged(false) } }
+                }
                 status = if (config.autoNetworkSwitch) {
                     waitingStatus("网络不可用，正在自动切换")
                 } else if (config.networkMode == NetworkBinder.MODE_AUTO) {
@@ -287,8 +299,11 @@ class RelayExitService : Service() {
             },
             onError = onError@{ message ->
                 if (networkBinder !== binder || destroyed) return@onError
+                networkRevision++
                 activeNetworkMode = null
-                stopCoreOnly()
+                core?.let { running ->
+                    executeCoreTask { runCatching { running.networkChanged(false) } }
+                }
                 status = errorStatus(message)
                 requestRefreshSoon()
             },
@@ -353,6 +368,7 @@ class RelayExitService : Service() {
             }
             if (!shouldStart) return@executeCoreTask
 
+            val networkAtStart = networkRevision
             var client: Client? = null
             try {
                 val identity = File(filesDir, "relayproxy/device-identity.json")
@@ -376,6 +392,9 @@ class RelayExitService : Service() {
                 if (!accepted) {
                     runCatching { created.stop() }
                     return@executeCoreTask
+                }
+                if (networkAtStart != networkRevision || activeNetworkMode == null) {
+                    created.networkChanged(activeNetworkMode != null)
                 }
                 // Drain pushes that arrived before this core became active.
                 requestMessageDrain()

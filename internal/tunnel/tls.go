@@ -93,10 +93,11 @@ const (
 
 // TLSSession implements TunnelSession using TLS + yamux multiplexer
 type TLSSession struct {
-	conn     net.Conn
-	session  *yamux.Session
-	openGate chan struct{}
-	closed   atomic.Bool
+	dialTimings *DialTimings
+	conn        net.Conn
+	session     *yamux.Session
+	openGate    chan struct{}
+	closed      atomic.Bool
 }
 
 // DefaultYAMUXConfig keeps stream setup responsive and permits enough
@@ -139,6 +140,7 @@ func disableTunnelTCPKeepAlive(conn net.Conn) {
 
 // DialTLS connects to targetAddr using TLS and initializes a yamux client session
 func DialTLS(ctx context.Context, targetAddr string, tlsConfig *tls.Config, yamuxConfig *yamux.Config) (*TLSSession, error) {
+	start := time.Now()
 	dialer := &net.Dialer{
 		Timeout: 10 * time.Second,
 	}
@@ -146,6 +148,7 @@ func DialTLS(ctx context.Context, targetAddr string, tlsConfig *tls.Config, yamu
 	if err != nil {
 		return nil, fmt.Errorf("tcp dial failed: %w", err)
 	}
+	connected := time.Now()
 	TuneTCPConn(rawConn)
 	disableTunnelTCPKeepAlive(rawConn)
 
@@ -183,7 +186,9 @@ func DialTLS(ctx context.Context, targetAddr string, tlsConfig *tls.Config, yamu
 		return nil, fmt.Errorf("yamux client init failed: %w", err)
 	}
 
-	return NewTLSSession(sessionConn, session), nil
+	result := NewTLSSession(sessionConn, session)
+	result.dialTimings = &DialTimings{ConnectMS: connected.Sub(start).Milliseconds(), HandshakeMS: time.Since(connected).Milliseconds(), TotalMS: time.Since(start).Milliseconds()}
+	return result, nil
 }
 
 // ServerTLS wraps an incoming TLS net.Conn into a yamux server session

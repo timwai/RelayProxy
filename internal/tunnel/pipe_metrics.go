@@ -38,10 +38,8 @@ type pipePumpMetrics struct {
 }
 
 // PipeMetrics records approximate elapsed time and exact byte/call counters for
-// both copy pumps. The hot path is lock-free and uses the process-wide coarse
-// clock so high-throughput proxy streams don't pay a mutex plus time.Now on
-// every copied chunk. Snapshot uses a precise clock for the currently blocked
-// operation, while completed operation timing has coarse-clock granularity.
+// both copy pumps. The hot path is lock-free and uses the same monotonic clock
+// as Snapshot, without a periodic timer or sensitivity to wall-clock changes.
 type PipeMetrics struct {
 	up   pipePumpMetrics
 	down pipePumpMetrics
@@ -56,7 +54,7 @@ func (m *PipeMetrics) pump(up bool) *pipePumpMetrics {
 
 func (m *PipeMetrics) begin(up bool, phase string) {
 	p := m.pump(up)
-	p.startedNanos.Store(coarseTimeNanos())
+	p.startedNanos.Store(monotonicTimeNanos())
 	switch phase {
 	case "read":
 		p.readCalls.Add(1)
@@ -71,7 +69,7 @@ func (m *PipeMetrics) begin(up bool, phase string) {
 
 func (m *PipeMetrics) end(up bool, n int) {
 	p := m.pump(up)
-	now := coarseTimeNanos()
+	now := monotonicTimeNanos()
 	phase := p.phase.Swap(pipePhaseIdle)
 	started := p.startedNanos.Swap(0)
 	var elapsed uint64
@@ -93,7 +91,7 @@ func (m *PipeMetrics) end(up bool, n int) {
 }
 
 func (m *PipeMetrics) Snapshot() PipeMetricsSnapshot {
-	now := time.Now().UnixNano()
+	now := monotonicTimeNanos()
 	snapshot := func(p *pipePumpMetrics) PumpMetrics {
 		readNanos := p.readNanos.Load()
 		writeNanos := p.writeNanos.Load()

@@ -13,6 +13,7 @@ import (
 
 const (
 	defaultDNSCacheTTL      = 30 * time.Second
+	negativeDNSCacheTTL     = 5 * time.Second
 	defaultDNSCacheEntries  = 2048
 	defaultDNSLookupTimeout = 15 * time.Second
 	happyEyeballsDelay      = 250 * time.Millisecond
@@ -20,6 +21,7 @@ const (
 
 type dnsCacheEntry struct {
 	ips       []net.IP
+	err       error
 	expiresAt time.Time
 }
 
@@ -79,7 +81,7 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 		// Cache entries are immutable after publication. Callers in this package
 		// treat the returned addresses as read-only, so a cache hit allocates
 		// neither a slice nor per-IP backing bytes.
-		return entry.ips, nil
+		return entry.ips, entry.err
 	}
 
 	// Register one lookup per normalized hostname. Browser connection bursts
@@ -89,7 +91,7 @@ func (c *dnsCache) lookup(ctx context.Context, host string) ([]net.IP, error) {
 	now = time.Now()
 	if entry, ok = c.entries[key]; ok && now.Before(entry.expiresAt) {
 		c.mu.Unlock()
-		return entry.ips, nil
+		return entry.ips, entry.err
 	}
 	if err := ctx.Err(); err != nil {
 		c.mu.Unlock()
@@ -129,9 +131,18 @@ func (c *dnsCache) resolve(ctx context.Context, key, host string, flight *dnsLoo
 	if err == nil && len(ips) > 0 {
 		ips = cloneIPs(ips)
 	}
+	ttl := c.ttl
+	cacheable := err == nil && len(ips) > 0
+	var dnsErr *net.DNSError
+	if errors.As(err, &dnsErr) && dnsErr.IsNotFound && !dnsErr.IsTimeout && !dnsErr.IsTemporary {
+		// Briefly share NXDOMAIN results across browser retries. Transient
+		// failures and cancellation must remain immediately retryable.
+		cacheable = true
+		ttl = min(ttl, negativeDNSCacheTTL)
+	}
 
 	c.mu.Lock()
-	if c.inflight[key] == flight && err == nil && len(ips) > 0 {
+	if c.inflight[key] == flight && cacheable {
 		now := time.Now()
 		if len(c.entries) >= c.maxEntries {
 			for k, candidate := range c.entries {
@@ -146,7 +157,7 @@ func (c *dnsCache) resolve(ctx context.Context, key, host string, flight *dnsLoo
 				}
 			}
 		}
-		c.entries[key] = dnsCacheEntry{ips: ips, expiresAt: now.Add(c.ttl)}
+		c.entries[key] = dnsCacheEntry{ips: ips, err: err, expiresAt: now.Add(ttl)}
 	}
 	flight.ips, flight.err = ips, err
 	if c.inflight[key] == flight {

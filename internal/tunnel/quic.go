@@ -117,6 +117,7 @@ type QUICSession struct {
 	peerStreamResume atomic.Bool
 	activeStreams    atomic.Int64
 	ownedPacketConn  net.PacketConn
+	dialTimings      *DialTimings
 	closeOnce        sync.Once
 	closeErr         error
 
@@ -358,12 +359,12 @@ func DialQUIC(ctx context.Context, targetAddr string, tlsConfig *tls.Config, qui
 	}
 	quicConfig.EnableDatagrams = true
 
-	conn, err := quic.DialAddr(ctx, targetAddr, tlsConfig, quicConfig)
+	session, err := dialQUICAddresses(ctx, targetAddr, tlsConfig, quicConfig, false)
 	if err != nil {
 		return nil, fmt.Errorf("quic dial failed: %w", err)
 	}
 
-	return NewQUICSession(conn), nil
+	return session, nil
 }
 
 func (s *QUICSession) OpenStream(ctx context.Context) (TunnelStream, error) {

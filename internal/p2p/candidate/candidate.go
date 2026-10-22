@@ -19,11 +19,12 @@ import (
 )
 
 const (
-	MaxCandidates            = 16
-	ProbeMagic        uint32 = 0x52505633 // "RPV3"
-	ProbeVersion      byte   = 1
-	ProbeRequestSize         = 16
-	ProbeResponseSize        = 32
+	MaxCandidates             = 16
+	ProbeMagic         uint32 = 0x52505633 // "RPV3"
+	ProbeVersion       byte   = 1
+	ProbeRequestSize          = 16
+	ProbeResponseSize         = 32
+	probeRetryInterval        = 200 * time.Millisecond
 )
 
 var (
@@ -394,8 +395,12 @@ func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn
 
 	var results []protocol.P2PCandidate
 	var firstResponse time.Time
+	nextSend := time.Now().Add(probeRetryInterval)
 	buffer := make([]byte, 64)
 	for len(pending) > 0 {
+		if ctx.Err() != nil {
+			break
+		}
 		readUntil := deadline
 		if !firstResponse.IsZero() {
 			// Do not add a two-second delay to IPv4-only peers when an
@@ -407,11 +412,23 @@ func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn
 		if !time.Now().Before(readUntil) {
 			break
 		}
+		if !time.Now().Before(nextSend) {
+			// Retry unanswered probes on the same socket and nonce. A lost
+			// packet must not hide an otherwise reachable address family.
+			for nonce, remote := range pending {
+				request := EncodeProbeRequest(nonce)
+				_, _ = conn.WriteToUDPAddrPort(request[:], remote)
+			}
+			nextSend = time.Now().Add(probeRetryInterval)
+		}
+		if nextSend.Before(readUntil) {
+			readUntil = nextSend
+		}
 		_ = conn.SetReadDeadline(readUntil)
 		n, sender, readErr := conn.ReadFromUDPAddrPort(buffer)
 		if readErr != nil {
 			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
-				break
+				continue
 			}
 			if len(results) > 0 {
 				break

@@ -4,7 +4,11 @@ import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
 import android.net.NetworkCapabilities
+import android.net.LinkProperties
 import android.net.NetworkRequest
+import android.os.Handler
+import android.os.Looper
+import android.util.Log
 
 class NetworkBinder(context: Context) {
     companion object {
@@ -30,6 +34,13 @@ class NetworkBinder(context: Context) {
 
     private val callbacks = mutableListOf<ConnectivityManager.NetworkCallback>()
     private val candidates = mutableMapOf<Network, Candidate>()
+    private val linkSignatures = mutableMapOf<Network, String>()
+    private val handler = Handler(Looper.getMainLooper())
+    private var pendingPromotion: Network? = null
+    private var promotionTask: Runnable? = null
+    private var promotionDelayMs = 1_500L
+    private var linkChangeTask: Runnable? = null
+    private var legacyDefault: Network? = null
     private var cellularRequestCallback: ConnectivityManager.NetworkCallback? = null
 
     private var boundNetwork: Network? = null
@@ -95,45 +106,20 @@ class NetworkBinder(context: Context) {
 
     private fun bindLegacyDefaultNetwork() {
         val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                handleLegacyAvailable(network)
+            override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
+                synchronized(this@NetworkBinder) {
+                    legacyDefault = network
+                    updateCandidate(network, modeFor(capabilities), capabilities)
+                }
             }
-
-            override fun onLost(network: Network) {
-                handleLegacyLost(network)
+            override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+                updateLink(network, properties)
             }
+            override fun onLost(network: Network) { removeCandidate(network) }
         }
-
         callbacks += cb
-        try {
-            connectivity.registerDefaultNetworkCallback(cb)
-        } catch (t: Throwable) {
-            callbacks.remove(cb)
-            throw t
-        }
-    }
-
-    @Synchronized
-    private fun handleLegacyAvailable(network: Network) {
-        if (released) return
-        val previous = boundNetwork
-        if (previous == network) return
-
-        boundNetwork = network
-        processNetwork = network
-        val activeMode = detectMode(network)
-        if (previous != null && previous != network) {
-            lostCallback?.invoke()
-        }
-        availableCallback?.invoke(activeMode)
-    }
-
-    @Synchronized
-    private fun handleLegacyLost(network: Network) {
-        if (released || boundNetwork != network) return
-        boundNetwork = null
-        processNetwork = null
-        lostCallback?.invoke()
+        try { connectivity.registerDefaultNetworkCallback(cb) }
+        catch (t: Throwable) { callbacks.remove(cb); throw t }
     }
 
     private fun registerTransportObserver(mode: String) {
@@ -144,10 +130,6 @@ class NetworkBinder(context: Context) {
             .build()
 
         val cb = object : ConnectivityManager.NetworkCallback() {
-            override fun onAvailable(network: Network) {
-                updateCandidate(network, mode)
-            }
-
             override fun onCapabilitiesChanged(
                 network: Network,
                 networkCapabilities: NetworkCapabilities,
@@ -155,9 +137,10 @@ class NetworkBinder(context: Context) {
                 updateCandidate(network, mode, networkCapabilities)
             }
 
-            override fun onLost(network: Network) {
-                removeCandidate(network)
+            override fun onLinkPropertiesChanged(network: Network, properties: LinkProperties) {
+                updateLink(network, properties)
             }
+            override fun onLost(network: Network) { removeCandidate(network) }
         }
 
         callbacks += cb
@@ -181,6 +164,7 @@ class NetworkBinder(context: Context) {
             }
 
             if (mode == preferredMode || automaticSwitch) {
+                connectivity.getLinkProperties(network)?.let { linkSignatures[network] = linkSignature(it) }
                 candidates[network] = Candidate(
                     network = network,
                     mode = mode,
@@ -194,13 +178,13 @@ class NetworkBinder(context: Context) {
     private fun updateCandidate(
         network: Network,
         mode: String,
-        capabilities: NetworkCapabilities? = connectivity.getNetworkCapabilities(network),
+        capabilities: NetworkCapabilities,
     ) {
         if (released) return
         candidates[network] = Candidate(
             network = network,
             mode = mode,
-            validated = capabilities?.let(::isUsable) == true,
+            validated = isUsable(capabilities),
         )
         reevaluate()
     }
@@ -209,36 +193,62 @@ class NetworkBinder(context: Context) {
     private fun removeCandidate(network: Network) {
         if (released) return
         candidates.remove(network)
+        linkSignatures.remove(network)
+        if (legacyDefault == network) legacyDefault = null
         reevaluate()
     }
 
     @Synchronized
     private fun reevaluate() {
-        if (released || preferredMode == MODE_AUTO) return
+        if (released) return
+        if (preferredMode == MODE_AUTO) {
+            switchTo(candidates[legacyDefault]?.takeIf { it.validated && linkSignatures.containsKey(it.network) })
+            return
+        }
 
-        val preferred = candidates.values.firstOrNull {
+        val usable = candidates.values.filter { it.validated && linkSignatures.containsKey(it.network) }
+        val current = candidates[boundNetwork]?.takeIf { it in usable }
+        val preferred = current?.takeIf { it.mode == preferredMode } ?: usable.firstOrNull {
             it.mode == preferredMode && it.validated
         }
         val fallback = if (automaticSwitch) {
-            candidates.values.firstOrNull {
-                it.mode == otherMode(preferredMode) && it.validated
+            current?.takeIf { it.mode == otherMode(preferredMode) } ?: usable.firstOrNull {
+                it.mode == otherMode(preferredMode)
             }
         } else {
             null
         }
         val selected = preferred ?: fallback
 
-        // Rebind first. When Wi-Fi has just recovered this prevents the
-        // cellular request from being released before the process has moved
-        // back to Wi-Fi.
-        switchTo(selected)
+        // A healthy fallback keeps carrying traffic while preferred Wi-Fi
+        // proves stable. Actual path loss switches immediately.
+        if (current != null && selected != null && current.network != selected.network) {
+            if (pendingPromotion != selected.network) {
+                cancelPromotion()
+                pendingPromotion = selected.network
+                promotionTask = Runnable {
+                    synchronized(this) {
+                        val ready = candidates[selected.network]
+                        if (!released && ready?.validated == true && linkSignatures.containsKey(selected.network)) {
+                            switchTo(ready)
+                        }
+                        pendingPromotion = null
+                        promotionTask = null
+                        reevaluate()
+                    }
+                }.also { handler.postDelayed(it, promotionDelayMs) }
+            }
+        } else {
+            cancelPromotion()
+            switchTo(selected)
+        }
 
         if (preferredMode == MODE_WIFI && automaticSwitch) {
             if (preferred == null) {
                 // Bring cellular up only while Wi-Fi is actually unavailable
                 // or connected without validated Internet access.
                 ensureCellularRequest()
-            } else {
+            } else if (boundNetwork == preferred.network) {
                 // Wi-Fi recovered. Release the explicit cellular request after
                 // switching back to reduce radio usage and battery impact.
                 releaseCellularRequest()
@@ -260,23 +270,27 @@ class NetworkBinder(context: Context) {
         }
 
         if (previous == candidate.network) return
+        linkChangeTask?.let { handler.removeCallbacks(it) }
+        linkChangeTask = null
 
-        if (!connectivity.bindProcessToNetwork(candidate.network)) {
-            errorCallback?.invoke(
-                "无法将 RelayProxy 进程绑定到" + networkLabel(candidate.mode) + "网络"
-            )
+        if (preferredMode != MODE_AUTO && !connectivity.bindProcessToNetwork(candidate.network)) {
+            val message = "无法将 RelayProxy 进程绑定到" + networkLabel(candidate.mode) + "网络"
+            if (candidates[previous]?.validated == true) {
+                // A failed promotion must not tear down the healthy fallback.
+                promotionDelayMs = 30_000L
+                Log.w("RelayProxy", message)
+            } else {
+                errorCallback?.invoke(message)
+            }
             return
         }
 
+        promotionDelayMs = 1_500L
         boundNetwork = candidate.network
         processNetwork = candidate.network
 
-        // Recreate the Relay tunnel whenever the selected path changes so all
-        // sockets immediately use the new network instead of waiting for an
-        // existing connection to time out.
-        if (previous != null && previous != candidate.network) {
-            lostCallback?.invoke()
-        }
+        // Core preserves its listeners and stream recovery registry; the
+        // callback replaces only transports after new sockets are rebound.
         availableCallback?.invoke(candidate.mode)
     }
 
@@ -329,19 +343,52 @@ class NetworkBinder(context: Context) {
         else -> "默认"
     }
 
-    private fun detectMode(network: Network): String {
-        val capabilities = connectivity.getNetworkCapabilities(network) ?: return MODE_AUTO
-        return when {
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> MODE_WIFI
-            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> MODE_CELLULAR
-            else -> MODE_AUTO
+    private fun modeFor(capabilities: NetworkCapabilities): String = when {
+        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> MODE_WIFI
+        capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> MODE_CELLULAR
+        else -> MODE_AUTO
+    }
+
+    private fun linkSignature(p: LinkProperties): String = listOf(
+        p.interfaceName.orEmpty(), p.linkAddresses.map { it.toString() }.sorted().joinToString(),
+        p.dnsServers.map { it.hostAddress.orEmpty() }.sorted().joinToString(),
+        p.routes.map { it.toString() }.sorted().joinToString(), p.mtu.toString(),
+    ).joinToString("|")
+
+    @Synchronized
+    private fun updateLink(network: Network, properties: LinkProperties) {
+        if (released) return
+        val signature = linkSignature(properties)
+        val previous = linkSignatures.put(network, signature)
+        if (boundNetwork == network && previous != null && previous != signature) {
+            linkChangeTask?.let { handler.removeCallbacks(it) }
+            linkChangeTask = Runnable {
+                synchronized(this) {
+                    linkChangeTask = null
+                    if (!released && boundNetwork == network) {
+                        availableCallback?.invoke(candidates[network]?.mode ?: MODE_AUTO)
+                    }
+                }
+            }.also { handler.postDelayed(it, 250L) }
         }
+        reevaluate()
+    }
+
+    private fun cancelPromotion() {
+        promotionTask?.let { handler.removeCallbacks(it) }
+        promotionTask = null
+        pendingPromotion = null
     }
 
     @Synchronized
     fun release() {
         if (released) return
         released = true
+        cancelPromotion()
+        linkChangeTask?.let { handler.removeCallbacks(it) }
+        linkChangeTask = null
+        linkSignatures.clear()
+        legacyDefault = null
         connectivity.bindProcessToNetwork(null)
 
         releaseCellularRequest()

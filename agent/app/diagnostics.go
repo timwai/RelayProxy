@@ -6,15 +6,17 @@ import (
 
 	"relayproxy/agent/exit"
 	"relayproxy/internal/traffic"
+	"relayproxy/internal/tunnel"
 )
 
 const maxDiagnosticConnections = 64
 
 type DiagnosticsSnapshot struct {
-	SampledAt   time.Time            `json:"sampledAt"`
-	Status      AgentStatus          `json:"status"`
-	Connections []traffic.Connection `json:"connections,omitempty"`
-	Exit        *exit.Diagnostics    `json:"exit,omitempty"`
+	Connection  tunnel.ConnectionMetrics `json:"connection"`
+	SampledAt   time.Time                `json:"sampledAt"`
+	Status      AgentStatus              `json:"status"`
+	Connections []traffic.Connection     `json:"connections,omitempty"`
+	Exit        *exit.Diagnostics        `json:"exit,omitempty"`
 }
 
 func (a *Agent) Diagnostics() DiagnosticsSnapshot {
@@ -40,6 +42,9 @@ func (a *Agent) Diagnostics() DiagnosticsSnapshot {
 	a.mu.RUnlock()
 	snapshot := DiagnosticsSnapshot{
 		SampledAt: time.Now(), Status: status, Connections: active,
+	}
+	if a.tunnelMgr != nil {
+		snapshot.Connection = a.tunnelMgr.ConnectionMetrics()
 	}
 	if handler != nil {
 		exitSnapshot := handler.Diagnostics()

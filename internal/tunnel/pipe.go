@@ -10,11 +10,16 @@ import (
 
 const (
 	pipeBufferSize        = 128 * 1024
+	pipeInitialBufferSize = 32 * 1024
 	pipeTransferBatchSize = 256 * 1024
 )
 
 var pipeBufferPool = sync.Pool{
 	New: func() any { return new([pipeBufferSize]byte) },
+}
+
+var pipeInitialBufferPool = sync.Pool{
+	New: func() any { return new([pipeInitialBufferSize]byte) },
 }
 
 // DeadlineStream is the common subset of net.Conn and TunnelStream.
@@ -47,17 +52,11 @@ func PipeWithMetrics(ctx context.Context, left, right DeadlineStream, idle time.
 			refreshInterval = idle
 		}
 	}
-	useCoarseClock := idle >= time.Second
 	refresh := func() {
 		if idle <= 0 {
 			return
 		}
-		var nowNanos int64
-		if useCoarseClock {
-			nowNanos = coarseTimeNanos()
-		} else {
-			nowNanos = time.Now().UnixNano()
-		}
+		nowNanos := monotonicTimeNanos()
 		next := nextRefresh.Load()
 		if next != 0 && nowNanos < next {
 			return
@@ -72,9 +71,19 @@ func PipeWithMetrics(ctx context.Context, left, right DeadlineStream, idle time.
 	}
 	refresh()
 	copyOne := func(dst, src DeadlineStream, upward bool) int64 {
-		bufp := pipeBufferPool.Get().(*[pipeBufferSize]byte)
-		defer pipeBufferPool.Put(bufp)
-		buf := bufp[:]
+		// Promote each busy direction independently, without charging every
+		// quiet connection 256 KiB for its lifetime.
+		small := pipeInitialBufferPool.Get().(*[pipeInitialBufferSize]byte)
+		var large *[pipeBufferSize]byte
+		defer func() {
+			if small != nil {
+				pipeInitialBufferPool.Put(small)
+			}
+			if large != nil {
+				pipeBufferPool.Put(large)
+			}
+		}()
+		buf := small[:]
 
 		var total int64
 		pendingTransfer := 0
@@ -113,6 +122,12 @@ func PipeWithMetrics(ctx context.Context, left, right DeadlineStream, idle time.
 				if ew != nil || nw != n {
 					stop()
 					return total
+				}
+				if large == nil && n == len(buf) && total >= pipeBufferSize {
+					large = pipeBufferPool.Get().(*[pipeBufferSize]byte)
+					pipeInitialBufferPool.Put(small)
+					small = nil
+					buf = large[:]
 				}
 			}
 			if er != nil {

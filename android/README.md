@@ -175,6 +175,11 @@ VPN、网络出口和本机代理使用三个独立运行意图，共享一个 G
 - 屏幕关闭、Android Power Saver、Device Idle/Doze 或当前出口为蜂窝网络时自动进入省电模式。
 - 省电模式关闭周期性 P2P QUIC keepalive、缩短空闲直连生命周期，并避免保留多余直连 Session；有真实业务时仍允许建立 P2P。
 - Wi-Fi 恢复、设备重新交互或省电状态解除后自动恢复标准 P2P 策略。
+- 消息通过 Go Core 回调即时通知 Service，取消每秒轮询；后台状态采样按统一省电策略调整，亮屏时活动连接为 15 秒、空闲为 60 秒，息屏时通常为 120 秒。消息接收不等待状态采样。
+- P2P 会话缓存收缩跳过仍有活跃流的直连；超限缓存会在流结束后由生命周期检查回收。公网地址发现只重试未响应的地址族，在原有 2 秒窗口内每 200 毫秒补发一次探测。
+- 普通 TCP 复制缓冲按方向从 32 KiB 起步，持续传输时扩到 128 KiB；无 UDP association 的 QUIC 会话停止重组清理定时器，关闭 association 后清空清理器暂存引用。
+
+本轮修改与本地验证数据见 [传输与 Android 资源优化记录](../docs/network-performance-optimization.md)。公网吞吐、真实 NAT 下的直连成功率及真机耗电仍需按记录中的验收步骤测量。
 
 ## 当前实现边界
 
@@ -189,3 +194,5 @@ VPN、网络出口和本机代理使用三个独立运行意图，共享一个 G
 - 尚未实现域名解析后的真实 IP/CIDR 二次匹配，也不提供 HTTPS 解密、远端 ICMP、Always-on / 系统级断网保护、SIM 卡选择及热点流量接管。
 
 最近的修复、自动化验证与待验收项见 [身份与分流自审记录](../docs/identity-access-routing-review.md)。
+
+网络连接增强：Relay/Public Direct 支持 IPv4/IPv6 多地址竞速；切网只重建网络通道并保留本机代理监听与 TCP 恢复状态。首选网络回切增加稳定等待，同一网络的地址/路由/DNS/MTU 变化会触发通道恢复；P2P 冷却按故障分类，连接耗时可从 Core 状态 JSON 查看。详见 [网络连接优化与恢复边界](../docs/network-connection-optimization.md)。

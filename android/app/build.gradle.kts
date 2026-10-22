@@ -134,4 +134,6 @@ kotlin {
 dependencies {
     implementation(files("libs/mobilecore.aar"))
     testImplementation("junit:junit:4.13.2")
+    // Local JVM tests need a working JSON implementation, not android.jar stubs.
+    testImplementation("org.json:json:20250107")
 }

@@ -66,6 +66,7 @@ type Manager struct {
 	pendingAnswers   map[uint64]protocol.P2PControlMessage
 	starting         map[string]uint64
 	cooldowns        map[string]failureState
+	peerOnline       map[string]bool
 	fallbacks        map[string]uint64
 	networkSig       string
 	ready            chan *Session
@@ -77,6 +78,7 @@ type Manager struct {
 
 type failureState struct {
 	count  int
+	kind   string
 	until  time.Time
 	reason string
 }
@@ -147,6 +149,8 @@ type Snapshot struct {
 }
 
 type PathStatus struct {
+	FailureKind      string
+	RetryAfterMS     int64
 	SessionID        uint64
 	ClientDeviceID   string
 	ExitDeviceID     string
@@ -326,7 +330,7 @@ func (m *Manager) EnsureClient(exitDeviceID string) {
 				m.removeFailedSession(item, "network_changed")
 			}
 		} else if err != nil {
-			m.recordFailure(exitDeviceID, err.Error())
+			m.recordFailureError(exitDeviceID, err)
 		}
 		m.mu.Lock()
 		if current, ok := m.starting[exitDeviceID]; ok && current == attemptID {
@@ -367,7 +371,7 @@ func (m *Manager) StartClient(ctx context.Context, exitDeviceID string) (*Sessio
 		if endpoint != nil {
 			_ = endpoint.Close()
 		}
-		return nil, fmt.Errorf("P2P connect rejected: [%s] %s", response.ErrorCode, response.ErrorMessage)
+		return nil, protocol.NewRelayError(response.ErrorCode, response.ErrorMessage)
 	}
 	if response.Type != protocol.P2PControlLeaseAck || response.SessionID == 0 || len(response.SessionToken) < 16 {
 		if endpoint != nil {
@@ -456,7 +460,21 @@ func (m *Manager) HandleControl(message protocol.P2PControlMessage) {
 		item := m.sessions[message.SessionID]
 		m.mu.Unlock()
 		if item != nil && item.matchesToken(message.SessionToken) {
+			item.mu.RLock()
+			changed := !slices.Equal(item.peerCandidates, message.Candidates)
+			item.mu.RUnlock()
 			item.setPeer(message.Candidates, "")
+			if changed {
+				m.mu.Lock()
+				failure, cooling := m.cooldowns[item.ExitDeviceID]
+				if cooling && failure.kind != "policy" && failure.kind != "rate_limit" {
+					delete(m.cooldowns, item.ExitDeviceID)
+				}
+				m.mu.Unlock()
+				if cooling && failure.kind != "policy" && failure.kind != "rate_limit" {
+					m.EnsureClient(item.ExitDeviceID)
+				}
+			}
 			if message.LeaseExpiresAt > 0 {
 				item.ExpiresAt.Store(message.LeaseExpiresAt)
 			}
@@ -672,6 +690,7 @@ func (m *Manager) PathStatus(exitDeviceID string) (PathStatus, bool) {
 		return PathStatus{
 			ExitDeviceID: exitDeviceID, State: StateCooldown,
 			Error: failure.reason, FallbackCount: fallbacks,
+			FailureKind: failure.kind, RetryAfterMS: max(0, time.Until(failure.until).Milliseconds()),
 		}, true
 	}
 	return best, bestRank >= 0
@@ -974,7 +993,7 @@ func (s *Session) establish(clientRole bool) {
 	candidates = candidate.PrioritizeSameSubnet(candidates, candidate.LocalInterfaceSubnets())
 	result, err := punch.Punch(ctx, conn, candidates, s.ID, s.Token, timeout)
 	if err != nil {
-		s.failDirect(err)
+		s.failDirect(&classifiedFailure{kind: "udp_unreachable", err: err})
 		return
 	}
 
@@ -1089,7 +1108,7 @@ func (s *Session) failDirect(err error) {
 		_ = endpoint.Close()
 	}
 	if clientRole {
-		s.manager.recordFailure(s.ExitDeviceID, reason)
+		s.manager.recordFailureError(s.ExitDeviceID, err)
 	}
 	s.reportPath("", reason)
 	s.manager.removeFailedSession(s, reason)
@@ -1174,8 +1193,15 @@ func (s *Session) watchLocalCandidatesWithRetry(retry time.Duration) {
 	if retry <= 0 {
 		retry = 15 * time.Second
 	}
-	ticker := time.NewTicker(retry)
-	defer ticker.Stop()
+	// Arm a retry only after failed publication. Unchanged candidates need
+	// no periodic wakeup on otherwise idle mobile sessions.
+	var timer *time.Timer
+	var retryC <-chan time.Time
+	defer func() {
+		if timer != nil {
+			timer.Stop()
+		}
+	}()
 	var latest []protocol.P2PCandidate
 	dirty := false
 	for {
@@ -1184,7 +1210,10 @@ func (s *Session) watchLocalCandidatesWithRetry(retry time.Duration) {
 			return
 		case <-s.manager.ctx.Done():
 			return
-		case candidates := <-changes:
+		case candidates, ok := <-changes:
+			if !ok {
+				return
+			}
 			latest = append([]protocol.P2PCandidate(nil), candidates...)
 			s.mu.Lock()
 			if s.state == StateClosed {
@@ -1194,10 +1223,8 @@ func (s *Session) watchLocalCandidatesWithRetry(retry time.Duration) {
 			s.localCandidates = append([]protocol.P2PCandidate(nil), latest...)
 			s.mu.Unlock()
 			dirty = true
-		case <-ticker.C:
-			if !dirty {
-				continue
-			}
+		case <-retryC:
+			retryC = nil
 		}
 		if !dirty || s.manager.send == nil {
 			continue
@@ -1212,9 +1239,20 @@ func (s *Session) watchLocalCandidatesWithRetry(retry time.Duration) {
 		cancel()
 		if err == nil && response.Type == protocol.P2PControlLeaseAck {
 			dirty = false
+			if timer != nil {
+				timer.Stop()
+			}
+			retryC = nil
 			if response.LeaseExpiresAt > 0 {
 				s.ExpiresAt.Store(response.LeaseExpiresAt)
 			}
+		} else {
+			if timer == nil {
+				timer = time.NewTimer(retry)
+			} else {
+				timer.Reset(retry)
+			}
+			retryC = timer.C
 		}
 	}
 }
@@ -1436,25 +1474,7 @@ func (m *Manager) invalidateNetwork() {
 }
 
 func (m *Manager) recordFailure(exitDeviceID, reason string) {
-	if m == nil || exitDeviceID == "" {
-		return
-	}
-	m.mu.Lock()
-	state := m.cooldowns[exitDeviceID]
-	state.count++
-	switch state.count {
-	case 1:
-		state.until = time.Now().Add(5 * time.Second)
-	case 2:
-		state.until = time.Now().Add(30 * time.Second)
-	case 3:
-		state.until = time.Now().Add(2 * time.Minute)
-	default:
-		state.until = time.Now().Add(10 * time.Minute)
-	}
-	state.reason = reason
-	m.cooldowns[exitDeviceID] = state
-	m.mu.Unlock()
+	m.recordFailureError(exitDeviceID, errors.New(reason))
 }
 
 func (m *Manager) resetFailure(exitDeviceID string) {
@@ -1511,14 +1531,14 @@ func (m *Manager) enforceClientLimit(keepID uint64) {
 		var oldestUsed int64
 		for _, item := range m.sessions {
 			item.mu.RLock()
-			clientRole, state := item.clientRole, item.state
+			clientRole, state, direct := item.clientRole, item.state, item.direct
 			item.mu.RUnlock()
 			if !clientRole || state != StateReady {
 				continue
 			}
 			count++
 			used := item.lastUsed.Load()
-			if item.ID == keepID {
+			if item.ID == keepID || (direct != nil && direct.ActiveStreams() > 0) {
 				continue
 			}
 			if oldest == nil || used < oldestUsed {
@@ -1571,6 +1591,7 @@ func (m *Manager) reapIdleLoop() {
 					continue
 				}
 				if direct != nil && direct.ActiveStreams() > 0 {
+					item.lastUsed.Store(now.UnixMilli())
 					continue
 				}
 				last := time.UnixMilli(item.lastUsed.Load())
@@ -1583,6 +1604,9 @@ func (m *Manager) reapIdleLoop() {
 			for _, item := range stale {
 				m.closeAndNotify(item, "idle_timeout")
 			}
+			// Busy sessions can temporarily exceed the cache limit. Reapply it
+			// after their streams drain, without interrupting active transfers.
+			m.enforceClientLimit(0)
 		}
 	}
 }

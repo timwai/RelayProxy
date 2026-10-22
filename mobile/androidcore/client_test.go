@@ -411,8 +411,8 @@ func TestMessageListenerSignalsQueuedAndNewMessages(t *testing.T) {
 		t.Fatalf("initial queued callback = %d, want 1", got)
 	}
 	client.enqueueMessage(protocol.PushMessage{ID: "new", Content: "just arrived"})
-	if got := listener.calls.Load(); got != 2 {
-		t.Fatalf("new message callback = %d, want 2", got)
+	if got := listener.calls.Load(); got != 1 {
+		t.Fatalf("undrained messages scheduled %d callbacks, want 1", got)
 	}
 	var messages []protocol.PushMessage
 	if err := json.Unmarshal([]byte(client.PopMessagesJSON()), &messages); err != nil {
@@ -423,7 +423,7 @@ func TestMessageListenerSignalsQueuedAndNewMessages(t *testing.T) {
 	}
 	client.SetMessageListener(nil)
 	client.enqueueMessage(protocol.PushMessage{ID: "quiet", Content: "no listener"})
-	if got := listener.calls.Load(); got != 2 {
+	if got := listener.calls.Load(); got != 1 {
 		t.Fatalf("callback invoked after unregister: %d", got)
 	}
 }

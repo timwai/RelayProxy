@@ -31,6 +31,7 @@ import (
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
+	"relayproxy/internal/netutil"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
 	"relayproxy/internal/proxy/httpproxy"
@@ -272,6 +273,8 @@ type AgentStatus struct {
 	DirectQUIC           *tunnel.QUICDiagnostics    `json:"directQuic,omitempty"`
 	P2PState             string                     `json:"p2pState,omitempty"`
 	P2PPath              string                     `json:"p2pPath,omitempty"`
+	P2PFailureKind       string                     `json:"p2pFailureKind,omitempty"`
+	P2PRetryAfterMS      int64                      `json:"p2pRetryAfterMs,omitempty"`
 	P2PError             string                     `json:"p2pError,omitempty"`
 	P2PSessionID         uint64                     `json:"p2pSessionId,omitempty"`
 	P2PExitID            string                     `json:"p2pExitId,omitempty"`
@@ -749,6 +752,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if err != nil {
 		return fmt.Errorf("open control stream: %w", err)
 	}
+	ctrl = a.tunnelMgr.TrackControlStream(sess, ctrl)
 	defer ctrl.Close()
 	if err := ctrl.SetDeadline(deadline); err != nil {
 		return err
@@ -826,6 +830,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	if accepted.State != "approved" || accepted.DeviceID == "" {
 		return errors.New("server returned an incomplete device approval")
 	}
+	a.tunnelMgr.RecordControlReady(sess)
 	tunnel.SetPeerCapabilities(sess, accepted.TransportCapabilities)
 	if accepted.BrutalUploadBPS > 0 && tunnel.UseBrutal(sess, accepted.BrutalUploadBPS, cfg.DisableLossCompensation) {
 		log.Printf("[Transport] Relay QUIC upload switched to Brutal target=%d B/s", accepted.BrutalUploadBPS)
@@ -995,7 +1000,9 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 	if heartbeatSec <= 0 {
 		heartbeatSec = 15
 	}
-	ticker := time.NewTicker(time.Duration(heartbeatSec) * time.Second)
+	interval := time.Duration(heartbeatSec) * time.Second
+	var lastRTT time.Duration
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -1004,9 +1011,6 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 		case <-sess.Done():
 			return
 		case <-ticker.C:
-			start := time.Now()
-			_ = ctrl.SetDeadline(start.Add(5 * time.Second))
-			var pong protocol.PongMessage
 			diagnostics, marshalErr := json.Marshal(a.Diagnostics())
 			if marshalErr != nil {
 				log.Printf("[Agent] Encode diagnostics failed: %v", marshalErr)
@@ -1015,18 +1019,13 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 				log.Printf("[Agent] Diagnostics snapshot omitted: %d bytes exceeds 256 KiB", len(diagnostics))
 				diagnostics = nil
 			}
-			err := protocol.WriteJSON(ctrl, protocol.PingMessage{Timestamp: start.UnixMilli(), Diagnostics: diagnostics})
-			if err == nil {
-				err = protocol.ReadJSON(ctrl, &pong)
-			}
+			pong, rtt, err := tunnel.Heartbeat(ctx, ctrl, sess, interval, lastRTT, protocol.PingMessage{Timestamp: time.Now().UnixMilli(), Diagnostics: diagnostics})
 			if err != nil {
-				// A timeout can leave a partial JSON frame. Reusing this stream
-				// after the error would lose framing; reconnect the session.
 				log.Printf("[Agent] Heartbeat failed: %v", err)
 				_ = sess.Close()
 				return
 			}
-			_ = ctrl.SetDeadline(time.Time{})
+			lastRTT = rtt
 			if pong.RDPTargets != nil {
 				a.refreshRDPTargets(sess, epoch, *pong.RDPTargets)
 			}
@@ -1035,7 +1034,7 @@ func (a *Agent) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, ses
 			}
 			a.mu.RLock()
 			if a.epoch == epoch && a.readySession == sess {
-				a.latencyMs.Store(time.Since(start).Milliseconds())
+				a.latencyMs.Store(rtt.Milliseconds())
 			}
 			a.mu.RUnlock()
 		}
@@ -1091,7 +1090,11 @@ func (a *Agent) refreshProxyExits(sess tunnel.TunnelSession, epoch uint64, exits
 	if revision != 0 {
 		a.proxyExitRevision = revision
 	}
+	manager := a.proxyP2P
 	a.mu.Unlock()
+	if manager != nil {
+		manager.ObserveExits(exits)
+	}
 	a.updatePublicDirectInventory(refreshed)
 }
 
@@ -1505,6 +1508,11 @@ func (a *Agent) Start() (err error) {
 	}
 	a.mu.Lock()
 	a.started = true
+	a.wg.Add(1)
+	go func() {
+		defer a.wg.Done()
+		watchNetworkRecovery(a.ctx, 5*time.Second, netutil.CurrentNetworkSignature, a.tunnelMgr.WakeReconnect)
+	}()
 	if a.divertSrv != nil {
 		// A broker/driver failure does not necessarily disconnect the Relay.
 		// Reconcile capture independently of tunnel state callbacks as well.
@@ -1609,6 +1617,8 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PState = string(path.State)
 			st.P2PPath = path.Path
 			st.P2PError = path.Error
+			st.P2PFailureKind = path.FailureKind
+			st.P2PRetryAfterMS = path.RetryAfterMS
 			st.P2PSessionID = path.SessionID
 			st.P2PExitID = path.ExitDeviceID
 			st.P2PRTTMs = path.RTTMs

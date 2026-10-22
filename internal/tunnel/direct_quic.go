@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net"
 	"slices"
-	"strings"
 	"sync"
 
 	"github.com/apernet/quic-go"
@@ -136,37 +135,10 @@ func DialDirectQUIC(ctx context.Context, address string, tlsConfig *tls.Config, 
 	if err != nil {
 		return nil, err
 	}
-	remoteAddr, err := net.ResolveUDPAddr("udp", address)
+	session, err := dialQUICAddresses(ctx, address, tlsConfig, DirectQUICConfig(quicConfig), true)
 	if err != nil {
-		return nil, fmt.Errorf("resolve direct QUIC address: %w", err)
-	}
-	if tlsConfig.ServerName == "" {
-		if host, _, splitErr := net.SplitHostPort(address); splitErr == nil {
-			tlsConfig.ServerName = strings.Trim(host, "[]")
-		}
-	}
-
-	network := "udp"
-	localAddr := &net.UDPAddr{Port: 0}
-	if remoteAddr.IP.To4() != nil {
-		network = "udp4"
-		localAddr.IP = net.IPv4zero
-	} else if remoteAddr.IP.To16() != nil {
-		network = "udp6"
-		localAddr.IP = net.IPv6unspecified
-	}
-	packetConn, err := net.ListenUDP(network, localAddr)
-	if err != nil {
-		return nil, fmt.Errorf("direct QUIC UDP socket failed: %w", err)
-	}
-	TuneDirectQUICUDPConn(packetConn)
-
-	conn, err := quic.Dial(ctx, packetConn, remoteAddr, tlsConfig, DirectQUICConfig(quicConfig))
-	if err != nil {
-		_ = packetConn.Close()
 		return nil, fmt.Errorf("direct QUIC dial failed: %w", err)
 	}
-	session := newOwnedQUICSession(conn, packetConn)
 	SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
 	return session, nil
 }

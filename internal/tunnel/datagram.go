@@ -137,12 +137,13 @@ type datagramMux struct {
 	closeOnce       sync.Once
 	done            chan struct{}
 	send            chan queuedDatagram
+	reapWake        chan struct{}
 	wg              sync.WaitGroup
 	reassemblyBytes atomic.Int64
 }
 
 func newDatagramMux(s *QUICSession) *datagramMux {
-	m := &datagramMux{session: s, ctx: s.conn.Context(), budget: processDatagramBudget, channels: make(map[uint64]*DatagramChannel), done: make(chan struct{}), send: make(chan queuedDatagram, datagramSendQueueSize)}
+	m := &datagramMux{session: s, ctx: s.conn.Context(), budget: processDatagramBudget, channels: make(map[uint64]*DatagramChannel), done: make(chan struct{}), send: make(chan queuedDatagram, datagramSendQueueSize), reapWake: make(chan struct{}, 1)}
 	// Drain even unregistered datagrams. A session must not retain an unread
 	// native receive queue merely because it has no active associations.
 	m.wg.Add(3)
@@ -294,30 +295,51 @@ func (m *datagramMux) sendLoop() {
 }
 
 // reapLoop is shared by every native UDP association on a QUIC session. A
-// per-association ticker would multiply wakeups and timers under load.
+// per-association ticker would multiply wakeups and timers under load. It sleeps
+// without a timer whenever there are no endpoint associations to expire.
 func (m *datagramMux) reapLoop() {
 	defer m.wg.Done()
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	conns := make([]*UDPDatagramConn, 0, maxDatagramAssociations)
+	timer := time.NewTimer(100 * time.Millisecond)
+	timer.Stop()
+	defer timer.Stop()
+	var tick <-chan time.Time
+	var conns []*UDPDatagramConn
 	for {
 		select {
 		case <-m.ctx.Done():
 			return
 		case <-m.done:
 			return
-		case now := <-ticker.C:
-			conns = conns[:0]
-			m.mu.RLock()
-			for _, channel := range m.channels {
-				if channel.reaper != nil {
-					conns = append(conns, channel.reaper)
-				}
+		case <-m.reapWake:
+			if tick != nil {
+				// The existing tick will include newly registered connections.
+				// Association bursts must not trigger repeated full-map scans.
+				continue
 			}
-			m.mu.RUnlock()
-			for _, conn := range conns {
-				conn.reap(now)
+		case <-tick:
+		}
+		conns = conns[:0]
+		m.mu.RLock()
+		for _, channel := range m.channels {
+			if !channel.closed && channel.reaper != nil {
+				conns = append(conns, channel.reaper)
 			}
+		}
+		m.mu.RUnlock()
+		now := time.Now()
+		for _, conn := range conns {
+			conn.reap(now)
+		}
+		// Reused scratch storage must not keep closed associations, streams,
+		// and their packet buffers alive until the entire QUIC session closes.
+		active := len(conns) > 0
+		clear(conns)
+		if active {
+			timer.Reset(100 * time.Millisecond)
+			tick = timer.C
+		} else {
+			timer.Stop()
+			tick = nil
 		}
 	}
 }
@@ -568,6 +590,10 @@ func (c *DatagramChannel) setReaper(reaper *UDPDatagramConn) bool {
 		return false
 	}
 	c.reaper = reaper
+	select {
+	case c.mux.reapWake <- struct{}{}:
+	default:
+	}
 	return true
 }
 

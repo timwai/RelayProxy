@@ -109,62 +109,59 @@ type clientConfig struct {
 }
 
 type statusSnapshot struct {
-	ConnectionState     string                  `json:"connectionState"`
-	ApprovalState       string                  `json:"approvalState"`
-	DeviceID            string                  `json:"deviceId,omitempty"`
-	DeviceName          string                  `json:"deviceName"`
-	IdentityName        string                  `json:"identityName,omitempty"`
-	PolicyRevision      int64                   `json:"policyRevision,omitempty"`
-	Transport           string                  `json:"transport,omitempty"`
-	ExitApproved        bool                    `json:"exitApproved"`
-	ClientApproved      bool                    `json:"clientApproved"`
-	ProxyState          string                  `json:"proxyState,omitempty"`
-	ProxyError          string                  `json:"proxyError,omitempty"`
-	SelectedExit        string                  `json:"selectedExit"`
-	ProxyExits          []protocol.ProxyExit    `json:"proxyExits,omitempty"`
-	ActiveStreams       int64                   `json:"activeStreams"`
-	LatencyMs           int64                   `json:"latencyMs"`
-	PowerConstrained    bool                    `json:"powerConstrained"`
-	DirectState         string                  `json:"directState,omitempty"`
-	DirectPath          string                  `json:"directPath,omitempty"`
-	DirectError         string                  `json:"directError,omitempty"`
-	DirectEndpoint      string                  `json:"directEndpoint,omitempty"`
-	DirectRTTMs         int64                   `json:"directRttMs,omitempty"`
-	DirectFallbackCount uint64                  `json:"directFallbackCount,omitempty"`
-	DirectBytesUp       uint64                  `json:"directBytesUp,omitempty"`
-	DirectBytesDown     uint64                  `json:"directBytesDown,omitempty"`
-	DirectQUIC          *tunnel.QUICDiagnostics `json:"directQuic,omitempty"`
-	P2PState            string                  `json:"p2pState,omitempty"`
-	P2PPath             string                  `json:"p2pPath,omitempty"`
-	P2PError            string                  `json:"p2pError,omitempty"`
-	P2PRTTMs            int64                   `json:"p2pRttMs,omitempty"`
-	P2PCandidateSummary string                  `json:"p2pCandidateSummary,omitempty"`
-	UPnPEnabled         bool                    `json:"upnpEnabled"`
-	UPnPState           string                  `json:"upnpState"`
-	UPnPError           string                  `json:"upnpError,omitempty"`
-	UPnPAddress         string                  `json:"upnpAddress,omitempty"`
-	P2PBytesUp          uint64                  `json:"p2pBytesUp,omitempty"`
-	P2PBytesDown        uint64                  `json:"p2pBytesDown,omitempty"`
-	P2PQUIC             *tunnel.QUICDiagnostics `json:"p2pQuic,omitempty"`
-	ProxyActiveTCP      int64                   `json:"proxyActiveTcp"`
-	ProxyActiveUDP      int64                   `json:"proxyActiveUdp"`
-	ProxyTCPFlows       uint64                  `json:"proxyTcpFlows"`
-	ProxyUDPFlows       uint64                  `json:"proxyUdpFlows"`
-	ProxyBytesUp        uint64                  `json:"proxyBytesUp"`
-	ProxyBytesDown      uint64                  `json:"proxyBytesDown"`
-	NativeUDP           tunnel.DatagramUsage    `json:"nativeUdp"`
-	RoutingMode         routing.Mode            `json:"routingMode"`
-	LastError           string                  `json:"lastError,omitempty"`
-}
-
-// MessageListener receives notifications for server push messages without polling.
-// Callbacks may run on a Go background thread.
-type MessageListener interface {
-	OnMessage()
+	ConnectionState     string                   `json:"connectionState"`
+	ApprovalState       string                   `json:"approvalState"`
+	DeviceID            string                   `json:"deviceId,omitempty"`
+	DeviceName          string                   `json:"deviceName"`
+	IdentityName        string                   `json:"identityName,omitempty"`
+	PolicyRevision      int64                    `json:"policyRevision,omitempty"`
+	Transport           string                   `json:"transport,omitempty"`
+	ExitApproved        bool                     `json:"exitApproved"`
+	ClientApproved      bool                     `json:"clientApproved"`
+	ProxyState          string                   `json:"proxyState,omitempty"`
+	ProxyError          string                   `json:"proxyError,omitempty"`
+	SelectedExit        string                   `json:"selectedExit"`
+	ProxyExits          []protocol.ProxyExit     `json:"proxyExits,omitempty"`
+	ActiveStreams       int64                    `json:"activeStreams"`
+	LatencyMs           int64                    `json:"latencyMs"`
+	PowerConstrained    bool                     `json:"powerConstrained"`
+	DirectState         string                   `json:"directState,omitempty"`
+	DirectPath          string                   `json:"directPath,omitempty"`
+	DirectError         string                   `json:"directError,omitempty"`
+	DirectEndpoint      string                   `json:"directEndpoint,omitempty"`
+	DirectRTTMs         int64                    `json:"directRttMs,omitempty"`
+	DirectFallbackCount uint64                   `json:"directFallbackCount,omitempty"`
+	DirectBytesUp       uint64                   `json:"directBytesUp,omitempty"`
+	DirectBytesDown     uint64                   `json:"directBytesDown,omitempty"`
+	DirectQUIC          *tunnel.QUICDiagnostics  `json:"directQuic,omitempty"`
+	P2PState            string                   `json:"p2pState,omitempty"`
+	P2PPath             string                   `json:"p2pPath,omitempty"`
+	P2PFailureKind      string                   `json:"p2pFailureKind,omitempty"`
+	P2PRetryAfterMS     int64                    `json:"p2pRetryAfterMs,omitempty"`
+	P2PError            string                   `json:"p2pError,omitempty"`
+	P2PRTTMs            int64                    `json:"p2pRttMs,omitempty"`
+	P2PCandidateSummary string                   `json:"p2pCandidateSummary,omitempty"`
+	UPnPEnabled         bool                     `json:"upnpEnabled"`
+	UPnPState           string                   `json:"upnpState"`
+	UPnPError           string                   `json:"upnpError,omitempty"`
+	UPnPAddress         string                   `json:"upnpAddress,omitempty"`
+	P2PBytesUp          uint64                   `json:"p2pBytesUp,omitempty"`
+	P2PBytesDown        uint64                   `json:"p2pBytesDown,omitempty"`
+	P2PQUIC             *tunnel.QUICDiagnostics  `json:"p2pQuic,omitempty"`
+	ProxyActiveTCP      int64                    `json:"proxyActiveTcp"`
+	ProxyActiveUDP      int64                    `json:"proxyActiveUdp"`
+	ProxyTCPFlows       uint64                   `json:"proxyTcpFlows"`
+	ProxyUDPFlows       uint64                   `json:"proxyUdpFlows"`
+	ProxyBytesUp        uint64                   `json:"proxyBytesUp"`
+	ProxyBytesDown      uint64                   `json:"proxyBytesDown"`
+	ConnectionMetrics   tunnel.ConnectionMetrics `json:"connectionMetrics"`
+	NativeUDP           tunnel.DatagramUsage     `json:"nativeUdp"`
+	RoutingMode         routing.Mode             `json:"routingMode"`
+	LastError           string                   `json:"lastError,omitempty"`
 }
 
 // Client is the small gomobile-facing wrapper for the Android exit node.
-// The exported surface intentionally uses only gomobile-supported scalar values.
+// The exported surface uses gomobile-supported values and callback interfaces.
 type Client struct {
 	cfg      clientConfig
 	identity *deviceidentity.Identity
@@ -606,6 +603,7 @@ func (c *Client) Stop() error {
 	}
 	c.closed = true
 	c.messageListener = nil
+	c.messages = nil
 	c.status.ConnectionState = string(tunnel.StateClosed)
 	c.clientApproved.Store(false)
 	socksServer, vpnSocksServer, httpServer := c.socksServer, c.vpnSocksServer, c.httpServer
@@ -756,31 +754,6 @@ func (c *Client) SetPowerConstrained(constrained bool) {
 	}
 }
 
-// SetMessageListener enables event-driven message delivery to Android.
-// Messages received before registration also trigger a callback.
-func (c *Client) SetMessageListener(listener MessageListener) {
-	if c == nil {
-		return
-	}
-	c.mu.Lock()
-	if c.closed {
-		c.mu.Unlock()
-		return
-	}
-	c.messageListener = listener
-	pending := len(c.messages) > 0
-	c.mu.Unlock()
-	if pending && listener != nil {
-		notifyMessageListener(listener)
-	}
-}
-
-func notifyMessageListener(listener MessageListener) {
-	// A Java callback failure must not interrupt the relay stream/receipt.
-	defer func() { _ = recover() }()
-	listener.OnMessage()
-}
-
 // PopMessagesJSON returns and clears server-originated messages waiting for the
 // Android UI. Keeping this as JSON preserves a gomobile-friendly scalar API.
 func (c *Client) PopMessagesJSON() string {
@@ -788,7 +761,7 @@ func (c *Client) PopMessagesJSON() string {
 		return "[]"
 	}
 	c.mu.Lock()
-	messages := append([]protocol.PushMessage(nil), c.messages...)
+	messages := c.messages
 	c.messages = nil
 	c.mu.Unlock()
 	if len(messages) == 0 {
@@ -807,6 +780,7 @@ func (c *Client) enqueueMessage(message protocol.PushMessage) {
 		c.mu.Unlock()
 		return
 	}
+	wasEmpty := len(c.messages) == 0
 	if len(c.messages) >= 500 {
 		copy(c.messages, c.messages[len(c.messages)-499:])
 		c.messages = c.messages[:499]
@@ -814,7 +788,7 @@ func (c *Client) enqueueMessage(message protocol.PushMessage) {
 	c.messages = append(c.messages, message)
 	listener := c.messageListener
 	c.mu.Unlock()
-	if listener != nil {
+	if wasEmpty && listener != nil {
 		notifyMessageListener(listener)
 	}
 }
@@ -836,6 +810,7 @@ func (c *Client) StatusJSON() string {
 	s.ProxyBytesUp = c.proxyBytesUp.Load()
 	s.ProxyBytesDown = c.proxyBytesDown.Load()
 	s.NativeUDP = tunnel.NativeUDPUsage()
+	s.ConnectionMetrics = c.manager.ConnectionMetrics()
 	if publicDirect != nil {
 		if path, ok := publicDirect.PathStatus(s.SelectedExit); ok {
 			s.DirectState = path.State
@@ -859,6 +834,8 @@ func (c *Client) StatusJSON() string {
 			s.P2PState = string(path.State)
 			s.P2PPath = path.Path
 			s.P2PError = path.Error
+			s.P2PFailureKind = path.FailureKind
+			s.P2PRetryAfterMS = path.RetryAfterMS
 			s.P2PRTTMs = path.RTTMs
 			s.P2PCandidateSummary = path.CandidateSummary
 			s.P2PBytesUp = path.BytesUp
@@ -953,6 +930,9 @@ func (c *Client) onTunnelStateChange(_, newState tunnel.State, sess tunnel.Tunne
 	c.mu.Unlock()
 
 	if !shouldServe {
+		// Manager state callbacks are serialized. Revoke the old credentials
+		// here, before a replacement session can publish fresh inventory.
+		c.updatePublicDirectInventory(nil)
 		return
 	}
 
@@ -980,6 +960,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if err != nil {
 		return fmt.Errorf("open control stream: %w", err)
 	}
+	ctrl = c.manager.TrackControlStream(sess, ctrl)
 	defer ctrl.Close()
 	if err := ctrl.SetDeadline(deadline); err != nil {
 		return err
@@ -1073,6 +1054,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if accepted.State != "approved" || accepted.DeviceID == "" {
 		return errors.New("server returned an incomplete device approval")
 	}
+	c.manager.RecordControlReady(sess)
 	tunnel.SetPeerCapabilities(sess, accepted.TransportCapabilities)
 	if accepted.BrutalUploadBPS > 0 {
 		tunnel.UseBrutal(sess, accepted.BrutalUploadBPS, c.cfg.DisableLossCompensation)
@@ -1206,10 +1188,6 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	}
 	cancel()
 	stopPublicDirect()
-	// Public Direct authorization is derived from this Relay session's
-	// server-provided inventory and one-time tickets. Never carry a ready direct
-	// session across Relay reconnects or authorization changes.
-	c.updatePublicDirectInventory(nil)
 	_ = sess.Close()
 	workers.Wait()
 	return nil
@@ -1305,7 +1283,11 @@ func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.P
 		c.proxyExitRevision = revision
 	}
 	c.proxyDialer.SetDefaultExitID(selected)
+	manager := c.proxyP2P
 	c.mu.Unlock()
+	if manager != nil {
+		manager.ObserveExits(refreshed)
+	}
 	c.updatePublicDirectInventory(refreshed)
 	if !routing.IsCustomExitID(selected) {
 		c.ensureProxyDirectPath(selected)
@@ -1316,7 +1298,9 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 	if heartbeatSec <= 0 {
 		heartbeatSec = 15
 	}
-	ticker := time.NewTicker(time.Duration(heartbeatSec) * time.Second)
+	interval := time.Duration(heartbeatSec) * time.Second
+	var lastRTT time.Duration
+	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
 	for {
 		select {
@@ -1325,22 +1309,16 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 		case <-sess.Done():
 			return
 		case <-ticker.C:
-			start := time.Now()
-			_ = ctrl.SetDeadline(start.Add(5 * time.Second))
-			err := protocol.WriteJSON(ctrl, protocol.PingMessage{Timestamp: start.UnixMilli()})
-			var pong protocol.PongMessage
-			if err == nil {
-				err = protocol.ReadJSON(ctrl, &pong)
-			}
+			pong, rtt, err := tunnel.Heartbeat(ctx, ctrl, sess, interval, lastRTT, protocol.PingMessage{Timestamp: time.Now().UnixMilli()})
 			if err != nil {
 				c.setLastError(fmt.Errorf("heartbeat failed: %w", err))
 				_ = sess.Close()
 				return
 			}
-			_ = ctrl.SetDeadline(time.Time{})
+			lastRTT = rtt
 			c.mu.Lock()
 			if !c.closed && c.manager.Session() == sess {
-				c.status.LatencyMs = time.Since(start).Milliseconds()
+				c.status.LatencyMs = rtt.Milliseconds()
 			}
 			c.mu.Unlock()
 			if pong.ProxyExits != nil {

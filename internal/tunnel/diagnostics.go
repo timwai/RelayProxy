@@ -8,6 +8,7 @@ import "time"
 // When collected on the relay, sent counters describe relay-to-device traffic.
 type SessionDiagnostics struct {
 	Transport TransportType    `json:"transport"`
+	Dial      *DialTimings     `json:"dial,omitempty"`
 	Local     string           `json:"local"`
 	Remote    string           `json:"remote"`
 	QUIC      *QUICDiagnostics `json:"quic,omitempty"`
@@ -53,6 +54,12 @@ func DiagnoseSession(session TunnelSession) *SessionDiagnostics {
 	}
 	if addr := session.RemoteAddr(); addr != nil {
 		d.Remote = addr.String()
+	}
+	if q, ok := session.(*QUICSession); ok {
+		d.Dial = q.dialTimings
+	}
+	if t, ok := session.(*TLSSession); ok {
+		d.Dial = t.dialTimings
 	}
 	if quicSession, ok := session.(*QUICSession); ok && quicSession.conn != nil {
 		stats := quicSession.conn.ConnectionStats()

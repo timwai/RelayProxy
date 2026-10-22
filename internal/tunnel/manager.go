@@ -20,7 +20,9 @@ const (
 	ModeQUICOnly Mode = "quic_only"
 	ModeTCPOnly  Mode = "tcp_only"
 
-	defaultAutoFallbackDelay = 250 * time.Millisecond
+	defaultAutoFallbackDelay     = 250 * time.Millisecond
+	defaultAutoQUICRetryInterval = 15 * time.Second
+	maxAutoQUICRetryInterval     = 2 * time.Minute
 )
 
 type State string
@@ -34,29 +36,36 @@ const (
 )
 
 type ManagerConfig struct {
-	ServerAddress     string        // e.g. "1.2.3.4" or "relay.example.com"
-	QUICPort          int           // default 443
-	TCPPort           int           // default 443
-	Mode              Mode          // auto, quic_only, tcp_only
-	TLSConfig         *tls.Config   // TLS configuration
-	PlainTCP          bool          // Explicitly disable TLS; a nil TLSConfig alone uses secure defaults.
-	ConnectTimeout    time.Duration // default 10s
-	AutoFallbackDelay time.Duration // delay before racing TCP against an in-flight QUIC attempt
+	ServerAddress         string        // e.g. "1.2.3.4" or "relay.example.com"
+	QUICPort              int           // default 443
+	TCPPort               int           // default 443
+	Mode                  Mode          // auto, quic_only, tcp_only
+	TLSConfig             *tls.Config   // TLS configuration
+	PlainTCP              bool          // Explicitly disable TLS; a nil TLSConfig alone uses secure defaults.
+	ConnectTimeout        time.Duration // default 10s
+	AutoFallbackDelay     time.Duration // delay before racing TCP against an in-flight QUIC attempt
+	AutoQUICRetryInterval time.Duration // initial QUIC retry interval while auto uses TLS; default 15s
 }
 
 type TunnelManager struct {
-	cfg         ManagerConfig
-	mu          sync.RWMutex
-	connectMu   sync.Mutex
-	stateEvents sync.Mutex
-	state       State
-	session     TunnelSession
-	ctx         context.Context
-	cancel      context.CancelFunc
-	onState     func(oldState, newState State, session TunnelSession)
-	notifyChan  chan struct{}
-	startOnce   sync.Once
-	wg          sync.WaitGroup
+	cfg              ManagerConfig
+	mu               sync.RWMutex
+	connectMu        sync.Mutex
+	stateEvents      sync.Mutex
+	state            State
+	session          TunnelSession
+	ctx              context.Context
+	cancel           context.CancelFunc
+	onState          func(oldState, newState State, session TunnelSession)
+	notifyChan       chan struct{}
+	startOnce        sync.Once
+	wg               sync.WaitGroup
+	networkWake      chan struct{}
+	networkAvailable bool
+	connectCancel    context.CancelFunc
+	metrics          ConnectionMetrics
+	lostAt           time.Time
+	connectedAt      time.Time
 }
 
 func NewTunnelManager(cfg ManagerConfig, onState func(oldState, newState State, session TunnelSession)) *TunnelManager {
@@ -75,6 +84,9 @@ func NewTunnelManager(cfg ManagerConfig, onState func(oldState, newState State, 
 	if cfg.AutoFallbackDelay <= 0 {
 		cfg.AutoFallbackDelay = defaultAutoFallbackDelay
 	}
+	if cfg.AutoQUICRetryInterval <= 0 {
+		cfg.AutoQUICRetryInterval = defaultAutoQUICRetryInterval
+	}
 	if cfg.PlainTCP {
 		cfg.TLSConfig = nil
 	} else {
@@ -89,12 +101,14 @@ func NewTunnelManager(cfg ManagerConfig, onState func(oldState, newState State, 
 
 	ctx, cancel := context.WithCancel(context.Background())
 	return &TunnelManager{
-		cfg:        cfg,
-		state:      StateDisconnected,
-		ctx:        ctx,
-		cancel:     cancel,
-		onState:    onState,
-		notifyChan: make(chan struct{}, 1),
+		cfg:              cfg,
+		state:            StateDisconnected,
+		ctx:              ctx,
+		cancel:           cancel,
+		onState:          onState,
+		notifyChan:       make(chan struct{}, 1),
+		networkWake:      make(chan struct{}, 1),
+		networkAvailable: true,
 	}
 }
 
@@ -122,6 +136,9 @@ func (m *TunnelManager) setState(newState State, session TunnelSession) bool {
 		return false
 	}
 	oldState := m.state
+	if newState == StateConnected {
+		m.connectedAt = time.Now()
+	}
 	m.state = newState
 	m.session = session
 	m.mu.Unlock()
@@ -154,6 +171,9 @@ func (m *TunnelManager) MarkSessionLost(sess TunnelSession) {
 	oldState := m.state
 	m.session = nil
 	m.state = StateDisconnected
+	if m.lostAt.IsZero() {
+		m.lostAt = time.Now()
+	}
 	m.mu.Unlock()
 	_ = sess.Close()
 	if m.onState != nil && oldState != StateDisconnected {
@@ -166,7 +186,7 @@ func (m *TunnelManager) MarkSessionLost(sess TunnelSession) {
 }
 
 // Connect dials the relay server according to the configured mode
-func (m *TunnelManager) Connect(ctx context.Context) (TunnelSession, error) {
+func (m *TunnelManager) Connect(ctx context.Context) (result TunnelSession, connectErr error) {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	stop := context.AfterFunc(m.ctx, cancel)
@@ -192,6 +212,41 @@ func (m *TunnelManager) Connect(ctx context.Context) (TunnelSession, error) {
 		}
 	}
 
+	m.mu.Lock()
+	if !m.networkAvailable {
+		m.mu.Unlock()
+		return nil, errors.New("network unavailable")
+	}
+	m.connectCancel = cancel
+	m.metrics.Attempts++
+	m.metrics.FallbackReason = ""
+	m.metrics.ControlReadyMS = 0
+	m.metrics.FirstByteMS = 0
+	m.metrics.Dial = nil
+	m.metrics.Transport = ""
+	m.mu.Unlock()
+	started := time.Now()
+	defer func() {
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		m.connectCancel = nil
+		m.metrics.LastConnectMS = time.Since(started).Milliseconds()
+		if connectErr != nil {
+			m.metrics.Failures++
+			m.metrics.LastError = connectErr.Error()
+		} else {
+			m.metrics.LastError = ""
+			m.metrics.Transport = result.Transport()
+			if d := DiagnoseSession(result); d != nil {
+				m.metrics.Dial = d.Dial
+			}
+			if !m.lostAt.IsZero() {
+				m.metrics.Reconnects++
+				m.metrics.LastRecoveryMS = time.Since(m.lostAt).Milliseconds()
+				m.lostAt = time.Time{}
+			}
+		}
+	}()
 	m.setState(StateConnecting, nil)
 
 	quicAddr := net.JoinHostPort(m.cfg.ServerAddress, strconv.Itoa(m.cfg.QUICPort))
@@ -295,6 +350,15 @@ func (m *TunnelManager) dialAuto(ctx context.Context, quicAddr, tcpAddr string) 
 		case result := <-results:
 			pending--
 			if result.err == nil {
+				if result.transport == TransportTLS {
+					m.mu.Lock()
+					if quicErr != nil {
+						m.metrics.FallbackReason = quicErr.Error()
+					} else {
+						m.metrics.FallbackReason = "quic_pending_after_head_start"
+					}
+					m.mu.Unlock()
+				}
 				cancel()
 				if pending > 0 {
 					go closeLateTransportResults(results, pending)
@@ -358,6 +422,8 @@ func (m *TunnelManager) reconnectLoop() {
 		30 * time.Second,
 	}
 	backoffIdx := 0
+	var lastAttempt time.Time
+	expedite := false
 
 	for {
 		select {
@@ -368,33 +434,53 @@ func (m *TunnelManager) reconnectLoop() {
 
 		sess := m.Session()
 		if sess != nil {
-			// Connected: wait for session death or explicit disconnect.
-			// Control-plane heartbeat already covers e2e liveness; do not OpenStream-probe
-			// (that polluted relay logs and could falsely tear down the tunnel).
-			select {
-			case <-m.ctx.Done():
-				return
-			case <-sess.Done():
-				log.Printf("[TunnelManager] Session died, triggering reconnect")
-				m.MarkSessionLost(sess)
-			case <-m.notifyChan:
-				// Explicit disconnect notification
-			}
+			m.waitConnected(sess)
 			continue
 		}
 
+		m.mu.RLock()
+		available := m.networkAvailable
+		m.mu.RUnlock()
+		if !available {
+			select {
+			case <-m.ctx.Done():
+				return
+			case <-m.networkWake:
+				expedite = true
+			}
+			continue
+		}
 		m.setState(StateReconnecting, nil)
 
 		// Calculate backoff with +/- 20% jitter
 		base := backoffs[backoffIdx]
 		jitter := time.Duration(float64(base) * (0.8 + 0.4*rand.Float64()))
 
+		if expedite {
+			jitter = max(0, time.Until(lastAttempt.Add(500*time.Millisecond))) + time.Duration(rand.Intn(100))*time.Millisecond
+			expedite = false
+		}
+		timer := time.NewTimer(jitter)
 		select {
 		case <-m.ctx.Done():
+			timer.Stop()
 			return
-		case <-time.After(jitter):
+		case <-timer.C:
+		case <-m.networkWake:
+			timer.Stop()
+			// Coalesce callback bursts and retain jitter across devices.
+			delay := max(0, time.Until(lastAttempt.Add(500*time.Millisecond))) + time.Duration(rand.Intn(100))*time.Millisecond
+			timer = time.NewTimer(delay)
+			select {
+			case <-m.ctx.Done():
+				timer.Stop()
+				return
+			case <-timer.C:
+			}
+			backoffIdx = 0
 		}
 
+		lastAttempt = time.Now()
 		// Allow sufficient timeout budget for all dial attempts
 		ctx, cancel := context.WithTimeout(m.ctx, m.cfg.ConnectTimeout*2)
 		_, err := m.Connect(ctx)

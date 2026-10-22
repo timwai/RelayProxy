@@ -592,14 +592,15 @@ class RelayVpnService : VpnService() {
     }
 
     private fun stopOwnedRelayIfNeeded() {
-        val store = ConfigStore(this)
-        val intent = Intent(this, RelayExitService::class.java)
-        if (store.isDesiredRunning() || store.load().clientEnabled) {
-            intent.action = RelayExitService.ACTION_RECONFIGURE
-        } else {
-            intent.action = RelayExitService.ACTION_STOP
+        // VPN shutting down only releases its own demand. It must never clear
+        // the independently selected exit-sharing switch via ACTION_STOP.
+        // RelayExitService decides whether exit/local proxy still need Core.
+        runCatching {
+            startService(
+                Intent(this, RelayExitService::class.java)
+                    .setAction(RelayExitService.ACTION_RECONFIGURE)
+            )
         }
-        runCatching { startService(intent) }
     }
 
     private fun setStatus(state: String, detail: String) {

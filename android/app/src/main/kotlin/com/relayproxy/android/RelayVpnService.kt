@@ -4,7 +4,9 @@ import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.content.BroadcastReceiver
 import android.content.Intent
+import android.content.IntentFilter
 import android.content.Context
 import android.net.ConnectivityManager
 import android.net.Network
@@ -14,6 +16,7 @@ import android.os.Handler
 import android.os.IBinder
 import android.os.Looper
 import android.os.ParcelFileDescriptor
+import android.os.PowerManager
 import android.os.SystemClock
 import android.system.OsConstants
 import hev.htproxy.TProxyService
@@ -39,6 +42,17 @@ class RelayVpnService : VpnService() {
         private const val UNKNOWN_APPLICATION = "__android_unknown__"
 
         @Volatile
+        private var uiVisible = false
+
+        @Volatile
+        private var activeInstance: RelayVpnService? = null
+
+        fun setUiVisible(visible: Boolean) {
+            uiVisible = visible
+            activeInstance?.requestNativeMonitorSoon()
+        }
+
+        @Volatile
         private var status = JSONObject().put("vpnState", "STOPPED").toString()
 
         fun statusJson(): String = status
@@ -61,6 +75,13 @@ class RelayVpnService : VpnService() {
     private val executor = Executors.newSingleThreadExecutor()
     private val handler = Handler(Looper.getMainLooper())
     private val statusLock = Any()
+    private lateinit var powerManager: PowerManager
+    private var powerReceiverRegistered = false
+    private val powerReceiver = object : BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            requestNativeMonitorSoon()
+        }
+    }
     @Volatile
     private var tun: ParcelFileDescriptor? = null
 
@@ -92,6 +113,19 @@ class RelayVpnService : VpnService() {
 
     override fun onCreate() {
         super.onCreate()
+        activeInstance = this
+        powerManager = getSystemService(PowerManager::class.java)
+        val filter = IntentFilter().apply {
+            addAction(Intent.ACTION_SCREEN_ON)
+            addAction(Intent.ACTION_SCREEN_OFF)
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(powerReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(powerReceiver, filter)
+        }
+        powerReceiverRegistered = true
         val manager = getSystemService(NotificationManager::class.java)
         manager.createNotificationChannel(
             NotificationChannel(CHANNEL_ID, "RelayProxy VPN", NotificationManager.IMPORTANCE_LOW)
@@ -144,6 +178,11 @@ class RelayVpnService : VpnService() {
 
     override fun onDestroy() {
         handler.removeCallbacks(nativeMonitor)
+        if (activeInstance === this) activeInstance = null
+        if (powerReceiverRegistered) {
+            powerReceiverRegistered = false
+            runCatching { unregisterReceiver(powerReceiver) }
+        }
         synchronized(this) {
             destroyed = true
             operationGeneration++
@@ -501,6 +540,13 @@ class RelayVpnService : VpnService() {
         }
     }
 
+    private fun requestNativeMonitorSoon() {
+        handler.removeCallbacks(nativeMonitor)
+        if (!destroyed && tun != null && activeGeneration >= 0L) {
+            handler.post(nativeMonitor)
+        }
+    }
+
     private fun pollNativeTunnel(generation: Long) {
         if (tun == null || !isCurrentGeneration(generation)) return
         if (!runCatching { TProxyService.TProxyIsRunning() }.getOrDefault(false)) {
@@ -517,7 +563,11 @@ class RelayVpnService : VpnService() {
         updateTunnelStats()
         handler.post {
             if (tun != null && isCurrentGeneration(generation)) {
-                handler.postDelayed(nativeMonitor, 1_000)
+                handler.removeCallbacks(nativeMonitor)
+                handler.postDelayed(
+                    nativeMonitor,
+                    PowerAwarePollPolicy.vpnMonitorMs(uiVisible, powerManager.isInteractive),
+                )
             }
         }
     }

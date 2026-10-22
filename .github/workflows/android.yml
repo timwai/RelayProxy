@@ -97,6 +97,9 @@ jobs:
         with:
           gradle-version: "8.9"
 
+      - name: Test battery-aware scheduling
+        run: gradle -p android :app:testDebugUnitTest --tests 'com.relayproxy.android.PowerAwarePollPolicyTest'
+
       - name: Build debug APK
         run: gradle -p android :app:assembleDebug
 

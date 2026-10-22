@@ -106,7 +106,17 @@ func (c *Client) configureProxyPathProvider() {
 	})
 }
 
+// Inventory heartbeats and selection changes may prewarm in normal mode, but
+// must not recreate idle paths while Android is conserving power.
+func (c *Client) prewarmProxyDirectPath(exitDeviceID string) {
+	c.prepareProxyDirectPath(exitDeviceID, true)
+}
+
 func (c *Client) ensureProxyDirectPath(exitDeviceID string) {
+	c.prepareProxyDirectPath(exitDeviceID, false)
+}
+
+func (c *Client) prepareProxyDirectPath(exitDeviceID string, prewarm bool) {
 	if c == nil {
 		return
 	}
@@ -120,8 +130,9 @@ func (c *Client) ensureProxyDirectPath(exitDeviceID string) {
 	p2pEnabled := c.cfg.ProxyP2PEnabled != nil && *c.cfg.ProxyP2PEnabled
 	mode := c.cfg.ProxyPathMode
 	closed := c.closed
+	powerConstrained := c.powerConstrained
 	c.mu.RUnlock()
-	if closed || mode == "relay_only" {
+	if closed || mode == "relay_only" || (prewarm && powerConstrained) {
 		return
 	}
 	if mode != "p2p_only" && publicDirect != nil {

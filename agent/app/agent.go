@@ -1626,7 +1626,7 @@ func (a *Agent) Status() AgentStatus {
 			st.P2PFallbackCount = path.FallbackCount
 			st.P2PBytesUp = path.BytesUp
 			st.P2PBytesDown = path.BytesDown
-			if p2pSession, ready := proxyP2P.ReadyForExit(st.SelectedExit); ready {
+			if p2pSession, ready := proxyP2P.PeekReadyForExit(st.SelectedExit); ready {
 				if diagnostics := tunnel.DiagnoseSession(p2pSession); diagnostics != nil && diagnostics.QUIC != nil {
 					st.P2PQUIC = diagnostics.QUIC
 				}

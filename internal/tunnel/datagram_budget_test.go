@@ -83,9 +83,9 @@ func TestDatagramIdleTimeoutCanBeDisabled(t *testing.T) {
 	conn := NewUDPDatagramConnWithIdleTimeout(channel, budgetStream{Conn: a}, &net.UDPAddr{}, 0)
 	defer conn.Close()
 	defer b.Close()
-	now := time.Now()
-	conn.lastActivityNanos.Store(now.Add(-24 * time.Hour).UnixNano())
-	conn.reap(now)
+	if next := conn.reap(time.Now().Add(24 * time.Hour)); !next.IsZero() {
+		t.Fatalf("lifetime association scheduled an idle deadline: %v", next)
+	}
 	select {
 	case <-conn.done:
 		t.Fatal("lifetime-bound datagram association was reaped as idle")

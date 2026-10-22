@@ -61,6 +61,13 @@ func TestPowerProfileAndSessionLimitPreserveActiveTransfer(t *testing.T) {
 	active.clientRole, active.state, active.direct = true, StateReady, direct
 	active.mu.Unlock()
 	active.lastUsed.Store(1)
+	if _, ok := manager.PeekReadyForExit("active-exit"); !ok || active.lastUsed.Load() != 1 {
+		t.Fatal("diagnostic lookup refreshed or lost the ready path")
+	}
+	if _, ok := manager.ReadyForExit("active-exit"); !ok || active.lastUsed.Load() <= 1 {
+		t.Fatal("routing lookup did not refresh the ready path")
+	}
+	active.lastUsed.Store(1)
 	stream, err := direct.OpenStream(ctx)
 	if err != nil {
 		t.Fatal(err)

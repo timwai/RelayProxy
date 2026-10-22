@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"sync/atomic"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	proxyp2p "relayproxy/agent/p2p"
@@ -24,6 +25,9 @@ func TestAndroidP2PManagerOptionsInheritSharedPunchTimeout(t *testing.T) {
 		BrutalUploadBPS: 4000000, BrutalDownloadBPS: 7000000,
 	}
 	options := androidP2PManagerOptions(cfg, accepted)
+	if !options.DisableNetworkWatch {
+		t.Fatal("Android must use its bound-network events instead of interface polling")
+	}
 	if options.PunchTimeout != 0 {
 		t.Fatalf("Android overrides shared P2P punch timeout: %v", options.PunchTimeout)
 	}
@@ -446,4 +450,53 @@ func TestMessageListenerCanDrainFromCallback(t *testing.T) {
 	if listener.calls != 1 || client.PopMessagesJSON() != "[]" {
 		t.Fatal("callback did not drain the queue")
 	}
+}
+
+// Heartbeat inventory and peer recovery must not revive idle direct paths in
+// low power mode. Actual application demand must still bypass prewarm gating.
+func TestLowPowerInventoryWaitsForDirectPathDemand(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","clientEnabled":true,"proxyP2pEnabled":true,"proxyPathMode":"p2p_only","defaultExitId":"exit"}`, filepath.Join(t.TempDir(), "identity.json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer client.Stop()
+		var calls atomic.Int64
+		manager := proxyp2p.NewManager(context.Background(), func(context.Context, protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+			calls.Add(1)
+			return protocol.P2PControlMessage{}, protocol.NewRelayError(protocol.ErrCodeExitOffline, "offline")
+		}, func() ([]protocol.P2PCandidate, string, error) {
+			return []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.1:5000"}}, "test-fingerprint", nil
+		}, time.Minute)
+		defer manager.Close()
+		client.proxyP2P = manager
+		client.clientApproved.Store(true)
+		client.SetPowerConstrained(true)
+		refresh := func(online bool) {
+			client.refreshProxyExits(nil, []protocol.ProxyExit{{DeviceID: "exit", Online: online}}, 1)
+		}
+		for range 3 {
+			refresh(true)
+		}
+		synctest.Wait()
+		if calls.Load() != 0 {
+			t.Fatal("heartbeat prewarmed a direct path in low power mode")
+		}
+		client.ensureProxyDirectPath("exit")
+		synctest.Wait()
+		if calls.Load() != 1 {
+			t.Fatalf("reactive attempts=%d, want 1", calls.Load())
+		}
+		refresh(false)
+		refresh(true)
+		synctest.Wait()
+		if calls.Load() != 1 {
+			t.Fatal("peer online event prewarmed a direct path")
+		}
+		client.ensureProxyDirectPath("exit")
+		synctest.Wait()
+		if calls.Load() != 2 {
+			t.Fatal("peer recovery did not release cooldown for real demand")
+		}
+	})
 }

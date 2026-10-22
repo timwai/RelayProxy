@@ -734,7 +734,7 @@ func (c *Client) SetDefaultExit(exitID string) {
 		c.routingDialer.SetDefaultExitID(exitID)
 	}
 	if !routing.IsCustomExitID(exitID) {
-		c.ensureProxyDirectPath(exitID)
+		c.prewarmProxyDirectPath(exitID)
 	}
 }
 
@@ -880,7 +880,7 @@ func (c *Client) StatusJSON() string {
 			s.P2PCandidateSummary = path.CandidateSummary
 			s.P2PBytesUp = path.BytesUp
 			s.P2PBytesDown = path.BytesDown
-			if p2pSession, ready := manager.ReadyForExit(s.SelectedExit); ready {
+			if p2pSession, ready := manager.PeekReadyForExit(s.SelectedExit); ready {
 				if diagnostics := tunnel.DiagnoseSession(p2pSession); diagnostics != nil && diagnostics.QUIC != nil {
 					s.P2PQUIC = diagnostics.QUIC
 				}
@@ -1185,7 +1185,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 		c.mu.Unlock()
 		selected := strings.TrimSpace(c.proxyDialer.GetDefaultExitID())
 		if clientRuntimeApproved && selected != "" && selected != protocol.ServerExitDeviceID && !routing.IsCustomExitID(selected) {
-			c.ensureProxyDirectPath(selected)
+			c.prewarmProxyDirectPath(selected)
 		}
 		defer func() {
 			c.mu.Lock()
@@ -1330,7 +1330,7 @@ func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.P
 	}
 	c.updatePublicDirectInventory(refreshed)
 	if !routing.IsCustomExitID(selected) {
-		c.ensureProxyDirectPath(selected)
+		c.prewarmProxyDirectPath(selected)
 	}
 }
 
@@ -1400,6 +1400,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 // value: a shorter window defeats LAN/WAN retries and NAT mapping discovery.
 func androidP2PManagerOptions(cfg clientConfig, accepted protocol.DeviceAccepted) proxyp2p.QUICManagerOptions {
 	return proxyp2p.QUICManagerOptions{
+		DisableNetworkWatch:     true, // Android binds networks and calls NetworkChanged.
 		KeepAlive:               10 * time.Second,
 		IdleTimeout:             120 * time.Second,
 		MaxExitSessions:         1,

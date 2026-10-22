@@ -69,6 +69,7 @@ type Manager struct {
 	peerOnline       map[string]bool
 	fallbacks        map[string]uint64
 	networkSig       string
+	maintenanceWake  chan struct{}
 	ready            chan *Session
 	closed           atomic.Bool
 	attemptSeq       atomic.Uint64
@@ -84,17 +85,19 @@ type failureState struct {
 }
 
 type QUICManagerOptions struct {
-	PunchTimeout            time.Duration
-	KeepAlive               time.Duration
-	IdleTimeout             time.Duration
-	MaxExitSessions         int
-	PortStart               int
-	PortEnd                 int
-	UPnPEnabled             bool
-	LowPowerIdleTimeout     time.Duration
-	LowPowerMaxSessions     int
-	NetworkCheckInterval    time.Duration
-	NetworkSignature        func() string
+	PunchTimeout         time.Duration
+	KeepAlive            time.Duration
+	IdleTimeout          time.Duration
+	MaxExitSessions      int
+	PortStart            int
+	PortEnd              int
+	UPnPEnabled          bool
+	LowPowerIdleTimeout  time.Duration
+	LowPowerMaxSessions  int
+	NetworkCheckInterval time.Duration
+	NetworkSignature     func() string
+	// DisableNetworkWatch is for platforms that already deliver network events.
+	DisableNetworkWatch     bool
 	BrutalUploadBPS         uint64
 	BrutalDownloadBPS       uint64
 	DisableLossCompensation bool
@@ -181,7 +184,7 @@ func NewManager(parent context.Context, send ControlSender, local LocalDescripti
 		lowPowerIdleTimeout: 60 * time.Second, lowPowerMaxSessions: 1,
 		networkCheckInterval: 10 * time.Second, networkSignature: CurrentNetworkSignature,
 		sessions: make(map[uint64]*Session), pendingAnswers: make(map[uint64]protocol.P2PControlMessage), starting: make(map[string]uint64), cooldowns: make(map[string]failureState),
-		fallbacks: make(map[string]uint64), ready: make(chan *Session, 1024),
+		fallbacks: make(map[string]uint64), ready: make(chan *Session, 1024), maintenanceWake: make(chan struct{}),
 	}
 }
 
@@ -222,14 +225,16 @@ func NewQUICManagerWithOptions(parent context.Context, send ControlSender, rende
 	m.brutalUploadBPS = options.BrutalUploadBPS
 	m.brutalDownloadBPS = options.BrutalDownloadBPS
 	m.disableLossCompensation = options.DisableLossCompensation
-	if m.networkSignature != nil {
+	if !options.DisableNetworkWatch && m.networkSignature != nil {
 		m.networkSig = m.networkSignature()
 	}
 	m.endpointFactory = func() *Endpoint {
 		return NewEndpointWithPortRangeAndUPnP(rendezvous, options.PortStart, options.PortEnd, options.UPnPEnabled)
 	}
 	go m.reapIdleLoop()
-	go m.watchNetworkLoop()
+	if !options.DisableNetworkWatch {
+		go m.watchNetworkLoop()
+	}
 	return m
 }
 
@@ -281,6 +286,11 @@ func (m *Manager) SetPowerConstrained(constrained bool) {
 	if constrained && !previous {
 		m.enforceClientLimit(0)
 	}
+	if constrained != previous {
+		m.mu.Lock()
+		m.wakeMaintenanceLocked()
+		m.mu.Unlock()
+	}
 }
 
 func (m *Manager) PowerConstrained() bool {
@@ -318,6 +328,7 @@ func (m *Manager) EnsureClient(exitDeviceID string) {
 	}
 	attemptID := m.attemptSeq.Add(1)
 	m.starting[exitDeviceID] = attemptID
+	m.wakeMaintenanceLocked()
 	epoch := m.networkEpoch.Load()
 	m.mu.Unlock()
 
@@ -335,6 +346,7 @@ func (m *Manager) EnsureClient(exitDeviceID string) {
 		m.mu.Lock()
 		if current, ok := m.starting[exitDeviceID]; ok && current == attemptID {
 			delete(m.starting, exitDeviceID)
+			m.wakeMaintenanceLocked()
 		}
 		m.mu.Unlock()
 	}()
@@ -472,7 +484,7 @@ func (m *Manager) HandleControl(message protocol.P2PControlMessage) {
 				}
 				m.mu.Unlock()
 				if cooling && failure.kind != "policy" && failure.kind != "rate_limit" {
-					m.EnsureClient(item.ExitDeviceID)
+					m.PrewarmClient(item.ExitDeviceID)
 				}
 			}
 			if message.LeaseExpiresAt > 0 {
@@ -628,6 +640,16 @@ func (m *Manager) Session(id uint64) (*Session, bool) {
 // ReadyForExit returns a usable direct tunnel only after punching, the QUIC
 // handshake and certificate fingerprint verification all succeeded.
 func (m *Manager) ReadyForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
+	return m.readyForExit(exitDeviceID, true)
+}
+
+// PeekReadyForExit is a diagnostic lookup. Unlike routing a new flow, observing
+// a tunnel must not extend its idle lifetime.
+func (m *Manager) PeekReadyForExit(exitDeviceID string) (tunnel.TunnelSession, bool) {
+	return m.readyForExit(exitDeviceID, false)
+}
+
+func (m *Manager) readyForExit(exitDeviceID string, touch bool) (tunnel.TunnelSession, bool) {
 	if m == nil || exitDeviceID == "" {
 		return nil, false
 	}
@@ -641,7 +663,9 @@ func (m *Manager) ReadyForExit(exitDeviceID string) (tunnel.TunnelSession, bool)
 	m.mu.Unlock()
 	for _, item := range items {
 		if direct, ok := item.Tunnel(); ok {
-			item.lastUsed.Store(time.Now().UnixMilli())
+			if touch {
+				item.lastUsed.Store(time.Now().UnixMilli())
+			}
 			return direct, true
 		}
 	}
@@ -744,6 +768,7 @@ func (m *Manager) newSessionWithEndpoint(id uint64, clientDeviceID, exitDeviceID
 	}
 	old := m.sessions[id]
 	m.sessions[id] = item
+	m.wakeMaintenanceLocked()
 	m.mu.Unlock()
 	if old != nil {
 		old.closeLocal()
@@ -780,6 +805,7 @@ func (m *Manager) remove(id uint64) {
 	m.mu.Lock()
 	item := m.sessions[id]
 	delete(m.sessions, id)
+	m.wakeMaintenanceLocked()
 	m.mu.Unlock()
 	if item != nil {
 		item.closeLocal()
@@ -796,6 +822,7 @@ func (m *Manager) pruneExit(exitDeviceID string) {
 		state := item.State()
 		if state == StateDegraded || state == StateClosed {
 			delete(m.sessions, id)
+			m.wakeMaintenanceLocked()
 			stale = append(stale, item)
 		}
 	}
@@ -1408,31 +1435,19 @@ func (m *Manager) watchNetworkLoop() {
 	if m == nil || m.networkSignature == nil || m.networkCheckInterval <= 0 {
 		return
 	}
-	ticker := time.NewTicker(m.networkCheckInterval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case <-ticker.C:
-			current := m.networkSignature()
-			m.mu.Lock()
-			previous := m.networkSig
-			if previous == "" {
-				m.networkSig = current
-				m.mu.Unlock()
-				continue
-			}
-			changed := current != "" && current != previous
-			if changed {
-				m.networkSig = current
-			}
-			m.mu.Unlock()
-			if changed {
-				m.invalidateNetwork()
-			}
+	m.maintainWhileActive(m.networkCheckInterval, true, func(time.Time) {
+		current := m.networkSignature()
+		m.mu.Lock()
+		previous := m.networkSig
+		changed := previous != "" && current != "" && current != previous
+		if previous == "" || changed {
+			m.networkSig = current
 		}
-	}
+		m.mu.Unlock()
+		if changed {
+			m.invalidateNetwork()
+		}
+	})
 }
 
 func (m *Manager) invalidateNetwork() {
@@ -1455,6 +1470,7 @@ func (m *Manager) invalidateNetwork() {
 	m.pendingAnswers = make(map[uint64]protocol.P2PControlMessage)
 	m.cooldowns = make(map[string]failureState)
 	m.starting = make(map[string]uint64)
+	m.wakeMaintenanceLocked()
 	m.mu.Unlock()
 
 	for _, item := range items {
@@ -1468,7 +1484,7 @@ func (m *Manager) invalidateNetwork() {
 	}
 	if m.send != nil && (m.local != nil || m.endpointFactory != nil) {
 		for exitID := range retry {
-			m.EnsureClient(exitID)
+			m.PrewarmClient(exitID)
 		}
 	}
 }
@@ -1550,6 +1566,7 @@ func (m *Manager) enforceClientLimit(keepID uint64) {
 			return
 		}
 		delete(m.sessions, oldest.ID)
+		m.wakeMaintenanceLocked()
 		m.mu.Unlock()
 		m.closeAndNotify(oldest, "lru_evicted")
 	}
@@ -1567,48 +1584,42 @@ func (m *Manager) reapIdleLoop() {
 	if interval < time.Second {
 		interval = time.Second
 	}
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-m.ctx.Done():
-			return
-		case now := <-ticker.C:
-			var stale []*Session
-			idleTimeout := m.effectiveIdleTimeout()
-			powerConstrained := m.powerConstrained.Load()
-			m.mu.Lock()
-			for id, item := range m.sessions {
-				item.mu.RLock()
-				clientRole, state, direct := item.clientRole, item.state, item.direct
-				item.mu.RUnlock()
-				if state != StateReady || idleTimeout <= 0 {
-					continue
-				}
-				// Desktop Exit sessions are retained normally. In constrained mode,
-				// both roles may discard an idle path to eliminate NAT keepalive cost.
-				if !clientRole && !powerConstrained {
-					continue
-				}
-				if direct != nil && direct.ActiveStreams() > 0 {
-					item.lastUsed.Store(now.UnixMilli())
-					continue
-				}
-				last := time.UnixMilli(item.lastUsed.Load())
-				if now.Sub(last) >= idleTimeout {
-					delete(m.sessions, id)
-					stale = append(stale, item)
-				}
+	m.maintainWhileActive(interval, false, func(now time.Time) {
+		var stale []*Session
+		idleTimeout := m.effectiveIdleTimeout()
+		powerConstrained := m.powerConstrained.Load()
+		m.mu.Lock()
+		for id, item := range m.sessions {
+			item.mu.RLock()
+			clientRole, state, direct := item.clientRole, item.state, item.direct
+			item.mu.RUnlock()
+			if state != StateReady || idleTimeout <= 0 {
+				continue
 			}
-			m.mu.Unlock()
-			for _, item := range stale {
-				m.closeAndNotify(item, "idle_timeout")
+			// Desktop Exit sessions are retained normally. In constrained mode,
+			// both roles may discard an idle path to eliminate NAT keepalive cost.
+			if !clientRole && !powerConstrained {
+				continue
 			}
-			// Busy sessions can temporarily exceed the cache limit. Reapply it
-			// after their streams drain, without interrupting active transfers.
-			m.enforceClientLimit(0)
+			if direct != nil && direct.ActiveStreams() > 0 {
+				item.lastUsed.Store(now.UnixMilli())
+				continue
+			}
+			last := time.UnixMilli(item.lastUsed.Load())
+			if now.Sub(last) >= idleTimeout {
+				delete(m.sessions, id)
+				m.wakeMaintenanceLocked()
+				stale = append(stale, item)
+			}
 		}
-	}
+		m.mu.Unlock()
+		for _, item := range stale {
+			m.closeAndNotify(item, "idle_timeout")
+		}
+		// Busy sessions can temporarily exceed the cache limit. Reapply it
+		// after their streams drain, without interrupting active transfers.
+		m.enforceClientLimit(0)
+	})
 }
 
 func (m *Manager) closeAndNotify(item *Session, reason string) {
@@ -1639,6 +1650,7 @@ func (m *Manager) removeFailedSession(item *Session, reason string) {
 	current := m.sessions[item.ID]
 	if current == item {
 		delete(m.sessions, item.ID)
+		m.wakeMaintenanceLocked()
 	}
 	m.mu.Unlock()
 	if current == item {

@@ -18,7 +18,7 @@ internal object PowerAwarePollPolicy {
         activeStreams: Long,
     ): Long {
         if (state == "STOPPED") return 0L
-        if (uiVisible) return VISIBLE_MS
+        if (uiVisible && interactive) return VISIBLE_MS
         if (!interactive) {
             return if (state == "CONNECTING") BACKGROUND_ACTIVE_MS else SCREEN_OFF_MS
         }
@@ -31,7 +31,7 @@ internal object PowerAwarePollPolicy {
 
     fun vpnMonitorMs(uiVisible: Boolean, interactive: Boolean): Long =
         when {
-            uiVisible -> VISIBLE_MS
+            uiVisible && interactive -> VISIBLE_MS
             interactive -> 30_000L
             else -> SCREEN_OFF_MS
         }
@@ -39,5 +39,5 @@ internal object PowerAwarePollPolicy {
     // Native health checks continue with the VPN, but counters are diagnostic.
     // Read JNI counters only when a screen can actually display them.
     fun shouldCollectVpnStats(uiVisible: Boolean, interactive: Boolean): Boolean =
-        uiVisible || interactive
+        uiVisible && interactive
 }

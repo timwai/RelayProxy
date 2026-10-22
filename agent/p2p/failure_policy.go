@@ -86,7 +86,7 @@ func (m *Manager) ObserveExits(exits []protocol.ProxyExit) {
 	m.mu.Unlock()
 	if m.send != nil && (m.local != nil || m.endpointFactory != nil) {
 		for _, exitID := range retry {
-			m.EnsureClient(exitID)
+			m.PrewarmClient(exitID)
 		}
 	}
 }

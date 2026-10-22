@@ -138,6 +138,7 @@ type datagramMux struct {
 	done            chan struct{}
 	send            chan queuedDatagram
 	reapWake        chan struct{}
+	reapRequested   atomic.Bool
 	wg              sync.WaitGroup
 	reassemblyBytes atomic.Int64
 }
@@ -296,13 +297,15 @@ func (m *datagramMux) sendLoop() {
 
 // reapLoop is shared by every native UDP association on a QUIC session. A
 // per-association ticker would multiply wakeups and timers under load. It sleeps
-// without a timer whenever there are no endpoint associations to expire.
+// without a timer when no idle timeout or pending fragment needs expiry, even
+// if lifetime-stream associations remain open.
 func (m *datagramMux) reapLoop() {
 	defer m.wg.Done()
 	timer := time.NewTimer(100 * time.Millisecond)
 	timer.Stop()
 	defer timer.Stop()
 	var tick <-chan time.Time
+	var next time.Time
 	var conns []*UDPDatagramConn
 	for {
 		select {
@@ -311,13 +314,21 @@ func (m *datagramMux) reapLoop() {
 		case <-m.done:
 			return
 		case <-m.reapWake:
-			if tick != nil {
-				// The existing tick will include newly registered connections.
-				// Association bursts must not trigger repeated full-map scans.
+			// Coalesce association/fragment bursts into at most one extra scan
+			// per 100ms, while interrupting a distant idle deadline promptly.
+			soon := time.Now().Add(100 * time.Millisecond)
+			if tick != nil && !next.After(soon) {
 				continue
 			}
+			next = soon
+			timer.Reset(time.Until(next))
+			tick = timer.C
+			continue
 		case <-tick:
 		}
+		// Keep requests coalesced until a scan actually starts, rather than
+		// waking this goroutine for each fragmented packet in an active stream.
+		m.reapRequested.Store(false)
 		conns = conns[:0]
 		m.mu.RLock()
 		for _, channel := range m.channels {
@@ -327,15 +338,17 @@ func (m *datagramMux) reapLoop() {
 		}
 		m.mu.RUnlock()
 		now := time.Now()
+		next = time.Time{}
 		for _, conn := range conns {
-			conn.reap(now)
+			if expires := conn.reap(now); !expires.IsZero() && (next.IsZero() || expires.Before(next)) {
+				next = expires
+			}
 		}
 		// Reused scratch storage must not keep closed associations, streams,
 		// and their packet buffers alive until the entire QUIC session closes.
-		active := len(conns) > 0
 		clear(conns)
-		if active {
-			timer.Reset(100 * time.Millisecond)
+		if !next.IsZero() {
+			timer.Reset(max(0, time.Until(next)))
 			tick = timer.C
 		} else {
 			timer.Stop()
@@ -559,6 +572,7 @@ func (c *DatagramChannel) Close() error {
 		close(c.done)
 		c.drainLocked()
 		cleanup := c.onClose
+		hasReaper := c.reaper != nil
 		m.mu.Unlock()
 		if cleanup != nil {
 			cleanup()
@@ -569,6 +583,9 @@ func (c *DatagramChannel) Close() error {
 		delete(m.channels, c.ID)
 		m.budget.associations.Add(-1)
 		m.mu.Unlock()
+		if hasReaper {
+			m.wakeReaper()
+		}
 	})
 	return nil
 }
@@ -590,11 +607,18 @@ func (c *DatagramChannel) setReaper(reaper *UDPDatagramConn) bool {
 		return false
 	}
 	c.reaper = reaper
+	c.mux.wakeReaper()
+	return true
+}
+
+func (m *datagramMux) wakeReaper() {
+	if m.reapWake == nil || !m.reapRequested.CompareAndSwap(false, true) {
+		return
+	}
 	select {
-	case c.mux.reapWake <- struct{}{}:
+	case m.reapWake <- struct{}{}:
 	default:
 	}
-	return true
 }
 
 func (c *DatagramChannel) drainLocked() {

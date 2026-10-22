@@ -38,15 +38,15 @@ type UDPDatagramConn struct {
 	mu                 sync.Mutex
 	readDeadlineNanos  atomic.Int64
 	writeDeadlineNanos atomic.Int64
-	lastActivityNanos  atomic.Int64
-	activitySeq        atomic.Uint64
-	reapedActivitySeq  uint64
-	deadlineChanged    chan struct{}
-	readMu, writeMu    sync.Mutex
-	readTimer          *time.Timer
-	assemblyMu         sync.Mutex
-	pending            map[uint32]*pendingUDP
-	packetID           atomic.Uint32
+	activityOrigin     time.Time
+	// Monotonic elapsed time; -1 prevents a packet from reviving a closed conn.
+	lastActivityNanos atomic.Int64
+	deadlineChanged   chan struct{}
+	readMu, writeMu   sync.Mutex
+	readTimer         *time.Timer
+	assemblyMu        sync.Mutex
+	pending           map[uint32]*pendingUDP
+	packetID          atomic.Uint32
 }
 
 func NewUDPDatagramConn(channel *DatagramChannel, stream TunnelStream, remote net.Addr) *UDPDatagramConn {
@@ -58,8 +58,7 @@ func NewUDPDatagramConn(channel *DatagramChannel, stream TunnelStream, remote ne
 // lifetime stream closes. Long-lived protocols such as RDP use that mode so a
 // quiet desktop doesn't pay a new association handshake on its next packet.
 func NewUDPDatagramConnWithIdleTimeout(channel *DatagramChannel, stream TunnelStream, remote net.Addr, idleTimeout time.Duration) *UDPDatagramConn {
-	c := &UDPDatagramConn{channel: channel, stream: stream, remote: remote, idleTimeout: idleTimeout, done: make(chan struct{}), deadlineChanged: make(chan struct{}), pending: make(map[uint32]*pendingUDP)}
-	c.lastActivityNanos.Store(time.Now().UnixNano())
+	c := &UDPDatagramConn{channel: channel, stream: stream, remote: remote, idleTimeout: idleTimeout, activityOrigin: time.Now(), done: make(chan struct{}), deadlineChanged: make(chan struct{}), pending: make(map[uint32]*pendingUDP)}
 	if !channel.setCleanup(c.clearPending) {
 		_ = c.Close()
 		return c
@@ -102,45 +101,65 @@ func (c *UDPDatagramConn) legacyWatch() {
 	}
 }
 
-func (c *UDPDatagramConn) reap(now time.Time) {
+// reap returns the next actual expiry, or zero when no timer is needed.
+func (c *UDPDatagramConn) reap(now time.Time) time.Time {
 	select {
 	case <-c.done:
-		return
+		return time.Time{}
 	case <-c.channel.done:
 		_ = c.Close()
-		return
+		return time.Time{}
 	case <-c.channel.mux.ctx.Done():
 		_ = c.Close()
-		return
+		return time.Time{}
 	default:
 	}
+	var next time.Time
 	c.assemblyMu.Lock()
 	for id, p := range c.pending {
-		if now.Sub(p.created) >= reassemblyTimeout {
+		expires := p.created.Add(reassemblyTimeout)
+		if !now.Before(expires) {
 			c.channel.mux.budget.reassemblyDrops.Add(1)
 			c.dropLocked(id, p)
+		} else if next.IsZero() || expires.Before(next) {
+			next = expires
 		}
 	}
 	c.assemblyMu.Unlock()
 
-	seq := c.activitySeq.Load()
-	if seq != c.reapedActivitySeq {
-		c.reapedActivitySeq = seq
-		c.lastActivityNanos.Store(now.UnixNano())
-	}
-	if c.idleTimeout > 0 && now.Sub(time.Unix(0, c.lastActivityNanos.Load())) >= c.idleTimeout {
-		// One final sequence check prevents a close racing with a packet that
-		// arrived after this reaper tick sampled activity.
-		if latest := c.activitySeq.Load(); latest != c.reapedActivitySeq {
-			c.reapedActivitySeq = latest
-			c.lastActivityNanos.Store(now.UnixNano())
-			return
+	for c.idleTimeout > 0 {
+		last := c.lastActivityNanos.Load()
+		if last < 0 {
+			return time.Time{}
 		}
-		_ = c.Close()
+		expires := c.activityOrigin.Add(time.Duration(last) + c.idleTimeout)
+		if now.Before(expires) {
+			if next.IsZero() || expires.Before(next) {
+				next = expires
+			}
+			break
+		}
+		// CAS covers activity arriving between the expiry check and close.
+		if c.lastActivityNanos.CompareAndSwap(last, -1) {
+			_ = c.Close()
+			return time.Time{}
+		}
 	}
+	return next
 }
 
-func (c *UDPDatagramConn) touch() { c.activitySeq.Add(1) }
+func (c *UDPDatagramConn) touch() {
+	if c.idleTimeout <= 0 {
+		return
+	}
+	now := time.Since(c.activityOrigin).Nanoseconds()
+	for {
+		previous := c.lastActivityNanos.Load()
+		if previous < 0 || now <= previous || c.lastActivityNanos.CompareAndSwap(previous, now) {
+			return
+		}
+	}
+}
 func (c *UDPDatagramConn) dropLocked(id uint32, p *pendingUDP) {
 	delete(c.pending, id)
 	c.channel.mux.releaseReassembly(p.bytes)
@@ -187,6 +206,9 @@ func (c *UDPDatagramConn) assemble(f protocol.UDPFragment, dst []byte) (int, boo
 		}
 		p = &pendingUDP{total: f.Total, count: f.Count, data: make([]byte, int(f.Total)), bytes: int(f.Total), created: time.Now()}
 		c.pending[f.PacketID] = p
+		if len(c.pending) == 1 {
+			c.channel.mux.wakeReaper()
+		}
 	}
 	if p.total != f.Total || p.count != f.Count {
 		c.channel.mux.budget.reassemblyDrops.Add(1)
@@ -350,6 +372,7 @@ func (c *UDPDatagramConn) WriteTo(p []byte, _ net.Addr) (int, error) {
 }
 func (c *UDPDatagramConn) Close() error {
 	c.once.Do(func() {
+		c.lastActivityNanos.Store(-1)
 		close(c.done)
 		_ = c.channel.Close()
 		_ = c.stream.Close()

@@ -591,6 +591,7 @@ func TestNetworkWatcherDetectsSignatureChange(t *testing.T) {
 	manager.networkSignature = func() string { return signature.Load().(string) }
 	manager.networkCheckInterval = 5 * time.Millisecond
 	manager.networkSig = "network-a"
+	manager.newSession(1, "client", "exit", []byte("0123456789abcdef"), 0)
 	go manager.watchNetworkLoop()
 
 	signature.Store("network-b")

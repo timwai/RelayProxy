@@ -30,8 +30,12 @@ class PowerAwarePollPolicyTest {
     @Test
     fun screenOffChecksVpnHealthButSkipsStatistics() {
         assertEquals(false, PowerAwarePollPolicy.shouldCollectVpnStats(false, false))
-        assertEquals(true, PowerAwarePollPolicy.shouldCollectVpnStats(true, false))
-        assertEquals(true, PowerAwarePollPolicy.shouldCollectVpnStats(false, true))
+        assertEquals(false, PowerAwarePollPolicy.shouldCollectVpnStats(true, false))
+        assertEquals(false, PowerAwarePollPolicy.shouldCollectVpnStats(false, true))
+        assertEquals(true, PowerAwarePollPolicy.shouldCollectVpnStats(true, true))
+        // Screen-off can arrive before the Activity clears its visibility flag.
+        assertEquals(120_000L, PowerAwarePollPolicy.vpnMonitorMs(true, false))
+        assertEquals(120_000L, PowerAwarePollPolicy.relayRefreshMs(true, false, "CONNECTED", 0))
     }
 
     @Test

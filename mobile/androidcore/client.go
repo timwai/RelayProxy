@@ -171,32 +171,32 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	mu                sync.RWMutex
-	status            statusSnapshot
-	messages          []protocol.PushMessage
-	messageListener   MessageListener
-	starting          bool
-	started           bool
-	closed            bool
-	powerConstrained  bool
+	mu                  sync.RWMutex
+	status              statusSnapshot
+	messages            []protocol.PushMessage
+	messageListener     MessageListener
+	starting            bool
+	started             bool
+	closed              bool
+	powerConstrained    bool
 	heartbeatMultiplier atomic.Int32
 	heartbeatWake       chan struct{}
-	proxyP2P          *proxyp2p.Manager
-	proxyDirect       *publicDirectClientManager
-	proxyExitRevision uint64
-	proxyDialer       *agentclient.TunnelDialer
-	routingDialer     *routing.RoutingDialer
-	traffic           *traffic.Registry
-	clientApproved    atomic.Bool
-	socksServer       *socks5.Server
-	vpnSocksServer    *socks5.Server
-	httpServer        *httpproxy.Server
-	proxyActiveTCP    atomic.Int64
-	proxyActiveUDP    atomic.Int64
-	proxyTCPFlows     atomic.Uint64
-	proxyUDPFlows     atomic.Uint64
-	proxyBytesUp      atomic.Uint64
-	proxyBytesDown    atomic.Uint64
+	proxyP2P            *proxyp2p.Manager
+	proxyDirect         *publicDirectClientManager
+	proxyExitRevision   uint64
+	proxyDialer         *agentclient.TunnelDialer
+	routingDialer       *routing.RoutingDialer
+	traffic             *traffic.Registry
+	clientApproved      atomic.Bool
+	socksServer         *socks5.Server
+	vpnSocksServer      *socks5.Server
+	httpServer          *httpproxy.Server
+	proxyActiveTCP      atomic.Int64
+	proxyActiveUDP      atomic.Int64
+	proxyTCPFlows       atomic.Uint64
+	proxyUDPFlows       atomic.Uint64
+	proxyBytesUp        atomic.Uint64
+	proxyBytesDown      atomic.Uint64
 
 	wg sync.WaitGroup
 }
@@ -415,8 +415,8 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 			ResumeEnabled: true, ResumeGrace: 15 * time.Second,
 			ResumeMaxSessions: 64, ResumeReplayLimit: p2presume.DefaultReplayLimit,
 		}),
-		ctx:    ctx,
-		cancel: cancel,
+		ctx:           ctx,
+		cancel:        cancel,
 		heartbeatWake: make(chan struct{}, 1),
 		status: statusSnapshot{
 			ConnectionState: string(tunnel.StateDisconnected),

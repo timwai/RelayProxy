@@ -560,7 +560,9 @@ class RelayVpnService : VpnService() {
             }
             return
         }
-        updateTunnelStats()
+        if (PowerAwarePollPolicy.shouldCollectVpnStats(uiVisible, powerManager.isInteractive)) {
+            updateTunnelStats()
+        }
         handler.post {
             if (tun != null && isCurrentGeneration(generation)) {
                 handler.removeCallbacks(nativeMonitor)

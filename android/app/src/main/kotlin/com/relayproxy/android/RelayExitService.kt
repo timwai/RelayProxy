@@ -18,10 +18,12 @@ import android.os.PowerManager
 import android.os.SystemClock
 import com.relayproxy.core.androidcore.Androidcore
 import com.relayproxy.core.androidcore.Client
+import com.relayproxy.core.androidcore.MessageListener
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicBoolean
 
 class RelayExitService : Service() {
     companion object {
@@ -34,14 +36,6 @@ class RelayExitService : Service() {
         private const val CHANNEL_ID = "relayproxy_exit"
         private const val MESSAGE_CHANNEL_ID = "relayproxy_messages"
         private const val NOTIFICATION_ID = 1001
-
-        private const val UI_REFRESH_MS = 1_000L
-        private const val MESSAGE_POLL_MS = 1_000L
-        private const val CONNECTING_REFRESH_MS = 3_000L
-        private const val ACTIVE_REFRESH_MS = 5_000L
-        private const val IDLE_REFRESH_MS = 20_000L
-        private const val WAITING_REFRESH_MS = 30_000L
-        private const val ERROR_REFRESH_MS = 30_000L
 
         @Volatile
         private var status = JSONObject()
@@ -98,6 +92,7 @@ class RelayExitService : Service() {
     private lateinit var messageOverlayController: MessageOverlayController
     private var powerReceiverRegistered = false
     private var coreGeneration = 0L
+    private val messageDrainPending = AtomicBoolean(false)
 
     @Volatile
     private var destroyed = false
@@ -126,15 +121,6 @@ class RelayExitService : Service() {
         }
     }
 
-    private val messagePoll = object : Runnable {
-        override fun run() {
-            core?.let(::drainMessages)
-            if (!destroyed) {
-                handler.postDelayed(this, MESSAGE_POLL_MS)
-            }
-        }
-    }
-
     override fun onCreate() {
         super.onCreate()
         activeInstance = this
@@ -142,7 +128,6 @@ class RelayExitService : Service() {
         messageOverlayController = MessageOverlayController(this, ::showMessageNotification)
         registerPowerStateReceiver()
         createNotificationChannel()
-        handler.post(messagePoll)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -204,7 +189,6 @@ class RelayExitService : Service() {
 
     override fun onDestroy() {
         handler.removeCallbacks(refresh)
-        handler.removeCallbacks(messagePoll)
         if (::messageOverlayController.isInitialized) {
             messageOverlayController.dismissAll()
         }
@@ -370,6 +354,11 @@ class RelayExitService : Service() {
                 val identity = File(filesDir, "relayproxy/device-identity.json")
                 val created = Androidcore.newClient(config.coreJson(), identity.absolutePath)
                 client = created
+                created.setMessageListener(object : MessageListener {
+                    override fun onMessage() {
+                        requestMessageDrain()
+                    }
+                })
                 created.setPowerConstrained(shouldUseP2PLowPowerProfile())
                 created.start()
                 val accepted = synchronized(this) {
@@ -384,6 +373,8 @@ class RelayExitService : Service() {
                     runCatching { created.stop() }
                     return@executeCoreTask
                 }
+                // Drain pushes that arrived before this core became active.
+                requestMessageDrain()
                 status = decorateStatus(created.statusJSON())
             } catch (t: Throwable) {
                 runCatching { client?.stop() }
@@ -500,6 +491,14 @@ class RelayExitService : Service() {
         )
     }
 
+    private fun requestMessageDrain() {
+        if (destroyed || !messageDrainPending.compareAndSet(false, true)) return
+        handler.post {
+            messageDrainPending.set(false)
+            if (!destroyed) core?.let(::drainMessages)
+        }
+    }
+
     private fun drainMessages(client: Client) {
         val raw = runCatching { client.popMessagesJSON() }.getOrDefault("[]")
         val messages = runCatching { JSONArray(raw) }.getOrNull() ?: return
@@ -612,21 +611,17 @@ class RelayExitService : Service() {
     }
 
     private fun nextRefreshDelay(): Long {
-        if (uiVisible) return UI_REFRESH_MS
-
         val obj = runCatching { JSONObject(status) }.getOrNull()
         val state = obj?.optString("connectionState", "UNKNOWN") ?: "UNKNOWN"
         val streams = (obj?.optLong("activeStreams", 0) ?: 0) +
             (obj?.optLong("proxyActiveTcp", 0) ?: 0) +
             (obj?.optLong("proxyActiveUdp", 0) ?: 0)
-        return when (state) {
-            "CONNECTING" -> CONNECTING_REFRESH_MS
-            "CONNECTED" -> if (streams > 0) ACTIVE_REFRESH_MS else IDLE_REFRESH_MS
-            "WAITING_NETWORK" -> WAITING_REFRESH_MS
-            "ERROR" -> ERROR_REFRESH_MS
-            "STOPPED" -> 0L
-            else -> IDLE_REFRESH_MS
-        }
+        return PowerAwarePollPolicy.relayRefreshMs(
+            uiVisible = uiVisible,
+            interactive = powerManager.isInteractive,
+            state = state,
+            activeStreams = streams,
+        )
     }
 
     private fun requestRefreshSoon() {

@@ -237,7 +237,7 @@ class RelayExitService : Service() {
         if (config.serverAddress.isBlank()) {
             status = errorStatus("请先填写 Relay Server 地址")
             updateNotificationIfChanged(force = true)
-            scheduleRefresh(ERROR_REFRESH_MS)
+            scheduleRefresh(nextRefreshDelay())
             return
         }
 
@@ -252,7 +252,7 @@ class RelayExitService : Service() {
             waitingStatus("等待" + networkLabel + "网络")
         }
         updateNotificationIfChanged(force = true)
-        scheduleRefresh(WAITING_REFRESH_MS)
+        scheduleRefresh(nextRefreshDelay())
 
         val binder = NetworkBinder(this)
         networkBinder = binder

@@ -386,7 +386,7 @@ class ConfigStore(private val context: Context) {
         config.serverAddress.isNotBlank() &&
             Regex("^(?=.*[a-z])(?=.*[0-9])[a-z0-9]{16}$").matches(config.identityId)
 
-    fun coreDemand(config: ExitConfig = load()): CoreDemand = CoreDemand(
+    internal fun coreDemand(config: ExitConfig = load()): CoreDemand = CoreDemand(
         exitEnabled = isDesiredRunning(),
         vpnEnabled = isVpnDesiredRunning(),
         localProxyEnabled = config.clientEnabled && (config.socks5Enabled || config.httpEnabled),

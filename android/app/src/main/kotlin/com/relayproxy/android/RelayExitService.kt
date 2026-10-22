@@ -139,10 +139,14 @@ class RelayExitService : Service() {
             }
             ACTION_START -> {
                 store.setDesiredRunning(true)
-                if (serviceStartedAtElapsed == 0L) {
-                    serviceStartedAtElapsed = SystemClock.elapsedRealtime()
+                if (shouldRunCore(store)) {
+                    if (serviceStartedAtElapsed == 0L) {
+                        serviceStartedAtElapsed = SystemClock.elapsedRealtime()
+                    }
+                    if (core != null || networkBinder != null) reconfigureRelay() else startRelay()
+                } else {
+                    stopRelay(startId)
                 }
-                if (core != null || networkBinder != null) reconfigureRelay() else startRelay()
             }
             ACTION_RECONFIGURE -> {
                 if (shouldRunCore(store)) {
@@ -155,11 +159,13 @@ class RelayExitService : Service() {
                 }
             }
             ACTION_CONNECT -> {
-                if (store.hasConnectionConfig()) {
+                // Returning to the UI must not implicitly opt back into a
+                // background connection, nor rebuild an already-running core.
+                if (shouldRunCore(store)) {
                     if (serviceStartedAtElapsed == 0L) {
                         serviceStartedAtElapsed = SystemClock.elapsedRealtime()
                     }
-                    if (core == null && networkBinder == null) startRelay() else reconfigureRelay()
+                    if (core == null && networkBinder == null) startRelay() else requestRefreshSoon()
                 } else {
                     stopRelay(startId)
                 }
@@ -221,9 +227,7 @@ class RelayExitService : Service() {
             ?: """{"enabled":true,"applications":[],"activeConnections":0,"trackedConnections":0}"""
     }
 
-    private fun shouldRunCore(store: ConfigStore): Boolean {
-        return store.hasConnectionConfig()
-    }
+    private fun shouldRunCore(store: ConfigStore): Boolean = store.shouldRunCore()
 
     private fun startRelay() {
         val startingText = "正在启动"
@@ -401,6 +405,7 @@ class RelayExitService : Service() {
 
     private fun stopRelay(startId: Int) {
         handler.removeCallbacks(refresh)
+        relayConfig = null
         val (old, generation) = synchronized(this) {
             coreGeneration++
             val value = core

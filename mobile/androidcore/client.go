@@ -179,6 +179,8 @@ type Client struct {
 	started           bool
 	closed            bool
 	powerConstrained  bool
+	heartbeatMultiplier atomic.Int32
+	heartbeatWake       chan struct{}
 	proxyP2P          *proxyp2p.Manager
 	proxyDirect       *publicDirectClientManager
 	proxyExitRevision uint64
@@ -415,6 +417,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 		}),
 		ctx:    ctx,
 		cancel: cancel,
+		heartbeatWake: make(chan struct{}, 1),
 		status: statusSnapshot{
 			ConnectionState: string(tunnel.StateDisconnected),
 			ApprovalState:   "unknown",
@@ -752,6 +755,43 @@ func (c *Client) SetPowerConstrained(constrained bool) {
 	if manager != nil {
 		manager.SetPowerConstrained(constrained)
 	}
+}
+
+// SetHeartbeatMultiplier adjusts the control heartbeat cadence when Android
+// enters low power states. The server deadline uses the negotiated cadence,
+// so a maximum of 2x and 60 seconds is enforced on the client.
+func (c *Client) SetHeartbeatMultiplier(multiplier int) {
+	if c == nil {
+		return
+	}
+	if multiplier < 1 {
+		multiplier = 1
+	} else if multiplier > 2 {
+		multiplier = 2
+	}
+	c.mu.RLock()
+	closed := c.closed
+	c.mu.RUnlock()
+	if closed {
+		return
+	}
+	if c.heartbeatMultiplier.Swap(int32(multiplier)) != int32(multiplier) {
+		select {
+		case c.heartbeatWake <- struct{}{}:
+		default:
+		}
+	}
+}
+
+func androidHeartbeatInterval(heartbeatSec int, multiplier int32) time.Duration {
+	if heartbeatSec <= 0 {
+		heartbeatSec = 15
+	}
+	base := time.Duration(heartbeatSec) * time.Second
+	if multiplier <= 1 || base >= 60*time.Second {
+		return base
+	}
+	return min(base*2, 60*time.Second)
 }
 
 // PopMessagesJSON returns and clears server-originated messages waiting for the
@@ -1298,18 +1338,38 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 	if heartbeatSec <= 0 {
 		heartbeatSec = 15
 	}
-	interval := time.Duration(heartbeatSec) * time.Second
+	negotiatedInterval := time.Duration(heartbeatSec) * time.Second
+	interval := func() time.Duration {
+		return androidHeartbeatInterval(heartbeatSec, c.heartbeatMultiplier.Load())
+	}
+	lastSent := time.Now()
+	timer := time.NewTimer(interval())
+	defer timer.Stop()
 	var lastRTT time.Duration
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-sess.Done():
 			return
-		case <-ticker.C:
-			pong, rtt, err := tunnel.Heartbeat(ctx, ctrl, sess, interval, lastRTT, protocol.PingMessage{Timestamp: time.Now().UnixMilli()})
+		case <-c.heartbeatWake:
+			// Keep the next Ping anchored to the previous Ping. In particular,
+			// returning to foreground must not postpone an already due Ping.
+			next := interval() - time.Since(lastSent)
+			if next < 0 {
+				next = 0
+			}
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(next)
+		case <-timer.C:
+			lastSent = time.Now()
+			// The server and read budgets still use the negotiated interval.
+			pong, rtt, err := tunnel.Heartbeat(ctx, ctrl, sess, negotiatedInterval, lastRTT, protocol.PingMessage{Timestamp: lastSent.UnixMilli()})
 			if err != nil {
 				c.setLastError(fmt.Errorf("heartbeat failed: %w", err))
 				_ = sess.Close()
@@ -1324,6 +1384,7 @@ func (c *Client) heartbeatLoop(ctx context.Context, ctrl tunnel.TunnelStream, se
 			if pong.ProxyExits != nil {
 				c.refreshProxyExits(sess, *pong.ProxyExits, pong.ProxyExitRevision)
 			}
+			timer.Reset(interval())
 		}
 	}
 }

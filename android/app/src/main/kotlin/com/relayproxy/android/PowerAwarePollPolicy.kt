@@ -35,4 +35,9 @@ internal object PowerAwarePollPolicy {
             interactive -> 30_000L
             else -> SCREEN_OFF_MS
         }
+
+    // Native health checks continue with the VPN, but counters are diagnostic.
+    // Read JNI counters only when a screen can actually display them.
+    fun shouldCollectVpnStats(uiVisible: Boolean, interactive: Boolean): Boolean =
+        uiVisible || interactive
 }

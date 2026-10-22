@@ -196,6 +196,7 @@ class MainActivity : Activity() {
         if (::customExitContainer.isInitialized) renderCustomExits()
         connectControlChannel()
         RelayExitService.setUiVisible(true)
+        RelayVpnService.setUiVisible(true)
         refreshGlobalMessageOverlayPermissionState()
         handler.removeCallbacks(pollStatus)
         handler.post(pollStatus)
@@ -203,6 +204,7 @@ class MainActivity : Activity() {
 
     override fun onPause() {
         RelayExitService.setUiVisible(false)
+        RelayVpnService.setUiVisible(false)
         unregisterMessageReceiver()
         handler.removeCallbacks(pollStatus)
         super.onPause()

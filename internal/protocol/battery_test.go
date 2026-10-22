@@ -36,7 +36,10 @@ func TestBatteryHeartbeatBackwardCompatibility(t *testing.T) {
 }
 
 func TestBatteryLevelBounds(t *testing.T) {
-	for _, tc := range []struct{ level int; valid bool }{
+	for _, tc := range []struct {
+		level int
+		valid bool
+	}{
 		{-1, false}, {0, true}, {50, true}, {100, true}, {101, false},
 	} {
 		if got := (BatteryStatus{Level: tc.level}).Valid(); got != tc.valid {

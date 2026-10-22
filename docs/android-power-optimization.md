@@ -49,6 +49,18 @@
 - **UDP 按实际到期调度**：同一 QUIC 会话仍共用一个清理器，调度最近的碎片或空闲截止时间。仅依赖生命周期流的关联（例如 RDP）在没有待组装碎片时无需计时器；首个新碎片会唤醒调度。新关联、碎片和关闭事件按 100ms 窗口合并扫描，碎片仍在创建后 200ms 过期，双向读写使用单调时钟更新空闲期限，关闭与活动刷新用 CAS 防止并发复活。
 - **只在界面展示 VPN 计数**：后台亮屏也跳过 JNI 流量统计；原生存活检查继续。屏幕关闭优先于可能尚未清除的 Activity 可见标志，避免息屏仍每秒轮询。
 
+## 电量状态上报（第四阶段）
+
+Android 客户端**默认启用**电量上报，但只随已经运行的 Relay Core 现有 Ping 上报，不创建网络请求：
+
+1. `RelayExitService` 存活时注册系统 `ACTION_BATTERY_CHANGED` 接收器并获取首次粘性广播；之后仅在电量整数百分比或充电状态变化时更新内存快照。
+2. 通过 `Client.SetBatteryStatus(level, charging)` 更新 Go Core 内存；心跳使用新 `PingMessage.battery` 可选字段携带缓存值，不另外发送请求或强制心跳。
+3. Server 在已认证的 DeviceSession 上验证电量必须介于 0–100%，保存 `level / charging / receivedAt`，供 `GET /api/v1/devices` 返回。仅在线 Android 设备附带已知电量，其余为 `null`。Server Web 设备列表/详情展示电量、充电状态及更新时刻。
+4. VPN、出口、SOCKS5/HTTP 全部关闭时 Relay Core 停止，不会为了电量上报唤醒、重连或启动后台 Service；电量信息是在线会话级临时状态，断开后不会以过期读数显示为实时数据。
+5. 兼容旧版本：未上报的旧客户端省略 `battery` 字段；旧 Server 默认忽略 JSON 多余字段。无须额外 Android 权限、定时器、WakeLock 或心跳加速。
+
+**验收**：Android 设备联网后打开 Server Web“设备管理”，检查 0%/100% 边界、插拔电源更新、两次心跳间延迟；关闭全部功能并确认 Server 标记离线后不显示旧电量；对旧客户端和非 Android 平台返回 `null`。测试运行时 Server 前端需要重新 `npm run build`（`scripts/build.sh` 默认执行）以将新 UI 嵌入 Go 发布二进制。
+
 ## 测试
 
 1. Go：`go test ./...` 和相关包的 `go test -race`；新增覆盖 P2P 诊断不续期、空会话休眠/恢复、Android 省电心跳不预热但允许真实需求、UDP 碎片唤醒/释放、长短超时交错、双向活动续期与关闭后不复活。消息回调及切网保留本地代理的回归测试继续执行。

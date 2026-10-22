@@ -157,6 +157,12 @@ type statusSnapshot struct {
 	LastError           string                  `json:"lastError,omitempty"`
 }
 
+// MessageListener receives notifications for server push messages without polling.
+// Callbacks may run on a Go background thread.
+type MessageListener interface {
+	OnMessage()
+}
+
 // Client is the small gomobile-facing wrapper for the Android exit node.
 // The exported surface intentionally uses only gomobile-supported scalar values.
 type Client struct {
@@ -171,6 +177,7 @@ type Client struct {
 	mu                sync.RWMutex
 	status            statusSnapshot
 	messages          []protocol.PushMessage
+	messageListener   MessageListener
 	starting          bool
 	started           bool
 	closed            bool
@@ -598,6 +605,7 @@ func (c *Client) Stop() error {
 		return nil
 	}
 	c.closed = true
+	c.messageListener = nil
 	c.status.ConnectionState = string(tunnel.StateClosed)
 	c.clientApproved.Store(false)
 	socksServer, vpnSocksServer, httpServer := c.socksServer, c.vpnSocksServer, c.httpServer
@@ -748,6 +756,31 @@ func (c *Client) SetPowerConstrained(constrained bool) {
 	}
 }
 
+// SetMessageListener enables event-driven message delivery to Android.
+// Messages received before registration also trigger a callback.
+func (c *Client) SetMessageListener(listener MessageListener) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
+	c.messageListener = listener
+	pending := len(c.messages) > 0
+	c.mu.Unlock()
+	if pending && listener != nil {
+		notifyMessageListener(listener)
+	}
+}
+
+func notifyMessageListener(listener MessageListener) {
+	// A Java callback failure must not interrupt the relay stream/receipt.
+	defer func() { _ = recover() }()
+	listener.OnMessage()
+}
+
 // PopMessagesJSON returns and clears server-originated messages waiting for the
 // Android UI. Keeping this as JSON preserves a gomobile-friendly scalar API.
 func (c *Client) PopMessagesJSON() string {
@@ -770,12 +803,20 @@ func (c *Client) PopMessagesJSON() string {
 
 func (c *Client) enqueueMessage(message protocol.PushMessage) {
 	c.mu.Lock()
-	defer c.mu.Unlock()
+	if c.closed {
+		c.mu.Unlock()
+		return
+	}
 	if len(c.messages) >= 500 {
 		copy(c.messages, c.messages[len(c.messages)-499:])
 		c.messages = c.messages[:499]
 	}
 	c.messages = append(c.messages, message)
+	listener := c.messageListener
+	c.mu.Unlock()
+	if listener != nil {
+		notifyMessageListener(listener)
+	}
 }
 
 // StatusJSON returns a stable JSON snapshot for the Android UI.

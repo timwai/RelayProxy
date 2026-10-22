@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -389,5 +390,60 @@ func TestAndroidUPnPRequiresLocalConsent(t *testing.T) {
 	}
 	if config.UPnPAllowed == nil || !*config.UPnPAllowed {
 		t.Fatal("Android UPnP consent was lost")
+	}
+}
+
+// countingMessageListener verifies the gomobile callback contract.
+type countingMessageListener struct {
+	calls atomic.Int64
+}
+
+func (l *countingMessageListener) OnMessage() {
+	l.calls.Add(1)
+}
+
+func TestMessageListenerSignalsQueuedAndNewMessages(t *testing.T) {
+	client := &Client{}
+	client.enqueueMessage(protocol.PushMessage{ID: "queued", Content: "already here"})
+	listener := &countingMessageListener{}
+	client.SetMessageListener(listener)
+	if got := listener.calls.Load(); got != 1 {
+		t.Fatalf("initial queued callback = %d, want 1", got)
+	}
+	client.enqueueMessage(protocol.PushMessage{ID: "new", Content: "just arrived"})
+	if got := listener.calls.Load(); got != 2 {
+		t.Fatalf("new message callback = %d, want 2", got)
+	}
+	var messages []protocol.PushMessage
+	if err := json.Unmarshal([]byte(client.PopMessagesJSON()), &messages); err != nil {
+		t.Fatal(err)
+	}
+	if len(messages) != 2 || messages[0].ID != "queued" || messages[1].ID != "new" {
+		t.Fatalf("unexpected queued messages: %+v", messages)
+	}
+	client.SetMessageListener(nil)
+	client.enqueueMessage(protocol.PushMessage{ID: "quiet", Content: "no listener"})
+	if got := listener.calls.Load(); got != 2 {
+		t.Fatalf("callback invoked after unregister: %d", got)
+	}
+}
+
+type drainingMessageListener struct {
+	client *Client
+	calls int
+}
+
+func (l *drainingMessageListener) OnMessage() {
+	l.calls++
+	_ = l.client.PopMessagesJSON()
+}
+
+func TestMessageListenerCanDrainFromCallback(t *testing.T) {
+	client := &Client{}
+	listener := &drainingMessageListener{client: client}
+	client.SetMessageListener(listener)
+	client.enqueueMessage(protocol.PushMessage{ID: "1", Content: "hello"})
+	if listener.calls != 1 || client.PopMessagesJSON() != "[]" {
+		t.Fatal("callback did not drain the queue")
 	}
 }

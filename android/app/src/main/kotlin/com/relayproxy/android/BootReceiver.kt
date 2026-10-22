@@ -18,27 +18,15 @@ class BootReceiver : BroadcastReceiver() {
         val relayDesired = store.isDesiredRunning()
         val vpnDesired = store.isVpnDesiredRunning()
         val config = store.load()
-        val localProxyDesired = config.clientEnabled
-        val controlDesired = store.hasConnectionConfig(config)
         val vpnCanStart = vpnDesired && VpnService.prepare(context) == null
         if (vpnDesired && !vpnCanStart) store.setVpnDesiredRunning(false)
-        if (!relayDesired && !vpnCanStart && !localProxyDesired && !controlDesired) {
-            return
-        }
 
-        if (relayDesired || vpnCanStart || localProxyDesired || controlDesired) {
-            val service = Intent(context, RelayExitService::class.java)
-                .setAction(
-                    if (relayDesired) {
-                        RelayExitService.ACTION_START
-                    } else if (vpnCanStart || localProxyDesired) {
-                        RelayExitService.ACTION_RECONFIGURE
-                    } else {
-                        RelayExitService.ACTION_CONNECT
-                    }
-                )
-            startService(context, service)
-        }
+        // Saved credentials alone never justify reconnecting after reboot or
+        // app replacement. Only an enabled exit, VPN, or local proxy can.
+        if (!store.shouldRunCore(config)) return
+        val service = Intent(context, RelayExitService::class.java)
+            .setAction(if (relayDesired) RelayExitService.ACTION_START else RelayExitService.ACTION_RECONFIGURE)
+        startService(context, service)
         if (vpnCanStart) {
             startService(
                 context,

@@ -38,6 +38,31 @@ type DeviceSession struct {
 	BytesUp             atomic.Int64
 	BytesDown           atomic.Int64
 	Diagnostics         atomic.Pointer[DeviceDiagnostics]
+	Battery             atomic.Pointer[DeviceBattery]
+}
+
+// DeviceBattery is session-scoped, never persisted across disconnects. It is
+// populated only by authenticated heartbeats with a valid level.
+type DeviceBattery struct {
+	Level      int       `json:"level"`
+	Charging   bool      `json:"charging"`
+	ReceivedAt time.Time `json:"receivedAt"`
+}
+
+func (s *DeviceSession) SetBatteryStatus(battery *protocol.BatteryStatus) {
+	if battery == nil || !battery.Valid() {
+		return
+	}
+	s.Battery.Store(&DeviceBattery{
+		Level: battery.Level, Charging: battery.Charging, ReceivedAt: time.Now(),
+	})
+}
+
+func (s *DeviceSession) BatterySnapshot() *DeviceBattery {
+	if s == nil {
+		return nil
+	}
+	return s.Battery.Load()
 }
 
 type DeviceDiagnostics struct {

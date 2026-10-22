@@ -32,12 +32,21 @@
 
 **范围**：这是停止 Android 应用自己的 Core、心跳、网络监听与诊断刷新，并非声称 Android 系统不会执行任何电池/包管理活动。通知、网络流量和真实连接仍受系统 Doze、运营商及设备厂商后台策略影响。
 
+## 第三阶段：事件合并与传输低功耗
+
+- **心跳自适应**：系统省电、Doze、息屏，以及移动数据后台空闲时，Android 通过 `SetHeartbeatMultiplier(2)` 请求较低的心跳频率。Go Core 只允许倍率 1–2，实际间隔最大 60 秒；回前台/电源状态变化立即重新计算定时器。服务端仍使用原协商间隔的 `3 × heartbeatSec + 5s` 超时，避免无限制乘以 4 导致离线误判。QUIC 的默认空闲超时为 120 秒，因此不能直接使用 120 秒以上的心跳间隔。
+- **通知状态合并**：仅对同一连接状态下的通知文案变化施加最短 2 秒更新间隔。实际网络状态从 CONNECTED 变 ERROR / WAITING_NETWORK 时即时显示，停止服务仍移除前台通知。
+- **息屏保活不采集诊断计数器**：VPN 的 `TProxyIsRunning` 存活检查继续按既有退避策略执行；非前台且屏幕关闭时跳过 `TProxyGetStats` JNI 调用。亮屏后恢复计数器读取。
+- **按应用分流的正确性**：`getConnectionOwnerUid` 与应用规则匹配有关，不等同于 UI 监控。仅在 `routing.requiresApplicationIdentity` 为 true 时注册流量归属解析器；本阶段不在息屏强行跳过，否则可能将敏感应用流量错误发送至默认出口。
+- **Doze 白名单 / WakeLock**：不在省电默认路径申请忽略电池优化权限或持有 WakeLock。这些措施可能增加电池消耗，并不保证系统、运营商或厂商 ROM 允许后台长期存活。若实际机型验证表明后台网络受限，应单独提供用户主动选择的稳定性指引和短时、有界的关键任务锁，而非默认打开。
+- **Radio 请求合并**：应用层没有可安全合并的额外网络诊断请求；先以减少心跳小包作为蜂窝 radio 优化，后续需要抓包和 batterystats 数据才引入新的批处理策略，防止无意增加排队延迟。
+
 ## 测试
 
 1. Go：`go test ./mobile/androidcore`（包含消息回调、回调内 drain、先到消息后注册监听器测试）。
-2. Android：执行项目构建脚本**重新生成** `mobilecore.aar`（`MessageListener` 是新增的 gomobile API），再执行 Android 单元测试 `PowerAwarePollPolicyTest` 和 `CoreDemandTest`；旧 AAR 无法通过新回调的 Kotlin 编译。
+2. Android：执行项目构建脚本**重新生成** `mobilecore.aar`（`MessageListener` 是新增的 gomobile API），再执行 Android 单元测试 `PowerAwarePollPolicyTest` 、`CoreDemandTest` 及 `NotificationRefreshPolicyTest`；旧 AAR 无法通过新回调的 Kotlin 编译。
 3. 启停组合：依次测试（出口、VPN、本地代理）的全部 8 种开关组合。关闭最后一个业务后，确认 Relay 通知消失、Core 已停止、没有定期状态刷新/重连；只开出口时从另一端访问出口；只开本地代理时验证 SOCKS5/HTTP；只开 VPN 时验证域名分流。快速连续开启/关闭不得保留僵尸连接。\n4. 真机回归：前台、息屏、Doze 和 Wi-Fi ↔ 移动网络切换中检查 TCP、UDP、DNS、分流、VPN 保活、Relay 自动恢复。
 5. 消息回归：在应用前后台、亮屏/息屏接收服务端验证码和重要消息，确认即时触发而非定时取消息；展示时间受 Android 通知与息屏策略影响。
-6. 同型号同网络/同出口 A/B：各做至少 30 分钟无流量息屏待机和 30 分钟负载。通过 Android Studio Energy Profiler、`adb shell dumpsys batterystats --reset` / `adb shell dumpsys batterystats` 比较 CPU 唤醒次数、网络无线电活动时间、耗电估算，同时记录重连时延和消息时延。
+6. 心跳兼容：验证 Server 15s 和 30s 协商值，在亮屏/息屏/Doze/蜂窝网多次切换后，持续 30 分钟确认设备不被服务端过早剔除，且退出 UI 后不丢必要的消息和出口会话。\n7. 同型号同网络/同出口 A/B：各做至少 30 分钟无流量息屏待机和 30 分钟负载。通过 Android Studio Energy Profiler、`adb shell dumpsys batterystats --reset` / `adb shell dumpsys batterystats` 比较 CPU 唤醒次数、网络无线电活动时间、耗电估算，同时记录重连时延和消息时延。
 
 **代价**：息屏时 VPN native 停止的检测可能延后最多约两分钟（不含 Android Doze 延迟）；VPN 转发本身不会因此停止。真正能减少多少电量要根据上述真机数据判断，不能由轮询次数直接换算。

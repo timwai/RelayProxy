@@ -1508,6 +1508,7 @@ func (r *Router) handleListExits(w http.ResponseWriter, req *http.Request) {
 			"transport":     string(e.Transport),
 			"activeStreams": e.ActiveStreams.Load(),
 			"online":        true,
+			"battery":       e.BatterySnapshot(),
 			"publicDirect": map[string]any{
 				"available":             verifiedDirect > 0,
 				"verifiedEndpointCount": verifiedDirect,

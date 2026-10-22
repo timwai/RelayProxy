@@ -493,8 +493,7 @@ class SettingsActivity : Activity() {
             Toast.makeText(this, "仅选中应用模式至少需要选择一个应用", Toast.LENGTH_SHORT).show()
             return
         }
-        val coreWasDesired = store.isDesiredRunning() ||
-            store.isVpnDesiredRunning() || current.clientEnabled
+        val coreWasDesired = store.shouldRunCore(current)
         store.save(config)
         applyRunningConfiguration(store, config, coreWasDesired)
         Toast.makeText(this, "设置已保存", Toast.LENGTH_SHORT).show()
@@ -562,17 +561,17 @@ class SettingsActivity : Activity() {
         config: ExitConfig,
         coreWasDesired: Boolean,
     ) {
-        if (store.hasConnectionConfig(config)) {
+        val shouldRun = store.shouldRunCore(config)
+        if (coreWasDesired || shouldRun) {
             val relay = Intent(this, RelayExitService::class.java)
-                .setAction(
-                    if (coreWasDesired || store.isDesiredRunning() || store.isVpnDesiredRunning() || config.clientEnabled) {
-                        RelayExitService.ACTION_RECONFIGURE
-                    } else {
-                        RelayExitService.ACTION_CONNECT
-                    }
-                )
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) startForegroundService(relay)
-            else startService(relay)
+                .setAction(RelayExitService.ACTION_RECONFIGURE)
+            // When saving turns off the last enabled service, avoid starting
+            // a foreground service that will only be asked to shut down.
+            if (shouldRun && Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(relay)
+            } else {
+                startService(relay)
+            }
         }
         if (store.isVpnDesiredRunning() && section != SECTION_EXIT) {
             val vpn = Intent(this, RelayVpnService::class.java)

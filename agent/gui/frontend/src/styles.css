@@ -49,7 +49,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 
 .actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}.actions.end{justify-content:flex-end}
 .btn{border:1px solid var(--line2);background:var(--surface);border-radius:10px;color:var(--text);min-height:36px;padding:0 12px;font-weight:650}
-.btn:hover:not(:disabled){background:var(--surface3)}.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.btn.primary:hover:not(:disabled){filter:brightness(1.04)}.btn.danger{color:var(--danger)}.btn.quiet{min-height:29px;padding:0 7px;border-color:transparent;background:transparent;font-size:11px}
+.btn:hover:not(:disabled){background:var(--surface3)}.btn.primary{background:var(--brand);border-color:var(--brand);color:#fff}.btn.primary:hover:not(:disabled){background:var(--brand);filter:brightness(1.04)}.btn.danger{color:var(--danger)}.btn.quiet{min-height:29px;padding:0 7px;border-color:transparent;background:transparent;font-size:11px}
 .card{background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:0 7px 22px rgba(15,23,42,.035);min-width:0}
 .main>*+*{margin-top:14px}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.card-head h2{font-size:15px;margin:2px 0 0}

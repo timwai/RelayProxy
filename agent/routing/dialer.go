@@ -60,14 +60,21 @@ func (d *RoutingDialer) decideFlow(flow Flow) Decision {
 func (d *RoutingDialer) begin(ctx context.Context, exitID, host string, port uint16, protocol string) (Decision, *traffic.Record) {
 	info := proxy.ClientFromContext(ctx)
 	flow := Flow{
-		Process:        info.Process,
-		ProcessAliases: append([]string(nil), info.ProcessAliases...),
-		Host:           host,
-		Port:           port,
-		Protocol:       protocol,
+		Entry:            info.Entry,
+		IP:               info.DestinationIP,
+		InboundInterface: info.InboundInterface,
+		Process:          info.Process,
+		ProcessAliases:   append([]string(nil), info.ProcessAliases...),
+		Host:             host,
+		Port:             port,
+		Protocol:         protocol,
+	}
+	if info.Source.IsValid() {
+		flow.SourceIP = info.Source.Addr().Unmap().String()
+		flow.SourcePort = info.Source.Port()
 	}
 	var pid uint32
-	if flow.Process == "" && d.LookupProcess != nil && info.Source.IsValid() && info.Local.IsValid() {
+	if flow.Entry != "gateway" && flow.Process == "" && d.LookupProcess != nil && info.Source.IsValid() && info.Local.IsValid() {
 		if id, process, err := d.LookupProcess(protocol, info.Source, info.Local); err == nil {
 			pid, flow.Process = id, process
 		}
@@ -90,7 +97,7 @@ func (d *RoutingDialer) begin(ctx context.Context, exitID, host string, port uin
 		exitID = ""
 	}
 	meta := traffic.Metadata{ProcessID: pid, Process: flow.Process, Host: host, IP: flow.IP, Port: port,
-		DomainSource: "requested", Protocol: protocol, Entry: info.Entry, Action: string(decision.Action), Rule: decision.Rule, ExitID: exitID}
+		DomainSource: flowDomainSource(info.Entry, host, flow.IP), Protocol: protocol, Entry: info.Entry, Action: string(decision.Action), Rule: decision.Rule, ExitID: exitID}
 	if info.Source.IsValid() {
 		meta.Source = info.Source.String()
 	}
@@ -198,7 +205,11 @@ func (d *RoutingDialer) dialTCP(ctx context.Context, exitNodeID, host string, po
 
 	switch action {
 	case ActionDirect:
-		addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
+		target := host
+		if info := proxy.ClientFromContext(ctx); info.Entry == "gateway" && info.DestinationIP != "" {
+			target = info.DestinationIP
+		}
+		addr := net.JoinHostPort(target, strconv.Itoa(int(port)))
 		log.Printf("[Routing] DIRECT %s", addr)
 		return d.directDialer.DialContext(ctx, "tcp", addr)
 
@@ -258,7 +269,11 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 
 	switch action {
 	case ActionDirect:
-		addr := net.JoinHostPort(host, strconv.Itoa(int(port)))
+		target := host
+		if info := proxy.ClientFromContext(ctx); info.Entry == "gateway" && info.DestinationIP != "" {
+			target = info.DestinationIP
+		}
+		addr := net.JoinHostPort(target, strconv.Itoa(int(port)))
 		log.Printf("[Routing] DIRECT UDP %s", addr)
 		c, err := d.directDialer.DialContext(ctx, "udp", addr)
 		if err != nil {
@@ -315,4 +330,14 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 	default:
 		return nil, fmt.Errorf("unsupported routing action %q", action)
 	}
+}
+
+func flowDomainSource(entry, host, ip string) string {
+	if entry == "gateway" {
+		if host != ip {
+			return "dns"
+		}
+		return "unknown"
+	}
+	return "requested"
 }

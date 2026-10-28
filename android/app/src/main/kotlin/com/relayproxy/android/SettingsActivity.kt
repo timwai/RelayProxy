@@ -322,7 +322,7 @@ class SettingsActivity : Activity() {
             minimumHeight = dp(50)
         }
         exit.addView(labeled("已授权出口", exitSelection), topMargin(14))
-        exit.addView(labeled("首选出口设备 ID", defaultExitId), topMargin(12))
+        exit.addView(labeled("首选出口设备 / 分组 ID", defaultExitId), topMargin(12))
         addSectionCard(root, SECTION_EXIT, exit)
 
         val vpn = card()
@@ -597,6 +597,7 @@ class SettingsActivity : Activity() {
                 labels += "$name · ${if (online) "在线" else "离线"}"
             }
         }
+        ConfigStore(this).load().routing.deviceGroups.forEach { group -> exitIds += group.id; labels += group.name + " · 分组（优先级故障切换）" }
         if (selectedExitId.isNotBlank() && selectedExitId !in exitIds) {
             exitIds += selectedExitId
             labels += "固定出口 ${selectedExitId.take(12)} · 当前未发现"

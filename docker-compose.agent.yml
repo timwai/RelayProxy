@@ -1,7 +1,7 @@
 services:
   relay-agent:
-    # The image only supplies CA certificates and iptables/nft compatibility
-    # tools. The Agent program and YAML remain on the host mounts below.
+    # The image supplies CA certificates, iptables, nftables and iproute2.
+    # The Agent program and YAML remain on the host mounts below.
     # Use a statically linked Linux Agent binary (CGO_ENABLED=0) with Alpine.
     build:
       context: ./docker/agent
@@ -14,7 +14,7 @@ services:
     pid: host
     stop_grace_period: 15s
 
-    # NFQUEUE/firewall management and marked raw-packet reinjection.
+    # NFQUEUE/TPROXY, firewall/policy routing and raw-packet reinjection.
     cap_add:
       - NET_ADMIN
       - NET_RAW

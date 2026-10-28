@@ -26,3 +26,10 @@ export function selectedExitUnavailable({ exitsReady, connected, exits, selected
   if (!item) return true;
   return !!connected && item.online === false;
 }
+
+export function withExitGroups(exits = [], groups = []) {
+  return [...exits, ...groups.map(group => {
+    const member = group.members?.map(id => exits.find(e => (e.deviceId || e.id) === id && e.online !== false)).find(Boolean);
+    return {id:group.id,deviceId:group.id,name:group.name+' · 分组',online:!!member,kind:'group',members:group.members,resolvedDeviceId:member?.deviceId||member?.id||''};
+  })];
+}

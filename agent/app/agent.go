@@ -24,6 +24,7 @@ import (
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
 	"relayproxy/agent/fileshare"
+	"relayproxy/agent/gateway"
 	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/agent/rdp"
 	"relayproxy/agent/rdp/hostalias"
@@ -31,6 +32,7 @@ import (
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
+	"relayproxy/internal/exitgroup"
 	"relayproxy/internal/netutil"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
@@ -173,6 +175,7 @@ type AgentConfig struct {
 	AccessCIDRs             []string // IP ranges for the access list (CIDR / single IP / start-end)
 	NetworkMode             string   // "" (off) | "divert"
 	DivertConfig            divert.Config
+	Gateway                 gateway.Config
 	Routing                 routing.Config
 	InsecureTLS             bool // Allow self-signed TLS certificates for development/testing
 	PlainTCP                bool // Disable TLS entirely; connect via plaintext TCP + yamux
@@ -230,6 +233,7 @@ type ProxyExitSummary struct {
 }
 
 type AgentStatus struct {
+	Gateway              gateway.Status             `json:"gateway"`
 	Connected            bool                       `json:"connected"`
 	Transport            string                     `json:"transport"`
 	TunnelDiagnostics    *tunnel.SessionDiagnostics `json:"tunnelDiagnostics,omitempty"`
@@ -310,6 +314,8 @@ type RDPSessionStatus struct {
 }
 
 type Agent struct {
+	gatewaySrv *gateway.Server
+
 	cfg                  AgentConfig
 	tunnelMgr            *tunnel.TunnelManager
 	dialer               *routing.RoutingDialer
@@ -460,13 +466,13 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if err := routing.ValidateCustomExits(cfg.CustomExits); err != nil {
 		return nil, err
 	}
-	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules, cfg.Routing.DNSExitID); err != nil {
+	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules, cfg.Routing.DNSExitID, cfg.Gateway.ExitID); err != nil {
 		return nil, err
 	}
 	if err := routing.ValidateSubscriptionExitReferences(cfg.CustomExits, cfg.Routing.Subscriptions); err != nil {
 		return nil, err
 	}
-	if cfg.ExitUpstreamID != "" {
+	if cfg.ExitUpstreamID != "" && !exitgroup.IsID(cfg.ExitUpstreamID) {
 		item, _ := routing.FindCustomExit(cfg.CustomExits, cfg.ExitUpstreamID)
 		cfg.ExitUpstream = exit.UpstreamConfig{Mode: item.Protocol, Address: item.Address, Username: item.Username, Password: item.Password}
 	}
@@ -480,6 +486,12 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		return nil, err
 	}
 	cfg.Routing = engine.Config()
+	if err := gateway.Validate(cfg.Gateway); err != nil {
+		return nil, err
+	}
+	if err := exitgroup.Validate(cfg.Routing.DeviceGroups, cfg.DefaultExitID, cfg.Gateway.ExitID, cfg.ExitUpstreamID); err != nil {
+		return nil, err
+	}
 	cfg.DivertConfig.Mode = cfg.NetworkMode
 	if err := divert.ValidateConfig(cfg.DivertConfig); err != nil {
 		return nil, err
@@ -517,12 +529,14 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.rawDialer.ConfigureStreamResume(resumeClient, p2presume.DefaultReplayLimit)
 	a.configureProxyPathProvider()
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
+	a.rawDialer.ConfigureExitGroups(cfg.Routing.DeviceGroups, a.groupExitUsable)
 	a.dialer.SetCustomExits(cfg.CustomExits)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
 		a.exitHandler = exit.NewHandler(exit.HandlerConfig{
 			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
+			UpstreamExitID: cfg.ExitUpstreamID, UpstreamDialer: a.groupUpstreamDialer(cfg.ExitUpstreamID),
 			AllowBrowserNetwork: cfg.BrowserNetworkShare,
 			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
 			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: p2presume.DefaultReplayLimit,
@@ -584,7 +598,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 				return []string{host}
 			},
 			SharedPolicy: func(flow divert.Flow) divert.Decision {
-				d := engine.DecideFlow(routing.Flow{Process: flow.Process, ProcessAliases: flow.ProcessAliases, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
+				d := engine.DecideFlow(routing.Flow{Entry: "divert", Process: flow.Process, ProcessAliases: flow.ProcessAliases, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
 				return divert.Decision{Action: divert.Action(d.Action), ExitID: d.ExitID, Rule: d.Rule, DatagramRequired: d.DatagramRequired, HandleDirect: d.HandleDirect}
 			},
 		})
@@ -776,7 +790,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		transportCaps = append(transportCaps, protocol.UDPModeDatagram)
 	}
 	requested := make([]string, 0, 2)
-	if cfg.Mode == "CLIENT" || cfg.Mode == "BOTH" {
+	if cfg.Mode == "CLIENT" || cfg.Mode == "BOTH" || cfg.Gateway.Enabled || exitgroup.IsID(cfg.ExitUpstreamID) {
 		requested = append(requested, protocol.CapabilityProxyClient)
 	}
 	if handler != nil {
@@ -1506,6 +1520,9 @@ func (a *Agent) Start() (err error) {
 			a.mu.Unlock()
 		}
 	}
+	if err := a.startGateway(cfg.Gateway); err != nil {
+		return err
+	}
 	a.mu.Lock()
 	a.started = true
 	a.wg.Add(1)
@@ -1582,6 +1599,7 @@ func (a *Agent) Status() AgentStatus {
 	}
 	st.Connected = a.handshakeOK.Load() && sess != nil
 	a.mu.RUnlock()
+	st.Gateway = a.GatewayStatus()
 	if ptr := a.selectedExit.Load(); ptr != nil {
 		st.SelectedExit = *ptr
 	}
@@ -2169,6 +2187,9 @@ func (a *Agent) closeRuntime() error {
 		a.rdpTargets = nil
 		a.cancel()
 		a.mu.Unlock()
+		if a.gatewaySrv != nil {
+			_ = a.gatewaySrv.Stop()
+		}
 		if a.routingEngine != nil {
 			a.routingEngine.Close()
 		}
@@ -2231,11 +2252,11 @@ func (a *Agent) ApplyPolicies(routeCfg routing.Config, divertCfg divert.Config) 
 // as one policy generation. This is required when a single GUI save creates
 // an exit and immediately references it from a rule or DNS exit selection.
 // The shared Exit handler's upstream remains a startup-only setting.
-func (a *Agent) ApplyClientConfig(routeCfg routing.Config, divertCfg divert.Config, items []routing.CustomExit, defaultID string) error {
-	return a.applyPolicyBundle(routeCfg, divertCfg, &items, &defaultID)
+func (a *Agent) ApplyClientConfig(routeCfg routing.Config, divertCfg divert.Config, items []routing.CustomExit, defaultID string, gatewayCfg ...gateway.Config) error {
+	return a.applyPolicyBundle(routeCfg, divertCfg, &items, &defaultID, gatewayCfg...)
 }
 
-func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Config, newExits *[]routing.CustomExit, newDefault *string) error {
+func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Config, newExits *[]routing.CustomExit, newDefault *string, gatewayCfg ...gateway.Config) error {
 	routeCfg = routing.CloneConfig(routeCfg)
 	divertCfg = cloneAgentConfig(AgentConfig{DivertConfig: divertCfg}).DivertConfig
 	if err := routing.ValidateConfig(routeCfg); err != nil {
@@ -2266,7 +2287,14 @@ func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Conf
 	if newDefault != nil {
 		defaultID = *newDefault
 	}
-	if err := routing.ValidateCustomReferences(items, defaultID, a.cfg.ExitUpstreamID, routeCfg.Rules, routeCfg.DNSExitID); err != nil {
+	gatewayID := a.cfg.Gateway.ExitID
+	if len(gatewayCfg) > 0 {
+		gatewayID = gatewayCfg[0].ExitID
+	}
+	if err := exitgroup.Validate(routeCfg.DeviceGroups, defaultID, gatewayID, a.cfg.ExitUpstreamID); err != nil {
+		return err
+	}
+	if err := routing.ValidateCustomReferences(items, defaultID, a.cfg.ExitUpstreamID, routeCfg.Rules, routeCfg.DNSExitID, gatewayID); err != nil {
 		return err
 	}
 	if err := routing.ValidateSubscriptionExitReferences(items, routeCfg.Subscriptions); err != nil {
@@ -2321,6 +2349,7 @@ func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Conf
 		a.dialer.SetDefaultExitID(defaultID)
 	}
 	a.cfg.Routing = a.routingEngine.Config()
+	a.rawDialer.ConfigureExitGroups(routeCfg.DeviceGroups, a.groupExitUsable)
 	a.cfg.DivertConfig = divertCfg
 	if a.divertSrv != nil && !newCapture && oldCapture {
 		// Relax after publishing disabled policy. Failure leaves a stricter
@@ -2345,7 +2374,7 @@ func (a *Agent) ApplyCustomExits(items []routing.CustomExit) error {
 	if a.closed.Load() {
 		return errors.New("agent closed")
 	}
-	if err := routing.ValidateCustomReferences(items, a.cfg.DefaultExitID, a.cfg.ExitUpstreamID, a.cfg.Routing.Rules, a.cfg.Routing.DNSExitID); err != nil {
+	if err := routing.ValidateCustomReferences(items, a.cfg.DefaultExitID, a.cfg.ExitUpstreamID, a.cfg.Routing.Rules, a.cfg.Routing.DNSExitID, a.cfg.Gateway.ExitID); err != nil {
 		return err
 	}
 	a.dialer.SetCustomExits(items)
@@ -2362,6 +2391,7 @@ func (a *Agent) ReloadDivert(cfg divert.Config) error {
 }
 
 func cloneAgentConfig(cfg AgentConfig) AgentConfig {
+	cfg.Gateway = gateway.Clone(cfg.Gateway)
 	cloneBool := func(p *bool) *bool {
 		if p == nil {
 			return nil

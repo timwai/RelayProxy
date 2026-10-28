@@ -1,6 +1,6 @@
 // Keep multiline rule fields as raw strings while the editor is open.
 // Normalizing on every keystroke removes empty lines and makes Enter unusable.
-export const RULE_LIST_KEYS = ['processes', 'targets', 'ports', 'protocols'];
+export const RULE_LIST_KEYS = ['processes', 'targets', 'ports', 'protocols', 'source_cidrs'];
 
 // Items may be separated by newlines, commas or semicolons (ASCII or full-width),
 // so "chrome.exe, firefox.exe; edge.exe" and one-per-line both work.
@@ -17,6 +17,7 @@ export function splitRuleList(value) {
 export function normalizeRuleLists(rule) {
   const result = {...rule};
   for (const key of RULE_LIST_KEYS) {
+    if (key === "source_cidrs" && rule[key] === undefined) continue;
     result[key] = splitRuleList(rule[key]);
   }
   return result;

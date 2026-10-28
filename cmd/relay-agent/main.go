@@ -22,6 +22,7 @@ import (
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
 	"relayproxy/agent/fileshare"
+	"relayproxy/agent/gateway"
 	"relayproxy/agent/gui"
 	"relayproxy/agent/rdp/hostalias"
 	"relayproxy/agent/singleton"
@@ -84,6 +85,7 @@ func main() {
 	noGuiFlag := flag.Bool("no-gui", false, "Run headless without the desktop window")
 	minimizedFlag := flag.Bool("minimized", false, "Start the desktop window minimized to the system tray")
 	hiddenFlag := flag.Bool("hidden", false, "Alias for --minimized (kept for existing autostart entries)")
+	gatewayCleanupFlag := flag.Bool("gateway-cleanup", false, "Remove this Agent gateway kernel rules and exit (Linux; root required)")
 	versionFlag := flag.Bool("version", false, "Print the version and exit")
 	backgroundFlag := flag.Bool("background", false, "Run the Agent in a detached background process (headless)")
 	daemonFlag := flag.Bool("daemon", false, "Alias for --background")
@@ -108,6 +110,13 @@ func main() {
 		flag.PrintDefaults()
 	}
 	flag.Parse()
+	if *gatewayCleanupFlag {
+		if err := gateway.Disable(); err != nil {
+			fmt.Fprintln(os.Stderr, err)
+			os.Exit(1)
+		}
+		return
+	}
 
 	if *replacementHelperFlag != "" {
 		if err := singleton.RunReplacementHelper(*replacementHelperFlag); err != nil {
@@ -357,6 +366,7 @@ func main() {
 		NetworkMode:           networkMode,
 		DivertConfig:          cfgFile.DivertConfig(),
 		Routing:               cfgFile.Routing,
+		Gateway:               cfgFile.Gateway,
 		InsecureTLS:           *insecureFlag || cfgFile.Server.InsecureTLS,
 		PlainTCP:              !cfgFile.IsServerTLSEnabled(),
 		ConnectTimeout:        10 * time.Second,

@@ -3,6 +3,7 @@ package androidcore
 import (
 	"context"
 	"log"
+	"relayproxy/internal/exitgroup"
 	"strings"
 
 	agentclient "relayproxy/agent/client"
@@ -121,7 +122,7 @@ func (c *Client) prepareProxyDirectPath(exitDeviceID string, prewarm bool) {
 		return
 	}
 	exitDeviceID = strings.TrimSpace(exitDeviceID)
-	if exitDeviceID == "" || exitDeviceID == protocol.ServerExitDeviceID || !c.clientApproved.Load() {
+	if exitgroup.IsID(exitDeviceID) || exitDeviceID == "" || exitDeviceID == protocol.ServerExitDeviceID || !c.clientApproved.Load() {
 		return
 	}
 	c.mu.RLock()

@@ -7,11 +7,13 @@ import (
 )
 
 type ClientInfo struct {
-	Entry          string
-	Source         netip.AddrPort
-	Local          netip.AddrPort
-	Process        string
-	ProcessAliases []string
+	DestinationIP    string
+	InboundInterface string
+	Entry            string
+	Source           netip.AddrPort
+	Local            netip.AddrPort
+	Process          string
+	ProcessAliases   []string
 }
 type clientInfoKey struct{}
 
@@ -49,4 +51,9 @@ func addrPort(addr net.Addr) netip.AddrPort {
 		return netip.AddrPort{}
 	}
 	return netip.AddrPortFrom(p.Addr().Unmap().WithZone(""), p.Port())
+}
+
+// WithGatewayFlow attaches metadata observed by the trusted Linux LAN listener.
+func WithGatewayFlow(ctx context.Context, source, dest netip.AddrPort, iface string) context.Context {
+	return context.WithValue(ctx, clientInfoKey{}, ClientInfo{Entry: "gateway", Source: source, Local: dest, DestinationIP: dest.Addr().String(), InboundInterface: iface})
 }

@@ -4,6 +4,11 @@ on:
   pull_request:
     paths:
       - "agent/exit/**"
+      - "agent/gateway/**"
+      - "agent/client/**"
+      - "internal/exitgroup/**"
+      - "docker/agent/**"
+      - "docker-compose.agent.yml"
       - "agent/divert/**"
       - "agent/routing/**"
       - ".github/workflows/network-acceptance.yml"
@@ -155,3 +160,24 @@ jobs:
           name: linux-dns-guard-veth-captures
           path: ${{ runner.temp }}/dns-acceptance/
           if-no-files-found: warn
+
+  linux-lan-gateway:
+    name: Linux LAN gateway in Alpine runtime
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+      - name: Build standalone gateway acceptance test
+        run: CGO_ENABLED=0 go test -c ./agent/gateway -o "$RUNNER_TEMP/gateway.test"
+      - name: Build shipped Alpine runtime with gateway dependencies
+        run: docker build -t relayproxy-agent-runtime:gateway-test docker/agent
+      - name: Exercise transparent traffic and retained guard inside a privileged container
+        run: |
+          docker run --rm --privileged \
+            -v "$RUNNER_TEMP/gateway.test:/work/gateway.test:ro" \
+            -e RELAYPROXY_GATEWAY_INTEGRATION=1 \
+            relayproxy-agent-runtime:gateway-test \
+            /work/gateway.test -test.v -test.timeout=60s

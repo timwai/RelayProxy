@@ -34,6 +34,7 @@ type SelectedSession struct {
 func (s SelectedSession) IsDirect() bool { return s.Path.IsDirect() }
 
 type TunnelDialer struct {
+	groups        exitGroups
 	getTunnel     func() tunnel.TunnelSession
 	getClientID   func() string
 	defaultExitID atomic.Pointer[string]
@@ -358,7 +359,7 @@ func (d *TunnelDialer) nextRequestIDWithPrefix(prefix string) string {
 	return prefix + strconv.FormatUint(d.requestSeq.Add(1), 36)
 }
 
-func (d *TunnelDialer) DialTCP(ctx context.Context, exitNodeID string, host string, port uint16) (net.Conn, error) {
+func (d *TunnelDialer) dialTCP(ctx context.Context, exitNodeID string, host string, port uint16) (net.Conn, error) {
 	if exitNodeID == "" {
 		exitNodeID = d.GetDefaultExitID()
 	}
@@ -453,7 +454,7 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 		return nil, fmt.Errorf("failed to write stream header: %w", err)
 	}
 	if err := protocol.WriteJSON(stream, protocol.OpenTCPRequest{
-		RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000, Resume: resumeWire,
+		ExitHop: protocol.ExitHop(ctx), RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000, Resume: resumeWire,
 	}); err != nil {
 		_ = stream.Close()
 		return nil, fmt.Errorf("failed to write open request: %w", err)
@@ -530,7 +531,7 @@ func (d *TunnelDialer) DialUDP(ctx context.Context, exitNodeID string, host stri
 	return d.DialUDPWithOptions(ctx, exitNodeID, host, port, UDPDialOptions{})
 }
 
-func (d *TunnelDialer) DialUDPWithOptions(ctx context.Context, exitNodeID string, host string, port uint16, opts UDPDialOptions) (net.PacketConn, error) {
+func (d *TunnelDialer) dialUDPWithOptions(ctx context.Context, exitNodeID string, host string, port uint16, opts UDPDialOptions) (net.PacketConn, error) {
 	if exitNodeID == "" {
 		exitNodeID = d.GetDefaultExitID()
 	}
@@ -651,7 +652,7 @@ func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelS
 	}
 
 	req := protocol.OpenUDPRequest{
-		RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000,
+		ExitHop: protocol.ExitHop(ctx), RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000,
 		Mode: protocol.UDPModeStream, DatagramRequired: opts.DatagramRequired,
 	}
 	if datagrams != nil {

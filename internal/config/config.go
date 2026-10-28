@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gopkg.in/yaml.v3"
+	"relayproxy/agent/gateway"
 	"relayproxy/agent/routing"
 	"relayproxy/agent/systemproxy"
 	"relayproxy/internal/proxy"
@@ -194,6 +195,7 @@ type AgentConfigFile struct {
 		} `yaml:"public"`
 	} `yaml:"direct"`
 
+	Gateway gateway.Config `yaml:"gateway"`
 	Routing routing.Config `yaml:"routing"` // 新增路由配置
 
 	Exit struct {

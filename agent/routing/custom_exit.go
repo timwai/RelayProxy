@@ -3,6 +3,7 @@ package routing
 import (
 	"fmt"
 	"net"
+	"relayproxy/internal/exitgroup"
 	"strconv"
 	"strings"
 )
@@ -85,7 +86,7 @@ func ValidateCustomReferences(items []CustomExit, defaultID, sharedID string, ru
 			used[rule.ExitID] = fmt.Sprintf("routing.rules[%d]", i)
 		}
 	}
-	if sharedID != "" {
+	if sharedID != "" && !exitgroup.IsID(sharedID) {
 		if !IsCustomExitID(sharedID) {
 			return fmt.Errorf("exit.upstream_exit_id must reference a local custom exit")
 		}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"relayproxy/internal/exitgroup"
 	"runtime"
 	"slices"
 	"strconv"
@@ -12,6 +13,7 @@ import (
 
 	"gopkg.in/yaml.v3"
 	"relayproxy/agent/divert"
+	"relayproxy/agent/gateway"
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
 )
@@ -95,6 +97,9 @@ func validateAccess(p acl.Policy) error {
 func NormalizeAgentConfig(c *AgentConfigFile) error {
 	if c == nil {
 		return fmt.Errorf("config cannot be nil")
+	}
+	if err := gateway.Validate(c.Gateway); err != nil {
+		return err
 	}
 	c.Server.Address = strings.TrimSpace(c.Server.Address)
 	c.Device.IdentityID = strings.ToLower(strings.TrimSpace(c.Device.IdentityID))
@@ -310,7 +315,7 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	if err := routing.ValidateCustomExits(c.Proxy.CustomExits); err != nil {
 		return err
 	}
-	if err := routing.ValidateCustomReferences(c.Proxy.CustomExits, c.Proxy.DefaultExitID, c.Exit.UpstreamExitID, c.Routing.Rules, c.Routing.DNSExitID); err != nil {
+	if err := routing.ValidateCustomReferences(c.Proxy.CustomExits, c.Proxy.DefaultExitID, c.Exit.UpstreamExitID, c.Routing.Rules, c.Routing.DNSExitID, c.Gateway.ExitID); err != nil {
 		return err
 	}
 	for _, item := range c.Proxy.CustomExits {
@@ -330,6 +335,9 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	}
 	if err := routing.ValidateConfig(c.Routing); err != nil {
 		return fmt.Errorf("routing: %w", err)
+	}
+	if err := exitgroup.Validate(c.Routing.DeviceGroups, c.Proxy.DefaultExitID, c.Gateway.ExitID, c.Exit.UpstreamExitID); err != nil {
+		return err
 	}
 	if err := divert.ValidateConfig(c.DivertConfig()); err != nil {
 		return fmt.Errorf("network: %w", err)
@@ -401,6 +409,7 @@ func CloneAgentConfig(c *AgentConfigFile) *AgentConfigFile {
 	out.Web.Enabled = cloneBool(c.Web.Enabled)
 	out.Exit.Access.Domains = slices.Clone(c.Exit.Access.Domains)
 	out.Exit.Access.CIDRs = slices.Clone(c.Exit.Access.CIDRs)
+	out.Gateway = gateway.Clone(c.Gateway)
 	out.Routing = routing.CloneConfig(c.Routing)
 	out.Network.ExcludeProcesses = slices.Clone(c.Network.ExcludeProcesses)
 	return &out

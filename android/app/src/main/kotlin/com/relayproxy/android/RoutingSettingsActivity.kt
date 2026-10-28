@@ -283,6 +283,7 @@ class RoutingSettingsActivity : Activity() {
                 exitLabels.add(item.name)
             }
         }
+        config.deviceGroups.forEach { group -> exitIDs.add(group.id); exitLabels.add(group.name + " · 分组") }
         if (current.exitId.isNotBlank() && current.exitId !in exitIDs) {
             exitIDs.add(current.exitId)
             exitLabels.add(ExitDisplayNames.label(current.exitId, names) + "（不可用）")

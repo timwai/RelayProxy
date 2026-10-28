@@ -3,7 +3,7 @@
 export function connectionPathLabel(connection = {}, exits = []) {
   const path = String(connection?.path || '').trim();
   const action = String(connection?.action || '').toUpperCase();
-  const exitID = String(connection?.exit_id || connection?.exitId || '').trim();
+  const exitID = String(connection?.resolved_exit_id || connection?.exit_id || connection?.exitId || '').trim();
   if (action !== 'PROXY' || !exitID) return path || action || '—';
 
   const exit = (Array.isArray(exits) ? exits : []).find(item =>

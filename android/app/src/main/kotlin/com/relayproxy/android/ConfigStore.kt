@@ -64,6 +64,10 @@ data class AndroidCustomExit(
     }
 }
 
+data class DeviceGroupConfig(val id: String = "group:" + UUID.randomUUID().toString(), val name: String = "", val members: List<String> = emptyList()) {
+    fun toJson() = JSONObject().put("id", id).put("name", name).put("members", members.toJsonArray())
+}
+
 data class RoutingRuleConfig(
     val id: String = UUID.randomUUID().toString(),
     val name: String = "新规则",
@@ -120,6 +124,7 @@ data class RoutingConfig(
     val defaultAction: String = "PROXY",
     val rules: List<RoutingRuleConfig> = emptyList(),
     val subscriptions: List<RoutingSubscriptionConfig> = emptyList(),
+    val deviceGroups: List<DeviceGroupConfig> = emptyList(),
     val revision: Long = 0,
 ) {
     fun requiresApplicationIdentity(androidSdk: Int): Boolean =
@@ -132,6 +137,7 @@ data class RoutingConfig(
     ): JSONObject = JSONObject()
         .put("mode", mode)
         .put("default_action", defaultAction)
+        .put("device_groups", JSONArray().apply { deviceGroups.forEach { put(it.toJson()) } })
         .put("revision", if (forCore) null else revision)
         .put("subscriptions", JSONArray().apply { subscriptions.forEach { put(it.toJson()) } })
         .put("rules", JSONArray().apply {
@@ -187,6 +193,7 @@ data class RoutingConfig(
                             entries.optJSONObject(i)?.let { add(RoutingSubscriptionConfig.fromJson(it)) }
                         }
                     },
+                    deviceGroups = buildList { val a = json.optJSONArray("device_groups") ?: JSONArray(); for (i in 0 until a.length()) { val g = a.optJSONObject(i) ?: continue; add(DeviceGroupConfig(g.getString("id"), g.getString("name"), g.stringList("members"))) } },
                     revision = json.optLong("revision", 0),
                 )
             }.getOrDefault(RoutingConfig())
@@ -362,6 +369,7 @@ class ConfigStore(private val context: Context) {
             JSONArray(prefs.getString("customExits", "[]") ?: "[]")
         }.getOrNull() ?: return emptyMap()
         return buildMap {
+            RoutingConfig.fromJson(prefs.getString("routing", null)).deviceGroups.forEach { put(it.id, it.name + " · 分组") }
             for (index in 0 until entries.length()) {
                 val item = entries.optJSONObject(index) ?: continue
                 val id = item.optString("id").trim()
@@ -527,6 +535,7 @@ class ConfigStore(private val context: Context) {
     }
 
     fun save(config: ExitConfig) {
+        validateGroups(config.routing, config.defaultExitId)
         require(config.customExits.map { it.id }.distinct().size == config.customExits.size) {
             "自定义出口 ID 重复"
         }
@@ -602,7 +611,9 @@ class ConfigStore(private val context: Context) {
     }
 
     fun saveRouting(routing: RoutingConfig): RoutingConfig = synchronized(routingLock) {
-        val locals = load().customExits
+        val snapshot = load()
+        validateGroups(routing, snapshot.defaultExitId)
+        val locals = snapshot.customExits
         routing.subscriptions.forEach { sub ->
             if (sub.action == "PROXY" && sub.exitId.startsWith("local:")) {
                 require(locals.any { it.id == sub.exitId && it.enabled }) {
@@ -625,6 +636,21 @@ class ConfigStore(private val context: Context) {
             .putInt("configVersion", 5)
             .apply()
         updated
+    }
+
+    private fun validateGroups(r: RoutingConfig, defaultID: String) {
+        require(r.deviceGroups.size <= 128) { "最多支持 128 个分组" }
+        require(r.deviceGroups.map { it.id }.distinct().size == r.deviceGroups.size) { "分组 ID 重复" }
+        require(r.deviceGroups.map { it.name.trim().lowercase() }.distinct().size == r.deviceGroups.size) { "分组名称重复" }
+        r.deviceGroups.forEach { g ->
+            require(g.id.startsWith("group:") && g.id.length in 7..128) { "无效分组 ID" }
+            require(g.name.isNotBlank() && g.name.length <= 64) { "分组名称必须为 1–64 字" }
+            require(g.members.size in 1..128 && g.members.distinct().size == g.members.size) { "请选择 1–128 个不同的设备" }
+            require(g.members.none { it.isBlank() || it.startsWith("group:") || it.startsWith("local:") }) { "分组成员必须为设备" }
+        }
+        (listOf(defaultID) + r.rules.map { it.exitId } + r.subscriptions.map { it.exitId }).filter { it.startsWith("group:") }.forEach { id ->
+            require(r.deviceGroups.any { it.id == id }) { "分组正在被默认出口或规则引用，请先解除引用：$id" }
+        }
     }
 
     fun isDesiredRunning(): Boolean = prefs.getBoolean("desiredRunning", false)

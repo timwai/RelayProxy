@@ -33,6 +33,7 @@ type Metadata struct {
 	Action         string   `json:"action"`
 	Rule           string   `json:"rule"`
 	ExitID         string   `json:"exit_id"`
+	ResolvedExitID string   `json:"resolved_exit_id,omitempty"`
 	Accounting     string   `json:"accounting"` // stream payload or observed packet payload
 }
 
@@ -363,4 +364,13 @@ func (r *Registry) Snapshot() Snapshot {
 	}
 	sort.Slice(s.Connections, func(i, j int) bool { return s.Connections[i].ID > s.Connections[j].ID })
 	return s
+}
+
+func (r *Record) SetResolvedExit(id string) {
+	if r == nil || id == "" {
+		return
+	}
+	r.registry.mu.Lock()
+	r.connection.ResolvedExitID = id
+	r.registry.mu.Unlock()
 }

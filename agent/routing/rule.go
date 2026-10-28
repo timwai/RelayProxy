@@ -1,5 +1,7 @@
 package routing
 
+import "relayproxy/internal/exitgroup"
+
 // Action represents a routing decision
 type Action string
 
@@ -31,6 +33,8 @@ const (
 
 // Rule is a single routing rule. Rules are evaluated in order (first match wins).
 type Rule struct {
+	Entries          []string `yaml:"entries,omitempty" json:"entries,omitempty"`
+	SourceCIDRs      []string `yaml:"source_cidrs,omitempty" json:"source_cidrs,omitempty"`
 	Name             string   `yaml:"name"    json:"name"`                        // Human-readable name
 	Enabled          bool     `yaml:"enabled" json:"enabled"`                     // Whether this rule is active
 	Action           Action   `yaml:"action"  json:"action"`                      // What to do on match
@@ -46,12 +50,16 @@ type Rule struct {
 // Flow contains only observed metadata. An unknown process or hostname stays
 // empty and cannot satisfy a condition that requires it.
 type Flow struct {
-	Process        string
-	ProcessAliases []string
-	Host           string
-	IP             string
-	Port           uint16
-	Protocol       string
+	Entry            string
+	SourceIP         string
+	SourcePort       uint16
+	InboundInterface string
+	Process          string
+	ProcessAliases   []string
+	Host             string
+	IP               string
+	Port             uint16
+	Protocol         string
 }
 
 type Decision struct {
@@ -65,7 +73,8 @@ type Decision struct {
 
 // Config holds all routing configuration.
 type Config struct {
-	Subscriptions []Subscription `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"` // External lists evaluated after hand-written rules
+	DeviceGroups  []exitgroup.Group `yaml:"device_groups,omitempty" json:"device_groups,omitempty"`
+	Subscriptions []Subscription    `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"` // External lists evaluated after hand-written rules
 
 	Mode                  Mode          `yaml:"mode"           json:"mode"`                   // Routing mode
 	DNSMode               DNSMode       `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"` // proxy (default) or local

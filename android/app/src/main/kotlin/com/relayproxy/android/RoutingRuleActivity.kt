@@ -296,6 +296,7 @@ class RoutingRuleActivity : Activity() {
                     if (custom.enabled) "已启用" else "已停用"
             }
         }
+        ConfigStore(this).load().routing.deviceGroups.forEach { group -> ids += group.id; labels += group.name + " · 分组（优先级故障切换）" }
         if (selectedExitId.isNotBlank() && selectedExitId !in ids) {
             ids += selectedExitId
             labels += "${ExitDisplayNames.label(selectedExitId, names)} · 当前不可用"

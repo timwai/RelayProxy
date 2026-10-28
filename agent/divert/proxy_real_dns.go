@@ -99,3 +99,8 @@ func realProxyDNSReply(ctx context.Context, raw []byte, udp bool, exchange func(
 	}
 	return reply
 }
+
+// ExchangeGatewayDNS reuses authenticated encrypted DNS without enabling local capture.
+func (s *Server) ExchangeGatewayDNS(ctx context.Context, exitID string, query []byte, udp bool) []byte {
+	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, q []byte) ([]byte, error) { return s.exchangeLimitedProxyDNS(ctx, exitID, q) })
+}

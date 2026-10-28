@@ -20,6 +20,9 @@ func WrapConn(c net.Conn, record *Record) net.Conn {
 	if source, ok := c.(proxyPathSource); ok {
 		record.setPathSource(source)
 	}
+	if source, ok := c.(interface{ SelectedExitID() string }); ok {
+		record.SetResolvedExit(source.SelectedExitID())
+	}
 	record.Activate()
 	return &conn{Conn: c, record: record}
 }
@@ -61,6 +64,9 @@ type packetConn struct {
 func WrapPacketConn(pc net.PacketConn, record *Record) net.PacketConn {
 	if record == nil {
 		return pc
+	}
+	if source, ok := pc.(interface{ SelectedExitID() string }); ok {
+		record.SetResolvedExit(source.SelectedExitID())
 	}
 	record.Activate()
 	wrapped := &packetConn{PacketConn: pc, record: record}

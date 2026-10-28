@@ -53,3 +53,13 @@ test('selected exit banner waits for inventory and ignores auto selection', () =
   assert.equal(selectedExitUnavailable({exitsReady:false,connected:true,exits:[],selected:'exit-a'}), false);
   assert.equal(selectedExitUnavailable({exitsReady:true,connected:true,exits:[],selected:''}), false);
 });
+
+test('group inventory follows priority and keeps a stable group selection', async () => {
+  const {withExitGroups}=await import('./exitInventory.js');
+  const groups=[{id:'group:wan',name:'主备',members:['a','b']}];
+  let list=withExitGroups([{deviceId:'a',online:false},{deviceId:'b',online:true}],groups);
+  assert.equal(list.at(-1).resolvedDeviceId,'b');assert.equal(list.at(-1).id,'group:wan');
+  list=withExitGroups([{deviceId:'a',online:true},{deviceId:'b',online:true}],groups);
+  assert.equal(list.at(-1).resolvedDeviceId,'a');
+  assert.equal(withExitGroups([],groups).at(-1).online,false);
+});

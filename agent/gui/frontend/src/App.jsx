@@ -1,3 +1,6 @@
+import DeviceGroups from './DeviceGroups.jsx';
+import GatewayPage from './GatewayPage.jsx';
+import {withExitGroups} from './exitInventory.js';
 import React, {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} from './bridge.js';
@@ -31,6 +34,7 @@ const CONFIG_SECTIONS=[
  ['dns','shield','DNS 与防泄漏','自动解析、DNS 出口和防泄漏'],
  ['proxy','swap','代理与自定义出口','SOCKS5、HTTP、透明代理和本机出口'],
  ['connection','route','连接策略','传输协议、P2P 与公网直连'],
+ ['gateway','share','局域网网关','Linux LAN 透明接入与公共分流规则'],
  ['exitshare','share','出口共享','共享能力、上游出口与访问控制']
 ];
 const SETTINGS_SECTIONS=[
@@ -58,7 +62,7 @@ const EMPTY={
  rdp:{enabled:true,address:'127.0.0.1:3389'},
  p2p:{enabled:true,mode:'auto',punchTimeoutMs:1200,keepaliveSec:10,idleTimeoutSec:120,maxExitSessions:4,fallback:true,upnpAllowed:false},publicDirectAdvertise:'',
  networkMode:'',network:{mode:'',exclude_processes:[]},systemProxy:{mode:'',autoFollow:true,http:true,socks5:true,proxyIpLiterals:true},systemProxyStatus:{},platform:'',networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
- verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,dns_exit_id:'',dns_upstreams:[],doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
+ verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,device_groups:[],dns_exit_id:'',dns_upstreams:[],doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
 };
 
 const cx=(...v)=>v.filter(Boolean).join(' ');
@@ -366,7 +370,7 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
 
 function ExitShare({status,config,setv,save,dirty}){
  const u=config.exitUpstream||EMPTY.exitUpstream,[loopbackRisk,setLoopbackRisk]=useState(false);
- const customs=arr(config.customExits),chosen=customs.find(x=>x.id===config.upstreamExitId);
+ const customs=[...arr(config.customExits),...arr(config.routing?.device_groups).map(g=>({...g,enabled:true,protocol:"group",address:"按优先顺序故障切换"}))],chosen=customs.find(x=>x.id===config.upstreamExitId);
  const legacy=!config.upstreamExitId&&u.mode&&u.mode!=='direct';
  const selected=config.upstreamExitId||(legacy?'__legacy__':'__direct__');
  return <><PageHead title="本机出口共享" desc="允许 Server 将授权流量通过此设备访问 Internet 或指定网络。"/>
@@ -375,7 +379,7 @@ function ExitShare({status,config,setv,save,dirty}){
   <Field label="上游连接方式">
    <Select value={selected} onChange={e=>{
     const id=e.target.value;
-    setv('upstreamExitId',id.startsWith('local:')?id:'');
+    setv('upstreamExitId',(id.startsWith('local:')||id.startsWith('group:'))?id:'');
     if(id==='__direct__')setv('exitUpstream.mode','direct');
    }}>
     <option value="__direct__">本机直连</option>
@@ -384,7 +388,7 @@ function ExitShare({status,config,setv,save,dirty}){
    </Select>
   </Field>
   {chosen&&<div className="setting top-gap"><div className="grow"><b>{chosen.name}</b><div className="mini">{chosen.address} · {chosen.protocol.toUpperCase()}</div></div><Badge tone={chosen.enabled?'ok':'danger'}>{chosen.enabled?'可用':'不可用'}</Badge></div>}
-  {chosen&&chosen.protocol!=='socks5'&&<div className="notice warn top-gap">HTTP(S) CONNECT 仅支持 TCP。共享出口的 UDP 请求会失败，不会回退本机直连。</div>}
+  {chosen&&chosen.protocol!=='socks5'&&chosen.protocol!=='group'&&<div className="notice warn top-gap">HTTP(S) CONNECT 仅支持 TCP。共享出口的 UDP 请求会失败，不会回退本机直连。</div>}
   {config.upstreamExitId&&!chosen&&<div className="notice danger top-gap">所选上游出口已丢失，保存将被阻止。请重新选择或切换到本机直连。</div>}
   {legacy&&<div className="notice warn top-gap">当前仍使用旧版上游 {u.mode}。请创建自定义出口并在此引用；切换上游前保留原有工作方式。</div>}
   {!customs.length&&<div className="notice top-gap">暂无自定义出口。请前往「网络配置 → 代理与自定义出口」创建。</div>}
@@ -397,7 +401,7 @@ function RuleEditor({value,exits,onChange}){
  const set=(k,v)=>onChange({...value,[k]:v});
  const setAction=action=>onChange({...value,action,exit_id:action==='PROXY'?(value.exit_id||''):'',handle_direct:action==='DIRECT'?!!value.handle_direct:false});
  const sep='可用换行、逗号或分号分隔多个条目';
- return <div className="form-grid"><Field label="规则名称"><Input value={value.name||''} onChange={e=>set('name',e.target.value)}/></Field><Field label="动作"><Select value={value.action||'PROXY'} onChange={e=>setAction(e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field><Field label="指定出口"><Select value={value.exit_id||''} disabled={value.action!=='PROXY'} onChange={e=>set('exit_id',e.target.value)}><option value="">跟随默认出口</option>{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false}>{x.name||x.deviceId}{x.online===false?' · 离线':''}</option>)}</Select></Field><Field label="协议"><Select value={protocolChoice(value.protocols)} onChange={e=>set('protocols',protocolsFromChoice(e.target.value))}>{PROTOCOL_CHOICES.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></Field><Field label="进程" help={sep+'，如 chrome.exe, steam.exe'} className="full"><Textarea rows="3" value={ruleListText(value.processes)} onChange={e=>set('processes',e.target.value)}/></Field><Field label="域名 / IP / CIDR" help={sep+'，支持通配符，如 *.example.com; 10.0.0.0/8'} className="full"><Textarea rows="3" value={ruleListText(value.targets)} onChange={e=>set('targets',e.target.value)}/></Field><Field label="端口" help={sep+'，留空表示任意端口'} className="full"><Textarea rows="2" value={ruleListText(value.ports)} onChange={e=>set('ports',e.target.value)}/></Field><label className="check-line"><input type="checkbox" checked={!!value.datagram_required} disabled={!!value.handle_direct} onChange={e=>set('datagram_required',e.target.checked)}/><span><strong>要求原生 UDP</strong><small>{value.handle_direct?'托管 DIRECT 与 Relay Datagram 互斥。':'仅在支持 datagram 的代理路径上使用。'}</small></span></label><label className="check-line"><input type="checkbox" checked={!!value.handle_direct} disabled={value.action!=='DIRECT'||!!value.datagram_required} onChange={e=>set('handle_direct',e.target.checked)}/><span><strong>RelayProxy 托管 DIRECT</strong><small>{value.datagram_required?'要求原生 UDP 时不能同时托管 DIRECT。':'由 RelayProxy 建立本地直连并纳入连接监控。'}</small></span></label></div>
+ return <div className="form-grid"><Field label="规则名称"><Input value={value.name||''} onChange={e=>set('name',e.target.value)}/></Field><Field label="动作"><Select value={value.action||'PROXY'} onChange={e=>setAction(e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field><Field label="指定出口"><Select value={value.exit_id||''} disabled={value.action!=='PROXY'} onChange={e=>set('exit_id',e.target.value)}><option value="">跟随默认出口</option>{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false&&x.kind!=='group'}>{x.name||x.deviceId}{x.online===false?' · 离线':''}</option>)}</Select></Field><Field label="协议"><Select value={protocolChoice(value.protocols)} onChange={e=>set('protocols',protocolsFromChoice(e.target.value))}>{PROTOCOL_CHOICES.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></Field><Field label="进程" help={sep+'，如 chrome.exe, steam.exe'} className="full"><Textarea rows="3" value={ruleListText(value.processes)} onChange={e=>set('processes',e.target.value)}/></Field><Field label="域名 / IP / CIDR" help={sep+'，支持通配符，如 *.example.com; 10.0.0.0/8'} className="full"><Textarea rows="3" value={ruleListText(value.targets)} onChange={e=>set('targets',e.target.value)}/></Field><Field label="入口"><Select value={arr(value.entries).includes("gateway")?"gateway":""} onChange={e=>set("entries",e.target.value?[e.target.value]:[])}><option value="">所有入口</option><option value="gateway">局域网网关</option></Select></Field><Field label="来源网段" help="留空匹配所有来源；如 192.168.1.0/24"><Textarea rows="2" value={ruleListText(value.source_cidrs)} onChange={e=>set("source_cidrs",e.target.value)}/></Field><Field label="端口" help={sep+'，留空表示任意端口'} className="full"><Textarea rows="2" value={ruleListText(value.ports)} onChange={e=>set('ports',e.target.value)}/></Field><label className="check-line"><input type="checkbox" checked={!!value.datagram_required} disabled={!!value.handle_direct} onChange={e=>set('datagram_required',e.target.checked)}/><span><strong>要求原生 UDP</strong><small>{value.handle_direct?'托管 DIRECT 与 Relay Datagram 互斥。':'仅在支持 datagram 的代理路径上使用。'}</small></span></label><label className="check-line"><input type="checkbox" checked={!!value.handle_direct} disabled={value.action!=='DIRECT'||!!value.datagram_required} onChange={e=>set('handle_direct',e.target.checked)}/><span><strong>RelayProxy 托管 DIRECT</strong><small>{value.datagram_required?'要求原生 UDP 时不能同时托管 DIRECT。':'由 RelayProxy 建立本地直连并纳入连接监控。'}</small></span></label></div>
 }
 
 function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
@@ -449,7 +453,7 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
  <summary><span><strong>全局路由策略</strong><small>路由模式：{r.mode==='rule'?'规则模式':r.mode==='direct'?'全局直连':'全局代理'} · 默认出口：{exitName(exits,config.defaultExitId||'')} · 未命中：{r.default_action||'PROXY'}</small></span></summary>
  <Card title="全局路由策略" eyebrow="ROUTING MODE"><div className="form-grid">
  <Field label="路由模式"><Select value={r.mode||'global_proxy'} onChange={e=>setv('routing.mode',e.target.value)}><option value="global_proxy">全局代理</option><option value="rule">规则模式</option><option value="direct">全局直连</option></Select></Field>
- <Field label="默认代理出口" help="仅影响未指定独立出口的 PROXY 流量；不会覆盖每条规则的指定出口。"><Select value={config.defaultExitId||''} onChange={e=>setv('defaultExitId',e.target.value)}><option value="">自动选择</option>{config.defaultExitId&&!exits.some(x=>(x.deviceId||x.id)===config.defaultExitId)&&<option value={config.defaultExitId}>原出口不可用 · {config.defaultExitId}</option>}{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false&&(x.deviceId||x.id)!==config.defaultExitId}>{x.name||x.deviceId||x.id}{x.online===false?' · 离线':''}</option>)}</Select></Field>
+ <Field label="默认代理出口" help="仅影响未指定独立出口的 PROXY 流量；不会覆盖每条规则的指定出口。"><Select value={config.defaultExitId||''} onChange={e=>setv('defaultExitId',e.target.value)}><option value="">自动选择</option>{config.defaultExitId&&!exits.some(x=>(x.deviceId||x.id)===config.defaultExitId)&&<option value={config.defaultExitId}>原出口不可用 · {config.defaultExitId}</option>}{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false&&x.kind!=='group'&&(x.deviceId||x.id)!==config.defaultExitId}>{x.name||x.deviceId||x.id}{x.online===false?' · 离线':''}</option>)}</Select></Field>
  <Field label="规则未命中时"><Select value={r.default_action||'PROXY'} onChange={e=>setv('routing.default_action',e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field>
  </div><div className="mini top-gap">「默认代理出口」决定 PROXY 连接用哪台设备；「规则未命中时」决定 PROXY / DIRECT / REJECT。两者独立，已授权出口撤销或离线时不会静默直连。</div></Card>
  </details>
@@ -853,7 +857,7 @@ export default function App(){
 
  const setv=useCallback((path,value,markDirty=true)=>{setConfig(prev=>{const next=structuredClone(prev),keys=path.split('.');let o=next;for(let i=0;i<keys.length-1;i++){o[keys[i]]=o[keys[i]]&&typeof o[keys[i]]==='object'?o[keys[i]]:{};o=o[keys[i]]}o[keys[keys.length-1]]=value;return next});if(markDirty)setDirty(true)},[]);
  const save=useCallback(async payload=>{if(!loaded||!config.revision){toast('配置尚未就绪，暂不能保存','danger');return false}try{const r=await saveConfig(config.revision,payload);if(!r.ok)throw new Error(r.message||'保存失败');await refreshConfig();await refreshStatus();toast(r.restartRequired?(r.message||'已保存，部分设置需重启'):(r.message||'已保存'));return true}catch(e){toast(e.message,'danger');return false}},[loaded,config.revision,toast,refreshConfig,refreshStatus]);
- const select=useCallback(async id=>{try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName([...exits,...arr(config.customExits)],id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[exits,config.customExits,refreshConfig,refreshStatus,toast]);
+ const select=useCallback(async id=>{try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName([...withExitGroups(exits,arr(config.routing?.device_groups)),...arr(config.customExits)],id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[exits,config.customExits,config.routing?.device_groups,refreshConfig,refreshStatus,toast]);
  const clearMessages=useCallback(async()=>{if(!messages.length||!confirm('清空本设备的消息历史？'))return;try{await call('goClearMessages');messageIDs.current.clear();setMessages([]);setUnreadMessages(0);toast('消息历史已清空')}catch(e){toast('清空消息失败：'+(e?.message||String(e)),'danger')}},[messages.length,toast]);
  const clearConnections=useCallback(async()=>{await call('goClearConnections');await refreshConnections();toast('已清理结束连接历史')},[refreshConnections,toast]);
  const clearLogs=useCallback(async()=>{await call('goClearLogs');setLogs([]);toast('日志已清空')},[toast]);
@@ -881,18 +885,20 @@ export default function App(){
  const discardAndContinue=useCallback(async()=>{const action=pendingAction;if(!action)return;setPendingAction(null);setDirty(false);if(action.kind==='page'){await refreshConfig();setFileTarget(action.fileDevice?{device:action.fileDevice,serial:Date.now()}:null);setPage(action.target);return}if(action.kind==='reload'){await reloadConfig();return}if(action.kind==='restart'){await restartApp();return}if(action.kind==='quit'){await quitApp()}},[pendingAction,refreshConfig,reloadConfig,restartApp,quitApp]);
  useEffect(()=>{const h=e=>{if(!dirty)return;e.preventDefault();e.returnValue=''};window.addEventListener('beforeunload',h);return()=>window.removeEventListener('beforeunload',h)},[dirty]);
  const selectedExit=status.selectedExit||config.defaultExitId||'';
- const exitUnavailable=selectedExitUnavailable({exitsReady,connected:!!status.connected,exits:[...exits,...arr(config.customExits)],selected:selectedExit});
+ const exitUnavailable=selectedExitUnavailable({exitsReady,connected:!!status.connected,exits:[...withExitGroups(exits,arr(config.routing?.device_groups)),...arr(config.customExits)],selected:selectedExit});
  const approval=String(status.approvalState||'').toLowerCase();
  const approvalPending=/pending|wait|approval|待审批/.test(approval);
  const approvalRejected=/reject|denied|revoked|撤销|拒绝/.test(approval);
  const title=page==='settings'?'常规设置':PAGE_NAMES[page]||'RelayProxy';
  const category=CONFIG_IDS.has(page)?'网络配置':(page==='settings'||SETTINGS_IDS.has(page))?'设置':'';
- const p={status,config,exits,setv,save,toast,dirty};
+ const groupExits=withExitGroups(exits,arr(config.routing?.device_groups));
+ const p={status,config,exits:groupExits,setv,save,toast,dirty};
  let content;
  if(page==='overview')content=<Overview {...p} traffic={connections} history={history} onRefresh={refreshStatus} onGoto={requestPage}/>;
  else if(page==='devices')content=<Devices {...p} onRefresh={refreshStatus}/>;
  else if(page==='connection')content=<Connection {...p} onReload={()=>requestLifecycle('reload')}/>;
- else if(page==='exits')content=<DeviceCenter status={status} exits={exits} targets={targets} filePeers={filePeers} config={config} onSpeed={id=>{setSpeedExit(id);setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} onGoto={requestPage} onFiles={openDeviceFiles} onConnectRDP={connectDeviceRDP} onRefresh={()=>{void Promise.all([refreshExits(),refreshTargets(),refreshFilePeers()])}}/>;
+ else if(page==='gateway')content=<GatewayPage {...p} onGoto={requestPage}/>;
+ else if(page==='exits')content=<><DeviceCenter status={status} exits={exits} targets={targets} filePeers={filePeers} config={config} onSpeed={id=>{setSpeedExit(id);setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} onGoto={requestPage} onFiles={openDeviceFiles} onConnectRDP={connectDeviceRDP} onRefresh={()=>{void Promise.all([refreshExits(),refreshTargets(),refreshFilePeers()])}}/><DeviceGroups {...p} exits={exits}/></>;
  else if(page==='proxy')content=<ProxyPage {...p} onService={()=>requestPage('settings')} onRefreshCapabilities={refreshNetworkCapabilities}/>;
  else if(page==='exitshare')content=<ExitShare {...p}/>;
  else if(page==='routing')content=<RoutingPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;

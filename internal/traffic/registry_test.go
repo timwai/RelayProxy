@@ -230,3 +230,19 @@ func TestRegistryPreservesServiceProcessMetadata(t *testing.T) {
 		t.Fatalf("service metadata=%+v", row.Metadata)
 	}
 }
+
+type resolvedGroupConn struct{ net.Conn }
+
+func (resolvedGroupConn) SelectedExitID() string { return "backup-device" }
+func TestGroupTrafficKeepsConfiguredAndConcreteExit(t *testing.T) {
+	registry := NewRegistry(4, 4)
+	record := registry.Start(Metadata{Action: "PROXY", ExitID: "group:wan"})
+	a, b := net.Pipe()
+	defer b.Close()
+	c := WrapConn(resolvedGroupConn{a}, record)
+	defer c.Close()
+	snapshot := registry.Snapshot()
+	if len(snapshot.Connections) != 1 || snapshot.Connections[0].ExitID != "group:wan" || snapshot.Connections[0].ResolvedExitID != "backup-device" {
+		t.Fatalf("group attribution: %+v", snapshot)
+	}
+}

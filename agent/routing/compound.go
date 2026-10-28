@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/netip"
 	"path"
+	"relayproxy/internal/exitgroup"
 	"slices"
 	"strconv"
 	"strings"
@@ -12,6 +13,7 @@ import (
 // CloneConfig preserves nil versus empty lists and prevents caller mutations
 // from changing an already published policy.
 func CloneConfig(cfg Config) Config {
+	cfg.DeviceGroups = exitgroup.Clone(cfg.DeviceGroups)
 	cfg.DoHBlockedIPs = slices.Clone(cfg.DoHBlockedIPs)
 	cfg.DNSUpstreams = slices.Clone(cfg.DNSUpstreams)
 	cfg.DNSDirectDomains = slices.Clone(cfg.DNSDirectDomains)
@@ -23,6 +25,8 @@ func CloneConfig(cfg Config) Config {
 	cfg.Subscriptions = slices.Clone(cfg.Subscriptions)
 	for i := range cfg.Rules {
 		r := &cfg.Rules[i]
+		r.Entries = slices.Clone(r.Entries)
+		r.SourceCIDRs = slices.Clone(r.SourceCIDRs)
 		r.Processes = slices.Clone(r.Processes)
 		r.Targets = slices.Clone(r.Targets)
 		r.Ports = slices.Clone(r.Ports)
@@ -32,6 +36,7 @@ func CloneConfig(cfg Config) Config {
 }
 
 type compoundRule struct {
+	sources      []netip.Prefix
 	networks     []netip.Prefix
 	hosts        []string
 	addressGlobs []string
@@ -54,6 +59,11 @@ func targetPrefix(value string) (netip.Prefix, bool) {
 
 func compileCompound(r Rule) compoundRule {
 	var c compoundRule
+	for _, raw := range r.SourceCIDRs {
+		if p, err := netip.ParsePrefix(raw); err == nil {
+			c.sources = append(c.sources, p.Masked())
+		}
+	}
 	for _, target := range r.Targets {
 		if prefix, ok := targetPrefix(target); ok {
 			c.networks = append(c.networks, prefix)
@@ -93,6 +103,23 @@ func matchProcess(pattern, process string) bool {
 }
 
 func (c compoundRule) matches(r Rule, f Flow) bool {
+	switch f.Entry {
+	case "socks5-udp":
+		f.Entry = "socks5"
+	case "browser_chrome":
+		f.Entry = "browser"
+	case "transparent":
+		f.Entry = "divert"
+	}
+	if len(r.Entries) > 0 && !slices.Contains(r.Entries, f.Entry) {
+		return false
+	}
+	if len(c.sources) > 0 {
+		addr, err := netip.ParseAddr(f.SourceIP)
+		if err != nil || !slices.ContainsFunc(c.sources, func(p netip.Prefix) bool { return p.Contains(addr.Unmap()) }) {
+			return false
+		}
+	}
 	if len(r.Processes) > 0 && !slices.ContainsFunc(r.Processes, func(p string) bool {
 		if matchProcess(p, f.Process) {
 			return true
@@ -161,6 +188,16 @@ func (c compoundRule) matches(r Rule, f Flow) bool {
 }
 
 func validateCompound(rule Rule) error {
+	for _, entry := range rule.Entries {
+		if entry != "gateway" && entry != "socks5" && entry != "http" && entry != "divert" && entry != "browser" && entry != "vpn" {
+			return fmt.Errorf("invalid routing entry %q", entry)
+		}
+	}
+	for _, raw := range rule.SourceCIDRs {
+		if _, err := netip.ParsePrefix(raw); err != nil {
+			return fmt.Errorf("invalid source CIDR %q", raw)
+		}
+	}
 	for _, p := range rule.Processes {
 		if strings.TrimSpace(p) != p || p == "" || strings.ContainsAny(p, "\x00\r\n") {
 			return fmt.Errorf("process condition must be nonempty without surrounding whitespace")

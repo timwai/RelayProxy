@@ -1,6 +1,9 @@
 package gui
 
-import "relayproxy/agent/routing"
+import (
+	"relayproxy/agent/routing"
+	"relayproxy/internal/exitgroup"
+)
 
 // routingConfigView is the single transport-independent shape read by the
 // React desktop and local Web GUIs. Keep every editable field here: if a
@@ -22,6 +25,7 @@ func routingConfigView(cfg routing.Config) map[string]any {
 	associationEnabled := cfg.DNSAssociationEnabled == nil || *cfg.DNSAssociationEnabled
 	return map[string]any{
 		"mode":                    cfg.Mode,
+		"device_groups":           append([]exitgroup.Group{}, cfg.DeviceGroups...),
 		"dns_mode":                dnsMode,
 		"auto_detect_dns":         cfg.AutoDetectDNS,
 		"dns_association_enabled": associationEnabled,

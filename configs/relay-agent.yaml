@@ -40,3 +40,17 @@ p2p:
 direct:
   public:
     advertise: ""              # 例如 exit.example.com:35820
+
+# 可选：Linux LAN 网关。设备把默认网关和 DNS 指向本机固定 LAN IP。
+# 无需客户端；需要 root、nftables、iproute2。复用 routing 公共规则。
+# gateway:
+#   enabled: true
+#   interface: eth0
+#   source_cidrs: [192.168.50.0/24]
+#   exit_id: group:home
+#   port: 15080
+#   max_connections: 1024
+# routing.device_groups 示例：
+# - id: group:home
+#   name: 家庭主备
+#   members: [primary-agent-device-id, backup-agent-device-id]

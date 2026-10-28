@@ -18,11 +18,13 @@ import (
 	"relayproxy/agent/app"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
+	"relayproxy/agent/gateway"
 	"relayproxy/agent/rdp"
 	"relayproxy/agent/routing"
 	"relayproxy/agent/startup"
 	"relayproxy/agent/systemproxy"
 	"relayproxy/internal/config"
+	"relayproxy/internal/exitgroup"
 	"relayproxy/internal/protocol"
 )
 
@@ -413,6 +415,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Exit.Access.CIDRs = c.AccessCIDRs
 	res.Network.Mode = c.NetworkMode
 	res.Network.ExcludeProcesses = c.DivertConfig.ExcludeProcesses
+	res.Gateway = gateway.Clone(c.Gateway)
 	res.Routing = c.Routing
 	return res
 }
@@ -420,7 +423,8 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 // ConfigUpdate carries the subset of settings the desktop UI is allowed to
 // change. Pointer fields mean "leave unchanged when nil".
 type ConfigUpdate struct {
-	Revision *string `json:"revision,omitempty"`
+	Gateway  *gateway.Config `json:"gateway"`
+	Revision *string         `json:"revision,omitempty"`
 	Server   struct {
 		Address     *string `json:"address"`
 		QUICPort    *int    `json:"quicPort"`
@@ -522,6 +526,7 @@ type CustomExitUpdate struct {
 }
 
 type RoutingConfigUpdate struct {
+	DeviceGroups          *[]exitgroup.Group      `json:"device_groups"`
 	Mode                  *string                 `json:"mode"`
 	DNSMode               *string                 `json:"dns_mode"`
 	AutoDetectDNS         *bool                   `json:"auto_detect_dns"`
@@ -788,7 +793,13 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		cfg.Network.ExcludeProcesses = cleanLines(*in.Network.ExcludeProcesses)
 	}
 
+	if in.Gateway != nil {
+		cfg.Gateway = gateway.Clone(*in.Gateway)
+	}
 	if in.Routing != nil {
+		if in.Routing.DeviceGroups != nil {
+			cfg.Routing.DeviceGroups = exitgroup.Clone(*in.Routing.DeviceGroups)
+		}
 		if in.Routing.AutoDetectDNS != nil {
 			cfg.Routing.AutoDetectDNS = *in.Routing.AutoDetectDNS
 		}
@@ -935,8 +946,17 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	// one bundle. Rules in the same save may refer to a newly created exit.
 	dcfg := cfg.DivertConfig()
 	dcfg.Mode = b.agent.Config().NetworkMode
-	if err := b.agent.ApplyClientConfig(cfg.Routing, dcfg, cfg.Proxy.CustomExits, cfg.Proxy.DefaultExitID); err != nil {
+	applyErr := b.agent.ApplyClientConfig(cfg.Routing, dcfg, cfg.Proxy.CustomExits, cfg.Proxy.DefaultExitID, cfg.Gateway)
+	if applyErr == nil {
+		applyErr = b.agent.ApplyGatewayConfig(cfg.Gateway, in.Gateway != nil)
+	}
+	if err := applyErr; err != nil {
 		var rollbackErrors []error
+		previousDivert := previousConfig.DivertConfig()
+		previousDivert.Mode = b.agent.Config().NetworkMode
+		if rollbackErr := b.agent.ApplyClientConfig(previousConfig.Routing, previousDivert, previousConfig.Proxy.CustomExits, previousConfig.Proxy.DefaultExitID, previousConfig.Gateway); rollbackErr != nil {
+			rollbackErrors = append(rollbackErrors, fmt.Errorf("恢复运行配置失败: %w", rollbackErr))
+		}
 		if !reload {
 			if restoreErr := b.writeConfig(path, previousConfig); restoreErr != nil {
 				rollbackErrors = append(rollbackErrors, fmt.Errorf("恢复保存前的配置失败: %w", restoreErr))
@@ -1087,7 +1107,8 @@ func policyFingerprint(c *config.AgentConfigFile) string {
 		Routing routing.Config
 		Divert  divert.Config
 		ExitID  string
-	}{r, d, c.Proxy.DefaultExitID})
+		Gateway gateway.Config
+	}{r, d, c.Proxy.DefaultExitID, normalizedGateway(c.Gateway)})
 	return string(data)
 }
 
@@ -1154,4 +1175,11 @@ func (b *UIBridge) SetAutoStart(enable bool) error {
 // Close terminates the agent
 func (b *UIBridge) Close() error {
 	return b.agent.Close()
+}
+
+func (b *UIBridge) GatewayStatus() gateway.Status { return b.agent.GatewayStatus() }
+
+func normalizedGateway(c gateway.Config) gateway.Config {
+	c.SourceCIDRs = append([]string{}, c.SourceCIDRs...)
+	return c
 }

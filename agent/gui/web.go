@@ -627,7 +627,8 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		"isAutostart":       payload.IsAutostart, "minimizeToTray": payload.MinimizeToTray,
 		"startMinimized": payload.StartMinimized, "theme": payload.Theme, "version": payload.Version,
 		"verificationPopupTimeoutSec": payload.VerificationPopupTimeoutSec,
-		"routing":                     payload.Routing, "network": payload.Network, "networkCapabilities": payload.NetworkCapabilities,
+		"gateway":                     cfg.Gateway, "gatewayStatus": b.GatewayStatus(),
+		"routing": payload.Routing, "network": payload.Network, "networkCapabilities": payload.NetworkCapabilities,
 		"runtime": payload.Runtime, "revision": payload.Revision, "restartRequired": payload.RestartRequired,
 		"restartFields": payload.RestartFields, "reloadPending": payload.ReloadPending,
 	})

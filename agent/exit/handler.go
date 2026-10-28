@@ -17,6 +17,7 @@ import (
 	"relayproxy/internal/acl"
 	p2presume "relayproxy/internal/p2p/resume"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/proxy"
 	"relayproxy/internal/speedtest"
 	"relayproxy/internal/tunnel"
 )
@@ -31,6 +32,8 @@ type HandlerConfig struct {
 	ACLChecker          *acl.Checker
 	ConnectTimeout      time.Duration
 	AllowBrowserNetwork bool // explicit local opt-in, separate from ordinary proxy.exit
+	UpstreamDialer      proxy.TunnelDialer
+	UpstreamExitID      string
 	Upstream            UpstreamConfig
 	ResumeEnabled       bool
 	ResumeGrace         time.Duration
@@ -133,6 +136,11 @@ func (h *Handler) handleOpenTCP(ctx context.Context, stream tunnel.TunnelStream)
 		log.Printf("[ExitHandler] Failed to read OpenTCPRequest: %v", err)
 		return
 	}
+	if req.ExitHop < 0 || req.ExitHop >= protocol.MaxExitHops {
+		_ = protocol.WriteJSON(stream, protocol.OpenTCPResponse{RequestID: req.RequestID, ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "exit chain exceeds hop limit"})
+		return
+	}
+	ctx = protocol.WithExitHop(ctx, req.ExitHop+1)
 	if policy := boundRelayPolicy(ctx); policy != nil {
 		req.RelayPolicy = policy
 	}
@@ -441,6 +449,11 @@ func (h *Handler) handleOpenUDP(ctx context.Context, stream tunnel.TunnelStream)
 		log.Printf("[ExitHandler] Failed to read OpenUDPRequest: %v", err)
 		return
 	}
+	if req.ExitHop < 0 || req.ExitHop >= protocol.MaxExitHops {
+		_ = protocol.WriteJSON(stream, protocol.OpenUDPResponse{RequestID: req.RequestID, ErrorCode: protocol.ErrCodeInvalidRequest, ErrorMessage: "exit chain exceeds hop limit"})
+		return
+	}
+	ctx = protocol.WithExitHop(ctx, req.ExitHop+1)
 	if policy := boundRelayPolicy(ctx); policy != nil {
 		req.RelayPolicy = policy
 	}

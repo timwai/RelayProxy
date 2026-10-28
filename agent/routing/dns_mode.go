@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"relayproxy/internal/proxy"
 	"strings"
 )
 
@@ -36,6 +37,9 @@ func (d *RoutingDialer) ResolveProxyTarget(ctx context.Context, host string) (st
 	}
 	if cfg.DNSMode != DNSModeLocal {
 		return "", fmt.Errorf("routing: unsupported DNS mode %q", cfg.DNSMode)
+	}
+	if info := proxy.ClientFromContext(ctx); info.Entry == "gateway" && info.DestinationIP != "" {
+		return info.DestinationIP, nil
 	}
 	if cfg.AutoDetectDNS {
 		// Automatic fallback applies only to local-resolution mode: first

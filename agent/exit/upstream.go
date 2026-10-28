@@ -75,6 +75,9 @@ func (c UpstreamConfig) validate() error {
 }
 
 func (h *Handler) dialTCP(ctx context.Context, ips []net.IP, port uint16) (net.Conn, string, error) {
+	if h.cfg.UpstreamDialer != nil {
+		return groupTCP(ctx, h.cfg.UpstreamDialer, h.cfg.UpstreamExitID, ips, port)
+	}
 	upstream := h.cfg.Upstream.normalized()
 	if upstream.Mode == UpstreamDirect {
 		conn, err := dialTCPIPs(ctx, ips, port)
@@ -101,6 +104,13 @@ func (h *Handler) dialTCP(ctx context.Context, ips []net.IP, port uint16) (net.C
 }
 
 func (h *Handler) dialUDP(ctx context.Context, target netip.AddrPort) (net.Conn, error) {
+	if h.cfg.UpstreamDialer != nil {
+		pc, err := h.cfg.UpstreamDialer.DialUDP(ctx, h.cfg.UpstreamExitID, target.Addr().String(), target.Port())
+		if err != nil {
+			return nil, err
+		}
+		return &upstreamPacketConn{PacketConn: pc, target: target}, nil
+	}
 	upstream := h.cfg.Upstream.normalized()
 	if upstream.Mode == UpstreamDirect {
 		var d net.Dialer

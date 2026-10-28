@@ -24,6 +24,7 @@ import (
 	"relayproxy/internal/acl"
 	quiccongestion "relayproxy/internal/congestion"
 	"relayproxy/internal/deviceidentity"
+	"relayproxy/internal/exitgroup"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
 	"relayproxy/internal/proxy/httpproxy"
@@ -305,6 +306,9 @@ func normalizeConfig(raw string) (clientConfig, error) {
 		return cfg, errors.New("clientEnabled requires a local proxy listener")
 	}
 	cfg.DefaultExitID = strings.TrimSpace(cfg.DefaultExitID)
+	if err := exitgroup.Validate(cfg.Routing.DeviceGroups, cfg.DefaultExitID); err != nil {
+		return cfg, err
+	}
 	if err := routing.ValidateCustomExits([]routing.CustomExit(cfg.CustomExits)); err != nil {
 		return cfg, err
 	}
@@ -471,6 +475,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 	}
 	c.traffic = traffic.NewRegistry(1024, 256)
 	c.routingDialer = routing.NewRoutingDialer(routingEngine, c.proxyDialer)
+	c.proxyDialer.ConfigureExitGroups(cfg.Routing.DeviceGroups, c.groupExitUsable)
 	c.routingDialer.SetCustomExits([]routing.CustomExit(cfg.CustomExits))
 	c.routingDialer.Traffic = c.traffic
 	return c, nil
@@ -696,10 +701,14 @@ func (c *Client) SetRoutingConfig(configJSON string) error {
 	if err := routing.ValidateCustomReferences([]routing.CustomExit(c.cfg.CustomExits), c.cfg.DefaultExitID, "", cfg.Rules, cfg.DNSExitID); err != nil {
 		return err
 	}
+	if err := exitgroup.Validate(cfg.DeviceGroups, c.cfg.DefaultExitID); err != nil {
+		return err
+	}
 	if err := c.routingDialer.Engine().Reload(cfg); err != nil {
 		return err
 	}
 	c.cfg.Routing = c.routingDialer.Engine().Config()
+	c.proxyDialer.ConfigureExitGroups(c.cfg.Routing.DeviceGroups, c.groupExitUsable)
 	c.status.RoutingMode = c.cfg.Routing.Mode
 	return nil
 }
@@ -719,9 +728,13 @@ func (c *Client) SetDefaultExit(exitID string) {
 		c.mu.Unlock()
 		return
 	}
+	if err := exitgroup.Validate(c.cfg.Routing.DeviceGroups, exitID); err != nil {
+		c.mu.Unlock()
+		return
+	}
 	c.cfg.DefaultExitID = exitID
 	selected := effectiveProxyExit(exitID, c.status.ProxyExits)
-	state, statusError := proxySelectionStatus(exitID, c.status.ProxyExits)
+	state, statusError := proxySelectionStatus(exitID, c.status.ProxyExits, c.cfg.Routing.DeviceGroups)
 	if routing.IsCustomExitID(exitID) {
 		state, statusError = "ready", ""
 	}
@@ -734,7 +747,7 @@ func (c *Client) SetDefaultExit(exitID string) {
 	if c.routingDialer != nil {
 		c.routingDialer.SetDefaultExitID(exitID)
 	}
-	if !routing.IsCustomExitID(exitID) {
+	if !routing.IsCustomExitID(exitID) && !exitgroup.IsID(exitID) {
 		c.prewarmProxyDirectPath(exitID)
 	}
 }
@@ -1126,6 +1139,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	clientRuntimeApproved := c.cfg.ClientEnabled && clientApproved
 	c.mu.RLock()
 	configuredExit := c.cfg.DefaultExitID
+	configuredGroups := exitgroup.Clone(c.cfg.Routing.DeviceGroups)
 	c.mu.RUnlock()
 	selectedExit := configuredExit
 	var acceptedExits []protocol.ProxyExit
@@ -1133,7 +1147,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	if accepted.ProxyExits != nil {
 		acceptedExits = cloneProxyExits(*accepted.ProxyExits)
 		selectedExit = effectiveProxyExit(selectedExit, acceptedExits)
-		proxyState, proxyError = proxySelectionStatus(configuredExit, acceptedExits)
+		proxyState, proxyError = proxySelectionStatus(configuredExit, acceptedExits, configuredGroups)
 	}
 	if routing.IsCustomExitID(configuredExit) {
 		selectedExit, proxyState, proxyError = configuredExit, "ready", ""
@@ -1328,7 +1342,7 @@ func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.P
 		return
 	}
 	selected := effectiveProxyExit(c.cfg.DefaultExitID, refreshed)
-	proxyState, proxyError := proxySelectionStatus(c.cfg.DefaultExitID, refreshed)
+	proxyState, proxyError := proxySelectionStatus(c.cfg.DefaultExitID, refreshed, c.cfg.Routing.DeviceGroups)
 	if routing.IsCustomExitID(c.cfg.DefaultExitID) {
 		selected, proxyState, proxyError = c.cfg.DefaultExitID, "ready", ""
 	}
@@ -1346,7 +1360,7 @@ func (c *Client) refreshProxyExits(sess tunnel.TunnelSession, exits []protocol.P
 		manager.ObserveExits(refreshed)
 	}
 	c.updatePublicDirectInventory(refreshed)
-	if !routing.IsCustomExitID(selected) {
+	if !routing.IsCustomExitID(selected) && !exitgroup.IsID(selected) {
 		c.prewarmProxyDirectPath(selected)
 	}
 }
@@ -1614,7 +1628,21 @@ func effectiveProxyExit(configured string, exits []protocol.ProxyExit) string {
 	return selected
 }
 
-func proxySelectionStatus(configured string, exits []protocol.ProxyExit) (string, string) {
+func proxySelectionStatus(configured string, exits []protocol.ProxyExit, groups ...[]exitgroup.Group) (string, string) {
+	if exitgroup.IsID(configured) && len(groups) > 0 {
+		candidates := exitgroup.Candidates(groups[0], configured, func(id string) bool {
+			for _, e := range exits {
+				if e.DeviceID == id && e.Online {
+					return true
+				}
+			}
+			return false
+		})
+		if len(candidates) > 0 {
+			return "ready", ""
+		}
+		return "exit_unavailable", "分组内没有可用且已授权的在线出口"
+	}
 	configured = strings.TrimSpace(configured)
 	online := make([]protocol.ProxyExit, 0, len(exits))
 	for _, item := range exits {
@@ -1638,4 +1666,15 @@ func proxySelectionStatus(configured string, exits []protocol.ProxyExit) (string
 	default:
 		return "exit_required", "存在多个可用出口，请在设置中选择一个"
 	}
+}
+
+func (c *Client) groupExitUsable(id string) bool {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	for _, e := range c.status.ProxyExits {
+		if e.DeviceID == id && e.Online {
+			return true
+		}
+	}
+	return false
 }

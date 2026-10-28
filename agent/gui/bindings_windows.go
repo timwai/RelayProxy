@@ -261,6 +261,8 @@ func (s *WailsService) GetConfig() (string, error) {
 		Theme                       string              `json:"theme"`
 		VerificationPopupTimeoutSec int                 `json:"verificationPopupTimeoutSec"`
 		Version                     string              `json:"version"`
+		Gateway                     any                 `json:"gateway"`
+		GatewayStatus               any                 `json:"gatewayStatus"`
 		Routing                     any                 `json:"routing"`
 		Network                     any                 `json:"network"`
 		NetworkCapabilities         divert.Capabilities `json:"networkCapabilities"`
@@ -352,6 +354,7 @@ func (s *WailsService) GetConfig() (string, error) {
 				Port:    state.Runtime.Proxy.HTTP.Port,
 			},
 		},
+		Gateway: cfg.Gateway, GatewayStatus: a.bridge.GatewayStatus(),
 		Routing: routingConfigView(cfg.Routing),
 	}
 	payload.SOCKS5 = proxyLeg{

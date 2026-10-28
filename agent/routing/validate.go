@@ -3,12 +3,23 @@ package routing
 import (
 	"fmt"
 	"net/netip"
+	"relayproxy/internal/exitgroup"
 	"strings"
 )
 
 // ValidateConfig checks disabled rules too, so enabling one cannot widen a
 // malformed selector into an accidental catch-all.
 func ValidateConfig(cfg Config) error {
+	refs := []string{cfg.DNSExitID}
+	for _, r := range cfg.Rules {
+		refs = append(refs, r.ExitID)
+	}
+	for _, s := range cfg.Subscriptions {
+		refs = append(refs, s.ExitID)
+	}
+	if err := exitgroup.Validate(cfg.DeviceGroups, refs...); err != nil {
+		return err
+	}
 	switch cfg.Mode {
 	case "", ModeRule, ModeGlobalProxy, ModeDirect:
 	default:

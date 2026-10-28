@@ -1112,6 +1112,13 @@ class MainActivity : Activity() {
 
         val store = ConfigStore(this)
         val selectedExit = store.load().defaultExitId
+        nodesListContainer.addView(Button(this).apply { text = "管理设备分组"; setOnClickListener { startActivity(Intent(this@MainActivity, DeviceGroupsActivity::class.java)) } })
+        store.load().routing.deviceGroups.forEach { group ->
+            nodesListContainer.addView(Button(this).apply {
+                text = (if (selectedExit == group.id) "● " else "") + group.name + " · 分组 · " + group.members.size + " 台设备"
+                setOnClickListener { selectExitNode(group.id) }
+            })
+        }
         autoNodeRadioDot.visibility = if (selectedExit.isBlank()) View.VISIBLE else View.INVISIBLE
 
         if (exitsArray == null || exitsArray.length() == 0) {

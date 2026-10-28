@@ -71,6 +71,7 @@ type TCPResumeBinding struct {
 
 // OpenTCPRequest is sent from Client -> Relay -> Exit to request a TCP connection.
 type OpenTCPRequest struct {
+	ExitHop     int               `json:"exitHop,omitempty"`
 	RequestID   string            `json:"requestId"`
 	Host        string            `json:"host"`
 	Port        uint16            `json:"port"`
@@ -91,6 +92,7 @@ type OpenTCPResponse struct {
 
 // OpenUDPRequest is sent from Client -> Relay -> Exit to request a UDP association
 type OpenUDPRequest struct {
+	ExitHop          int         `json:"exitHop,omitempty"`
 	RequestID        string      `json:"requestId"`
 	Host             string      `json:"host"`
 	Port             uint16      `json:"port"`

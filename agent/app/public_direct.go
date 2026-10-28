@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log"
+	"relayproxy/internal/exitgroup"
 	"strings"
 
 	"relayproxy/agent/client"
@@ -118,7 +119,7 @@ func (a *Agent) ensureProxyDirectPath(exitDeviceID string) {
 		return
 	}
 	exitDeviceID = strings.TrimSpace(exitDeviceID)
-	if exitDeviceID == "" || exitDeviceID == protocol.ServerExitDeviceID {
+	if exitgroup.IsID(exitDeviceID) || exitDeviceID == "" || exitDeviceID == protocol.ServerExitDeviceID {
 		return
 	}
 	a.mu.RLock()

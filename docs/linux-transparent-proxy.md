@@ -15,7 +15,7 @@ Linux Agent 使用 `mangle/OUTPUT -> NFQUEUE` 处理 TCP、UDP 和 IPv4/IPv6。D
 
 ## Docker Compose
 
-使用仓库根目录的 `docker-compose.agent.yml`。运行时镜像只包含 CA 与 iptables 工具，以下内容全部在宿主机：
+使用仓库根目录的 `docker-compose.agent.yml`。运行时镜像包含 CA 证书、iptables、nftables 和 iproute2，支持本机透明代理及局域网网关，以下内容全部在宿主机：
 
 - `./bin/relay-agent` -> 容器 `/opt/relayproxy/bin/relay-agent`（只读）；
 - `./config/relay-agent.yaml` -> 容器 `/data/relay-agent.yaml`（目录可写，配对保存需要原子替换）。
@@ -28,6 +28,8 @@ docker compose -f docker-compose.agent.yml up -d --build
 ```
 
 Compose 使用 host network/PID namespace 和 `NET_ADMIN`、`NET_RAW`，因此透明代理作用于宿主机网络。若 Web 管理需要从其他机器访问，请在外置配置中设置非回环 `web.listen`，并必须配置至少 32 字节的随机 `web.token`；默认页面仅监听 `127.0.0.1:9090`。内置 Web 服务是 HTTP，跨不可信网络时应放在 HTTPS 反向代理或 SSH 隧道后，避免 token 明文传输。
+
+启用局域网网关时，`gateway.interface` 使用 Linux 宿主机的 LAN 网卡名；配置与接入方法见[网关使用说明](gateway-and-groups-usage.md)。更新 Dockerfile 后需要执行上述 `up -d --build` 重建镜像并重建容器，仅 `restart` 不会安装新增依赖。
 
 ## 无桌面环境配对
 

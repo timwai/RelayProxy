@@ -1111,14 +1111,9 @@ class MainActivity : Activity() {
         nodesListContainer.removeAllViews()
 
         val store = ConfigStore(this)
-        val selectedExit = store.load().defaultExitId
-        nodesListContainer.addView(Button(this).apply { text = "管理设备分组"; setOnClickListener { startActivity(Intent(this@MainActivity, DeviceGroupsActivity::class.java)) } })
-        store.load().routing.deviceGroups.forEach { group ->
-            nodesListContainer.addView(Button(this).apply {
-                text = (if (selectedExit == group.id) "● " else "") + group.name + " · 分组 · " + group.members.size + " 台设备"
-                setOnClickListener { selectExitNode(group.id) }
-            })
-        }
+        val config = store.load()
+        val selectedExit = config.defaultExitId
+        renderDeviceGroups(config.routing.deviceGroups, selectedExit, exitsArray)
         autoNodeRadioDot.visibility = if (selectedExit.isBlank()) View.VISIBLE else View.INVISIBLE
 
         if (exitsArray == null || exitsArray.length() == 0) {
@@ -1227,6 +1222,144 @@ class MainActivity : Activity() {
             }
             nodesListContainer.addView(nodeCard, lp)
         }
+    }
+
+    /**
+     * 设备分组与设备出口卡片同列展示：分组卡片沿用节点卡的布局，
+     * 右侧显示在线成员数，标题带「分组」标签以区分单台设备。
+     */
+    private fun renderDeviceGroups(groups: List<DeviceGroupConfig>, selectedExit: String, exitsArray: JSONArray?) {
+        val online = mutableMapOf<String, Boolean>()
+        val names = mutableMapOf<String, String>()
+        if (exitsArray != null) {
+            for (i in 0 until exitsArray.length()) {
+                val item = exitsArray.optJSONObject(i) ?: continue
+                val id = item.optString("deviceId", "")
+                if (id.isBlank()) continue
+                online[id] = item.optBoolean("online", true)
+                names[id] = item.optString("name", id.take(12))
+            }
+        }
+
+        val header = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(dp(2), dp(6), 0, dp(2))
+        }
+        header.addView(TextView(this).apply {
+            text = "设备分组"
+            textSize = 13f
+            setTextColor(UiPalette.muted)
+            typeface = Typeface.DEFAULT_BOLD
+        }, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
+        header.addView(TextView(this).apply {
+            text = if (groups.isEmpty()) "＋ 新建分组" else "管理分组"
+            textSize = 12.5f
+            setTextColor(UiPalette.brand)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+            isClickable = true
+            isFocusable = true
+            setOnClickListener { startActivity(Intent(this@MainActivity, DeviceGroupsActivity::class.java)) }
+        })
+        nodesListContainer.addView(header)
+
+        if (groups.isEmpty()) {
+            nodesListContainer.addView(TextView(this).apply {
+                text = "把多台设备出口按优先级编成分组，连接失败时自动切换到下一台。"
+                textSize = 11.5f
+                setTextColor(UiPalette.placeholder)
+                setPadding(dp(2), 0, dp(2), dp(6))
+            })
+        }
+
+        groups.forEach { group ->
+            val isSelected = selectedExit == group.id
+            val onlineCount = group.members.count { online[it] == true }
+            val usable = onlineCount > 0
+            val card = UiKit.card(
+                this,
+                paddingDp = 14,
+                radiusDp = 14,
+                backgroundColor = if (isSelected) UiPalette.surfaceElevated else UiPalette.surface,
+                borderColor = if (isSelected) UiPalette.brandSoftBorder else UiPalette.line,
+            ).apply {
+                isClickable = true
+                isFocusable = true
+                setOnClickListener { selectExitNode(group.id) }
+            }
+            val row = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            row.addView(TextView(this).apply {
+                text = "组"
+                textSize = 11.5f
+                setTextColor(UiPalette.brand)
+                typeface = Typeface.DEFAULT_BOLD
+                gravity = Gravity.CENTER
+                background = UiKit.rounded(this@MainActivity, UiPalette.brandSoft, 8)
+                val p = dp(8)
+                setPadding(p, p, p, p)
+            })
+            val info = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                layoutParams = LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f).apply { leftMargin = dp(12) }
+            }
+            val titleRow = LinearLayout(this).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            titleRow.addView(TextView(this).apply {
+                text = group.name.ifBlank { "未命名分组" }
+                textSize = 13.5f
+                setTextColor(UiPalette.ink)
+                typeface = Typeface.DEFAULT_BOLD
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+            })
+            titleRow.addView(UiKit.chip(this, "故障切换", UiPalette.brand, UiPalette.brandSoft, radiusDp = 4).apply {
+                textSize = 9f
+                layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { leftMargin = dp(6) }
+            })
+            info.addView(titleRow)
+            info.addView(TextView(this).apply {
+                text = if (group.members.isEmpty()) "尚未添加成员" else group.members.joinToString(" → ") { names[it] ?: it.take(8) }
+                textSize = 11f
+                setTextColor(UiPalette.placeholder)
+                maxLines = 1
+                ellipsize = android.text.TextUtils.TruncateAt.END
+                setPadding(0, dp(1), 0, 0)
+            })
+            row.addView(info)
+
+            val right = LinearLayout(this).apply {
+                orientation = LinearLayout.VERTICAL
+                gravity = Gravity.END
+            }
+            right.addView(TextView(this).apply {
+                text = "$onlineCount/${group.members.size}"
+                textSize = 13f
+                setTextColor(if (usable) UiPalette.success else UiPalette.warning)
+                typeface = Typeface.MONOSPACE
+            })
+            right.addView(TextView(this).apply {
+                text = if (usable) "成员在线" else "无在线成员"
+                textSize = 9.5f
+                setTextColor(UiPalette.placeholder)
+            })
+            row.addView(right)
+            card.addView(row)
+            nodesListContainer.addView(card, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply { topMargin = dp(8) })
+        }
+
+        nodesListContainer.addView(TextView(this).apply {
+            text = "设备出口"
+            textSize = 13f
+            setTextColor(UiPalette.muted)
+            typeface = Typeface.DEFAULT_BOLD
+            setPadding(dp(2), dp(16), 0, dp(2))
+        })
     }
 
     private fun renderCustomExits() {

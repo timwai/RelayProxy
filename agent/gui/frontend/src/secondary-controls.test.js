@@ -7,7 +7,7 @@ const app=source('./App.jsx'),css=source('./styles.css');
 const slice=(start,end)=>{const a=app.indexOf(start),b=app.indexOf(end,a);assert.ok(a>=0&&b>a);return app.slice(a,b)};
 
 test('messages open directly to search and cards with one compact type filter',()=>{
- const page=slice('function MessagesPage(','function MessageSettingsPage(');
+ const page=slice('function MessagesPage(','function MonitorPage(');
  assert.match(page,/className="filter-bar message-filter-compact"/);
  assert.match(page,/aria-label="消息类型"/);
  assert.match(page,/<option value="code">验证码<\/option>/);
@@ -29,7 +29,7 @@ test('monitor shows connection list before collapsible aggregates and retains al
 });
 
 test('messages expose clear history directly beside filters instead of hidden page overflow',()=>{
- const page=slice('function MessagesPage(','function MessageSettingsPage(');
+ const page=slice('function MessagesPage(','function MonitorPage(');
  assert.match(page,/<PageHead title="消息中心"[^\n]*\/?>/);
  assert.doesNotMatch(page,/<PageHead[^\n]*actions=\{/);
  assert.match(page,/className="message-filter-actions" aria-label="消息操作"/);

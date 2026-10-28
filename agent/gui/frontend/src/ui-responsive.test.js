@@ -6,8 +6,8 @@ const read=file=>readFileSync(new URL(file,import.meta.url),'utf8');
 
 test('collapsed Agent navigation remains labeled and exposes current page',()=>{
  const app=read('./App.jsx');
- assert.match(app,/title=\{x\[2\]\} aria-label=\{x\[2\]\} aria-current=\{\(x\[0\]==='routing'\?CONFIG_IDS\.has\(page\):page===x\[0\]\)\?'page':undefined\}/);
- assert.match(app,/title="设置" aria-label="设置" aria-current=/);
+ assert.match(app,/title=\{x\[3\]\|\|x\[2\]\} aria-label=\{x\[2\]\} aria-current=\{page===x\[0\]\?'page':undefined\}/);
+ assert.match(app,/title="外观、启动与客户端维护" aria-label="设置" aria-current=\{page==='settings'\?'page':undefined\}/);
 });
 
 test('Agent shell and native controls respect viewport and chosen theme',()=>{

@@ -32,16 +32,16 @@ test('Windows Wails Go config explicitly exports platform', () => {
   assert.match(go,/Platform:\s+"windows"/);
 });
 
-test('Windows transparent proxy switch stays on local proxy page', () => {
+test('Windows transparent proxy switch and service maintenance live on the 接入 page', () => {
   const app = text('./App.jsx');
-  const start = app.indexOf('function ProxyPage(');
+  const start = app.indexOf('function AccessPage(');
   const end = app.indexOf('function ExitShare(',start);
   assert.ok(start>=0&&end>start);
   const page = app.slice(start,end);
   assert.match(page,/showWindowsCapture\(config\.platform,networkServiceBridgeAvailable\)/);
-  assert.match(page,/windowsCaptureAvailable&&<Card title="Windows 系统透明代理"/);
+  assert.match(page,/windowsCaptureAvailable&&<Card title="Windows 透明代理"/);
   assert.match(page,/checked=\{config\.networkMode==='divert'\}/);
   assert.match(page,/setv\('network\.mode',v\?'divert':''\)/);
   assert.match(page,/disabled=\{!canToggleIntercept\}/);
-  assert.match(app,/showWindowsService\(config\.platform,hasBridge\('goGetNetworkServiceStatus'\)\)/);
+  assert.match(page,/showWindowsService\(config\.platform,networkServiceBridgeAvailable\)&&<details className="details top-gap"><summary>Network Service 维护<\/summary>/);
 });

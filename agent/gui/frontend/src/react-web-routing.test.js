@@ -26,9 +26,10 @@ test('Unix release builds embed React before the Agent', () => {
 test('React accepts only known deep-linked pages', () => {
   const app = read('./App.jsx');
   const server = read('../../web.go');
-  assert.match(app, /const PAGE_IDS = new Set/);
-  assert.match(app, /new URLSearchParams\(window\.location\.search\)\.get\('page'\)/);
-  assert.match(app, /if \(PAGE_IDS\.has\(requested\)\) return requested;/);
+  assert.match(app, /const PAGE_IDS=new Set\(Object\.keys\(PAGE_NAMES\)\)/);
+  assert.match(app, /const requested=resolvePage\(new URLSearchParams\(window\.location\.search\)\.get\('page'\)\)/);
+  assert.match(app, /if \(requested\) return requested;/);
+  assert.match(app, /const resolvePage=id=>PAGE_IDS\.has\(id\)\?id:PAGE_ALIASES\[id\]\|\|''/);
   assert.match(app, /useState\(initialPage\)/);
   assert.match(server, /http\.Redirect\(rw, r, "\/\?page=monitor", http\.StatusSeeOther\)/);
 });

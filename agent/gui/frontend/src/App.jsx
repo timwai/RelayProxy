@@ -1,5 +1,5 @@
 import DeviceGroups from './DeviceGroups.jsx';
-import GatewayPage from './GatewayPage.jsx';
+import GatewaySection,{gatewayPatch} from './GatewayPage.jsx';
 import {withExitGroups} from './exitInventory.js';
 import React, {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
@@ -21,37 +21,29 @@ import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCali
 import {rdpPathLabel} from './pathStatus.js';
 import {DEVICE_SPEED_REVIEW_STEPS,deviceSpeedChecks} from './deviceSpeedChecks.js';
 
-// Operational pages are always one click away. Frequently edited policies
-// live under Network Configuration; infrequent preferences live in Settings.
+// One flat sidebar, grouped by what the user is trying to do:
+// which network to use (出口) → which traffic goes through it (分流 / DNS) →
+// how traffic enters RelayProxy (接入) → how this device reaches the Relay
+// Server (服务器) → what this device offers others (出口共享) → collaboration
+// tools → observation. Every destination is one click away; there is no
+// second-level configuration or settings navigation.
 const NAV=[
- {group:'工作台',items:[['overview','dashboard','运行概览'],['exits','devices','设备中心']]},
- {group:'协作',items:[['files','folder','文件共享'],['rdp','monitor','远程桌面'],['messages','bell','消息']]},
- {group:'观察',items:[['monitor','activity','实时监控'],['diagnostics','terminal','诊断与日志']]},
- {group:'网络配置',items:[['routing','split','网络配置']]}
+ {group:'工作台',items:[['overview','dashboard','概览','连接状态、流量与快捷操作'],['exits','devices','出口','设备出口、设备分组与自定义代理']]},
+ {group:'网络',items:[['routing','split','分流','路由模式、规则与订阅'],['dns','shield','DNS','解析模式、DNS 出口与防泄漏'],['access','swap','接入','本机监听、系统接管与局域网网关'],['server','route','服务器','Relay Server、传输策略与设备身份'],['exitshare','share','出口共享','本机作为其他设备的出口']]},
+ {group:'协作',items:[['files','folder','文件共享','共享目录与远程浏览'],['rdp','monitor','远程桌面','连接已授权设备'],['messages','bell','消息','验证码、通知与弹窗偏好']]},
+ {group:'观察',items:[['monitor','activity','实时监控','连接、进程、目标与路径'],['diagnostics','terminal','诊断','链路、透明代理、DNS 防泄漏与日志']]}
 ];
-const CONFIG_SECTIONS=[
- ['routing','split','分流规则','进程、域名、规则订阅和指定出口'],
- ['dns','shield','DNS 与防泄漏','自动解析、DNS 出口和防泄漏'],
- ['proxy','swap','代理与自定义出口','SOCKS5、HTTP、透明代理和本机出口'],
- ['connection','route','连接策略','传输协议、P2P 与公网直连'],
- ['gateway','globe','局域网网关','Linux LAN 透明接入与公共分流规则'],
- ['exitshare','share','出口共享','共享能力、上游出口与访问控制']
-];
-const SETTINGS_SECTIONS=[
- ['devices','devices','设备与身份','设备标识、身份与审批状态'],
- ['rdp-settings','monitor','远程桌面偏好','控制端启用与授权状态'],
- ['message-settings','bell','消息与弹窗','关闭时间与弹窗预览']
-];
-const CONFIG_IDS=new Set(CONFIG_SECTIONS.map(x=>x[0]));
-const SETTINGS_IDS=new Set(SETTINGS_SECTIONS.map(x=>x[0]));
-const PAGE_NAMES=Object.fromEntries([...NAV.flatMap(g=>g.items),...CONFIG_SECTIONS,...SETTINGS_SECTIONS].map(x=>[x[0],x[2]]));
-const PAGE_IDS = new Set([...NAV.flatMap(group=>group.items.map(item=>item[0])),...CONFIG_IDS,...SETTINGS_IDS,'settings']);
-// Preserve all existing ?page=... bookmarks and stored page IDs.
+const PAGE_NAMES=Object.fromEntries([...NAV.flatMap(g=>g.items),['settings','settings','设置']].map(x=>[x[0],x[2]]));
+const PAGE_DESC=Object.fromEntries([...NAV.flatMap(g=>g.items),['settings','settings','设置','外观、启动与客户端维护']].map(x=>[x[0],x[3]||'']));
+const PAGE_IDS=new Set(Object.keys(PAGE_NAMES));
+// Pages that were merged keep their old IDs working for bookmarks, stored
+// state and native deep links (window.relayNavigate).
+const PAGE_ALIASES={devices:'server',connection:'server',proxy:'access',gateway:'access','rdp-settings':'rdp','message-settings':'messages'};
+const resolvePage=id=>PAGE_IDS.has(id)?id:PAGE_ALIASES[id]||'';
 function initialPage() {
- const requested = new URLSearchParams(window.location.search).get('page');
- if (PAGE_IDS.has(requested)) return requested;
- const previous = sessionStorage.getItem('relayproxy-react-page');
- return PAGE_IDS.has(previous) ? previous : 'overview';
+ const requested=resolvePage(new URLSearchParams(window.location.search).get('page'));
+ if (requested) return requested;
+ return resolvePage(sessionStorage.getItem('relayproxy-react-page'))||'overview';
 }
 
 const EMPTY={
@@ -89,7 +81,7 @@ function PageHead({actions}){
   // Kept-mounted but hidden pages (File Sharing) also contain card headings;
   // only a visible heading of the active page may host the actions.
   const root=document.querySelector('.workspace .main');
-  const heading=[...(root?.querySelectorAll('.card-head')||[])].find(el=>el.offsetParent!==null)||null;
+  const heading=[...(root?.querySelectorAll('.card-head')||[])].find(el=>el.offsetParent!==null&&!el.closest('.quick-actions')&&!el.querySelector('button,.switch,.badge'))||null;
   const fallback=document.querySelector('.topbar .top-actions');
   setHost(heading||fallback||null);
  },[]);
@@ -135,7 +127,63 @@ function Modal({open,title,children,footer,onClose,wide}){
 // so every configuration page keeps one visual language.
 export {Badge,Button,Card,Field,Input,Metric,Modal,SaveBar,Select,Setting,Switch,Textarea,exitName};
 
-function Overview({status,config,exits,traffic,history,onRefresh,onGoto}){
+// exitChoices lists every selectable default exit: authorised devices, device
+// groups and enabled custom proxies. "自动选择" is represented by the empty id.
+function exitChoices(exits,customExits){
+ const devices=[],groups=[];
+ for(const x of arr(exits)){(x.kind==='group'?groups:devices).push({id:x.deviceId||x.id,name:x.name||x.deviceId||x.id,online:x.online!==false,kind:x.kind==='group'?'group':'device'})}
+ const customs=arr(customExits).filter(x=>x.enabled!==false).map(x=>({id:x.id,name:x.name||x.id,online:true,kind:'custom'}));
+ return {devices,groups,customs};
+}
+
+// ExitSwitcher is the top-bar pill that shows the current default exit and lets
+// the user switch it from any page. Switching calls goSelectExit immediately, so
+// the control is disabled while a page holds unsaved drafts.
+function ExitSwitcher({exits,customExits,selectedExit,connected,dirty,onSelect}){
+ const[open,setOpen]=useState(false),ref=useRef(null);
+ useEffect(()=>{if(!open)return;const h=e=>{if(ref.current&&!ref.current.contains(e.target))setOpen(false)};const k=e=>{if(e.key==='Escape')setOpen(false)};document.addEventListener('mousedown',h);document.addEventListener('keydown',k);return()=>{document.removeEventListener('mousedown',h);document.removeEventListener('keydown',k)}},[open]);
+ const current=exitName([...arr(exits),...arr(customExits)],selectedExit);
+ const {devices,groups,customs}=exitChoices(exits,customExits);
+ const pick=id=>{setOpen(false);if(id!==(selectedExit||''))onSelect(id)};
+ const item=x=><button type="button" role="menuitemradio" aria-checked={x.id===selectedExit} key={x.kind+':'+x.id} className={cx('exit-switcher-item',x.id===selectedExit&&'active')} disabled={x.kind!=='custom'&&connected&&!x.online} title={x.kind!=='custom'&&connected&&!x.online?'离线':undefined} onClick={()=>pick(x.id)}><span className={cx('dot',x.online?'online':'offline')}/><span className="grow">{x.name}</span>{x.id===selectedExit&&<span className="mini">当前</span>}</button>;
+ return <div className="exit-switcher" ref={ref}>
+  <button type="button" className={cx('exit-switcher-trigger',open&&'open')} aria-haspopup="menu" aria-expanded={open} aria-label={'默认出口：'+current} disabled={dirty} title={dirty?'存在未保存的修改，请先保存或放弃':'切换默认出口，立即生效'} onClick={()=>setOpen(o=>!o)}><Icon name="globe" size={15}/><span className="exit-switcher-label">出口</span><strong>{current}</strong><span className="exit-switcher-caret" aria-hidden="true">⌄</span></button>
+  {open&&<div className="exit-switcher-menu" role="menu" aria-label="选择默认出口">
+   <button type="button" role="menuitemradio" aria-checked={!selectedExit} className={cx('exit-switcher-item',!selectedExit&&'active')} onClick={()=>pick('')}><span className="dot online"/><span className="grow">自动选择</span>{!selectedExit&&<span className="mini">当前</span>}</button>
+   {devices.length>0&&<div className="exit-switcher-group">设备出口</div>}{devices.map(item)}
+   {groups.length>0&&<div className="exit-switcher-group">设备分组</div>}{groups.map(item)}
+   {customs.length>0&&<div className="exit-switcher-group">自定义代理</div>}{customs.map(item)}
+   {!devices.length&&!groups.length&&!customs.length&&<div className="exit-switcher-empty">暂无可用出口，请先在「出口」页授权设备或添加自定义代理。</div>}
+  </div>}
+ </div>;
+}
+
+const ROUTING_MODES=[['global_proxy','全局代理'],['rule','规则模式'],['direct','全局直连']];
+
+// QuickActions is the overview's one-click control strip: routing mode, default
+// exit and the platform's system takeover switch. Every action is applied
+// immediately through the bridge, so the strip is locked while drafts exist.
+function QuickActions({status,config,exits,dirty,onSave,onSelectExit,onGoto}){
+ const routing=config.routing||EMPTY.routing,mode=routing.mode||'rule',isMac=config.platform==='darwin',isWin=config.platform==='windows',isLinux=config.platform==='linux';
+ const selectedExit=status.selectedExit||config.defaultExitId||'';
+ const {devices,groups,customs}=exitChoices(exits,config.customExits);
+ const sys=config.systemProxy||EMPTY.systemProxy,sysStatus=config.systemProxyStatus||{},gw=config.gateway||{},gwStatus=status.gateway||config.gatewayStatus||{};
+ const lock=dirty?'存在未保存的修改，请先保存或放弃':undefined;
+ return <Card className="quick-actions" title="快捷操作" eyebrow="QUICK ACTIONS" action={dirty?<Badge tone="blue">有未保存修改，已锁定</Badge>:<Badge tone="neutral">即时生效</Badge>}>
+  <div className="quick-actions-row">
+   <div className="quick-action"><div className="mini">路由模式</div><div className="segment" role="radiogroup" aria-label="路由模式">{ROUTING_MODES.map(([id,label])=><button key={id} type="button" role="radio" aria-checked={mode===id} className={cx('segment-item',mode===id&&'active')} disabled={dirty} title={lock} onClick={()=>mode!==id&&onSave({routing:{mode:id}})}>{label}</button>)}</div></div>
+   <div className="quick-action"><div className="mini">默认出口</div><div className="row"><Select aria-label="默认出口" value={selectedExit} disabled={dirty} title={lock} onChange={e=>onSelectExit(e.target.value)}><option value="">自动选择</option>{devices.length>0&&<optgroup label="设备出口">{devices.map(x=><option key={x.id} value={x.id} disabled={status.connected&&!x.online}>{x.name}{status.connected&&!x.online?' · 离线':''}</option>)}</optgroup>}{groups.length>0&&<optgroup label="设备分组">{groups.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</optgroup>}{customs.length>0&&<optgroup label="自定义代理">{customs.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</optgroup>}</Select><Button quiet onClick={()=>onGoto('exits')}>管理 ›</Button></div></div>
+   <div className="quick-action"><div className="mini">{isMac?'macOS 系统代理':isWin?'Windows 透明代理':isLinux?'局域网网关':'系统接管'}</div>
+    {isMac&&<div className="row"><Switch label="macOS 系统代理" checked={sys.mode==='system'} disabled={dirty} onChange={v=>onSave({systemProxy:{mode:v?'system':''}})}/><span className="mini grow">{sysStatus.lastError?'需要处理':sysStatus.applied?'已接管系统代理':sys.mode==='system'?'已启用，等待应用':'未接管'}</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
+    {isWin&&<div className="row"><Badge tone={config.runtime?.network?.mode==='divert'||config.networkMode==='divert'?'ok':'neutral'}>{config.runtime?.network?.mode==='divert'?'接管中':config.networkMode==='divert'?'已启用 · 待重启':'未启用'}</Badge><span className="mini grow">按进程接管本机 TCP / UDP，开关需重启生效</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
+    {isLinux&&<div className="row"><Badge tone={gwStatus.running?'ok':gw.enabled?'warn':'neutral'}>{gwStatus.running?'运行中':gw.enabled?'已启用 · 未运行':'未启用'}</Badge><span className="mini grow">LAN 设备经本机透明接入</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
+    {!isMac&&!isWin&&!isLinux&&<div className="row"><span className="mini grow">本机 SOCKS5 / HTTP 代理接入</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
+   </div>
+  </div>
+ </Card>;
+}
+
+function Overview({status,config,exits,traffic,history,dirty,onRefresh,onGoto,onSave,onSelectExit}){
  const connected=!!status.connected;
  const approval=String(status.approvalState||''),approvalLower=approval.toLowerCase();
  const approvalLabel=connected?(approval||'已连接'):(/pending|wait|approval|待审批/.test(approvalLower)||/reject|denied|revoked|撤销|拒绝/.test(approvalLower)?approval:'未连接');
@@ -143,13 +191,15 @@ function Overview({status,config,exits,traffic,history,onRefresh,onGoto}){
  <Card className="hero overview-hero">
   <div className="hero-glow"/>
   <div className="hero-status"><span className={cx('dot',connected?'online':'offline')}/><div className="grow"><div className="eyebrow">{connected?'CONNECTED':'DISCONNECTED'}</div><div className="big">{connected?'RelayProxy 已连接':'等待连接到 RelayProxy Server'}</div><div className="muted">{((connected?(config.runtime?.serverAddress||config.serverAddress):config.serverAddress)||'尚未配置服务器')+' · '+(status.transport||config.runtime?.transport||config.transport||'auto')}{connected&&config.runtime?.serverAddress&&config.runtime.serverAddress!==config.serverAddress?' · 已保存新 Server，待重启':''}</div></div><Badge tone={connected?'ok':/reject|denied|revoked|撤销|拒绝/i.test(approvalLabel)?'danger':'neutral'}>{approvalLabel}</Badge></div>
-  <div className="overview-current-exit"><div className="grow"><div className="mini">{status.selectedExit?'当前运行出口':'默认代理出口配置'}</div><strong>{exitName([...exits,...arr(config.customExits)],status.selectedExit||config.defaultExitId)}</strong></div></div>
+  <div className="overview-current-exit"><div className="grow"><div className="mini">{status.selectedExit?'当前运行出口':'默认代理出口配置'}</div><strong>{exitName([...exits,...arr(config.customExits)],status.selectedExit||config.defaultExitId)}</strong></div><Button quiet onClick={()=>onGoto('server')}>服务器设置 ›</Button></div>
  </Card>
+ <QuickActions status={status} config={config} exits={exits} dirty={dirty} onSave={onSave} onSelectExit={onSelectExit} onGoto={onGoto}/>
  <div className="cards-4"><Metric label="下载速度" value={fmtBytes(traffic?.download_rate||0,true)} hint={fmtBytes(traffic?.download||0)+' 累计'} series={history.down}/><Metric label="上传速度" value={fmtBytes(traffic?.upload_rate||0,true)} hint={fmtBytes(traffic?.upload||0)+' 累计'} series={history.up}/><Metric label="往返延迟" value={connected?((status.latency||0)+' ms'):'—'} hint="Server RTT" series={history.latency}/><Metric label="活跃连接" value={traffic?.active??status.activeStreams??0} hint={(traffic?.total||0)+' 累计连接'} series={history.active}/></div>
- <Card title="最近连接" eyebrow="LIVE TRAFFIC"><div className="recent-list">{arr(traffic?.connections).slice(0,3).map((x,i)=><div className="recent-row" key={x.id||i}><div className="app-mark">{String(x.process_name||x.process||'?').slice(0,1).toUpperCase()}</div><div className="grow"><strong>{x.process_name||x.process||'未知进程'}</strong><div className="mono mini">{(x.host||x.ip||'—')+(x.port?':'+x.port:'')}</div></div><div className="recent-rate"><b>{fmtBytes(x.download_rate||0,true)} ↓</b><span>{fmtBytes(x.upload_rate||0,true)} ↑</span></div><Badge tone={tone(x.state)}>{connectionPathLabel(x,[...exits,...arr(config.customExits)])||x.state||'—'}</Badge></div>)}{!arr(traffic?.connections).length&&<div className="empty compact-empty">暂无连接记录。</div>}</div></Card></>
+ <Card title="最近连接" eyebrow="LIVE TRAFFIC" action={<Button quiet onClick={()=>onGoto('monitor')}>实时监控 ›</Button>}><div className="recent-list">{arr(traffic?.connections).slice(0,3).map((x,i)=><div className="recent-row" key={x.id||i}><div className="app-mark">{String(x.process_name||x.process||'?').slice(0,1).toUpperCase()}</div><div className="grow"><strong>{x.process_name||x.process||'未知进程'}</strong><div className="mono mini">{(x.host||x.ip||'—')+(x.port?':'+x.port:'')}</div></div><div className="recent-rate"><b>{fmtBytes(x.download_rate||0,true)} ↓</b><span>{fmtBytes(x.upload_rate||0,true)} ↑</span></div><Badge tone={tone(x.state)}>{connectionPathLabel(x,[...exits,...arr(config.customExits)])||x.state||'—'}</Badge></div>)}{!arr(traffic?.connections).length&&<div className="empty compact-empty">暂无连接记录。</div>}</div></Card></>
 }
 
-function Devices({status,config,setv,save,dirty,onRefresh,toast}){
+function ServerPage({status,config,setv,save,dirty,toast,onRefresh,onReload}){
+ const p=config.p2p||EMPTY.p2p,[tlsRisk,setTlsRisk]=useState(false),rt=config.runtime||{};
  const copy=async(text,label)=>{if(!text)return;if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',String(text));else await navigator.clipboard.writeText(String(text));toast('已复制'+label)};
  const capabilities=arr(status.approvedCapabilities),approval=String(status.approvalState||'').toLowerCase(),grantsActive=!!status.connected&&approval==='approved';
  const capMeta={
@@ -159,31 +209,22 @@ function Devices({status,config,setv,save,dirty,onRefresh,toast}){
   'rdp.host':['RDP 主机','允许已授权控制端连接本机 RDP'],
   'rdp.public':['RDP 公网入口','使用 Server 公网 RDP ingress 能力']
  };
- return <><PageHead title="身份与设备" desc="设备身份由 Server 审批并控制可用能力；此处管理本机标识与连接身份。" actions={<Button onClick={onRefresh}>刷新状态</Button>}/>
- <div className="cards-2">
-  <Card title="设备状态" eyebrow="DEVICE"><div className="identity-tile"><div className="identity-icon">▱</div><div className="grow"><div className="big small-big">{status.deviceName||config.deviceName||'RelayProxy Device'}</div><div className="mono muted">{status.deviceId||'等待 Server 分配设备 ID'}</div></div><Badge tone={tone(status.approvalState)}>{status.approvalState||'待连接'}</Badge></div>{status.deviceId&&<div className="actions end top-gap"><Button quiet onClick={()=>copy(status.deviceId,'设备 ID')}>复制设备 ID</Button></div>}<div className="divider"/><Setting title={grantsActive?'身份名称':'上次批准身份'} desc={grantsActive?'当前身份隔离范围':'缓存自上一次成功审批'}>{status.identityName||'—'}</Setting><Setting title={grantsActive?'策略版本':'上次策略版本'} desc="Server 下发的权限策略">{status.policyRevision||'—'}</Setting><Setting title={grantsActive?'当前模式':'上次批准模式'} desc="proxy.client / proxy.exit 聚合结果"><Badge tone={grantsActive?'blue':'neutral'}>{status.mode||'—'}</Badge></Setting></Card>
-  <Card title={grantsActive?'当前设备能力':'设备能力'} eyebrow="SERVER GRANTS">{!grantsActive&&capabilities.length>0&&<div className="notice warn">当前没有已认证的 Relay 会话。下面仅显示上一次成功审批的能力，用于排障；在重新连接并完成审批前不视为有效授权。</div>}<div className="capability-list">{capabilities.map(cap=>{const meta=capMeta[cap]||[cap,'Server 批准的设备能力'];return <div className="capability-row" key={cap}><div className="grow"><b>{meta[0]}</b><div className="mini">{meta[1]}</div><div className="mono mini">{cap}</div></div><Badge tone={grantsActive?'ok':'neutral'}>{grantsActive?'允许':'上次批准'}</Badge></div>})}{grantsActive&&<div className="capability-row"><div className="grow"><b>消息接收</b><div className="mini">所有已审批 Agent 都能接收发往本设备的消息；渠道仍按身份隔离。</div><div className="mono mini">messages · approved-device</div></div><Badge tone="ok">启用</Badge></div>}{!capabilities.length&&!grantsActive&&<div className="empty compact-empty">等待设备连接并审批后显示 Server 批准能力。</div>}</div></Card>
- </div>
- <Card title="本机身份配置" eyebrow="CONFIGURATION"><div className="form-grid"><Field label="设备名称"><Input value={config.deviceName||''} onChange={e=>setv('deviceName',e.target.value)}/></Field><Field label="身份 ID" help="由 Server 创建的身份 ID。"><div className="row"><Input value={config.identityId||''} onChange={e=>setv('identityId',e.target.value)}/><Button onClick={()=>copy(config.identityId,' Identity ID')}>复制</Button></div></Field><Field label="Server 地址" className="full"><Input value={config.serverAddress||''} onChange={e=>setv('serverAddress',e.target.value)}/></Field></div></Card>
- <Card title="审批说明" eyebrow="SERVER AUTHORIZATION"><div className="notice">设备首次连接后需要在 Server 管理端审批。出口、RDP、消息渠道等能力均按身份与设备授权隔离，客户端不会展示未授权资源。</div></Card>
- <SaveBar dirty={dirty} label="保存身份配置" hint="设备名称、身份 ID 与 Server 地址均为启动参数，保存后需重启客户端生效。" onSave={()=>save({device:{name:config.deviceName,identityId:config.identityId},server:{address:config.serverAddress}})}/></>
-}
-
-function Connection({status,config,setv,save,dirty,onReload}){
- const p=config.p2p||EMPTY.p2p,[tlsRisk,setTlsRisk]=useState(false),rt=config.runtime||{};
  const runtimeServer=[rt.serverAddress||config.serverAddress,rt.quicPort||config.quicPort,rt.tcpPort||config.tcpPort].join(' · ');
  const savedServer=[config.serverAddress,config.quicPort,config.tcpPort].join(' · ');
  const serverPending=!!config.restartRequired&&(rt.serverAddress!==undefined&&(rt.serverAddress!==config.serverAddress||Number(rt.quicPort)!==Number(config.quicPort)||Number(rt.tcpPort)!==Number(config.tcpPort)||rt.transport!==config.transport||!!rt.tlsEnabled!==!!config.tlsEnabled||!!rt.insecureTls!==!!config.insecureTls));
- return <><PageHead title="连接与路径" desc="控制 QUIC/TCP 传输偏好、P2P 与公网直连策略，并观察实时路径。" actions={<Button onClick={onReload}>重载配置</Button>}/><div className="cards-3"><Card title="当前传输"><div className="big small-big">{status.connected?(status.transport||'—'):'offline'}</div><div className="mini">{status.connected?'Server RTT '+(status.latency||0)+' ms':'等待 Relay 重连'}</div></Card><Card title="Direct Path"><div className="big small-big">{status.connected?(status.directState||'idle'):'offline'}</div><div className="mini">{status.connected?(status.directPath||status.directEndpoint||'未建立'):'当前无有效直连会话'}</div></Card><Card title="P2P"><div className="big small-big">{status.connected?(status.p2pState||'idle'):'offline'}</div><div className="mini">{status.connected?(status.p2pPath||status.p2pCandidateSummary||'自动协商'):'当前无有效 P2P 会话'}</div></Card></div>
+ return <><PageHead title="服务器与身份" desc="本机如何连接 Relay Server：地址、传输、直连策略，以及 Server 审批的设备身份。" actions={<><Button onClick={onRefresh}>刷新状态</Button><Button onClick={onReload}>重载配置</Button></>}/>
  {serverPending&&<div className="notice warn"><b>连接启动参数已保存，当前进程仍使用旧值。</b><br/>运行中：<span className="mono">{runtimeServer}</span> · {rt.transport||'auto'}<br/>重启后：<span className="mono">{savedServer}</span> · {config.transport||'auto'}</div>}
- <Card title="服务器与端口" eyebrow="SERVER"><div className="form-grid"><Field label="Relay Server"><Input value={config.serverAddress||''} onChange={e=>setv('serverAddress',e.target.value)}/></Field><Field label="TLS"><Select value={config.tlsEnabled===false?'off':'on'} onChange={e=>{const enabled=e.target.value==='on';setv('tlsEnabled',enabled);if(!enabled){setv('insecureTls',false);setv('transport','tcp_only')}}}><option value="on">启用 TLS</option><option value="off">关闭 TLS</option></Select></Field><Field label="QUIC / UDP 端口"><Input type="number" value={config.quicPort||35820} onChange={e=>setv('quicPort',Number(e.target.value))}/></Field><Field label="TCP / TLS 端口"><Input type="number" value={config.tcpPort||35821} onChange={e=>setv('tcpPort',Number(e.target.value))}/></Field></div><Setting title="允许自签名 / 不受信任证书" desc="仅用于可信开发环境；生产环境应保持关闭。"><Switch checked={!!config.insecureTls} disabled={config.tlsEnabled===false} onChange={v=>{if(v)setTlsRisk(true);else setv('insecureTls',false)}}/></Setting></Card>
- <Card title="传输策略" eyebrow="TRANSPORT"><div className="option-grid">{[['auto','自动','优先 QUIC，必要时回落 TCP'],['quic_only','仅 QUIC','固定使用 QUIC 传输'],['tcp_only','仅 TCP','固定使用 TLS/TCP']].map(x=><button key={x[0]} disabled={config.tlsEnabled===false&&x[0]!=='tcp_only'} className={cx('option',config.transport===x[0]&&'selected')} onClick={()=>setv('transport',x[0])}><div><strong>{x[1]}</strong><div className="mini">{x[2]}</div></div><span className="radio"/></button>)}</div></Card>
- <Card title="Direct / P2P" eyebrow="PATH POLICY"><Setting title="启用 P2P 直连" desc="首个请求可先走 Relay，后台建立可复用直连。"><Switch checked={p.enabled!==false} onChange={v=>setv('p2p.enabled',v)}/></Setting><Setting title="本机允许 UPnP 映射" desc="默认关闭。只有本机和 Server 同时允许才会向路由器申请 UDP 端口，保存后重启生效。"><Switch checked={p.upnpAllowed===true} onChange={v=>setv('p2p.upnpAllowed',v)}/></Setting><div className="notice">UPnP：{status.upnpState||'DISABLED'}{status.upnpAddress?' · '+status.upnpAddress:''}{status.upnpError?' · '+status.upnpError:''}</div><div className="form-grid top-gap"><Field label="路径模式"><Select value={p.mode||'auto'} onChange={e=>setv('p2p.mode',e.target.value)}><option value="auto">auto · 自动</option><option value="direct_only">direct_only · 仅直连（Public Direct / P2P）</option><option value="p2p_only">p2p_only · 仅 P2P</option><option value="relay_only">relay_only · 仅 Relay</option></Select></Field><Field label="打洞超时 (ms)"><Input type="number" value={p.punchTimeoutMs??1200} onChange={e=>setv('p2p.punchTimeoutMs',Number(e.target.value))}/></Field><Field label="Keepalive (s)"><Input type="number" value={p.keepaliveSec??10} onChange={e=>setv('p2p.keepaliveSec',Number(e.target.value))}/></Field><Field label="空闲超时 (s)"><Input type="number" value={p.idleTimeoutSec??120} onChange={e=>setv('p2p.idleTimeoutSec',Number(e.target.value))}/></Field><Field label="最大出口会话"><Input type="number" value={p.maxExitSessions??4} onChange={e=>setv('p2p.maxExitSessions',Number(e.target.value))}/></Field><Field label="失败回落" help={p.mode==='auto'?'仅自动模式使用；直连失败后回落 Relay。':'当前路径模式固定，不使用 Relay 回落开关。'}><Select disabled={p.mode!=='auto'} value={p.fallback===false?'off':'on'} onChange={e=>setv('p2p.fallback',e.target.value==='on')}><option value="on">允许回落 Relay</option><option value="off">不允许回落</option></Select></Field><Field label="手动公网地址（可选）" help="用于端口转发 / 云主机 DNS 等场景，Server 会主动验证。"><Input value={config.publicDirectAdvertise||''} onChange={e=>setv('publicDirectAdvertise',e.target.value)} placeholder="edge.example.com:35820"/></Field></div></Card>{(status.directError||status.p2pError)&&<div className="notice danger">{status.directError||status.p2pError}</div>}
- <SaveBar dirty={dirty} label="保存连接策略" hint="同时保存服务器与端口、传输策略、Direct / P2P 三组设置；这些均为启动参数，保存后需重启客户端生效。" onSave={()=>save({server:{address:config.serverAddress,quicPort:Number(config.quicPort),tcpPort:Number(config.tcpPort),tlsEnabled:config.tlsEnabled,insecureTls:!!config.insecureTls},transport:config.transport,p2p:config.p2p,direct:{public:{advertise:config.publicDirectAdvertise||''}}})}/><Modal open={tlsRisk} title="允许不受信任的 TLS 证书？" onClose={()=>setTlsRisk(false)} footer={<><Button onClick={()=>setTlsRisk(false)}>保持安全设置</Button><Button danger onClick={()=>{setv('insecureTls',true);setTlsRisk(false)}}>我了解风险，继续</Button></>}><div className="notice danger"><b>此设置会跳过服务端证书验证。</b><br/>仅在你完全信任的自建测试环境中使用。生产环境应使用受信任证书并保持关闭。</div></Modal></>
+ <Card title="Relay Server" eyebrow="SERVER"><div className="form-grid"><Field label="Server 地址" className="full"><Input value={config.serverAddress||''} onChange={e=>setv('serverAddress',e.target.value)} placeholder="relay.example.com"/></Field><Field label="QUIC / UDP 端口"><Input type="number" value={config.quicPort||35820} onChange={e=>setv('quicPort',Number(e.target.value))}/></Field><Field label="TCP / TLS 端口"><Input type="number" value={config.tcpPort||35821} onChange={e=>setv('tcpPort',Number(e.target.value))}/></Field><Field label="TLS"><Select value={config.tlsEnabled===false?'off':'on'} onChange={e=>{const enabled=e.target.value==='on';setv('tlsEnabled',enabled);if(!enabled){setv('insecureTls',false);setv('transport','tcp_only')}}}><option value="on">启用 TLS</option><option value="off">关闭 TLS</option></Select></Field><Field label="传输策略"><Select value={config.transport||'auto'} onChange={e=>setv('transport',e.target.value)}><option value="auto">自动 · 优先 QUIC，必要时回落 TCP</option><option value="quic_only" disabled={config.tlsEnabled===false}>仅 QUIC</option><option value="tcp_only">仅 TCP · 固定使用 TLS/TCP</option></Select></Field></div><Setting title="允许自签名 / 不受信任证书" desc="仅用于可信开发环境；生产环境应保持关闭。"><Switch checked={!!config.insecureTls} disabled={config.tlsEnabled===false} onChange={v=>{if(v)setTlsRisk(true);else setv('insecureTls',false)}}/></Setting></Card>
+ <div className="cards-2">
+  <Card title="设备身份" eyebrow="DEVICE"><div className="identity-tile"><div className="identity-icon">▱</div><div className="grow"><div className="big small-big">{status.deviceName||config.deviceName||'RelayProxy Device'}</div><div className="mono muted">{status.deviceId||'等待 Server 分配设备 ID'}</div></div><Badge tone={tone(status.approvalState)}>{status.approvalState||'待连接'}</Badge></div>{status.deviceId&&<div className="actions end top-gap"><Button quiet onClick={()=>copy(status.deviceId,'设备 ID')}>复制设备 ID</Button></div>}<div className="divider"/><div className="form-grid"><Field label="设备名称"><Input value={config.deviceName||''} onChange={e=>setv('deviceName',e.target.value)}/></Field><Field label="身份 ID" help="由 Server 创建的身份 ID。"><div className="row"><Input value={config.identityId||''} onChange={e=>setv('identityId',e.target.value)}/><Button onClick={()=>copy(config.identityId,' Identity ID')}>复制</Button></div></Field></div><div className="divider"/><Setting title={grantsActive?'身份名称':'上次批准身份'} desc={grantsActive?'当前身份隔离范围':'缓存自上一次成功审批'}>{status.identityName||'—'}</Setting><Setting title={grantsActive?'策略版本':'上次策略版本'} desc="Server 下发的权限策略">{status.policyRevision||'—'}</Setting><Setting title={grantsActive?'当前模式':'上次批准模式'} desc="proxy.client / proxy.exit 聚合结果"><Badge tone={grantsActive?'blue':'neutral'}>{status.mode||'—'}</Badge></Setting></Card>
+  <Card title={grantsActive?'当前设备能力':'设备能力'} eyebrow="SERVER GRANTS">{!grantsActive&&capabilities.length>0&&<div className="notice warn">当前没有已认证的 Relay 会话。下面仅显示上一次成功审批的能力，用于排障；在重新连接并完成审批前不视为有效授权。</div>}<div className="capability-list">{capabilities.map(cap=>{const meta=capMeta[cap]||[cap,'Server 批准的设备能力'];return <div className="capability-row" key={cap}><div className="grow"><b>{meta[0]}</b><div className="mini">{meta[1]}</div><div className="mono mini">{cap}</div></div><Badge tone={grantsActive?'ok':'neutral'}>{grantsActive?'允许':'上次批准'}</Badge></div>})}{grantsActive&&<div className="capability-row"><div className="grow"><b>消息接收</b><div className="mini">所有已审批 Agent 都能接收发往本设备的消息；渠道仍按身份隔离。</div><div className="mono mini">messages · approved-device</div></div><Badge tone="ok">启用</Badge></div>}{!capabilities.length&&!grantsActive&&<div className="empty compact-empty">等待设备连接并审批后显示 Server 批准能力。</div>}</div><div className="notice top-gap">设备首次连接后需要在 Server 管理端审批。出口、RDP、消息渠道等能力均按身份与设备授权隔离，客户端不会展示未授权资源。</div></Card>
+ </div>
+ <Card title="Direct / P2P" eyebrow="PATH POLICY"><Setting title="启用 P2P 直连" desc="首个请求可先走 Relay，后台建立可复用直连。"><Switch checked={p.enabled!==false} onChange={v=>setv('p2p.enabled',v)}/></Setting><Setting title="本机允许 UPnP 映射" desc={'默认关闭。只有本机和 Server 同时允许才会向路由器申请 UDP 端口，保存后重启生效。当前：'+(status.upnpState||'DISABLED')+(status.upnpAddress?' · '+status.upnpAddress:'')+(status.upnpError?' · '+status.upnpError:'')}><Switch checked={p.upnpAllowed===true} onChange={v=>setv('p2p.upnpAllowed',v)}/></Setting><div className="form-grid top-gap"><Field label="路径模式"><Select value={p.mode||'auto'} onChange={e=>setv('p2p.mode',e.target.value)}><option value="auto">auto · 自动</option><option value="direct_only">direct_only · 仅直连（Public Direct / P2P）</option><option value="p2p_only">p2p_only · 仅 P2P</option><option value="relay_only">relay_only · 仅 Relay</option></Select></Field><Field label="失败回落" help={p.mode==='auto'?'仅自动模式使用；直连失败后回落 Relay。':'当前路径模式固定，不使用 Relay 回落开关。'}><Select disabled={p.mode!=='auto'} value={p.fallback===false?'off':'on'} onChange={e=>setv('p2p.fallback',e.target.value==='on')}><option value="on">允许回落 Relay</option><option value="off">不允许回落</option></Select></Field><Field label="打洞超时 (ms)"><Input type="number" value={p.punchTimeoutMs??1200} onChange={e=>setv('p2p.punchTimeoutMs',Number(e.target.value))}/></Field><Field label="Keepalive (s)"><Input type="number" value={p.keepaliveSec??10} onChange={e=>setv('p2p.keepaliveSec',Number(e.target.value))}/></Field><Field label="空闲超时 (s)"><Input type="number" value={p.idleTimeoutSec??120} onChange={e=>setv('p2p.idleTimeoutSec',Number(e.target.value))}/></Field><Field label="最大出口会话"><Input type="number" value={p.maxExitSessions??4} onChange={e=>setv('p2p.maxExitSessions',Number(e.target.value))}/></Field><Field label="手动公网地址（可选）" className="full" help="用于端口转发 / 云主机 DNS 等场景，Server 会主动验证。"><Input value={config.publicDirectAdvertise||''} onChange={e=>setv('publicDirectAdvertise',e.target.value)} placeholder="edge.example.com:35820"/></Field></div>{(status.directError||status.p2pError)&&<div className="notice danger top-gap">{status.directError||status.p2pError}</div>}<div className="mini top-gap">实时路径（Relay / Public Direct / P2P）与 QUIC 质量请在「诊断」页查看。</div></Card>
+ <SaveBar dirty={dirty} label="保存服务器与身份" hint="Server 地址、端口、TLS、传输、Direct / P2P 与设备身份均为启动参数，保存后需重启客户端生效。" onSave={()=>save({server:{address:config.serverAddress,quicPort:Number(config.quicPort),tcpPort:Number(config.tcpPort),tlsEnabled:config.tlsEnabled,insecureTls:!!config.insecureTls},transport:config.transport,p2p:config.p2p,direct:{public:{advertise:config.publicDirectAdvertise||''}},device:{name:config.deviceName,identityId:config.identityId}})}/>
+ <Modal open={tlsRisk} title="允许不受信任的 TLS 证书？" onClose={()=>setTlsRisk(false)} footer={<><Button onClick={()=>setTlsRisk(false)}>保持安全设置</Button><Button danger onClick={()=>{setv('insecureTls',true);setTlsRisk(false)}}>我了解风险，继续</Button></>}><div className="notice danger"><b>此设置会跳过服务端证书验证。</b><br/>仅在你完全信任的自建测试环境中使用。生产环境应使用受信任证书并保持关闭。</div></Modal></>
 }
 
-
-function CustomExitManager({config,save,toast,dirty}){
+function CustomExitManager({config,save,toast,dirty,selectedExit,onSelectExit}){
  const items=arr(config.customExits);
  const [draft,setDraft]=useState(null),[busy,setBusy]=useState(false);
  const refs=id=>[
@@ -221,16 +262,17 @@ function CustomExitManager({config,save,toast,dirty}){
   finally{setBusy(false)}
  };
  return <>
-  <Card title="自定义出口" eyebrow={items.length+' LOCAL EXITS'} action={<Button primary onClick={()=>edit(null)}>＋ 添加出口</Button>}>
-   <div className="mini">本机 SOCKS5 / HTTP CONNECT，不依赖 Server 授权。可作为默认出口、分流规则目标和本机出口共享上游。点击「测试」会通过代理建立 TCP CONNECT；SOCKS5 还会经该代理向 Quad9 (9.9.9.9) 发送一次 example.com 的 UDP DNS 查询，分别显示结果。</div>
-   {!items.length&&<div className="empty">尚未创建自定义出口。点击「添加出口」创建 SOCKS5 或 HTTP 代理。</div>}
+  <Card title="自定义代理" eyebrow={items.length+' LOCAL PROXIES'} action={<Button primary onClick={()=>edit(null)}>＋ 添加代理</Button>}>
+   <div className="mini">本机可达的 SOCKS5 / HTTP CONNECT 代理，不依赖 Server 授权。可设为默认出口、分流规则目标和本机出口共享上游。「测试」会通过代理建立 TCP CONNECT；SOCKS5 还会经该代理向 Quad9 (9.9.9.9) 发送一次 example.com 的 UDP DNS 查询。</div>
+   {!items.length&&<div className="empty">尚未创建自定义代理。点击「添加代理」创建 SOCKS5 或 HTTP 代理。</div>}
    <div className="target-list top-gap">
     {items.map(item=><div className="target-row" key={item.id}>
      <div className="identity-icon small">↗</div>
      <div className="grow">
-      <div className="row"><strong>{item.name}</strong><Badge tone={item.enabled?'ok':'neutral'}>{item.enabled?'已启用':'已停用'}</Badge>{config.defaultExitId===item.id&&<Badge tone="blue">默认出口</Badge>}{config.upstreamExitId===item.id&&<Badge tone="blue">共享上游</Badge>}</div>
+      <div className="row"><strong>{item.name}</strong><Badge tone={item.enabled?'ok':'neutral'}>{item.enabled?'已启用':'已停用'}</Badge>{selectedExit===item.id&&<Badge tone="blue">默认出口</Badge>}{config.upstreamExitId===item.id&&<Badge tone="blue">共享上游</Badge>}</div>
       <div className="mono mini">{item.protocol.toUpperCase()} · {item.address} · {item.protocol==='socks5'?'支持 UDP ASSOCIATE':'仅 TCP'}</div>
      </div>
+     {onSelectExit&&selectedExit!==item.id&&<Button quiet disabled={!item.enabled||busy} title="将此代理设为默认出口，立即生效" onClick={()=>onSelectExit(item.id)}>设为默认</Button>}
      <Button quiet disabled={!item.enabled||busy} onClick={()=>test(item)}>测试</Button>
      <Button quiet onClick={()=>edit(item)}>编辑</Button>
      <Switch checked={item.enabled} disabled={busy} label={'启停 '+item.name} onChange={()=>toggle(item)}/>
@@ -238,7 +280,7 @@ function CustomExitManager({config,save,toast,dirty}){
     </div>)}
    </div>
   </Card>
-  <Modal open={!!draft} title={items.some(x=>x.id===draft?.id)?'编辑自定义出口':'新增自定义出口'} onClose={()=>setDraft(null)} footer={<><Button onClick={()=>setDraft(null)}>取消</Button><Button primary disabled={busy} onClick={saveDraft}>{busy?'保存中…':'保存出口'}</Button></>}>
+  <Modal open={!!draft} title={items.some(x=>x.id===draft?.id)?'编辑自定义代理':'新增自定义代理'} onClose={()=>setDraft(null)} footer={<><Button onClick={()=>setDraft(null)}>取消</Button><Button primary disabled={busy} onClick={saveDraft}>{busy?'保存中…':'保存代理'}</Button></>}>
    {draft&&<div className="form-grid">
     <Field label="名称"><Input value={draft.name} onChange={e=>update('name',e.target.value)} placeholder="办公 SOCKS5"/></Field>
     <Field label="协议"><Select value={draft.protocol} onChange={e=>update('protocol',e.target.value)}><option value="socks5">SOCKS5</option><option value="http">HTTP CONNECT</option><option value="https">HTTPS CONNECT</option></Select></Field>
@@ -252,7 +294,28 @@ function CustomExitManager({config,save,toast,dirty}){
  </>;
 }
 
-function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,onGoto,onFiles,onConnectRDP,onRefresh}){
+// 出口 page: everything about "whose network do I use" in one place —
+// device exits, device groups and local custom proxies, each able to become
+// the default exit with one click.
+const EXIT_TABS=[['devices','设备出口'],['groups','设备分组'],['custom','自定义代理']];
+function ExitsPage({status,config,exits,targets,filePeers,setv,save,dirty,toast,selectedExit,onSelectExit,onSpeed,onSpeedAll,onConnectRDP,onFiles,onRefresh}){
+ const [tab,setTab]=useState('devices');
+ const groups=arr(config.routing?.device_groups),customs=arr(config.customExits);
+ const counts={devices:exits.length,groups:groups.length,custom:customs.length};
+ const current=exitName([...withExitGroups(exits,groups),...customs],selectedExit);
+ return <><PageHead actions={<><Button onClick={onRefresh}>刷新</Button>{tab==='devices'&&<Button disabled={!status.connected||!exits.some(x=>x.online!==false)} onClick={onSpeedAll}>批量测速</Button>}</>}/>
+ <div className="exits-toolbar">
+  <div className="segment" role="tablist" aria-label="出口类型">{EXIT_TABS.map(([id,label])=><button key={id} type="button" role="tab" aria-selected={tab===id} className={tab===id?'active':''} onClick={()=>setTab(id)}>{label}<span className="segment-count">{counts[id]}</span></button>)}</div>
+  <div className="exits-current"><span className="mini">默认出口</span><strong>{current}</strong>{selectedExit&&<Button quiet disabled={dirty} title={dirty?'请先保存或放弃当前修改':'改为自动选择'} onClick={()=>onSelectExit('')}>改为自动</Button>}</div>
+ </div>
+ {dirty&&<div className="notice warn">存在未保存的修改；切换默认出口会立即生效并重新读取配置，请先保存或放弃修改。</div>}
+ {tab==='devices'&&<DeviceCenter status={status} exits={exits} targets={targets} filePeers={filePeers} config={config} selectedExit={selectedExit} onSelectExit={dirty?null:onSelectExit} onSpeed={onSpeed} onConnectRDP={onConnectRDP} onFiles={onFiles}/>}
+ {tab==='groups'&&<DeviceGroups config={config} exits={exits} setv={setv} save={save} dirty={dirty} toast={toast} selectedExit={selectedExit} onSelectExit={dirty?null:onSelectExit}/>}
+ {tab==='custom'&&<CustomExitManager config={config} save={save} toast={toast} dirty={dirty} selectedExit={selectedExit} onSelectExit={dirty?null:onSelectExit}/>}
+ </>;
+}
+
+function DeviceCenter({status,exits,targets,filePeers,config,selectedExit,onSelectExit,onSpeed,onConnectRDP,onFiles}){
  const [query,setQuery]=useState(''),[detail,setDetail]=useState('');
  const devices=useMemo(()=>buildDeviceCenter({proxyExits:exits,rdpTargets:targets,filePeers}),[exits,targets,filePeers]);
  const filtered=devices.filter(d=>!query.trim()||[d.name,d.id].some(x=>String(x).toLowerCase().includes(query.trim().toLowerCase())));
@@ -265,21 +328,22 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
  const rdpEnabled=config.rdp?.enabled!==false&&config.runtime?.rdp?.enabled!==false&&arr(status.approvedCapabilities).includes('rdp.controller');
  const activeRDPTargets=new Set(arr(status.rdpSessions).map(s=>s.deviceId).filter(Boolean));
  if(!activeRDPTargets.size&&status.rdpTargetId)activeRDPTargets.add(status.rdpTargetId);
- return <><PageHead actions={<><Button onClick={onRefresh}>刷新设备</Button><Button disabled={!status.connected||!exits.some(x=>x.online!==false)} onClick={onSpeedAll}>批量测速</Button></>}/>
+ return <>
  <div className="device-center-intro">
-  <div><strong>已授权设备</strong><span className="mini">按设备查看可用能力。卡片只提供操作，不修改全局代理出口。</span></div>
+  <div><strong>已授权设备</strong><span className="mini">Server 授权给本机的远程设备；提供代理出口的设备可直接设为默认出口。</span></div>
   <div className="device-center-filter"><Input aria-label="搜索设备名称或 ID" placeholder="搜索设备名称 / ID" value={query} onChange={e=>setQuery(e.target.value)}/><span className="mini">{filtered.length} 台</span></div>
  </div>
  <div className="device-center-grid">
   {filtered.map(d=>{
-   const meta=proxyMeta(d),name=d.name||d.id;
+   const meta=proxyMeta(d),name=d.name||d.id,isDefault=selectedExit===d.id;
    const online=status.connected&&d.online;
-   return <article className="device-center-card" key={d.id} onClick={e=>{if(!e.target.closest('button'))setDetail(d.id)}}>
+   return <article className={cx('device-center-card',isDefault&&'is-default')} key={d.id} onClick={e=>{if(!e.target.closest('button'))setDetail(d.id)}}>
     <div className="device-center-card-head">
      <div className="identity-icon"><Icon name="devices" size={21}/></div>
      <button className="device-center-card-name" type="button" onClick={()=>setDetail(d.id)} title={'查看 '+name+' 的设备详情'}>
       <strong>{name}</strong><span className="mini mono">{d.id}</span>
      </button>
+     {isDefault&&<Badge tone="blue">默认出口</Badge>}
      <Badge tone={online?'ok':'neutral'}>{online?'在线':status.connected?'离线':'未连接'}</Badge>
     </div>
     <div className="device-center-caps">
@@ -289,16 +353,16 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
      {meta.publicPath?.available&&<Badge tone="ok">公网直连候选</Badge>}
     </div>
     <div className="device-center-card-actions" aria-label={name+' 快捷操作'}>
-     
-     {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||d.rdp.online===false||!rdpEnabled} title={!rdpEnabled?'请在设置中启用远程桌面并确认控制端授权':online?activeRDPTargets.has(d.id)?'复用现有 RDP 入口，再次打开本地远程桌面':'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>{activeRDPTargets.has(d.id)?'再次打开':'远程桌面'}</span></button>}
+     {d.proxy&&!isDefault&&<button type="button" className="device-quick-action" disabled={!onSelectExit||!online||d.proxy.online===false} title={!onSelectExit?'请先保存或放弃当前修改':online?'将此设备设为默认代理出口，立即生效':'设备离线或未连接'} aria-label={'设为默认出口 '+name} onClick={()=>onSelectExit(d.id)}><Icon name="globe" size={18}/><span>设为默认</span></button>}
+     {d.rdp&&<button type="button" className="device-quick-action" disabled={!online||d.rdp.online===false||!rdpEnabled} title={!rdpEnabled?'请在「远程桌面」页底部的偏好中启用，并确认控制端授权':online?activeRDPTargets.has(d.id)?'复用现有 RDP 入口，再次打开本地远程桌面':'连接此设备':'设备离线'} aria-label={'远程连接 '+name} onClick={()=>onConnectRDP(d.id)}><Icon name="monitor" size={18}/><span>{activeRDPTargets.has(d.id)?'再次打开':'远程桌面'}</span></button>}
      {d.proxy&&<button type="button" className="device-quick-action" disabled={!online||d.proxy.online===false} title={online?'测试此设备代理出口':'设备离线或未连接'} aria-label={'测速 '+name} onClick={()=>onSpeed(d.id)}><Icon name="activity" size={18}/><span>测速</span></button>}
+     {d.shares.length>0&&onFiles&&<button type="button" className="device-quick-action" disabled={!online} title={online?'浏览此设备的共享目录':'设备离线或未连接'} aria-label={'浏览文件 '+name} onClick={()=>onFiles(d.id)}><Icon name="folder" size={18}/><span>浏览文件</span></button>}
      
     </div>
    </article>;
   })}
  </div>
  {!filtered.length&&<Card><div className="empty">{devices.length?'没有符合搜索条件的设备。':'暂无已授权的远程设备。请检查 Server 授权、RDP 权限或文件目录 ACL。'}</div></Card>}
- {arr(config.customExits).length>0&&<Card title="本机自定义代理" eyebrow="LOCAL PROXIES"><div className="device-center-local-list">{arr(config.customExits).map(x=><div className="device-center-local-row" key={x.id}><Icon name="swap" size={16}/><div className="grow"><strong>{x.name||x.id}</strong><div className="mini mono">{x.protocol?.toUpperCase()||'SOCKS5'} · {x.address}</div></div><Badge tone={x.enabled?'ok':'neutral'}>{x.enabled?'已启用':'已停用'}</Badge></div>)}</div><div className="mini">本机自定义代理不是远程设备；可在网络配置中管理，并在分流规则中指定为出口。</div></Card>}
  <Modal open={!!selected} title={selected?.name||'设备详情'} onClose={()=>setDetail('')} footer={<Button onClick={()=>setDetail('')}>关闭</Button>}>
   {selected&&<div className="stack">
    <Setting title="设备 ID"><span className="mono mini">{selected.id}</span></Setting>
@@ -314,9 +378,13 @@ function DeviceCenter({status,exits,targets,filePeers,config,onSpeed,onSpeedAll,
  </>;
 }
 
-function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilities,toast}){
- const sys=config.systemProxy||EMPTY.systemProxy,sysStatus=config.systemProxyStatus||{},isMac=config.platform==='darwin';
- const s=config.socks5||EMPTY.socks5,h=config.http||EMPTY.http,rs=config.runtime?.socks5||s,rh=config.runtime?.http||h,caps=config.networkCapabilities||{},[service,setService]=useState(null),[repairing,setRepairing]=useState(false);
+// 接入 page: every way traffic enters RelayProxy on this machine — local
+// SOCKS5/HTTP listeners, OS-level takeover (Windows transparent proxy or
+// macOS system proxy) and the Linux LAN gateway. Platform-specific cards only
+// appear on the platform they apply to; everything saves through one SaveBar.
+function AccessPage({status,config,exits,setv,save,dirty,onRefreshCapabilities,onConfigRefresh,toast}){
+ const sys=config.systemProxy||EMPTY.systemProxy,sysStatus=config.systemProxyStatus||{},isMac=config.platform==='darwin',isLinux=config.platform==='linux';
+ const s=config.socks5||EMPTY.socks5,h=config.http||EMPTY.http,rs=config.runtime?.socks5||s,rh=config.runtime?.http||h,caps=config.networkCapabilities||{},[service,setService]=useState(null),[busy,setBusy]=useState('');
  const networkServiceBridgeAvailable=hasBridge('goGetNetworkServiceStatus');
  const windowsCaptureAvailable=showWindowsCapture(config.platform,networkServiceBridgeAvailable);
  const refreshService=useCallback(async()=>{if(!networkServiceBridgeAvailable)return null;try{const x=await callJSON('goGetNetworkServiceStatus',{});setService(x||{});return x}catch{return null}},[networkServiceBridgeAvailable]);
@@ -326,9 +394,20 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
  const socksAddr=(s.listen||'127.0.0.1')+':'+(s.port||1080),httpAddr=(h.listen||'127.0.0.1')+':'+(h.port||8080),runtimeSocksAddr=(rs.listen||'127.0.0.1')+':'+(rs.port||1080),runtimeHttpAddr=(rh.listen||'127.0.0.1')+':'+(rh.port||8080);
  const socksURI='socks5h://'+socksAddr,httpURI='http://'+httpAddr,runtimeSocksURI='socks5h://'+runtimeSocksAddr,runtimeHttpURI='http://'+runtimeHttpAddr,socksPending=socksAddr!==runtimeSocksAddr||!!s.enabled!==!!rs.enabled,httpPending=httpAddr!==runtimeHttpAddr||!!h.enabled!==!!rh.enabled;
  const exposed=v=>{const x=String(v||'').trim().toLowerCase();return x==='0.0.0.0'||x==='::'||x==='[::]'||x==='*'};
- const repair=async()=>{setRepairing(true);try{const r=parseMutation(await call('goRepairNetworkService'));if(!r.ok&&r.message)throw new Error(r.message);await Promise.all([refreshService(),onRefreshCapabilities?.()]);toast(r.message||'Network Service 修复完成')}catch(e){toast(e.message,'danger')}finally{setRepairing(false)}};
+ const serviceAct=async(name,msg)=>{
+  if(name==='goUninstallNetworkService'){if(dirty){toast('当前有未保存修改，请先保存或放弃后再卸载 Network Service','danger');return}if(!window.confirm('卸载 RelayProxy Windows 网络服务？此操作会同时关闭已保存的系统透明代理配置。'))return}
+  setBusy(name);
+  try{const r=parseMutation(await call(name));if(!r.ok&&r.message)throw new Error(r.message);if(name==='goUninstallNetworkService')await onConfigRefresh?.();await Promise.all([refreshService(),onRefreshCapabilities?.()]);toast(r.message||msg)}
+  catch(e){toast(e.message,'danger')}finally{setBusy('')}
+ };
  const copy=async(value,label)=>{if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',value);else await navigator.clipboard.writeText(value);toast('已复制 '+label)};
- return <><PageHead title="本机代理" desc={windowsCaptureAvailable?"管理 SOCKS5、HTTP Proxy 与 Windows 透明代理接管。":"管理 SOCKS5 与 HTTP Proxy 的本地监听及网络访问。"} actions={<Button onClick={onService}>高级维护</Button>}/>
+ const saveAll=()=>save({
+  systemProxy:isMac?{mode:sys.mode||'',autoFollow:sys.autoFollow!==false,http:sys.http!==false,socks5:sys.socks5!==false,proxyIpLiterals:sys.proxyIpLiterals!==false}:undefined,
+  proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port)},
+  network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)},
+  gateway:isLinux?gatewayPatch(config.gateway||{}):undefined
+ });
+ return <><PageHead title="接入" desc={'本机流量如何进入 RelayProxy：'+(isMac?'应用通过本地代理或 macOS 系统代理接入。':windowsCaptureAvailable?'应用通过本地代理接入，或由 Windows 透明代理按进程接管。':isLinux?'应用通过本地代理接入；LAN 设备可经局域网网关透明接入。':'应用通过本地 SOCKS5 / HTTP 代理接入。')}/>
  <div className="cards-2">
   <Card title="SOCKS5" eyebrow="LOCAL PROXY" action={<Switch checked={s.enabled!==false} onChange={v=>setv('socks5.enabled',v)}/>}>
    <div className="row"><Badge tone={status.socks5Running?'ok':'neutral'}>{status.socks5Running?'运行中':'未运行'}</Badge><span className="mini">TCP + UDP ASSOCIATE · socks5h 由出口解析域名</span></div>
@@ -339,11 +418,11 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
   <Card title="HTTP / HTTPS CONNECT" eyebrow="LOCAL PROXY" action={<Switch checked={h.enabled!==false} onChange={v=>setv('http.enabled',v)}/>}>
    <div className="row"><Badge tone={status.httpRunning?'ok':'neutral'}>{status.httpRunning?'运行中':'未运行'}</Badge><span className="mini">普通 HTTP 代理与 HTTPS CONNECT 隧道</span></div>
    <div className="form-grid top-gap"><Field label="监听地址"><Input value={h.listen||''} onChange={e=>setv('http.listen',e.target.value)}/></Field><Field label="端口"><Input type="number" value={h.port||8080} onChange={e=>setv('http.port',Number(e.target.value))}/></Field></div>
-   {exposed(h.listen)&&<div className="notice warn top-gap">HTTP Proxy 正绑定所有网卡，局域网设备可能访问此代理。请确认 Windows Firewall 与网络环境可信。</div>}
+   {exposed(h.listen)&&<div className="notice warn top-gap">HTTP Proxy 正绑定所有网卡，局域网设备可能访问此代理。请确认系统防火墙与网络环境可信。</div>}
    <div className="setting top-gap"><div className="grow"><b>{status.httpRunning?'当前运行地址':'保存后地址'}</b><div className="mono mini">{status.httpRunning?runtimeHttpURI:httpURI}</div></div><Button quiet onClick={()=>copy(status.httpRunning?runtimeHttpURI:httpURI,'HTTP Proxy 地址')}>复制</Button></div>{httpPending&&<div className="notice warn top-gap">保存配置为 <span className="mono">{httpURI}</span>，当前进程仍使用 <span className="mono">{runtimeHttpURI}</span>；重启后切换。</div>}
   </Card>
  </div>
- {isMac&&<Card title="macOS 系统代理" eyebrow="SYSTEM PROXY" action={<Badge tone={sysStatus.lastError?'warn':sysStatus.applied?'ok':'neutral'}>{sysStatus.lastError?'需要处理':sysStatus.applied?'已接管':'未接管'}</Badge>}>
+ {isMac&&<Card title="macOS 系统代理" eyebrow="SYSTEM TAKEOVER" action={<Badge tone={sysStatus.lastError?'warn':sysStatus.applied?'ok':'neutral'}>{sysStatus.lastError?'需要处理':sysStatus.applied?'已接管':'未接管'}</Badge>}>
    <Setting title="接管模式" desc="通过系统 HTTP / HTTPS / SOCKS 代理将兼容应用流量交给 RelayProxy；无需 Apple Developer 签名。">
     <Select value={sys.mode||''} onChange={e=>{setv('systemProxy.mode',e.target.value);if(e.target.value==='system'){setv('networkMode','');setv('network.mode','')}}}><option value="">关闭系统代理</option><option value="system">系统代理（推荐）</option></Select>
    </Setting>
@@ -351,26 +430,30 @@ function ProxyPage({status,config,setv,save,dirty,onService,onRefreshCapabilitie
    <Setting title="HTTP / HTTPS" desc={httpAddr}><Switch checked={sys.http!==false} onChange={v=>setv('systemProxy.http',v)}/></Setting>
    <Setting title="SOCKS5" desc={socksAddr}><Switch checked={sys.socks5!==false} onChange={v=>setv('systemProxy.socks5',v)}/></Setting>
    <Setting title="代理 IP 地址目标" desc="临时移除系统绕过列表中的 IP / CIDR 例外，保护 localhost 和链路本地地址；关闭或退出时恢复原列表。"><Switch checked={sys.proxyIpLiterals!==false} onChange={v=>setv('systemProxy.proxyIpLiterals',v)}/></Setting>
-   <div className="mini top-gap">启用前持久保存原系统代理；正常退出、关闭或网络切换时仅恢复 RelayProxy 设置的值。意外退出后下一次启动尝试恢复。可能提示 macOS 管理员授权。</div>
+   <div className="mini top-gap">启用前持久保存原系统代理；正常退出、关闭或网络切换时仅恢复 RelayProxy 设置的值。意外退出后下一次启动尝试恢复。可能提示 macOS 管理员授权。系统代理不会捕获所有应用的 UDP / QUIC 流量；已有认证代理、PAC 或自动代理发现配置不会被静默覆盖。</div>
    {sysStatus.service&&<div className="setting top-gap"><div className="grow"><b>当前网络服务</b><span className="mono mini">{sysStatus.service}</span></div></div>}
    {sysStatus.pendingRecovery>0&&<div className="notice warn top-gap">尚有 {sysStatus.pendingRecovery} 项代理设置等待安全恢复。</div>}
    {sysStatus.lastError&&<div className="notice warn top-gap">{sysStatus.lastError}</div>}
-   <div className="notice top-gap">系统代理不会捕获所有应用的 UDP / QUIC 流量；已有认证代理、PAC 或自动代理发现配置不会被静默覆盖。</div>
   </Card>}
- {windowsCaptureAvailable&&<Card title="Windows 系统透明代理" eyebrow="WINDOWS NETWORK CAPTURE" action={<Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'运行条件已满足':service?.installed?'服务需修复':service?'服务未安装':'服务状态待检查'}</Badge>}>
-  <Setting title="接管系统流量" desc="使用 WinDivert 按进程与分流规则处理本机 TCP / UDP。"><Switch checked={config.networkMode==='divert'} disabled={!canToggleIntercept} onChange={v=>{setv('networkMode',v?'divert':'');setv('network.mode',v?'divert':'')}}/></Setting>
+ {windowsCaptureAvailable&&<Card title="Windows 透明代理" eyebrow="SYSTEM TAKEOVER" action={<Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'运行条件已满足':service?.installed?'服务需修复':service?'服务未安装':'服务状态待检查'}</Badge>}>
+  <Setting title="接管系统流量" desc="使用 WinDivert 按进程与分流规则处理本机 TCP / UDP；开关需重启生效。"><Switch checked={config.networkMode==='divert'} disabled={!canToggleIntercept} onChange={v=>{setv('networkMode',v?'divert':'');setv('network.mode',v?'divert':'')}}/></Setting>
   {!interceptReady&&<div className="notice warn top-gap"><b>当前系统透明代理尚不可用。</b> {caps.unavailable_reason||'此构建缺少完整的 TCP / UDP / IPv6 / 进程识别或回注能力。'}{config.networkMode==='divert'?' 你仍可关闭已保存的透明代理模式。':' 请修复 Network Service，或继续使用 SOCKS5 / HTTP Proxy。'}</div>}
   <div className="cards-3 compact top-gap">
    <div><div className="mini">Network Service</div><strong>{service?.ready?'就绪':service?.running?'运行中':service?.installed?'已安装':'尚未取得状态'}</strong><div className="mini">{service?.autoStartKnown?(service?.autoStart?'Automatic':'非自动启动'):'启动类型未知'}</div></div>
    <div><div className="mini">抓包后端</div><strong>{status.divertDiagnostics?.captureBackend||'WinDivert'}</strong><div className="mini">{status.divertDiagnostics?.captureState||status.divertStage||'idle'}</div></div>
    <div><div className="mini">数据面</div><strong>{Number(status.divertDiagnostics?.captured||0)} / {Number(status.divertDiagnostics?.classified||0)}</strong><div className="mini">抓包 / 分类 · PROXY {Number(status.divertDiagnostics?.proxy||0)}</div></div>
   </div>
-  {(status.divertError||service?.message)&&<div className={cx('notice','top-gap',status.divertError&&'danger')}>{status.divertError||service?.message}</div>}
-  <Field label="排除进程" help="这些进程的流量不经透明代理；可用换行、逗号或分号分隔，如 steam.exe, Teams.exe"><Textarea rows="5" value={ruleListText(config.network?.exclude_processes)} onChange={e=>setv('network.exclude_processes',e.target.value)}/></Field>
-  {networkServiceBridgeAvailable&&<div className="actions top-gap"><Button disabled={repairing} onClick={repair}>{repairing?'修复中…':'安装 / 修复服务'}</Button><Button onClick={onService}>高级维护 / 卸载</Button></div>}
+  {status.divertError&&<div className="notice danger top-gap">{status.divertError}</div>}
+  <Field label="排除进程" help="这些进程的流量不经透明代理；可用换行、逗号或分号分隔，如 steam.exe, Teams.exe"><Textarea rows="4" value={ruleListText(config.network?.exclude_processes)} onChange={e=>setv('network.exclude_processes',e.target.value)}/></Field>
+  {showWindowsService(config.platform,networkServiceBridgeAvailable)&&<details className="details top-gap"><summary>Network Service 维护</summary>
+   <div className="mini top-gap">透明代理由低权限 GUI 与 SYSTEM 网络服务协作完成。{service?.message||''}</div>
+   {service&&<div className="service-grid top-gap"><div><span>安装</span><b>{service.installed?'是':'否'}</b></div><div><span>运行</span><b>{service.running?'是':'否'}</b></div><div><span>自动启动</span><b>{service.autoStartKnown?(service.autoStart?'是':'否'):'未知'}</b></div><div><span>版本匹配</span><b>{service.versionMatch?'是':'否'}</b></div><div><span>恢复策略</span><b>{service.recoveryKnown?(service.recoveryEnabled?'已启用':'未启用'):'未知'}</b></div><div><span>PID</span><b className="mono">{service.pid||'—'}</b></div>{service.binaryPath&&<div className="service-path"><span>程序路径</span><b className="mono">{service.binaryPath}</b></div>}</div>}
+   {dirty&&<div className="notice warn top-gap">存在未保存配置时暂不允许卸载 Network Service，避免原生侧关闭透明代理后导致草稿 revision 失效。</div>}
+   <div className="actions top-gap"><Button disabled={!!busy} onClick={()=>serviceAct('goRepairNetworkService','Network Service 修复完成')}>{busy==='goRepairNetworkService'?'修复中…':'安装 / 修复服务'}</Button><Button danger disabled={!!busy||dirty} onClick={()=>serviceAct('goUninstallNetworkService','网络服务已卸载')}>卸载服务</Button></div>
+  </details>}
  </Card>}
- <SaveBar dirty={dirty} label="保存代理设置" hint="保存本地监听和透明代理设置；监听参数及 Windows 透明代理开关需重启生效，macOS 系统代理设置可即时应用。" onSave={()=>save({systemProxy:isMac?{mode:sys.mode||'',autoFollow:sys.autoFollow!==false,http:sys.http!==false,socks5:sys.socks5!==false,proxyIpLiterals:sys.proxyIpLiterals!==false}:undefined,proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port),defaultExitId:config.defaultExitId||''},network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)}})}/>
- <CustomExitManager config={config} save={save} toast={toast} dirty={dirty}/></>
+ {isLinux&&<GatewaySection config={config} status={status} exits={exits} setv={setv}/>}
+ <SaveBar dirty={dirty} label="保存接入设置" hint={'本地监听参数'+(windowsCaptureAvailable?'与 Windows 透明代理开关需重启生效':'需重启生效')+(isMac?'；macOS 系统代理即时应用':'')+(isLinux?'；局域网网关保存后立即应用':'')+'。'} onSave={saveAll}/></>
 }
 
 function ExitShare({status,config,setv,save,dirty}){
@@ -397,7 +480,7 @@ function ExitShare({status,config,setv,save,dirty}){
   {chosen&&chosen.protocol!=='socks5'&&chosen.protocol!=='group'&&<div className="notice warn top-gap">HTTP(S) CONNECT 仅支持 TCP。共享出口的 UDP 请求会失败，不会回退本机直连。</div>}
   {config.upstreamExitId&&!chosen&&<div className="notice danger top-gap">所选上游出口已丢失，保存将被阻止。请重新选择或切换到本机直连。</div>}
   {legacy&&<div className="notice warn top-gap">当前仍使用旧版上游 {u.mode}。请创建自定义出口并在此引用；切换上游前保留原有工作方式。</div>}
-  {!customs.length&&<div className="notice top-gap">暂无自定义出口。请前往「网络配置 → 代理与自定义出口」创建。</div>}
+  {!customs.length&&<div className="notice top-gap">暂无自定义出口。请前往「出口」页的「自定义代理」创建。</div>}
  </Card><Card title="出口访问控制" eyebrow="ACCESS POLICY"><Field label="策略模式"><Select value={config.accessMode||''} onChange={e=>setv('accessMode',e.target.value)}><option value="">关闭</option><option value="allow">仅允许列表</option><option value="deny">拒绝列表</option></Select></Field><Field label="域名规则" help="可用换行、逗号或分号分隔，支持通配符，如 *.example.com"><Textarea rows="4" value={ruleListText(config.accessDomains)} onChange={e=>setv('accessDomains',e.target.value)}/></Field><Field label="CIDR / IP" help="可用换行、逗号或分号分隔，如 10.0.0.0/8, 192.168.1.1"><Textarea rows="4" value={ruleListText(config.accessCidrs)} onChange={e=>setv('accessCidrs',e.target.value)}/></Field></Card></div>
  <SaveBar dirty={dirty} label="保存出口共享设置" hint="同时保存出口能力、上游代理与访问控制；出口相关设置均为启动参数，保存后需重启客户端生效。" onSave={()=>save({exit:{enabled:config.exitEnabled,browserNetworkShare:!!config.browserNetworkShare,allowInternet:config.allowInternet,allowPrivateNetwork:config.allowPrivateNetwork,allowLoopback:config.allowLoopback,upstreamExitId:config.upstreamExitId||'',upstream:config.upstreamExitId?undefined:u,access:{mode:config.accessMode||'',domains:splitRuleList(config.accessDomains),cidrs:splitRuleList(config.accessCidrs)}}})}/>
  <Modal open={loopbackRisk} title="允许出口流量访问本机 Loopback？" onClose={()=>setLoopbackRisk(false)} footer={<><Button onClick={()=>setLoopbackRisk(false)}>保持关闭</Button><Button danger onClick={()=>{setv('allowLoopback',true);setLoopbackRisk(false)}}>我了解风险，允许访问</Button></>}><div className="notice danger"><b>启用后，经 Server 授权到达此出口的流量可以访问本机 Loopback 服务。</b><br/>这可能包含只监听 127.0.0.1 / ::1 的管理接口、开发服务或其他原本不面向网络开放的进程。仅在你明确需要且访问策略足够严格时开启。</div></Modal></>
@@ -443,7 +526,16 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
   onDragEnd:endDrag,onMouseUp:()=>{armed.current=false}});
  const edit=i=>setEditing({index:i,rule:JSON.parse(JSON.stringify(i>=0?rules[i]:{name:'新规则',enabled:true,action:'PROXY',exit_id:'',datagram_required:false,handle_direct:false,processes:[],targets:[],ports:[],protocols:['tcp','udp']}))});
  const saveEditor=()=>{const n=[...rules],rule=normalizeRuleLists(editing.rule);if(editing.index<0)n.push(rule);else n[editing.index]=rule;commit(n);setEditing(null)};
- return <><PageHead title="分流规则" actions={<Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button>}/>
+ const mode=r.mode||'global_proxy';
+ return <><PageHead title="分流" actions={<Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button>}/>
+ <Card className="routing-policy">
+  <div className="routing-policy-row">
+   <div className="routing-policy-item"><span className="mini">路由模式</span><div className="segment" role="radiogroup" aria-label="路由模式">{ROUTING_MODES.map(([v,l])=><button key={v} type="button" role="radio" aria-checked={mode===v} className={mode===v?'active':''} onClick={()=>setv('routing.mode',v)}>{l}</button>)}</div></div>
+   <div className="routing-policy-item"><span className="mini">规则未命中时</span><Select aria-label="规则未命中时" disabled={mode!=='rule'} value={r.default_action||'PROXY'} onChange={e=>setv('routing.default_action',e.target.value)}><option value="PROXY">PROXY · 走默认出口</option><option value="DIRECT">DIRECT · 本机直连</option><option value="REJECT">REJECT · 阻断</option></Select></div>
+   <div className="routing-policy-item grow"><span className="mini">默认出口</span><div className="row"><strong>{exitName(exits,config.defaultExitId||'')}</strong><Button quiet onClick={()=>onGoto('exits')}>前往出口页 ›</Button></div></div>
+  </div>
+  <div className="mini top-gap">{mode==='rule'?'按下方规则从上到下匹配：手动规则 → 订阅 → 未命中动作。':mode==='direct'?'全局直连：所有流量不经代理，下方规则不参与匹配。':'全局代理：所有流量经默认出口，下方规则不参与匹配。'}「默认出口」决定 PROXY 连接用哪台设备，在「出口」页一键切换；已授权出口撤销或离线时不会静默直连。</div>
+ </Card>
  <Card title="规则列表" eyebrow={rules.length+' RULES'}><div className="rule-table"><div className="rule-row rule-head"><span>#</span><span>规则</span><span>匹配条件</span><span>动作</span><span>启用</span><span>操作</span></div>{rules.map((x,i)=><div className={cx('rule-row',!x.enabled&&'disabled',dragging===i&&'dragging',dropAt&&dropAt.i===i&&dragging!==i&&(dropAt.after?'drop-after':'drop-before'))} key={(x.name||'rule')+'-'+i} {...dragProps(i)}><span className="drag" role="button" tabIndex={-1} aria-label={'拖动调整顺序：'+(x.name||'规则 '+(i+1))} title="拖动调整顺序" onMouseDown={()=>{armed.current=true}}>⋮⋮</span><div><div className="row"><strong>{x.name||'规则 '+(i+1)}</strong></div><div className="mini">优先级 {i+1}</div></div><div className="chips">{arr(x.entries).includes('gateway')&&<span className="chip" key="e">局域网网关</span>}{arr(x.source_cidrs).slice(0,1).map(v=><span className="chip" key={'s'+v}>来源 {v}</span>)}{arr(x.processes).slice(0,2).map(v=><span className="chip" key={'p'+v}>{v}</span>)}{arr(x.targets).slice(0,2).map(v=><span className="chip" key={'t'+v}>{v}</span>)}{arr(x.ports).slice(0,1).map(v=><span className="chip" key={'o'+v}>{v}</span>)}{!arr(x.entries).length&&!arr(x.source_cidrs).length&&!arr(x.processes).length&&!arr(x.targets).length&&!arr(x.ports).length&&<span className="mini">任意流量</span>}</div><div><Badge tone={x.action==='REJECT'?'danger':x.action==='DIRECT'?'blue':'ok'}>{x.action||'PROXY'}</Badge>{x.exit_id&&<div className="mini">{exitName(exits,x.exit_id)}</div>}</div><div><Switch checked={!!x.enabled} label={(x.enabled?'停用':'启用')+' '+(x.name||'规则 '+(i+1))} onChange={v=>toggle(i,v)}/></div><div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>move(i,-1)}>↑</Button><Button quiet disabled={i===rules.length-1} onClick={()=>move(i,1)}>↓</Button><Button quiet onClick={()=>edit(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除这条分流规则？')&&commit(rules.filter((_,n)=>n!==i))}>删除</Button></div></div>)}{!rules.length&&<div className="empty">尚无规则。切换到规则模式前请先添加规则。</div>}</div></Card>
  <Card title="规则订阅" eyebrow={subs.length+' SUBSCRIPTIONS'} action={<Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button>}>
   <div className="mini">支持 GFWList（Base64 / Adblock 主机规则）、域名和 IP/CIDR 文本列表。按上到下顺序匹配：手动规则优先 → 订阅 → 默认动作。仅在规则模式生效，每 6 小时自动更新；下载失败继续使用本地已缓存的最后成功版本。URL 路径、正则和 Adblock 修饰符不会被扩大为整个域名匹配。</div>
@@ -455,15 +547,7 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
   </div>)}
   {!subs.length&&<div className="empty">尚未添加订阅，可以添加 GFWList 或自建规则列表。</div>}
  </Card>
- <details className="routing-strategy-disclosure">
- <summary><span><strong>全局路由策略</strong><small>路由模式：{r.mode==='rule'?'规则模式':r.mode==='direct'?'全局直连':'全局代理'} · 默认出口：{exitName(exits,config.defaultExitId||'')} · 未命中：{r.default_action||'PROXY'}</small></span></summary>
- <Card title="全局路由策略" eyebrow="ROUTING MODE"><div className="form-grid">
- <Field label="路由模式"><Select value={r.mode||'global_proxy'} onChange={e=>setv('routing.mode',e.target.value)}><option value="global_proxy">全局代理</option><option value="rule">规则模式</option><option value="direct">全局直连</option></Select></Field>
- <Field label="默认代理出口" help="仅影响未指定独立出口的 PROXY 流量；不会覆盖每条规则的指定出口。"><Select value={config.defaultExitId||''} onChange={e=>setv('defaultExitId',e.target.value)}><option value="">自动选择</option>{config.defaultExitId&&!exits.some(x=>(x.deviceId||x.id)===config.defaultExitId)&&<option value={config.defaultExitId}>原出口不可用 · {config.defaultExitId}</option>}{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false&&x.kind!=='group'&&(x.deviceId||x.id)!==config.defaultExitId}>{x.name||x.deviceId||x.id}{x.online===false?' · 离线':''}</option>)}</Select></Field>
- <Field label="规则未命中时"><Select value={r.default_action||'PROXY'} onChange={e=>setv('routing.default_action',e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field>
- </div><div className="mini top-gap">「默认代理出口」决定 PROXY 连接用哪台设备；「规则未命中时」决定 PROXY / DIRECT / REJECT。两者独立，已授权出口撤销或离线时不会静默直连。</div></Card>
- </details>
- <SaveBar dirty={dirty} label="保存分流规则" hint="保存默认代理出口、全局路由策略与分流规则；DNS 选项请在 DNS 与防泄漏页修改。" onSave={()=>save({routing:routingPagePatch(r),proxy:{defaultExitId:config.defaultExitId||''}})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
+ <SaveBar dirty={dirty} label="保存分流" hint="保存路由模式、未命中动作、规则与订阅；默认出口在「出口」页切换，DNS 选项在「DNS」页修改。" onSave={()=>save({routing:routingPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
  <Modal open={!!editingSub} title={editingSub&&editingSub.index>=0?'编辑规则订阅':'添加规则订阅'} wide onClose={()=>setEditingSub(null)} footer={<><Button onClick={()=>setEditingSub(null)}>取消</Button><Button primary onClick={saveSub}>保存订阅</Button></>}>
   {editingSub&&<div className="form-grid">
    <Field label="订阅名称"><Input value={editingSub.sub.name||''} onChange={e=>setEditingSub({...editingSub,sub:{...editingSub.sub,name:e.target.value}})}/></Field>
@@ -487,7 +571,7 @@ function DNSUpstreamsEditor({upstreams,onChange}){
   onBlur={()=>onChange(parseDNSUpstreamLines(draft))}/>;
 }
 
-function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
+function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
  const[advancedOpen,setAdvancedOpen]=useState(false);
  const[probing,setProbing]=useState(false);
  const[probe,setProbe]=useState(null);
@@ -504,15 +588,8 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
  const r=config.routing||EMPTY.routing;
  const inventory=[...arr(exits).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
  const change=next=>setv('routing',next);
- const protection=status.dnsProtection||{};
- const divertRunning=status.divertRunning===true;
- const captureMode=protection.capture||'unavailable';
- const captureObserved=divertRunning&&captureMode!=='unavailable';
- const strictCapture=captureObserved&&captureMode==='nfqueue-no-bypass';
- const fakeConfigured=!!r.fake_ip_enabled;
- const fakeApplied=divertRunning&&protection.fakeIpEnabled===true;
  const preset=currentDNSPreset(r);
- return <><PageHead title="DNS 设置"/>
+ return <><PageHead title="DNS" desc="系统 DNS 的解析方式、加密 DNS 出口与防泄漏选项；实际接管状态请在「诊断」页查看。"/>
  <Card title="DNS 处理模式" eyebrow="DNS POLICY">
   <Field label="解析模式" help="切换模式会统一更新内部 DNS 选项，旧版配置仍可使用。">
    <Select value={preset} onChange={e=>change(applyDNSPreset(r,e.target.value))}>
@@ -581,18 +658,14 @@ function DNSPage({status,config,exits,setv,save,dirty,onGoto,onDiscard}){
    </div>)}
   </>}
  </Card>
- <Card title="实际运行状态" eyebrow="ACTIVE DNS PROTECTION">
-  <Setting title="透明代理运行状态" desc={'DNS 捕获报告：'+captureMode+'（不代表所有 DNS 均已接管）'}><Badge tone={divertRunning?'blue':'warn'}>{divertRunning?'透明代理运行中':'透明代理未运行'}</Badge></Setting>
-  <Setting title="FakeIP 配置与捕获证据" desc={fakeConfigured?'已保存 FakeIP 策略；'+(captureObserved?'观察到捕获报告':'未观察到有效 DNS 捕获报告'):'FakeIP 策略未启用'}><Badge tone={strictCapture&&fakeApplied?'blue':fakeConfigured?'warn':'neutral'}>{!fakeConfigured?'未启用':!fakeApplied?'已配置 · 未确认应用':strictCapture?'内核捕获报告可用 · 仍需实测':'策略已应用 · 接管未独立验证'}</Badge></Setting>
-  <Setting title="独立 DNS Kill Switch" desc={protection.detail||'没有足够证据证明系统级防泄漏'}><Badge tone={protection.independentGuard==='rules-present'?'blue':'warn'}>{protection.independentGuard||'未验证'}</Badge></Setting>
- </Card>
  <SaveBar dirty={dirty} label="保存 DNS 设置" hint="切换模式自动配置兼容字段；保存后按现有热更新流程生效。" onSave={()=>save({routing:dnsPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
  </>;
 }
 
-function RDPPage({status,config,targets,refreshTargets,refreshStatus,toast}){
+function RDPPage({status,config,targets,refreshTargets,refreshStatus,toast,setv,save,dirty,onRestart}){
  const[busy,setBusy]=useState('');
  const desiredEnabled=config.rdp?.enabled!==false,runtimeEnabled=config.runtime?.rdp?.enabled!==false;
+ const rdpRestartPending=!dirty&&config.restartRequired&&arr(config.restartFields).some(x=>String(x).includes('RDP'));
  const controllerApproved=arr(status.approvedCapabilities).includes('rdp.controller');
  const sessions=arr(status.rdpSessions).length?arr(status.rdpSessions):(status.rdpTargetId?[{deviceId:status.rdpTargetId,listenAddr:status.rdpListenAddr,udpEnabled:status.rdpUdpEnabled,udpActive:status.rdpUdpActive,udpReason:status.rdpUdpReason,pathTcp:status.rdpPathTcp,pathUdp:status.rdpPathUdp}]:[]);
  const activeByID=new Map(sessions.map(s=>[s.deviceId,s]));
@@ -601,26 +674,22 @@ function RDPPage({status,config,targets,refreshTargets,refreshStatus,toast}){
  const disconnectAll=async()=>{setBusy('all');try{const r=parseMutation(await call('goDisconnectRDP'));if(!r.ok)throw new Error(r.message||'RDP 断开失败');await refreshStatus();toast('全部 RDP 会话已断开')}catch(e){toast(e.message,'danger')}finally{setBusy('')}};
  const copy=async value=>{if(!value)return;try{if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',String(value));else await navigator.clipboard.writeText(String(value));toast('已复制 RDP 本地入口')}catch(e){toast(e.message,'danger')}};
  return <><PageHead title="远程桌面" desc="已授权设备可同时保持独立的远程桌面连接，各自使用独立本地 TCP / UDP 端口。" actions={<Button onClick={refreshTargets}>刷新设备</Button>}/>
- {!desiredEnabled&&<div className="notice warn"><b>RDP 已在本机配置中关闭。</b> 请在「设置 → 远程桌面设置」中开启、保存并重启客户端，之后才会重新申请 rdp.controller。</div>}
+ {!desiredEnabled&&<div className="notice warn"><b>RDP 已在本机配置中关闭。</b> 在下方「远程桌面偏好」中开启、保存并重启客户端，之后才会重新申请 rdp.controller。</div>}
  {desiredEnabled&&runtimeEnabled&&status.connected&&!controllerApproved&&<div className="notice warn"><b>Server 未授予当前设备 rdp.controller。</b> 请在 Server 设备授权中启用“RDP 控制端”；授权变更后 Agent 会重新连接并刷新列表。</div>}
  {sessions.length>0&&<Card title="当前 RDP 会话" eyebrow={sessions.length+' ACTIVE SESSIONS'} action={sessions.length>1?<Button danger disabled={!!busy} onClick={disconnectAll}>断开全部</Button>:null}>
   <div className="target-list">{sessions.map(s=>{const id=s.deviceId,name=s.name||targets.find(t=>(t.deviceId||t.id)===id)?.name||id;return <div className="target-row rdp-session-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{name}</strong><div className="mono mini">{s.listenAddr||'准备中'}</div><div className="mini">TCP {rdpPathLabel(s.pathTcp)} · UDP {rdpPathLabel(s.pathUdp)} · {s.udpActive?'UDP Active':s.udpEnabled?'UDP Ready':'TCP Only'}</div>{s.udpReason&&<div className="mini">{s.udpReason}</div>}{s.hostsError&&<div className="mini">hosts：{s.hostsError}（已回退本地 IP）</div>}</div><Badge tone="ok">已连接</Badge><Button primary disabled={!!busy||!status.connected} title="复用现有本地端口，再次唤起远程桌面客户端" onClick={()=>connect(id)}>{busy===id?'打开中…':'再次打开'}</Button><Button quiet disabled={!s.listenAddr} onClick={()=>copy(s.listenAddr)}>复制地址</Button><Button danger disabled={!!busy} onClick={()=>disconnect(id)}>{busy===id?'断开中…':'断开'}</Button></div>})}</div>
  </Card>}
- <Card title="已授权设备" eyebrow={targets.length+' TARGETS'}><div className="target-list">{targets.map(x=>{const id=x.deviceId||x.id,active=activeByID.get(id);return <div className="target-row rdp-authorized-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{x.name||id}</strong><div className="mono mini">{id}</div></div>{active&&<Badge tone="blue">已建立入口</Badge>}<Badge tone={x.online?'ok':'neutral'}>{x.online?'在线':'离线'}</Badge><Button primary disabled={!x.online||!status.connected||!!busy} title={active?'复用现有本地端口，再次唤起远程桌面客户端':'连接此设备'} onClick={()=>connect(id)}>{busy===id?'打开中…':active?'再次打开':'连接'}</Button></div>})}{!targets.length&&<div className="empty">{!desiredEnabled?'本机 RDP 功能已关闭。':!runtimeEnabled?'RDP 设置等待重启生效。':status.connected&&!controllerApproved?'当前设备未获得 Server 的 rdp.controller 授权。':'当前没有 Server 授权的 RDP 目标设备。'}</div>}</div></Card></>
+ <Card title="已授权设备" eyebrow={targets.length+' TARGETS'}><div className="target-list">{targets.map(x=>{const id=x.deviceId||x.id,active=activeByID.get(id);return <div className="target-row rdp-authorized-row" key={id}><div className="identity-icon small">▣</div><div className="grow"><strong>{x.name||id}</strong><div className="mono mini">{id}</div></div>{active&&<Badge tone="blue">已建立入口</Badge>}<Badge tone={x.online?'ok':'neutral'}>{x.online?'在线':'离线'}</Badge><Button primary disabled={!x.online||!status.connected||!!busy} title={active?'复用现有本地端口，再次唤起远程桌面客户端':'连接此设备'} onClick={()=>connect(id)}>{busy===id?'打开中…':active?'再次打开':'连接'}</Button></div>})}{!targets.length&&<div className="empty">{!desiredEnabled?'本机 RDP 功能已关闭。':!runtimeEnabled?'RDP 设置等待重启生效。':status.connected&&!controllerApproved?'当前设备未获得 Server 的 rdp.controller 授权。':'当前没有 Server 授权的 RDP 目标设备。'}</div>}</div></Card>
+ <Card title="远程桌面偏好" eyebrow="PREFERENCES" action={<Badge tone={controllerApproved?'ok':status.connected?'warn':'neutral'}>{controllerApproved?'控制端已授权':status.connected?'控制端未授权':'未连接'}</Badge>}>
+  <Setting title="启用远程桌面" desc={runtimeEnabled?'Agent 正在向 Server 申请 rdp.controller 能力。关闭后保存并重启客户端生效。':'当前进程未启用 RDP；开启后保存并重启客户端，Agent 才会申请 rdp.controller。'}><Switch checked={desiredEnabled} onChange={v=>setv('rdp.enabled',v)} label="启用远程桌面"/></Setting>
+  {dirty&&<div className="actions end top-gap"><Button primary onClick={()=>save({rdp:{enabled:desiredEnabled}})}>保存 RDP 偏好</Button></div>}
+  {rdpRestartPending&&<div className="actions end top-gap"><Button primary onClick={onRestart}>重启客户端应用 RDP 设置</Button></div>}
+ </Card></>
 }
 
-function RDPSettingsPage({status,config,setv,save,dirty,toast,onGoto}){
- const desiredEnabled=config.rdp?.enabled!==false,runtimeEnabled=config.runtime?.rdp?.enabled!==false;
- const controllerApproved=arr(status.approvedCapabilities).includes('rdp.controller');
- const saveRDP=async()=>{await save({rdp:{enabled:desiredEnabled}})};
- const restart=async()=>{try{const r=parseMutation(await call('goRestart'));if(!r.ok)throw new Error(r.message||'重启客户端失败')}catch(e){toast(e.message,'danger')}};
- return <><PageHead title="远程桌面设置"/>
- <Card title="RDP 客户端能力" eyebrow="CONTROLLER"><Setting title="启用远程桌面" desc="关闭时 Agent 不会向 Server 申请 rdp.controller，因此授权设备列表会为空。"><Switch checked={desiredEnabled} onChange={v=>setv('rdp.enabled',v)} label="启用远程桌面"/></Setting><Setting title="当前运行状态" desc={runtimeEnabled?'Agent 正在申请 RDP 能力':'当前进程未启用 RDP；保存后需要重启客户端'}><Badge tone={runtimeEnabled?'ok':'neutral'}>{runtimeEnabled?'已启用':'未启用'}</Badge></Setting><Setting title="Server 控制端授权" desc={status.connected?(controllerApproved?'当前会话已获得 rdp.controller':'当前会话没有 rdp.controller；请检查 Server 设备能力审批'):'连接 Server 后才能确认当前授权'}><Badge tone={controllerApproved?'ok':status.connected?'warn':'neutral'}>{controllerApproved?'已授权':status.connected?'未授权':'未连接'}</Badge></Setting>{dirty&&<SaveBar dirty label="保存 RDP 设置" hint="RDP 开关属于启动设置；保存后需重启客户端重新申请 Server 能力。" onSave={saveRDP}/>} {!dirty&&config.restartRequired&&arr(config.restartFields).some(x=>String(x).includes('RDP'))&&<div className="actions end top-gap"><Button primary onClick={restart}>重启客户端应用 RDP 设置</Button></div>}</Card>
- </>;
-}
-
-function MessagesPage({messages,refresh,clear,toast}){
- const[filter,setFilter]=useState('all'),[query,setQuery]=useState('');
+function MessagesPage({messages,refresh,clear,toast,config,setv,save,dirty}){
+ const[filter,setFilter]=useState('all'),[query,setQuery]=useState(''),[preview,setPreview]=useState('');
+ const timeout=Number(config?.verificationPopupTimeoutSec??15);
  const classified=m=>({code:!!m.verificationCode||m.messageType==='verification_code'||m.popupType==='verification_code',important:m.messageType==='important'||m.popupType==='important'});
  const q=query.trim().toLowerCase();
  const filtered=messages.filter(m=>{const type=classified(m),typeOK=filter==='all'||(filter==='code'&&type.code)||(filter==='important'&&type.important)||(filter==='normal'&&!type.code&&!type.important);if(!typeOK)return false;if(!q)return true;return [m.title,m.content,m.source,m.verificationCode,m.messageType,m.popupType,m.messageRule,m.verificationRule].some(v=>String(v||'').toLowerCase().includes(q))});
@@ -628,23 +697,13 @@ function MessagesPage({messages,refresh,clear,toast}){
  return <><PageHead title="消息中心" desc="验证码、普通消息与重要提醒；匹配规则由 Server 管理，Agent 负责展示、弹窗和历史。"/>
  <div className="filter-bar message-filter-compact"><label className="message-type-filter"><span className="mini">类型</span><Select aria-label="消息类型" value={filter} onChange={e=>setFilter(e.target.value)}><option value="all">全部消息</option><option value="code">验证码</option><option value="normal">普通消息</option><option value="important">重要提醒</option></Select></label><div className="message-search"><Input value={query} onChange={e=>setQuery(e.target.value)} placeholder="搜索标题、内容、来源、规则或验证码"/><span className="mini">{filtered.length} 条</span></div><div className="message-filter-actions" aria-label="消息操作"><Button onClick={refresh}>刷新</Button><Button danger disabled={!messages.length} onClick={clear}>清空历史</Button></div></div>
  <div className="message-list">{filtered.slice().reverse().map((m,i)=>{const type=classified(m),code=type.code,important=type.important,msgType=m.messageType||m.popupType||(code?'verification_code':important?'important':'message'),rule=m.messageRule||m.verificationRule||'未标注规则';return <article className={cx('message-card',important&&'important')} key={m.id||i}><div className={cx('message-icon',code?'code':important?'important':'')}>{code?'#':important?'!':'✦'}</div><div className="grow"><div className="row between"><strong>{m.title||(code?'验证码':important?'重要消息':'消息')}</strong><div className="actions"><Badge tone={code?'ok':important?'danger':'blue'}>{code?'验证码':important?'重要':'通知'}</Badge><Badge tone={m.popup?'ok':'neutral'}>{m.popup?'弹窗':'仅历史'}</Badge></div></div><div className="mini">{[m.source||'RelayProxy',rule,fmtTime(m.createdAt)].filter(Boolean).join(' · ')}</div><div className="chips top-gap"><span className="chip mono">{msgType}</span>{m.popupType&&m.popupType!==msgType&&<span className="chip mono">compat · {m.popupType}</span>}</div><p>{m.content||''}</p>{m.verificationCode&&<button className="code-box" onClick={()=>copy(m.verificationCode)}>{m.verificationCode}<small>点击复制</small></button>}</div></article>})}{!filtered.length&&<Card><div className="empty">{messages.length?'没有符合当前筛选条件的消息。':'暂无消息。'}</div></Card>}</div>
+ <Card title="弹窗偏好" eyebrow="PREFERENCES">
+  <Setting title="消息弹窗自动关闭" desc="0 表示不自动关闭；支持的桌面端使用系统原生弹窗。匹配规则、消息类型与验证码提取由 Relay Server 下发。"><div className="row"><Input type="number" min="0" max="3600" aria-label="弹窗自动关闭秒数" value={timeout} onChange={e=>setv('verificationPopupTimeoutSec',Number(e.target.value))}/><span className="mini">秒</span></div></Setting>
+  <Setting title="预览弹窗样式" desc="按消息类型查看本平台的弹窗呈现。"><div className="actions"><Button quiet onClick={()=>setPreview('verification')}>验证码</Button><Button quiet onClick={()=>setPreview('message')}>普通消息</Button><Button quiet onClick={()=>setPreview('important')}>重要提醒</Button></div></Setting>
+  {dirty&&<div className="actions end top-gap"><Button primary onClick={()=>save({gui:{verificationPopupTimeoutSec:Number(config.verificationPopupTimeoutSec)}})}>保存弹窗偏好</Button></div>}
+ </Card>
+ <Modal open={!!preview} title={preview==='verification'?'验证码弹窗':preview==='important'?'重要提醒弹窗':'普通消息弹窗'} onClose={()=>setPreview('')} footer={<Button primary onClick={()=>setPreview('')}>关闭预览</Button>}><PopupPreview type={preview}/></Modal>
  </>
-}
-
-function MessageSettingsPage({config,setv,save,onGoto}){
- const[preview,setPreview]=useState('');
- const timeout=Number(config?.verificationPopupTimeoutSec??15);
- return <><PageHead title="消息设置"/>
- <div className="cards-2">
-  <Card title="弹窗策略" eyebrow="LOCAL PRESENTATION">
-   <Setting title="消息弹窗自动关闭" desc="0 表示不自动关闭；支持的桌面端会使用系统原生弹窗。"><div className="row"><Input type="number" min="0" max="3600" value={timeout} onChange={e=>setv('verificationPopupTimeoutSec',Number(e.target.value))}/><span className="mini">秒</span></div></Setting>
-   <Setting title="匹配规则" desc="规则名称、消息类型、popup 决策与验证码提取由 Relay Server 下发。"><Badge tone="blue">Server 管理</Badge></Setting>
-   <div className="actions end top-gap"><Button primary onClick={()=>save({gui:{verificationPopupTimeoutSec:Number(config.verificationPopupTimeoutSec)}})}>保存弹窗设置</Button></div>
-  </Card>
-  <Card title="测试弹窗" eyebrow="PREVIEW"><div className="actions"><Button onClick={()=>setPreview('verification')}>验证码</Button><Button onClick={()=>setPreview('message')}>普通消息</Button><Button onClick={()=>setPreview('important')}>重要提醒</Button></div><div className="notice top-gap">弹窗通过图标、Badge、按钮和轻量边框区分消息类型，具体呈现由当前平台负责。</div></Card>
- </div>
-
- <Modal open={!!preview} title={preview==='verification'?'验证码弹窗':preview==='important'?'重要提醒弹窗':'普通消息弹窗'} onClose={()=>setPreview('')} footer={<Button primary onClick={()=>setPreview('')}>关闭预览</Button>}><PopupPreview type={preview}/></Modal></>;
 }
 
 function MonitorPage({connections: snapshot,history,exits,customExits,refresh,clear,openNative}){
@@ -692,33 +751,13 @@ function DiagnosticsPage({diagnostics,logs,exits,customExits,refreshDiagnostics,
  <Card title="运行日志" eyebrow={visible.length+' / '+logs.length+' LINES'}><div className="log-toolbar"><div className="segment">{[['all','全部'],['relay','中继'],['p2p','P2P'],['proxy','代理'],['exit','出口']].map(x=><button key={x[0]} className={filter===x[0]?'active':''} onClick={()=>setFilter(x[0])}>{x[1]}</button>)}</div><span className="mini">{filter==='all'?'显示全部日志':'仅显示匹配分类的日志'}</span></div><div className="log-console">{visible.length?visible.map((x,i)=><div key={i} className={cx(/error|failed|失败|fatal|timeout/i.test(x)&&'log-error',/warn|retry|警告/i.test(x)&&'log-warn')}>{x}</div>):<div className="muted">当前分类暂无日志</div>}</div></Card></>
 }
 
-function SectionNavigation({page,onGoto,kind}){
- const configuration=kind==='configuration';
- const items=configuration?CONFIG_SECTIONS:[['settings','settings','常规设置','外观、启动与客户端维护'],...SETTINGS_SECTIONS];
- return <nav className="settings-navigation" aria-label={configuration?'网络配置分类':'设置分类'}>
-  {items.map(([id,icon,label,description])=>
-   <button key={id} type="button" title={description} aria-current={page===id?'page':undefined} className={'settings-nav-item '+(page===id?'active':'')} onClick={()=>onGoto(id)}>
-    <span className="settings-nav-icon"><Icon name={icon}/></span>
-    <span><strong>{label}</strong><small>{description}</small></span>
-   </button>)}
- </nav>;
-}
-function SettingsNavigation({page,onGoto}){return <SectionNavigation page={page} onGoto={onGoto} kind="settings"/>}
-function ConfigNavigation({page,onGoto}){return <SectionNavigation page={page} onGoto={onGoto} kind="configuration"/>}
-
-function SettingsPage({config,setv,save,toast,onReload,onRestart,onQuit,onGoto,dirty,onConfigRefresh,onRefreshCapabilities}){
- const[service,setService]=useState(null);
- const windowsServiceAvailable=showWindowsService(config.platform,hasBridge('goGetNetworkServiceStatus'));
-
- useEffect(()=>{if(windowsServiceAvailable)callJSON('goGetNetworkServiceStatus',{}).then(setService).catch(()=>{})},[windowsServiceAvailable]);
- const act=async(name,msg)=>{if(name==='goUninstallNetworkService'&&dirty){toast('当前有未保存修改，请先保存或放弃后再卸载 Network Service','danger');return}try{const r=parseMutation(await call(name));if(!r.ok&&r.message)throw new Error(r.message);if(name==='goUninstallNetworkService'&&onConfigRefresh)await onConfigRefresh();if(onRefreshCapabilities)await onRefreshCapabilities();toast(r.message||msg);if(hasBridge('goGetNetworkServiceStatus'))setService(await callJSON('goGetNetworkServiceStatus',{}))}catch(e){toast(e.message,'danger')}};
+function SettingsPage({config,setv,save,toast,onReload,onRestart,onQuit}){
  const auto=async v=>{try{const r=parseMutation(await call('goSetAutostart',v));if(!r.ok&&r.message)throw new Error(r.message);setv('isAutostart',v,false);toast(v?'已启用开机自启':'已关闭开机自启')}catch(e){toast(e.message,'danger')}};
- return <><SettingsNavigation page="settings" onGoto={onGoto}/><PageHead title="设置" desc="主题、窗口行为、开机自启与客户端维护。"/>
+ return <><PageHead title="设置" desc="外观、窗口行为、开机自启与客户端维护。网络相关设置都在左侧「网络」分组。"/>
  {config.restartRequired&&<div className="notice warn">以下设置需要重启客户端后生效：{arr(config.restartFields).join('、')||'启动参数'}。</div>}
  {config.reloadPending&&<div className="notice warn">配置文件中的策略与当前运行状态不同，可重新读取并应用。</div>}
  <div className="cards-2"><Card title="外观与窗口" eyebrow="APPEARANCE"><Setting title="主题" desc="跟随当前操作系统的外观设置"><Select value={config.theme||'system'} onChange={e=>setv('theme',e.target.value)}><option value="system">跟随系统</option><option value="light">浅色</option><option value="dark">深色</option></Select></Setting><Setting title="关闭时最小化到托盘" desc="关闭主窗口后 Agent 保持运行"><Switch checked={!!config.minimizeToTray} onChange={v=>setv('minimizeToTray',v)}/></Setting><div className="actions end top-gap"><Button primary onClick={()=>save({gui:{theme:config.theme,minimizeToTray:config.minimizeToTray}})}>保存界面设置</Button></div></Card>
- <Card title="启动与文件" eyebrow="APPLICATION"><Setting title="开机自启" desc="启动能力及所需权限由当前操作系统决定"><Switch checked={!!config.isAutostart} onChange={auto}/></Setting><Setting title="配置文件" desc={config.configPath||'未指定'}><Button onClick={()=>call('goOpenConfigDir')}>打开目录</Button></Setting><Setting title="版本" desc="RelayProxy Agent"><span className="mono">{config.version||'dev'}</span></Setting><div className="actions top-gap"><Button onClick={onReload}>重新读取并应用</Button><Button onClick={onRestart}>重启客户端</Button><Button danger onClick={onQuit}>退出</Button></div></Card></div>
- {windowsServiceAvailable&&<Card title="Windows 网络服务" eyebrow="NETWORK SERVICE"><div className="setting"><div className="grow"><b>服务状态</b><div className="mini">{service?.message||'透明代理由低权限 GUI 与 SYSTEM 网络服务协作完成。'}</div></div><Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'就绪':service?.running?'运行中':service?.installed?'已安装':'未安装'}</Badge></div>{service&&<div className="service-grid"><div><span>安装</span><b>{service.installed?'是':'否'}</b></div><div><span>运行</span><b>{service.running?'是':'否'}</b></div><div><span>自动启动</span><b>{service.autoStartKnown?(service.autoStart?'是':'否'):'未知'}</b></div><div><span>版本匹配</span><b>{service.versionMatch?'是':'否'}</b></div><div><span>恢复策略</span><b>{service.recoveryKnown?(service.recoveryEnabled?'已启用':'未启用'):'未知'}</b></div><div><span>PID</span><b className="mono">{service.pid||'—'}</b></div>{service.binaryPath&&<div className="service-path"><span>程序路径</span><b className="mono">{service.binaryPath}</b></div>}</div>}{dirty&&<div className="notice warn top-gap">存在未保存配置时暂不允许卸载 Network Service，避免原生侧关闭透明代理后导致草稿 revision 失效。</div>}<div className="actions top-gap"><Button onClick={()=>act('goRepairNetworkService','网络服务修复完成')}>修复服务</Button><Button danger disabled={dirty} onClick={()=>window.confirm('卸载 RelayProxy Windows 网络服务？此操作会同时关闭已保存的系统透明代理配置。')&&act('goUninstallNetworkService','网络服务已卸载')}>卸载服务</Button></div></Card>}</>
+ <Card title="启动与维护" eyebrow="APPLICATION"><Setting title="开机自启" desc="启动能力及所需权限由当前操作系统决定"><Switch checked={!!config.isAutostart} onChange={auto}/></Setting><Setting title="配置文件" desc={config.configPath||'未指定'}><Button onClick={()=>call('goOpenConfigDir')}>打开目录</Button></Setting><Setting title="版本" desc="RelayProxy Agent"><span className="mono">{config.version||'dev'}</span></Setting><div className="actions top-gap"><Button onClick={onReload}>重新读取并应用</Button><Button onClick={onRestart}>重启客户端</Button><Button danger onClick={onQuit}>退出</Button></div></Card></div></>
 }
 
 function PopupPreview({type}){
@@ -807,7 +846,7 @@ function SpeedModal({open,exits,status,initialExit,onClose,toast}){
  const reviewing=phase==='reviewing';
  return <Modal open={open} title="出口双向测速 · 设备链路信息" wide onClose={close} footer={<><Button disabled={busy||reviewing} onClick={close}>关闭</Button><Button disabled={busy||reviewing||!exitReady} onClick={calibrate}>{busy&&calibrateStep?'校准中 '+calibrateStep+'/'+BRUTAL_CALIBRATION_ROUNDS:'5 轮 BBR 保守校准'}</Button><Button primary disabled={busy||reviewing||!exitReady} onClick={run}>{busy?'测速中…':reviewing?'核验中…':'开始测速'}</Button></>}>
   <div className="device-speed-target"><div className="device-speed-target-identity"><Icon name="devices" size={18}/><div><span className="mini">当前测速设备（由设备卡片指定）</span><strong>{matched?.name||matched?.deviceName||exitID||'未选择设备'}</strong><span className="mono mini">{exitID||'无设备 ID'}</span></div></div><Field label="每方向时长（秒）"><Input type="number" min="1" max="30" disabled={busy||reviewing} value={duration} onChange={e=>setDuration(Number(e.target.value))}/></Field></div>
-  {!exitReady&&<div className="notice warn" role="alert">该设备当前不在线或未获得代理出口授权，已阻止自动回退到其他出口。请返回设备中心刷新授权。</div>}
+  {!exitReady&&<div className="notice warn" role="alert">该设备当前不在线或未获得代理出口授权，已阻止自动回退到其他出口。请返回「出口」页刷新授权。</div>}
   <DeviceSpeedLinkDetails exitID={exitID} exits={exits} result={result} status={status} phase={phase} revealCount={revealCount}/>
   {calibration&&<div className={cx('speed-result',calibration.error&&'error')}>{calibration.error?calibration.error:<><div className="notice warn">仅验证本机 BBR 发送侧，无法确认服务端发送侧的控制器或真实链路容量；共享公平性、负载 RTT 与 Hysteria2 实网对照仍须单独验收。本功能不会应用配置。</div><div>当前 Relay BBR 五轮候选：上行 <b>{calibration.upload.candidateMbps} Mbps</b> · 下行 <b>{calibration.download.candidateMbps} Mbps</b></div><div className="mini">最低分位吞吐：上行 {calibration.upload.bbrP10Mbps} Mbps / 下行 {calibration.download.bbrP10Mbps} Mbps；预留 40% 带宽余量。</div></>}</div>}
   {result&&<div className={cx('speed-result',result.error&&'error')}>{result.error?result.error:<>{leg('上行',result.upload||result.up)}{leg('下行',result.download||result.down)}</>}</div>}
@@ -863,12 +902,14 @@ export default function App(){
 
  const setv=useCallback((path,value,markDirty=true)=>{setConfig(prev=>{const next=structuredClone(prev),keys=path.split('.');let o=next;for(let i=0;i<keys.length-1;i++){o[keys[i]]=o[keys[i]]&&typeof o[keys[i]]==='object'?o[keys[i]]:{};o=o[keys[i]]}o[keys[keys.length-1]]=value;return next});if(markDirty)setDirty(true)},[]);
  const save=useCallback(async payload=>{if(!loaded||!config.revision){toast('配置尚未就绪，暂不能保存','danger');return false}try{const r=await saveConfig(config.revision,payload);if(!r.ok)throw new Error(r.message||'保存失败');await refreshConfig();await refreshStatus();toast(r.restartRequired?(r.message||'已保存，部分设置需重启'):(r.message||'已保存'));return true}catch(e){toast(e.message,'danger');return false}},[loaded,config.revision,toast,refreshConfig,refreshStatus]);
- const select=useCallback(async id=>{try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName([...withExitGroups(exits,arr(config.routing?.device_groups)),...arr(config.customExits)],id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[exits,config.customExits,config.routing?.device_groups,refreshConfig,refreshStatus,toast]);
+ const select=useCallback(async id=>{if(dirty){toast('存在未保存的修改，请先保存或放弃后再切换出口','warn');return}try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName([...withExitGroups(exits,arr(config.routing?.device_groups)),...arr(config.customExits)],id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[dirty,exits,config.customExits,config.routing?.device_groups,refreshConfig,refreshStatus,toast]);
  const clearMessages=useCallback(async()=>{if(!messages.length||!confirm('清空本设备的消息历史？'))return;try{await call('goClearMessages');messageIDs.current.clear();setMessages([]);setUnreadMessages(0);toast('消息历史已清空')}catch(e){toast('清空消息失败：'+(e?.message||String(e)),'danger')}},[messages.length,toast]);
  const clearConnections=useCallback(async()=>{await call('goClearConnections');await refreshConnections();toast('已清理结束连接历史')},[refreshConnections,toast]);
  const clearLogs=useCallback(async()=>{await call('goClearLogs');setLogs([]);toast('日志已清空')},[toast]);
  const copyLogs=useCallback(async()=>{const text=logs.join('\n');if(hasBridge('goCopyClipboard'))await call('goCopyClipboard',text);else await navigator.clipboard.writeText(text);toast('日志已复制')},[logs,toast]);
- const requestPage=useCallback(next=>{if(next===page)return;if(dirty){setPendingAction({kind:'page',target:next});return}setFileTarget(null);setPage(next)},[dirty,page]);
+ // Native menus and older bookmarks may still ask for pre-refactor page ids;
+ // resolve them to the page that now owns that content.
+ const requestPage=useCallback(raw=>{const next=resolvePage(raw)||'overview';if(next===page)return;if(dirty){setPendingAction({kind:'page',target:next});return}setFileTarget(null);setPage(next)},[dirty,page]);
  const openDeviceFiles=useCallback(deviceID=>{
   if(dirty){setPendingAction({kind:'page',target:'files',fileDevice:deviceID});return}
   setFileTarget({device:deviceID,serial:Date.now()});
@@ -895,27 +936,53 @@ export default function App(){
  const approval=String(status.approvalState||'').toLowerCase();
  const approvalPending=/pending|wait|approval|待审批/.test(approval);
  const approvalRejected=/reject|denied|revoked|撤销|拒绝/.test(approval);
- const title=page==='settings'?'常规设置':PAGE_NAMES[page]||'RelayProxy';
- const category=CONFIG_IDS.has(page)?'网络配置':(page==='settings'||SETTINGS_IDS.has(page))?'设置':'';
+ const title=PAGE_NAMES[page]||'RelayProxy';
+ const pageDesc=PAGE_DESC[page]||'';
  const groupExits=withExitGroups(exits,arr(config.routing?.device_groups));
+ const refreshExitInventory=()=>{void Promise.all([refreshExits(),refreshTargets(),refreshFilePeers()])};
  const p={status,config,exits:groupExits,setv,save,toast,dirty};
  let content;
- if(page==='overview')content=<Overview {...p} traffic={connections} history={history} onRefresh={refreshStatus} onGoto={requestPage}/>;
- else if(page==='devices')content=<Devices {...p} onRefresh={refreshStatus}/>;
- else if(page==='connection')content=<Connection {...p} onReload={()=>requestLifecycle('reload')}/>;
- else if(page==='gateway')content=<GatewayPage {...p} onGoto={requestPage}/>;
- else if(page==='exits')content=<><DeviceCenter status={status} exits={exits} targets={targets} filePeers={filePeers} config={config} onSpeed={id=>{setSpeedExit(id);setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} onGoto={requestPage} onFiles={openDeviceFiles} onConnectRDP={connectDeviceRDP} onRefresh={()=>{void Promise.all([refreshExits(),refreshTargets(),refreshFilePeers()])}}/><DeviceGroups {...p} exits={exits}/></>;
- else if(page==='proxy')content=<ProxyPage {...p} onService={()=>requestPage('settings')} onRefreshCapabilities={refreshNetworkCapabilities}/>;
- else if(page==='exitshare')content=<ExitShare {...p}/>;
+ if(page==='overview')content=<Overview {...p} traffic={connections} history={history} onRefresh={refreshStatus} onGoto={requestPage} onSave={save} onSelectExit={select}/>;
+ else if(page==='exits')content=<ExitsPage {...p} exits={exits} targets={targets} filePeers={filePeers} selectedExit={selectedExit} onSelectExit={select} onSpeed={id=>{setSpeedExit(id);setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} onConnectRDP={connectDeviceRDP} onFiles={openDeviceFiles} onRefresh={refreshExitInventory}/>;
  else if(page==='routing')content=<RoutingPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;
- else if(page==='dns')content=<DNSPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃 DNS 设置草稿')}}/>;
+ else if(page==='dns')content=<DNSPage {...p} onDiscard={async()=>{await refreshConfig();toast('已放弃 DNS 设置草稿')}}/>;
+ else if(page==='access')content=<AccessPage {...p} onRefreshCapabilities={refreshNetworkCapabilities} onConfigRefresh={async()=>{await refreshConfig();await refreshStatus()}}/>;
+ else if(page==='server')content=<ServerPage {...p} onRefresh={refreshStatus} onReload={()=>requestLifecycle('reload')}/>;
+ else if(page==='exitshare')content=<ExitShare {...p}/>;
  else if(page==='files')content=null;
- else if(page==='rdp')content=<RDPPage status={status} config={config} targets={targets} refreshTargets={refreshTargets} refreshStatus={refreshStatus} toast={toast}/>;
- else if(page==='rdp-settings')content=<RDPSettingsPage status={status} config={config} setv={setv} save={save} dirty={dirty} toast={toast} onGoto={requestPage}/>;
- else if(page==='messages')content=<MessagesPage messages={messages} refresh={refreshMessages} clear={clearMessages} toast={toast}/>;
- else if(page==='message-settings')content=<MessageSettingsPage config={config} setv={setv} save={save} onGoto={requestPage}/>;
+ else if(page==='rdp')content=<RDPPage status={status} config={config} targets={targets} refreshTargets={refreshTargets} refreshStatus={refreshStatus} toast={toast} setv={setv} save={save} dirty={dirty} onRestart={()=>requestLifecycle('restart')}/>;
+ else if(page==='messages')content=<MessagesPage messages={messages} refresh={refreshMessages} clear={clearMessages} toast={toast} config={config} setv={setv} save={save} dirty={dirty}/>;
  else if(page==='monitor')content=<MonitorPage connections={connections} history={history} exits={exits} customExits={config.customExits} refresh={refreshConnections} clear={clearConnections} openNative={()=>call('goOpenConnections')}/>;
  else if(page==='diagnostics')content=<DiagnosticsPage diagnostics={diagnostics} logs={logs} exits={exits} customExits={config.customExits} refreshDiagnostics={refreshDiagnostics} clearLogs={clearLogs} copyLogs={copyLogs}/>;
- else content=<SettingsPage config={config} setv={setv} save={save} toast={toast} dirty={dirty} onGoto={requestPage} onConfigRefresh={async()=>{await refreshConfig();await refreshStatus()}} onRefreshCapabilities={refreshNetworkCapabilities} onReload={()=>requestLifecycle('reload')} onRestart={()=>requestLifecycle('restart')} onQuit={()=>requestLifecycle('quit')}/>;
- return <div className="app-shell"><aside className="sidebar"><div className="nav-scroll">{NAV.map(g=><div className="nav-group" key={g.group}><div className="group-name">{g.group}</div>{g.items.map(x=><button key={x[0]} type="button" title={x[2]} aria-label={x[2]} aria-current={(x[0]==='routing'?CONFIG_IDS.has(page):page===x[0])?'page':undefined} className={cx('nav-item',(x[0]==='routing'?CONFIG_IDS.has(page):page===x[0])&&'active')} onClick={()=>requestPage(x[0])}><span className="nav-icon"><Icon name={x[1]}/></span><span>{x[2]}</span>{x[0]==='messages'&&unreadMessages>0&&<i className="nav-dot" title={unreadMessages+' 条新消息'}>{unreadMessages>9?'9+':unreadMessages}</i>}</button>)}</div>)}</div><div className="sidebar-footer"><button type="button" title="设置" aria-label="设置" aria-current={(page==='settings'||SETTINGS_IDS.has(page))?'page':undefined} className={cx('nav-item',(page==='settings'||SETTINGS_IDS.has(page))&&'active')} onClick={()=>requestPage('settings')}><span className="nav-icon"><Icon name="settings"/></span><span>设置</span></button><div className="connection-mini"><span className={cx('dot',status.connected?'online':'offline')}/><div><strong>{status.connected?'已连接':'未连接'}</strong><span>{status.connected?((status.latency||0)+' ms'):'—'}</span></div></div></div></aside><section className="workspace"><header className="topbar"><div className="crumb">{category&&<><span className="nav-category-crumb">{category}</span><span aria-hidden="true">/</span></>}<b>{title}</b><span>·</span><span>{status.deviceName||config.deviceName||'本设备'}</span></div><div className="top-actions"><button type="button" className="global-transfer-trigger" aria-label={'传输任务，'+transferSummary.running+' 项进行中'} aria-expanded={transferPanelOpen} onClick={()=>setTransferPanelOpen(open=>!open)}><Icon name="activity" size={16}/><span>传输任务</span>{transferSummary.running>0&&<span className="global-transfer-count">{transferSummary.running}</span>}</button>{dirty&&<Badge tone="blue">未保存</Badge>}{config.restartRequired&&<Badge tone="warn">需重启</Badge>}</div></header><main className="main">{CONFIG_IDS.has(page)&&<ConfigNavigation page={page} onGoto={requestPage}/>} {SETTINGS_IDS.has(page)&&<SettingsNavigation page={page} onGoto={requestPage}/>} {approvalPending&&<div className="notice warn state-banner"><b>设备等待审批。</b> 请在 Relay Server 使用当前身份审批此设备所需能力。</div>}{approvalRejected&&<div className="notice danger state-banner"><b>设备授权不可用。</b> 当前设备可能已被拒绝或撤销，代理、出口与 RDP 能力会受限。</div>}{!loaded&&<div className="notice danger state-banner"><b>配置尚未加载。</b> {configError||'正在连接配置接口…'} <Button quiet onClick={()=>void refreshConfig()}>重试读取</Button></div>}{exitUnavailable&&<div className="notice warn state-banner"><b>已选出口不可用。</b> RelayProxy 不会静默改选其他出口；请在「网络配置 → 分流规则」检查默认代理出口。 <Button quiet onClick={()=>requestPage('routing')}>查看配置</Button></div>}{content}<FileSharingPage toast={toast} active={page==='files'} navigationTarget={fileTarget} transferOpen={transferPanelOpen} onTransferOpenChange={setTransferPanelOpen} onTransferSummary={syncTransferSummary}/></main></section><div id="agent-file-transfer-portal"/><SpeedModal open={speedOpen} exits={exits} status={status} initialExit={speedExit} onClose={()=>setSpeedOpen(false)} toast={toast}/><BatchSpeedModal open={batchSpeedOpen} exits={exits} onClose={()=>setBatchSpeedOpen(false)} toast={toast}/><Modal open={!!pendingAction} title="有未保存的修改" onClose={()=>setPendingAction(null)} footer={<><Button onClick={()=>setPendingAction(null)}>继续编辑</Button><Button danger onClick={discardAndContinue}>放弃修改并继续</Button></>}><div className="notice warn">当前页面存在尚未保存的配置草稿。离开、重载、重启或退出会丢失这些修改。</div></Modal><Modal open={confirmQuit} title="退出 RelayProxy" onClose={()=>setConfirmQuit(false)} footer={<><Button onClick={()=>setConfirmQuit(false)}>取消</Button><Button danger onClick={()=>{setConfirmQuit(false);void quitApp()}}>确认退出</Button></>}><div className="notice">退出后将停止当前代理进程和连接。</div></Modal>{toastState&&<div className={cx('toast show',toastState.t==='danger'&&'danger',toastState.t==='warn'&&'warn')}>{toastState.message}</div>}</div>
+ else content=<SettingsPage config={config} setv={setv} save={save} toast={toast} onReload={()=>requestLifecycle('reload')} onRestart={()=>requestLifecycle('restart')} onQuit={()=>requestLifecycle('quit')}/>;
+ return <div className="app-shell">
+ <aside className="sidebar">
+  <div className="nav-scroll">{NAV.map(g=><div className="nav-group" key={g.group}><div className="group-name">{g.group}</div>{g.items.map(x=><button key={x[0]} type="button" title={x[3]||x[2]} aria-label={x[2]} aria-current={page===x[0]?'page':undefined} className={cx('nav-item',page===x[0]&&'active')} onClick={()=>requestPage(x[0])}><span className="nav-icon"><Icon name={x[1]}/></span><span>{x[2]}</span>{x[0]==='messages'&&unreadMessages>0&&<i className="nav-dot" title={unreadMessages+' 条新消息'}>{unreadMessages>9?'9+':unreadMessages}</i>}</button>)}</div>)}</div>
+  <div className="sidebar-footer"><button type="button" title="外观、启动与客户端维护" aria-label="设置" aria-current={page==='settings'?'page':undefined} className={cx('nav-item',page==='settings'&&'active')} onClick={()=>requestPage('settings')}><span className="nav-icon"><Icon name="settings"/></span><span>设置</span></button><div className="connection-mini"><span className={cx('dot',status.connected?'online':'offline')}/><div><strong>{status.connected?'已连接':'未连接'}</strong><span>{status.connected?((status.latency||0)+' ms'):'—'}</span></div></div></div>
+ </aside>
+ <section className="workspace">
+  <header className="topbar">
+   <div className="crumb"><b>{title}</b>{pageDesc&&<span className="crumb-desc">{pageDesc}</span>}</div>
+   <div className="top-actions">
+    <ExitSwitcher exits={groupExits} customExits={config.customExits} selectedExit={selectedExit} connected={!!status.connected} dirty={dirty} onSelect={select}/>
+    <button type="button" className="global-transfer-trigger" aria-label={'传输任务，'+transferSummary.running+' 项进行中'} aria-expanded={transferPanelOpen} onClick={()=>setTransferPanelOpen(open=>!open)}><Icon name="activity" size={16}/><span>传输任务</span>{transferSummary.running>0&&<span className="global-transfer-count">{transferSummary.running}</span>}</button>
+    {dirty&&<Badge tone="blue">未保存</Badge>}{config.restartRequired&&<Badge tone="warn">需重启</Badge>}
+   </div>
+  </header>
+  <main className="main">
+   {approvalPending&&<div className="notice warn state-banner"><b>设备等待审批。</b> 请在 Relay Server 使用当前身份审批此设备所需能力。</div>}
+   {approvalRejected&&<div className="notice danger state-banner"><b>设备授权不可用。</b> 当前设备可能已被拒绝或撤销，代理、出口与 RDP 能力会受限。</div>}
+   {!loaded&&<div className="notice danger state-banner"><b>配置尚未加载。</b> {configError||'正在连接配置接口…'} <Button quiet onClick={()=>void refreshConfig()}>重试读取</Button></div>}
+   {exitUnavailable&&<div className="notice warn state-banner"><b>已选出口不可用。</b> RelayProxy 不会静默改选其他出口；请在「出口」页重新选择默认出口，或切回自动选择。 <Button quiet onClick={()=>requestPage('exits')}>前往出口页</Button>{!dirty&&<Button quiet onClick={()=>select('')}>改为自动</Button>}</div>}
+   {content}
+   <FileSharingPage toast={toast} active={page==='files'} navigationTarget={fileTarget} transferOpen={transferPanelOpen} onTransferOpenChange={setTransferPanelOpen} onTransferSummary={syncTransferSummary}/>
+  </main>
+ </section>
+ <div id="agent-file-transfer-portal"/>
+ <SpeedModal open={speedOpen} exits={exits} status={status} initialExit={speedExit} onClose={()=>setSpeedOpen(false)} toast={toast}/>
+ <BatchSpeedModal open={batchSpeedOpen} exits={exits} onClose={()=>setBatchSpeedOpen(false)} toast={toast}/>
+ <Modal open={!!pendingAction} title="有未保存的修改" onClose={()=>setPendingAction(null)} footer={<><Button onClick={()=>setPendingAction(null)}>继续编辑</Button><Button danger onClick={discardAndContinue}>放弃修改并继续</Button></>}><div className="notice warn">当前页面存在尚未保存的配置草稿。离开、重载、重启或退出会丢失这些修改。</div></Modal>
+ <Modal open={confirmQuit} title="退出 RelayProxy" onClose={()=>setConfirmQuit(false)} footer={<><Button onClick={()=>setConfirmQuit(false)}>取消</Button><Button danger onClick={()=>{setConfirmQuit(false);void quitApp()}}>确认退出</Button></>}><div className="notice">退出后将停止当前代理进程和连接。</div></Modal>
+ {toastState&&<div className={cx('toast show',toastState.t==='danger'&&'danger',toastState.t==='warn'&&'warn')}>{toastState.message}</div>}
+ </div>
 }

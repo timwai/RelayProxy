@@ -4,11 +4,11 @@ import {Badge,Button,Field,Input,Modal,Select} from './App.jsx';
 const arr=v=>Array.isArray(v)?v:[];
 const newGroupID=()=>'group:'+(globalThis.crypto?.randomUUID?.()||Date.now().toString(36)+'-'+Math.random().toString(36).slice(2));
 
-export default function DeviceGroups({config,exits,setv,save,dirty,toast}){
+export default function DeviceGroups({config,exits,setv,save,dirty,toast,selectedExit,onSelectExit}){
  const groups=arr(config.routing?.device_groups);
  const [editing,setEditing]=useState(null);
  const idOf=e=>e.deviceId||e.id;
- const refs=id=>[config.defaultExitId===id&&'默认出口',config.upstreamExitId===id&&'共享上游',config.gateway?.exit_id===id&&'网关默认出口',config.routing?.dns_exit_id===id&&'DNS 出口',...arr(config.routing?.rules).filter(r=>r.exit_id===id).map(r=>'规则 '+r.name),...arr(config.routing?.subscriptions).filter(r=>r.exit_id===id).map(r=>'订阅 '+r.name)].filter(Boolean);
+ const refs=id=>[(selectedExit??config.defaultExitId)===id&&'默认出口',config.upstreamExitId===id&&'共享上游',config.gateway?.exit_id===id&&'网关默认出口',config.routing?.dns_exit_id===id&&'DNS 出口',...arr(config.routing?.rules).filter(r=>r.exit_id===id).map(r=>'规则 '+r.name),...arr(config.routing?.subscriptions).filter(r=>r.exit_id===id).map(r=>'订阅 '+r.name)].filter(Boolean);
  const name=id=>exits.find(e=>idOf(e)===id)?.name||id;
  const online=id=>exits.some(e=>idOf(e)===id&&e.online!==false);
  const update=next=>setv('routing.device_groups',next);
@@ -25,10 +25,10 @@ export default function DeviceGroups({config,exits,setv,save,dirty,toast}){
  return <section className="card device-groups">
   <div className="device-groups-head"><div><div className="eyebrow">DEVICE GROUPS</div><h2>设备分组</h2></div><Button onClick={()=>setEditing({id:newGroupID(),name:'',members:[]})}>新增分组</Button></div>
   <div className="mini">按成员顺序选择首个在线且已授权的出口，连接失败时尝试下一成员。已有 TCP 连接与 UDP 会话保持原出口；主设备恢复后，新连接优先使用主设备。</div>
-  {groups.map(g=>{const used=refs(g.id),ready=g.members.some(online);return <div className="setting" key={g.id}>
-   <div className="grow"><b>{g.name}</b><div className="mini">{g.members.map(name).join(' → ')}</div><div className="mini">{used.join(' · ')||'尚未引用'}</div></div>
+  {groups.map(g=>{const used=refs(g.id),ready=g.members.some(online),isDefault=(selectedExit??config.defaultExitId)===g.id;return <div className="setting" key={g.id}>
+   <div className="grow"><b>{g.name}</b>{isDefault&&<Badge tone="blue">默认出口</Badge>}<div className="mini">{g.members.map(name).join(' → ')}</div><div className="mini">{used.join(' · ')||'尚未引用'}</div></div>
    <Badge tone={ready?'ok':'neutral'}>{ready?'可用':'无在线成员'}</Badge>
-   <div className="actions"><Button quiet onClick={()=>setEditing({...g,members:[...g.members]})}>编辑</Button><Button quiet danger disabled={used.length>0} title={used.length?'请先解除引用':''} onClick={()=>update(groups.filter(x=>x.id!==g.id))}>删除</Button></div>
+   <div className="actions">{onSelectExit&&!isDefault&&<Button quiet disabled={!ready||dirty} title={dirty?'请先保存或放弃当前修改':'将此分组设为默认出口，立即生效'} onClick={()=>onSelectExit(g.id)}>设为默认</Button>}<Button quiet onClick={()=>setEditing({...g,members:[...g.members]})}>编辑</Button><Button quiet danger disabled={used.length>0} title={used.length?'请先解除引用':''} onClick={()=>update(groups.filter(x=>x.id!==g.id))}>删除</Button></div>
   </div>})}
   {!groups.length&&<div className="empty">尚无设备分组。创建后可在默认出口、分流规则、订阅、DNS 出口和局域网网关中选择。</div>}
   {dirty&&<div className="actions end top-gap"><Button primary onClick={()=>save({routing:{device_groups:groups}})}>保存设备分组</Button></div>}

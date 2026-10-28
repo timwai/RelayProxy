@@ -50,15 +50,13 @@ test('every page has one compact title in the topbar and actions moved below',()
  assert.doesNotMatch(page,/className="file-share-tabs"/);
 });
 
-// Moving a page into Settings must not invalidate its existing deep link.
-test('settings consolidates device identity, proxy, routing, DNS, exit sharing and diagnostics',()=>{
+// Merging pages must not invalidate their existing deep links.
+test('merged configuration pages keep deep links through aliases',()=>{
  const app=read('./App.jsx');
- for(const id of ['devices','proxy','routing','dns','exitshare','diagnostics'])
-  assert.match(app,new RegExp("'"+id+"'"));
- assert.match(app,/SETTINGS_IDS=new Set/);
- assert.match(app,/SETTINGS_SECTIONS\.map/);
- assert.match(app,/\.\.\.SETTINGS_IDS,'settings'/);
- assert.match(app,/SettingsNavigation page={page} onGoto={requestPage}/);
+ for(const id of ['routing','dns','access','server','exitshare','diagnostics'])
+  assert.match(app,new RegExp("\\['"+id+"','"));
+ assert.match(app,/const PAGE_ALIASES=\{devices:'server',connection:'server',proxy:'access',gateway:'access'/);
+ assert.match(app,/const PAGE_IDS=new Set\(Object\.keys\(PAGE_NAMES\)\)/);
 });
 test('authorized folder browsing prewarms direct paths without embedding download tickets',()=>{
  const page=read('./FileSharingPage.jsx');

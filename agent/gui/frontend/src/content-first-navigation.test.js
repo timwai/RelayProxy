@@ -8,16 +8,21 @@ const css=load('./styles.css'),sharingCSS=load('./fileSharing.css'),browserCSS=l
 const fragment=(source,from,to)=>{const a=source.indexOf(from),b=source.indexOf(to,a);assert.ok(a>=0&&b>a,`missing section: ${from}`);return source.slice(a,b)};
 const routing=fragment(app,'function RoutingPage(','// The three presets intentionally');
 
-test('routing rules and subscriptions render before folded global policy',()=>{
+test('routing page leads with a compact policy strip, then rules and subscriptions',()=>{
+ const policy=routing.indexOf('<Card className="routing-policy">');
  const rules=routing.indexOf('<Card title="规则列表"');
  const subscriptions=routing.indexOf('<Card title="规则订阅"');
- const advanced=routing.indexOf('<details className="routing-strategy-disclosure">');
- const save=routing.indexOf('<SaveBar dirty={dirty} label="保存分流规则"');
- assert.ok(rules>=0&&subscriptions>rules&&advanced>subscriptions&&save>advanced);
- assert.match(routing,/label="默认代理出口"/);
- assert.match(routing,/setv\('routing\.mode',e\.target\.value\)/);
- assert.match(routing,/save\(\{routing:routingPagePatch\(r\),proxy:\{defaultExitId:config\.defaultExitId\|\|''\}\}\)/);
- assert.match(css,/\.routing-strategy-disclosure>summary/);
+ const save=routing.indexOf('<SaveBar dirty={dirty} label="保存分流"');
+ assert.ok(policy>=0&&rules>policy&&subscriptions>rules&&save>subscriptions);
+ assert.match(routing,/role="radiogroup" aria-label="路由模式"/);
+ assert.match(routing,/onClick=\{\(\)=>setv\('routing\.mode',v\)\}/);
+ assert.match(routing,/aria-label="规则未命中时" disabled=\{mode!=='rule'\}/);
+ // The default exit is switched on the 出口 page (immediate), not saved here.
+ assert.doesNotMatch(routing,/label="默认代理出口"|setv\('defaultExitId'/);
+ assert.match(routing,/onGoto\('exits'\)/);
+ assert.match(routing,/onSave=\{\(\)=>save\(\{routing:routingPagePatch\(r\)\}\)\}/);
+ assert.doesNotMatch(routing,/routing-strategy-disclosure/);
+ assert.match(css,/\.routing-policy-row\{display:flex/);
 });
 
 test('local file sharing leads with folder cards, keeps service switches available below',()=>{

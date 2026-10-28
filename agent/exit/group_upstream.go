@@ -23,11 +23,18 @@ func (c *upstreamPacketConn) Write(b []byte) (int, error) {
 }
 func (c *upstreamPacketConn) RemoteAddr() net.Addr          { return net.UDPAddrFromAddrPort(c.target) }
 func (c *upstreamPacketConn) SetDeadline(t time.Time) error { return c.PacketConn.SetDeadline(t) }
+
+// groupTCP keeps the same multi-address fallback as the SOCKS5/HTTP upstream
+// modes: one unreachable permitted address must not fail the whole request.
 func groupTCP(ctx context.Context, d proxy.TunnelDialer, id string, ips []net.IP, port uint16) (net.Conn, string, error) {
 	if len(ips) == 0 {
 		return nil, "", errors.New("no permitted target address")
 	}
-	target := ips[0].String()
-	c, e := d.DialTCP(ctx, id, target, port)
-	return c, net.JoinHostPort(target, strconv.Itoa(int(port))), e
+	c, ip, e := dialTCPIPsWith(ctx, ips, func(attemptCtx context.Context, ip net.IP) (net.Conn, error) {
+		return d.DialTCP(attemptCtx, id, ip.String(), port)
+	})
+	if e != nil {
+		return nil, "", e
+	}
+	return c, net.JoinHostPort(ip.String(), strconv.Itoa(int(port))), nil
 }

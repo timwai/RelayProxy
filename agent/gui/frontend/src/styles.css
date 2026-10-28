@@ -53,6 +53,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-vis
 .card{background:var(--surface2);border:1px solid var(--line);border-radius:var(--radius);padding:18px;box-shadow:0 7px 22px rgba(15,23,42,.035);min-width:0}
 .main>*+*{margin-top:14px}
 .card-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.card-head h2{font-size:15px;margin:2px 0 0}
+.device-groups-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:14px}.device-groups-head h2{font-size:15px;margin:2px 0 0}.device-groups .mini+.setting{margin-top:4px}.device-group-members{border:1px solid var(--line);border-radius:10px;padding:0 12px}.device-group-members>.setting{padding:9px 0}.device-group-members>.mini{padding:10px 0}
 .eyebrow{font-size:9px;text-transform:uppercase;letter-spacing:1.5px;color:var(--subtle);font-weight:800}
 .cards-2,.cards-3,.cards-4{display:grid;gap:13px}.cards-2{grid-template-columns:repeat(2,minmax(0,1fr))}.cards-3{grid-template-columns:repeat(3,minmax(0,1fr))}.cards-4{grid-template-columns:repeat(4,minmax(0,1fr))}.compact>div{padding:5px 3px}
 .row{display:flex;align-items:center;gap:8px}.between{justify-content:space-between}.grow{flex:1;min-width:0}.stack{display:flex;flex-direction:column;gap:10px}.muted{color:var(--muted)}.mini{font-size:10.5px;color:var(--muted);line-height:1.55}.strong{font-weight:750}.big{font-size:25px;font-weight:820;line-height:1.15}.small-big{font-size:19px}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}

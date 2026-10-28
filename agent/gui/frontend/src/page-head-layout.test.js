@@ -8,7 +8,8 @@ test('page actions are portaled into the existing card heading',()=>{
  assert.match(app,/page-actions-contextual/);
  assert.match(app,/page-more-menu/);
  assert.match(app,/createPortal\(controls,host\)/);
- assert.match(app,/querySelector\('\.card-head'\)/);
+ assert.match(app,/querySelectorAll\('\.card-head'\)/);
+ assert.match(app,/find\(el=>el\.offsetParent!==null\)/);
  assert.doesNotMatch(app,/id="agent-page-actions"/);
  assert.match(styles,/\.page-head\.page-actions-contextual\{/);
 });

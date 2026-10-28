@@ -2,11 +2,13 @@ package exit
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/netip"
 	"relayproxy/internal/protocol"
+	"sync"
 	"testing"
 	"time"
 )
@@ -71,6 +73,64 @@ func TestExitRejectsForwardingLoopBeforeDial(t *testing.T) {
 		if resp.Success || resp.ErrorCode != protocol.ErrCodeInvalidRequest {
 			t.Fatal(resp)
 		}
+	}
+}
+
+type recordingTunnelDialer struct {
+	mu     sync.Mutex
+	hosts  []string
+	failOn map[string]error
+}
+
+func (d *recordingTunnelDialer) DialTCP(_ context.Context, _ string, host string, _ uint16) (net.Conn, error) {
+	d.mu.Lock()
+	d.hosts = append(d.hosts, host)
+	err := d.failOn[host]
+	d.mu.Unlock()
+	if err != nil {
+		return nil, err
+	}
+	c, s := net.Pipe()
+	_ = s.Close()
+	return c, nil
+}
+
+func (d *recordingTunnelDialer) DialUDP(context.Context, string, string, uint16) (net.PacketConn, error) {
+	return nil, errors.New("not used")
+}
+
+func TestGroupTCPFallsBackToNextPermittedAddress(t *testing.T) {
+	d := &recordingTunnelDialer{failOn: map[string]error{"10.0.0.1": errors.New("unreachable")}}
+	ips := []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2")}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, target, err := groupTCP(ctx, d, "group:home", ips, 443)
+	if err != nil {
+		t.Fatalf("groupTCP: %v", err)
+	}
+	defer conn.Close()
+	if target != "10.0.0.2:443" {
+		t.Fatalf("target = %q, want fallback address", target)
+	}
+	d.mu.Lock()
+	defer d.mu.Unlock()
+	if len(d.hosts) < 2 {
+		t.Fatalf("dialed hosts = %v, want both permitted addresses attempted", d.hosts)
+	}
+}
+
+func TestGroupTCPReportsErrorWhenEveryAddressFails(t *testing.T) {
+	d := &recordingTunnelDialer{failOn: map[string]error{
+		"10.0.0.1": errors.New("down-1"),
+		"10.0.0.2": errors.New("down-2"),
+	}}
+	ips := []net.IP{net.ParseIP("10.0.0.1"), net.ParseIP("10.0.0.2")}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, _, err := groupTCP(ctx, d, "group:home", ips, 443); err == nil {
+		t.Fatal("expected error when all permitted addresses fail")
 	}
 }
 

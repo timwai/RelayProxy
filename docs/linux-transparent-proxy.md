@@ -32,25 +32,51 @@ sudo modprobe xt_NFQUEUE
 
 ## Docker Compose
 
-使用仓库根目录的 `docker-compose.agent.yml`。运行时镜像包含 CA 证书、iptables、nftables 和 iproute2，支持本机透明代理及局域网网关，以下内容全部在宿主机：
+使用仓库根目录的 `docker-compose.agent.yml`。运行时镜像包含 CA 证书、iptables、nftables 和 iproute2；静态 Linux Agent 程序与完整配置目录从宿主机挂载：
 
 - `./bin/relay-agent` -> 容器 `/opt/relayproxy/bin/relay-agent`（只读）；
-- `./config/relay-agent.yaml` -> 容器 `/data/relay-agent.yaml`（目录可写，配对保存需要原子替换）。
+- `./config/` -> 容器 `/data/`（可写）。`relay-agent.yaml`、`device-identity.json` 和其他本地状态都保存在此目录，重建容器不会丢失设备身份；不要只挂载单个 YAML 文件。
 
-执行：
+先把对应宿主机架构的新版 `relay-agent` 放入 `./bin/`，再执行：
 
 ```bash
+mkdir -p ./bin ./config
+cp .env.agent.example .env.agent
 chmod +x ./bin/relay-agent
-docker compose -f docker-compose.agent.yml up -d --build
+# 编辑 .env.agent，填写服务器、设备身份和其他所需参数
+docker compose --env-file .env.agent -f docker-compose.agent.yml up -d --build
+docker compose --env-file .env.agent -f docker-compose.agent.yml logs -f relay-agent
 ```
 
-Compose 使用 host network/PID namespace 和 `NET_ADMIN`、`NET_RAW`，因此透明代理作用于宿主机网络。若 Web 管理需要从其他机器访问，请在外置配置中设置非回环 `web.listen`，并必须配置至少 32 字节的随机 `web.token`；默认页面仅监听 `127.0.0.1:9090`。内置 Web 服务是 HTTP，跨不可信网络时应放在 HTTPS 反向代理或 SSH 隧道后，避免 token 明文传输。
+`.env.agent` 可配置以下变量；布尔值使用 `true` / `false`（也接受 `1` / `0`），端口范围为 1–65535：
 
-启用局域网网关时，`gateway.interface` 使用 Linux 宿主机的 LAN 网卡名；配置与接入方法见[网关使用说明](gateway-and-groups-usage.md)。更新 Dockerfile 后需要执行上述 `up -d --build` 重建镜像并重建容器，仅 `restart` 不会安装新增依赖。
+| 环境变量 | 含义 |
+| --- | --- |
+| `RELAY_AGENT_BIN_DIR` | 宿主机程序目录，默认 `./bin`，只读挂载 |
+| `RELAY_AGENT_CONFIG_DIR` | 宿主机配置目录，默认 `./config`；Compose 将其挂载到容器 `/data` |
+| `RELAY_AGENT_IMAGE` | 运行时镜像名，默认 `relayproxy-agent-runtime:alpine` |
+| `RELAY_AGENT_SERVER` | Server 域名或 IP，不含协议和端口 |
+| `RELAY_AGENT_SERVER_TCP_PORT` / `RELAY_AGENT_SERVER_QUIC_PORT` | Server TCP / QUIC 端口 |
+| `RELAY_AGENT_SERVER_TLS_ENABLED` / `RELAY_AGENT_INSECURE_TLS` | TLS 开关 / 跳过证书验证；通常保持默认值 |
+| `RELAY_AGENT_DEVICE_NAME` / `RELAY_AGENT_IDENTITY_ID` | 设备名 / Server 生成的 16 位身份 ID |
+| `RELAY_AGENT_TRANSPORT_MODE` | `auto` / `quic_only` / `tcp_only` |
+| `RELAY_AGENT_DEFAULT_EXIT` | 默认出口 ID |
+| `RELAY_AGENT_TRANSPARENT_PROXY` | 本机透明代理开关；与局域网网关独立 |
+| `RELAY_AGENT_SOCKS5_ENABLED` / `RELAY_AGENT_SOCKS5_LISTEN` / `RELAY_AGENT_SOCKS5_PORT` | SOCKS5 开关、监听 IP、端口 |
+| `RELAY_AGENT_HTTP_ENABLED` / `RELAY_AGENT_HTTP_LISTEN` / `RELAY_AGENT_HTTP_PORT` | HTTP 代理开关、监听 IP、端口 |
+| `RELAY_AGENT_WEB_ENABLED` / `RELAY_AGENT_WEB_LISTEN` / `RELAY_AGENT_WEB_PORT` / `RELAY_AGENT_WEB_TOKEN` | Web 管理开关、监听 IP、端口、访问 Token |
+
+未设置或留空的参数保留 YAML 中的值；首次运行使用 Agent 默认值。非空环境变量在每次启动时覆盖对应 YAML 字段，经校验后原子保存，Web 页面读取同一份配置。比如 `RELAY_AGENT_TRANSPARENT_PROXY=false` 可显式关闭透明代理，留空则保留当前开关。若希望以后由 Web 页面管理某项，修改后应将相应环境变量留空；留空不会清除已保存的值，需要清除字符串时请修改 YAML 或管理页。复杂分流规则与局域网网关参数继续在 YAML 或管理页配置。
+
+环境变量需要新版 Agent 支持，仅重建运行时镜像不会更新外挂程序。程序本身也支持 `RELAY_AGENT_CONFIG_DIR` 选择配置目录；Compose 内固定为 `/data`，在宿主机启动程序时则指实际目录。显式 `--config` / `--config-dir` 优先于环境变量目录，已有 CLI 参数仍可覆盖本次运行设置。
+
+Compose 使用 host network/PID namespace 和 `NET_ADMIN`、`NET_RAW`，因此透明代理作用于宿主机网络。默认 Web 页面仅监听 `127.0.0.1:9090`。需要局域网管理时，设置 `RELAY_AGENT_WEB_LISTEN=0.0.0.0` 和至少 32 字节的随机 `RELAY_AGENT_WEB_TOKEN`；没有环境变量时也可设置外置 YAML 的 `web.listen` / `web.token`。包含 `$`、`#` 的值在 `.env.agent` 中用单引号包裹。`.env.agent` 已加入 Git 忽略。内置 Web 服务是 HTTP，跨不可信网络时应放在 HTTPS 反向代理或 SSH 隧道后。
+
+启用局域网网关时，`gateway.interface` 使用 Linux 宿主机的 LAN 网卡名；配置与接入方法见[网关使用说明](gateway-and-groups-usage.md)。修改 `.env.agent` 后重新执行上述 `up -d` 以重建容器并注入变量；`restart` 不会读取新环境变量。更新 Dockerfile 后使用 `up -d --build`。
 
 ## 无桌面环境配对
 
-容器启动后，Web 管理默认位于宿主机 `http://127.0.0.1:9090/`，页面与 Windows GUI 相同，可直接填写服务端管理地址、一次性配对码、设备名和模式完成配对。远程 Linux 主机保持默认回环监听时，可在管理电脑建立隧道：
+容器启动后，Web 管理默认位于宿主机 `http://127.0.0.1:9090/`，页面与 Windows GUI 相同，可填写 Server 地址、服务端生成的设备身份 ID 和设备名，然后在服务端审批设备。也可通过上述环境变量预先填写。远程 Linux 主机保持默认回环监听时，可在管理电脑建立隧道：
 
 ```bash
 ssh -L 9090:127.0.0.1:9090 user@linux-host

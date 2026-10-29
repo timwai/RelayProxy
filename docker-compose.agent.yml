@@ -6,7 +6,7 @@ services:
     build:
       context: ./docker/agent
       dockerfile: Dockerfile
-    image: relayproxy-agent-runtime:alpine
+    image: ${RELAY_AGENT_IMAGE:-relayproxy-agent-runtime:alpine}
     container_name: relay-agent
     restart: unless-stopped
     init: true
@@ -23,20 +23,40 @@ services:
     # Keep the container user able to write the host bind mount.
     user: "0:0"
 
+    # Blank values preserve the mounted YAML. Non-empty values override the
+    # corresponding settings at startup and are saved atomically for the Web UI.
+    environment:
+      RELAY_AGENT_CONFIG_DIR: /data
+      RELAY_AGENT_SERVER: ${RELAY_AGENT_SERVER:-}
+      RELAY_AGENT_SERVER_TCP_PORT: ${RELAY_AGENT_SERVER_TCP_PORT:-}
+      RELAY_AGENT_SERVER_QUIC_PORT: ${RELAY_AGENT_SERVER_QUIC_PORT:-}
+      RELAY_AGENT_SERVER_TLS_ENABLED: ${RELAY_AGENT_SERVER_TLS_ENABLED:-}
+      RELAY_AGENT_INSECURE_TLS: ${RELAY_AGENT_INSECURE_TLS:-}
+      RELAY_AGENT_DEVICE_NAME: ${RELAY_AGENT_DEVICE_NAME:-}
+      RELAY_AGENT_IDENTITY_ID: ${RELAY_AGENT_IDENTITY_ID:-}
+      RELAY_AGENT_TRANSPORT_MODE: ${RELAY_AGENT_TRANSPORT_MODE:-}
+      RELAY_AGENT_DEFAULT_EXIT: ${RELAY_AGENT_DEFAULT_EXIT:-}
+      RELAY_AGENT_TRANSPARENT_PROXY: ${RELAY_AGENT_TRANSPARENT_PROXY:-}
+      RELAY_AGENT_SOCKS5_ENABLED: ${RELAY_AGENT_SOCKS5_ENABLED:-}
+      RELAY_AGENT_SOCKS5_LISTEN: ${RELAY_AGENT_SOCKS5_LISTEN:-}
+      RELAY_AGENT_SOCKS5_PORT: ${RELAY_AGENT_SOCKS5_PORT:-}
+      RELAY_AGENT_HTTP_ENABLED: ${RELAY_AGENT_HTTP_ENABLED:-}
+      RELAY_AGENT_HTTP_LISTEN: ${RELAY_AGENT_HTTP_LISTEN:-}
+      RELAY_AGENT_HTTP_PORT: ${RELAY_AGENT_HTTP_PORT:-}
+      RELAY_AGENT_WEB_ENABLED: ${RELAY_AGENT_WEB_ENABLED:-}
+      RELAY_AGENT_WEB_LISTEN: ${RELAY_AGENT_WEB_LISTEN:-}
+      RELAY_AGENT_WEB_PORT: ${RELAY_AGENT_WEB_PORT:-}
+      RELAY_AGENT_WEB_TOKEN: ${RELAY_AGENT_WEB_TOKEN:-}
+
     volumes:
       # Mount directories instead of a single config file. Pairing saves the
       # YAML through a temporary file followed by an atomic rename.
-      - ./bin:/opt/relayproxy/bin:ro
-      - ./config:/data:rw
+      - ${RELAY_AGENT_BIN_DIR:-./bin}:/opt/relayproxy/bin:ro
+      - ${RELAY_AGENT_CONFIG_DIR:-./config}:/data:rw
 
     # xtables takes its process lock under /run.
     tmpfs:
       - /run:size=4m,mode=0755
 
-    # Common arguments stay in the entrypoint; `docker compose run ...` can
-    # append one-time pairing arguments without dropping --config.
-    entrypoint:
-      - /opt/relayproxy/bin/relay-agent
-      - --no-gui
-      - --config
-      - /data/relay-agent.yaml
+    # Headless startup and config directory are supplied by the image. One-off
+    # CLI overrides can be appended with `docker compose run --rm relay-agent …`.

@@ -223,11 +223,11 @@ func main() {
 				configDirExplicit = true
 			}
 		})
-		*configPath, err = resolveConfigPath(*configPath, *configDir, configExplicit, configDirExplicit)
+		*configPath, err = resolveStartupConfigPath(*configPath, *configDir, configExplicit, configDirExplicit, os.Getenv)
 		if err != nil {
 			return fmt.Errorf("[Config] Failed to resolve configuration path: %w", err)
 		}
-		cfgFile, err = loadOrCreateAgentConfig(*configPath)
+		cfgFile, err = loadStartupAgentConfig(*configPath, os.Getenv)
 		if err != nil {
 			return fmt.Errorf("[Config] Failed to load configuration %s: %w", *configPath, err)
 		}

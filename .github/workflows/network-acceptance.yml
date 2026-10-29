@@ -176,8 +176,8 @@ jobs:
         run: docker build -t relayproxy-agent-runtime:gateway-test docker/agent
       - name: Exercise transparent traffic and retained guard inside a privileged container
         run: |
-          docker run --rm --privileged \
+          docker run --rm --privileged --entrypoint /work/gateway.test \
             -v "$RUNNER_TEMP/gateway.test:/work/gateway.test:ro" \
             -e RELAYPROXY_GATEWAY_INTEGRATION=1 \
             relayproxy-agent-runtime:gateway-test \
-            /work/gateway.test -test.v -test.timeout=60s
+            -test.v -test.timeout=60s

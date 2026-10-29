@@ -53,6 +53,8 @@ Thumbs.db
 /macos/DerivedData/
 
 # Local agent/task metadata
+.env
+.env.agent
 .superpowers/
 .workbuddy/
 .smoke/

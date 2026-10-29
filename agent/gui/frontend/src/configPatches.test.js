@@ -1,6 +1,22 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {routingPagePatch,dnsPagePatch} from './configPatches.js';
+import {routingPagePatch,dnsPagePatch,changedGatewayPatch} from './configPatches.js';
+
+test('unmodified gateway is omitted from transparent proxy saves',()=>{
+ const saved={enabled:false,interface:'',source_cidrs:null};
+ assert.equal(changedGatewayPatch(saved,saved),undefined);
+ assert.equal(changedGatewayPatch({enabled:false,source_cidrs:[]},{}),undefined);
+ const payload=JSON.parse(JSON.stringify({network:{mode:'divert'},gateway:changedGatewayPatch(saved,saved)}));
+ assert.deepEqual(payload,{network:{mode:'divert'}});
+});
+
+test('gateway changes are saved and reverting a draft omits the gateway',()=>{
+ const saved={enabled:true,interface:'eth0',source_cidrs:['192.168.1.0/24'],port:15080};
+ assert.equal(changedGatewayPatch({...saved,source_cidrs:'192.168.1.0/24\n'},saved),undefined);
+ assert.equal(changedGatewayPatch({...saved,enabled:false},saved).enabled,false);
+ assert.equal(changedGatewayPatch({...saved,interface:'eth1'},saved).interface,'eth1');
+ assert.equal(changedGatewayPatch({...saved},saved),undefined);
+});
 
 test('routing rules save cannot overwrite DNS policies',()=>{
  const r={mode:'rule',default_action:'PROXY',rules:[{name:'proxy'}],subscriptions:[{name:'gfw',url:'https://example.com/list',enabled:true,action:'PROXY'}],

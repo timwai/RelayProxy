@@ -53,10 +53,10 @@ test('接入 page carries inbound listeners, system takeover and the Linux LAN g
  assert.match(access,/<Card title="SOCKS5" eyebrow="LOCAL PROXY"/);
  assert.match(access,/<Card title="HTTP \/ HTTPS CONNECT" eyebrow="LOCAL PROXY"/);
  assert.match(access,/isMac&&<Card title="macOS 系统代理" eyebrow="SYSTEM TAKEOVER"/);
- assert.match(access,/windowsCaptureAvailable&&<Card title="Windows 透明代理" eyebrow="SYSTEM TAKEOVER"/);
+ assert.match(access,/transparentCaptureAvailable&&<Card title=\{captureTitle\} eyebrow="SYSTEM TAKEOVER"/);
  assert.match(access,/<summary>Network Service 维护<\/summary>/);
  assert.match(access,/isLinux&&<GatewaySection /);
- assert.match(access,/gateway:isLinux\?gatewayPatch\(config\.gateway\|\|\{\}\):undefined/);
+ assert.match(access,/gateway:isLinux\?changedGatewayPatch\(config\.gateway,savedGateway\):undefined/);
  assert.match(access,/<SaveBar dirty=\{dirty\} label="保存接入设置"/);
  assert.doesNotMatch(src,/function ProxyPage\(|function GatewayPage\(/);
 });

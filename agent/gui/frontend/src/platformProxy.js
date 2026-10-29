@@ -6,6 +6,19 @@ export function showWindowsCapture(platform, hasNetworkServiceBridge) {
   return value === 'windows' || (value === '' && !!hasNetworkServiceBridge);
 }
 
+export function showTransparentCapture(platform, hasNetworkServiceBridge) {
+  return String(platform ?? '').trim().toLowerCase() === 'linux' || showWindowsCapture(platform, hasNetworkServiceBridge);
+}
+
 export function showWindowsService(platform, hasNetworkServiceBridge) {
   return showWindowsCapture(platform, hasNetworkServiceBridge) && !!hasNetworkServiceBridge;
+}
+
+export function transparentCaptureReady(caps={}) {
+  return !!(caps.tcp&&caps.udp&&caps.process_identity&&caps.original_destination&&caps.reply_injection&&caps.loop_bypass&&!caps.unavailable_reason);
+}
+
+export function captureProtocolLabel(caps={},diagnostics={}) {
+  const ipv6=diagnostics.captureFamily?diagnostics.captureFamily==='dual':!!caps.ipv6;
+  return 'TCP / UDP · '+(ipv6?'IPv4 / IPv6':'仅 IPv4');
 }

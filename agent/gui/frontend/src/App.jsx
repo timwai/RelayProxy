@@ -1,10 +1,10 @@
 import DeviceGroups from './DeviceGroups.jsx';
-import GatewaySection,{gatewayPatch} from './GatewayPage.jsx';
+import GatewaySection from './GatewayPage.jsx';
 import {withExitGroups} from './exitInventory.js';
 import React, {useCallback,useEffect,useLayoutEffect,useMemo,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {call,callJSON,hasBridge,installNativeHooks,parseMutation,saveConfig} from './bridge.js';
-import {showWindowsCapture,showWindowsService} from './platformProxy.js';
+import {showTransparentCapture,showWindowsService,transparentCaptureReady,captureProtocolLabel} from './platformProxy.js';
 import {exitInventoryKey as makeExitInventoryKey,exitUsable,selectedExitUnavailable} from './exitInventory.js';
 import {connectionPathLabel} from './connectionPathLabel.js';
 import {buildDeviceCenter} from './deviceCenter.js';
@@ -16,7 +16,7 @@ import useDialogFocus from './useDialogFocus.js';
 import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
 import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
-import {routingPagePatch,dnsPagePatch} from './configPatches.js';
+import {routingPagePatch,dnsPagePatch,changedGatewayPatch} from './configPatches.js';
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 import {rdpPathLabel} from './pathStatus.js';
 import {DEVICE_SPEED_REVIEW_STEPS,deviceSpeedChecks} from './deviceSpeedChecks.js';
@@ -173,10 +173,10 @@ function QuickActions({status,config,exits,dirty,onSave,onSelectExit,onGoto}){
   <div className="quick-actions-row">
    <div className="quick-action"><div className="mini">路由模式</div><div className="segment" role="radiogroup" aria-label="路由模式">{ROUTING_MODES.map(([id,label])=><button key={id} type="button" role="radio" aria-checked={mode===id} className={cx('segment-item',mode===id&&'active')} disabled={dirty} title={lock} onClick={()=>mode!==id&&onSave({routing:{mode:id}})}>{label}</button>)}</div></div>
    <div className="quick-action"><div className="mini">默认出口</div><div className="row"><Select aria-label="默认出口" value={selectedExit} disabled={dirty} title={lock} onChange={e=>onSelectExit(e.target.value)}><option value="">自动选择</option>{devices.length>0&&<optgroup label="设备出口">{devices.map(x=><option key={x.id} value={x.id} disabled={status.connected&&!x.online}>{x.name}{status.connected&&!x.online?' · 离线':''}</option>)}</optgroup>}{groups.length>0&&<optgroup label="设备分组">{groups.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</optgroup>}{customs.length>0&&<optgroup label="自定义代理">{customs.map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</optgroup>}</Select><Button quiet onClick={()=>onGoto('exits')}>管理 ›</Button></div></div>
-   <div className="quick-action"><div className="mini">{isMac?'macOS 系统代理':isWin?'Windows 透明代理':isLinux?'局域网网关':'系统接管'}</div>
+   <div className="quick-action"><div className="mini">{isMac?'macOS 系统代理':isWin?'Windows 透明代理':isLinux?'Linux 透明代理':'系统接管'}</div>
     {isMac&&<div className="row"><Switch label="macOS 系统代理" checked={sys.mode==='system'} disabled={dirty} onChange={v=>onSave({systemProxy:{mode:v?'system':''}})}/><span className="mini grow">{sysStatus.lastError?'需要处理':sysStatus.applied?'已接管系统代理':sys.mode==='system'?'已启用，等待应用':'未接管'}</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
-    {isWin&&<div className="row"><Badge tone={config.runtime?.network?.mode==='divert'||config.networkMode==='divert'?'ok':'neutral'}>{config.runtime?.network?.mode==='divert'?'接管中':config.networkMode==='divert'?'已启用 · 待重启':'未启用'}</Badge><span className="mini grow">按进程接管本机 TCP / UDP，开关需重启生效</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
-    {isLinux&&<div className="row"><Badge tone={gwStatus.running?'ok':gw.enabled?'warn':'neutral'}>{gwStatus.running?'运行中':gw.enabled?'已启用 · 未运行':'未启用'}</Badge><span className="mini grow">LAN 设备经本机透明接入</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
+    {(isWin||isLinux)&&<div className="row"><Badge tone={status.divertError?'danger':status.divertRunning?'ok':config.networkMode==='divert'?'warn':'neutral'}>{status.divertError?'接管异常':status.divertRunning?'接管中':config.networkMode==='divert'?(status.networkMode==='divert'?'等待接管':'已启用 · 待重启'):'未启用'}</Badge><span className="mini grow">按进程接管本机 TCP / UDP，开关需重启生效</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
+    {isLinux&&<div className="row top-gap"><Badge tone={gwStatus.running?'ok':gw.enabled?'warn':'neutral'}>{gwStatus.running?'运行中':gw.enabled?'已启用 · 未运行':'未启用'}</Badge><span className="mini grow">局域网网关 · LAN 设备经本机透明接入</span></div>}
     {!isMac&&!isWin&&!isLinux&&<div className="row"><span className="mini grow">本机 SOCKS5 / HTTP 代理接入</span><Button quiet onClick={()=>onGoto('access')}>设置 ›</Button></div>}
    </div>
   </div>
@@ -379,17 +379,18 @@ function DeviceCenter({status,exits,targets,filePeers,config,selectedExit,onSele
 }
 
 // 接入 page: every way traffic enters RelayProxy on this machine — local
-// SOCKS5/HTTP listeners, OS-level takeover (Windows transparent proxy or
+// SOCKS5/HTTP listeners, OS-level takeover (Windows/Linux transparent proxy or
 // macOS system proxy) and the Linux LAN gateway. Platform-specific cards only
 // appear on the platform they apply to; everything saves through one SaveBar.
-function AccessPage({status,config,exits,setv,save,dirty,onRefreshCapabilities,onConfigRefresh,toast}){
+function AccessPage({status,config,savedGateway,exits,setv,save,dirty,onRefreshCapabilities,onConfigRefresh,toast}){
  const sys=config.systemProxy||EMPTY.systemProxy,sysStatus=config.systemProxyStatus||{},isMac=config.platform==='darwin',isLinux=config.platform==='linux';
  const s=config.socks5||EMPTY.socks5,h=config.http||EMPTY.http,rs=config.runtime?.socks5||s,rh=config.runtime?.http||h,caps=config.networkCapabilities||{},[service,setService]=useState(null),[busy,setBusy]=useState('');
  const networkServiceBridgeAvailable=hasBridge('goGetNetworkServiceStatus');
- const windowsCaptureAvailable=showWindowsCapture(config.platform,networkServiceBridgeAvailable);
+ const transparentCaptureAvailable=showTransparentCapture(config.platform,networkServiceBridgeAvailable);
+ const captureTitle=isLinux?'Linux 透明代理':'Windows 透明代理';
  const refreshService=useCallback(async()=>{if(!networkServiceBridgeAvailable)return null;try{const x=await callJSON('goGetNetworkServiceStatus',{});setService(x||{});return x}catch{return null}},[networkServiceBridgeAvailable]);
  useEffect(()=>{onRefreshCapabilities?.();refreshService()},[onRefreshCapabilities,refreshService]);
- const interceptReady=!!(caps.tcp&&caps.udp&&caps.ipv6&&caps.process_identity&&caps.original_destination&&caps.reply_injection&&caps.loop_bypass&&!caps.unavailable_reason);
+ const interceptReady=transparentCaptureReady(caps);
  const canToggleIntercept=interceptReady||config.networkMode==='divert';
  const socksAddr=(s.listen||'127.0.0.1')+':'+(s.port||1080),httpAddr=(h.listen||'127.0.0.1')+':'+(h.port||8080),runtimeSocksAddr=(rs.listen||'127.0.0.1')+':'+(rs.port||1080),runtimeHttpAddr=(rh.listen||'127.0.0.1')+':'+(rh.port||8080);
  const socksURI='socks5h://'+socksAddr,httpURI='http://'+httpAddr,runtimeSocksURI='socks5h://'+runtimeSocksAddr,runtimeHttpURI='http://'+runtimeHttpAddr,socksPending=socksAddr!==runtimeSocksAddr||!!s.enabled!==!!rs.enabled,httpPending=httpAddr!==runtimeHttpAddr||!!h.enabled!==!!rh.enabled;
@@ -405,9 +406,9 @@ function AccessPage({status,config,exits,setv,save,dirty,onRefreshCapabilities,o
   systemProxy:isMac?{mode:sys.mode||'',autoFollow:sys.autoFollow!==false,http:sys.http!==false,socks5:sys.socks5!==false,proxyIpLiterals:sys.proxyIpLiterals!==false}:undefined,
   proxy:{socks5Enabled:s.enabled,socks5Listen:s.listen,socks5Port:Number(s.port),httpEnabled:h.enabled,httpListen:h.listen,httpPort:Number(h.port)},
   network:{mode:config.networkMode||'',excludeProcesses:splitRuleList(config.network?.exclude_processes)},
-  gateway:isLinux?gatewayPatch(config.gateway||{}):undefined
+  gateway:isLinux?changedGatewayPatch(config.gateway,savedGateway):undefined
  });
- return <><PageHead title="接入" desc={'本机流量如何进入 RelayProxy：'+(isMac?'应用通过本地代理或 macOS 系统代理接入。':windowsCaptureAvailable?'应用通过本地代理接入，或由 Windows 透明代理按进程接管。':isLinux?'应用通过本地代理接入；LAN 设备可经局域网网关透明接入。':'应用通过本地 SOCKS5 / HTTP 代理接入。')}/>
+ return <><PageHead title="接入" desc={'本机流量如何进入 RelayProxy：'+(isMac?'应用通过本地代理或 macOS 系统代理接入。':isLinux?'应用通过本地代理或 Linux 透明代理接入；LAN 设备可经局域网网关透明接入。':transparentCaptureAvailable?'应用通过本地代理接入，或由 Windows 透明代理按进程接管。':'应用通过本地 SOCKS5 / HTTP 代理接入。')}/>
  <div className="cards-2">
   <Card title="SOCKS5" eyebrow="LOCAL PROXY" action={<Switch checked={s.enabled!==false} onChange={v=>setv('socks5.enabled',v)}/>}>
    <div className="row"><Badge tone={status.socks5Running?'ok':'neutral'}>{status.socks5Running?'运行中':'未运行'}</Badge><span className="mini">TCP + UDP ASSOCIATE · socks5h 由出口解析域名</span></div>
@@ -435,16 +436,17 @@ function AccessPage({status,config,exits,setv,save,dirty,onRefreshCapabilities,o
    {sysStatus.pendingRecovery>0&&<div className="notice warn top-gap">尚有 {sysStatus.pendingRecovery} 项代理设置等待安全恢复。</div>}
    {sysStatus.lastError&&<div className="notice warn top-gap">{sysStatus.lastError}</div>}
   </Card>}
- {windowsCaptureAvailable&&<Card title="Windows 透明代理" eyebrow="SYSTEM TAKEOVER" action={<Badge tone={service?.ready?'ok':service?.installed?'warn':'neutral'}>{service?.ready?'运行条件已满足':service?.installed?'服务需修复':service?'服务未安装':'服务状态待检查'}</Badge>}>
-  <Setting title="接管系统流量" desc="使用 WinDivert 按进程与分流规则处理本机 TCP / UDP；开关需重启生效。"><Switch checked={config.networkMode==='divert'} disabled={!canToggleIntercept} onChange={v=>{setv('networkMode',v?'divert':'');setv('network.mode',v?'divert':'')}}/></Setting>
-  {!interceptReady&&<div className="notice warn top-gap"><b>当前系统透明代理尚不可用。</b> {caps.unavailable_reason||'此构建缺少完整的 TCP / UDP / IPv6 / 进程识别或回注能力。'}{config.networkMode==='divert'?' 你仍可关闭已保存的透明代理模式。':' 请修复 Network Service，或继续使用 SOCKS5 / HTTP Proxy。'}</div>}
+ {transparentCaptureAvailable&&<Card title={captureTitle} eyebrow="SYSTEM TAKEOVER" action={<Badge tone={isLinux?(interceptReady?'ok':'warn'):service?.ready?'ok':service?.installed?'warn':'neutral'}>{isLinux?(interceptReady?'运行条件已满足':'运行条件未满足'):service?.ready?'运行条件已满足':service?.installed?'服务需修复':service?'服务未安装':'服务状态待检查'}</Badge>}>
+  <Setting title="接管系统流量" desc={(isLinux?'使用 NFQUEUE':'使用 WinDivert')+' 按进程与分流规则处理本机 TCP / UDP；开关需重启生效。'}><Switch label={captureTitle} checked={config.networkMode==='divert'} disabled={!canToggleIntercept} onChange={v=>{setv('networkMode',v?'divert':'');setv('network.mode',v?'divert':'')}}/></Setting>
+  {isLinux&&<div className="mini top-gap">需要 root 或 CAP_NET_ADMIN + CAP_NET_RAW 权限、可用的 iptables mangle 后端、内核 NFQUEUE 支持，以及可见的 /proc。IPv6 为可选能力；ip6tables 不可用时仅接管 IPv4。Docker 部署需使用 host 网络与 PID 命名空间。本机透明代理不依赖局域网网关的 nftables / TPROXY。</div>}
+  {!interceptReady&&<div className="notice warn top-gap"><b>当前系统透明代理尚不可用。</b> {caps.unavailable_reason||'此构建缺少完整的 TCP / UDP / 进程识别或回注能力。'}{config.networkMode==='divert'?' 你仍可关闭已保存的透明代理模式。':isLinux?' 请检查上述权限和依赖，或继续使用 SOCKS5 / HTTP Proxy。':' 请修复 Network Service，或继续使用 SOCKS5 / HTTP Proxy。'}</div>}
   <div className="cards-3 compact top-gap">
-   <div><div className="mini">Network Service</div><strong>{service?.ready?'就绪':service?.running?'运行中':service?.installed?'已安装':'尚未取得状态'}</strong><div className="mini">{service?.autoStartKnown?(service?.autoStart?'Automatic':'非自动启动'):'启动类型未知'}</div></div>
-   <div><div className="mini">抓包后端</div><strong>{status.divertDiagnostics?.captureBackend||'WinDivert'}</strong><div className="mini">{status.divertDiagnostics?.captureState||status.divertStage||'idle'}</div></div>
+   {isLinux?<div><div className="mini">接管状态</div><strong>{status.divertRunning?'运行中':status.divertError?'接管异常':config.networkMode==='divert'?(status.networkMode==='divert'?'等待接管':'已启用 · 待重启'):'未启用'}</strong><div className="mini">{captureProtocolLabel(caps,status.divertDiagnostics)}</div></div>:<div><div className="mini">Network Service</div><strong>{service?.ready?'就绪':service?.running?'运行中':service?.installed?'已安装':'尚未取得状态'}</strong><div className="mini">{service?.autoStartKnown?(service?.autoStart?'Automatic':'非自动启动'):'启动类型未知'}</div></div>}
+   <div><div className="mini">抓包后端</div><strong>{status.divertDiagnostics?.captureBackend||(isLinux?'NFQUEUE':'WinDivert')}</strong><div className="mini">{status.divertDiagnostics?.captureState||status.divertStage||'idle'}</div></div>
    <div><div className="mini">数据面</div><strong>{Number(status.divertDiagnostics?.captured||0)} / {Number(status.divertDiagnostics?.classified||0)}</strong><div className="mini">抓包 / 分类 · PROXY {Number(status.divertDiagnostics?.proxy||0)}</div></div>
   </div>
   {status.divertError&&<div className="notice danger top-gap">{status.divertError}</div>}
-  <Field label="排除进程" help="这些进程的流量不经透明代理；可用换行、逗号或分号分隔，如 steam.exe, Teams.exe"><Textarea rows="4" value={ruleListText(config.network?.exclude_processes)} onChange={e=>setv('network.exclude_processes',e.target.value)}/></Field>
+  <Field label="排除进程" help={'这些进程的流量不经透明代理；可用换行、逗号或分号分隔，如 '+(isLinux?'sshd, docker':'steam.exe, Teams.exe')}><Textarea rows="4" value={ruleListText(config.network?.exclude_processes)} onChange={e=>setv('network.exclude_processes',e.target.value)}/></Field>
   {showWindowsService(config.platform,networkServiceBridgeAvailable)&&<details className="details top-gap"><summary>Network Service 维护</summary>
    <div className="mini top-gap">透明代理由低权限 GUI 与 SYSTEM 网络服务协作完成。{service?.message||''}</div>
    {service&&<div className="service-grid top-gap"><div><span>安装</span><b>{service.installed?'是':'否'}</b></div><div><span>运行</span><b>{service.running?'是':'否'}</b></div><div><span>自动启动</span><b>{service.autoStartKnown?(service.autoStart?'是':'否'):'未知'}</b></div><div><span>版本匹配</span><b>{service.versionMatch?'是':'否'}</b></div><div><span>恢复策略</span><b>{service.recoveryKnown?(service.recoveryEnabled?'已启用':'未启用'):'未知'}</b></div><div><span>PID</span><b className="mono">{service.pid||'—'}</b></div>{service.binaryPath&&<div className="service-path"><span>程序路径</span><b className="mono">{service.binaryPath}</b></div>}</div>}
@@ -453,7 +455,7 @@ function AccessPage({status,config,exits,setv,save,dirty,onRefreshCapabilities,o
   </details>}
  </Card>}
  {isLinux&&<GatewaySection config={config} status={status} exits={exits} setv={setv}/>}
- <SaveBar dirty={dirty} label="保存接入设置" hint={'本地监听参数'+(windowsCaptureAvailable?'与 Windows 透明代理开关需重启生效':'需重启生效')+(isMac?'；macOS 系统代理即时应用':'')+(isLinux?'；局域网网关保存后立即应用':'')+'。'} onSave={saveAll}/></>
+ <SaveBar dirty={dirty} label="保存接入设置" hint={'本地监听参数'+(transparentCaptureAvailable?'与'+captureTitle+'开关需重启生效':'需重启生效')+(isMac?'；macOS 系统代理即时应用':'')+(isLinux?'；局域网网关保存后立即应用':'')+'。'} onSave={saveAll}/></>
 }
 
 function ExitShare({status,config,setv,save,dirty}){
@@ -739,13 +741,13 @@ function DiagnosticsPage({diagnostics,logs,exits,customExits,refreshDiagnostics,
   <Card title="QUIC" eyebrow="TRANSPORT"><div className="diag-value">{quicRTT?quicRTT.toFixed(1)+' ms':'—'}</div><div className="mini">丢包 {quicLoss.toFixed(2)}% · GSO {quic.gso?'ON':'OFF'}</div><div className="mini">{fmtBytes(quic.receive_bps||0,true)} ↓ · {fmtBytes(quic.send_bps||0,true)} ↑</div></Card>
   <Card title="Public Direct" eyebrow="DIRECT PATH"><div className={cx('diag-value',tone(st.directState))}>{st.directState||'idle'}</div><div className="mini">{st.directPath||st.directEndpoint||'未建立'}{st.directRttMs?' · '+st.directRttMs+' ms':''}</div><div className="mini">回落 {Number(st.directFallbackCount||0)} 次</div></Card>
   <Card title="P2P" eyebrow="PEER PATH"><div className={cx('diag-value',tone(st.p2pState))}>{st.p2pState||'idle'}</div><div className="mini">{st.p2pPath||st.p2pCandidateSummary||'未建立'}{st.p2pRttMs?' · '+st.p2pRttMs+' ms':''}</div><div className="mini">回落 {Number(st.p2pFallbackCount||0)} 次</div><Setting title="UPnP 端口映射" desc={st.upnpError||st.upnpAddress||'默认关闭；需要本机和 Server 同时允许'}><Badge tone={st.upnpState==='MAPPED'?'ok':st.upnpState==='DEGRADED'||st.upnpState==='FAILED'?'danger':st.upnpState==='CGNAT'?'warn':'neutral'}>{st.upnpState||'DISABLED'}</Badge></Setting></Card>
-  <Card title="透明代理" eyebrow="WINDIVERT"><div className={cx('diag-value',st.divertRunning?'ok':st.divertError?'danger':'')}>{st.divertRunning?'运行中':'未运行'}</div><div className="mini">{[st.divertDiagnostics?.captureBackend,st.divertDiagnostics?.captureState||st.divertStage||st.networkMode].filter(Boolean).join(' · ')||'off'}</div><div className="mini">抓包 {Number(st.divertDiagnostics?.captured||0)} · 分类 {Number(st.divertDiagnostics?.classified||0)} · PROXY {Number(st.divertDiagnostics?.proxy||0)} · DIRECT {Number(st.divertDiagnostics?.direct||0)} · REJECT {Number(st.divertDiagnostics?.reject||0)}</div><div className={cx('mini',Number(st.divertDiagnostics?.injectionError||0)>0&&'danger-text')}>注入 {Number(st.divertDiagnostics?.injected||0)} · 注入失败 {Number(st.divertDiagnostics?.injectionError||0)} · 重连 {Number(st.divertDiagnostics?.reconnects||0)}</div>{(st.divertError||st.divertDiagnostics?.lastError)&&<div className="conn-error top-gap">{st.divertError||st.divertDiagnostics?.lastError}</div>}</Card>
+  <Card title="透明代理" eyebrow={st.divertDiagnostics?.captureBackend||'SYSTEM TAKEOVER'}><div className={cx('diag-value',st.divertRunning?'ok':st.divertError?'danger':'')}>{st.divertRunning?'运行中':'未运行'}</div><div className="mini">{[st.divertDiagnostics?.captureBackend,st.divertDiagnostics?.captureState||st.divertStage||st.networkMode].filter(Boolean).join(' · ')||'off'}</div><div className="mini">抓包 {Number(st.divertDiagnostics?.captured||0)} · 分类 {Number(st.divertDiagnostics?.classified||0)} · PROXY {Number(st.divertDiagnostics?.proxy||0)} · DIRECT {Number(st.divertDiagnostics?.direct||0)} · REJECT {Number(st.divertDiagnostics?.reject||0)}</div><div className={cx('mini',Number(st.divertDiagnostics?.injectionError||0)>0&&'danger-text')}>注入 {Number(st.divertDiagnostics?.injected||0)} · 注入失败 {Number(st.divertDiagnostics?.injectionError||0)} · 重连 {Number(st.divertDiagnostics?.reconnects||0)}</div>{(st.divertError||st.divertDiagnostics?.lastError)&&<div className="conn-error top-gap">{st.divertError||st.divertDiagnostics?.lastError}</div>}</Card>
   <Card title="DNS 防泄漏状态" eyebrow="SECURITY"><div className={cx('diag-value',st.dnsProtection?.capture==='nfqueue-no-bypass'?'ok':st.dnsProtection?.fakeIpEnabled?'warn':'')}>{st.dnsProtection?.fakeIpEnabled?'FakeIP 已启用':'FakeIP 未启用'}</div><div className="mini">内核 DNS 接管：{({'nfqueue-no-bypass':'Linux NFQUEUE 严格接管','nfqueue-bypass':'NFQUEUE 普通模式','partial-update':'规则更新不完整','running-unverified':'透明拦截运行中 · 未独立验证','unavailable':'未运行'})[st.dnsProtection?.capture]||st.dnsProtection?.capture||'未检测'}</div><div className={cx('mini',st.dnsProtection?.independentGuard!=='rules-present'&&'danger-text')}>独立 Kill Switch：{({'rules-present':'发现持久防火墙规则 · 仍需实机验证','persistence-unverified':'发现规则，但未验证开机恢复','not-installed':'未安装','unknown':'无法验证','unverified':'未验证','incomplete':'规则不完整','unsupported':'不支持'})[st.dnsProtection?.independentGuard]||'未检测'}</div>{st.dnsProtection?.detail&&<div className="mini top-gap">{st.dnsProtection.detail}</div>}<div className="notice top-gap">显示的是内核/防火墙配置证据，不是零 DNS 泄漏认证。DoH/443、环回 DNS 与断线行为仍需真机测试。</div></Card>
   <Card title="Native UDP" eyebrow="DATAGRAM"><div className="diag-value">{Number(st.nativeUdp?.associations||0)}</div><div className="mini">活动 Association · Queue {fmtBytes(st.nativeUdp?.queueBytes||0)}</div><div className={cx('mini',(Number(st.nativeUdp?.associationRejects||0)+Number(st.nativeUdp?.queueDrops||0)+Number(st.nativeUdp?.reassemblyDrops||0))>0&&'danger-text')}>拒绝 {Number(st.nativeUdp?.associationRejects||0)} · 队列丢弃 {Number(st.nativeUdp?.queueDrops||0)} · 重组丢弃 {Number(st.nativeUdp?.reassemblyDrops||0)}</div></Card>
  </div>
  <Card title="活动连接" eyebrow="ACTIVE CONNECTIONS" action={<span className="mini">{diagConnections.length} 条活动 · Exit TCP {exitTCP.length} · 采样 {fmtTime(diagnostics?.sampledAt||diagnostics?.exit?.sampled_at)}</span>}>{diagConnections.length===0?<div className="muted">当前没有活动连接</div>:<div className="diag-connections">{diagConnections.slice(0,8).map((x,i)=><div className="diag-conn" key={x.id||i}><div className="grow"><strong>{x.process_name||x.process||'未知进程'}</strong><div className="mono mini">{(x.host||x.ip||'—')+(x.port?':'+x.port:'')}</div></div><div><b>{fmtBytes(x.download_rate||0,true)} ↓</b><div className="mini">{connectionPathLabel(x,[...arr(exits),...arr(customExits)])}</div></div></div>)}</div>}</Card>
  <div className="cards-2">
-  <Card title="运行建议" eyebrow="HEALTH"><div className="stack">{!st.connected&&<div className="notice danger">控制隧道当前未连接，请先检查 Server 地址、端口、TLS 与网络连通性。</div>}{quicLoss>=3&&<div className="notice warn">当前 QUIC 发送丢包为 {quicLoss.toFixed(2)}%，建议比较 Public Direct / P2P / Relay 路径并运行出口测速。</div>}{st.divertError&&<div className="notice danger">透明代理错误：{st.divertError}</div>}{!st.divertError&&<div className="notice">透明代理异常时，请检查 Network Service、WinDivert 驱动和管理员安装状态。</div>}<div className="notice">Direct/P2P 出现持续回落时，结合出口测速、候选地址和日志分类确认瓶颈。</div></div></Card>
+  <Card title="运行建议" eyebrow="HEALTH"><div className="stack">{!st.connected&&<div className="notice danger">控制隧道当前未连接，请先检查 Server 地址、端口、TLS 与网络连通性。</div>}{quicLoss>=3&&<div className="notice warn">当前 QUIC 发送丢包为 {quicLoss.toFixed(2)}%，建议比较 Public Direct / P2P / Relay 路径并运行出口测速。</div>}{st.divertError&&<div className="notice danger">透明代理错误：{st.divertError}</div>}{!st.divertError&&<div className="notice">透明代理异常时，请检查运行权限、抓包后端和「接入」页中的运行条件。</div>}<div className="notice">Direct/P2P 出现持续回落时，结合出口测速、候选地址和日志分类确认瓶颈。</div></div></Card>
   <Card title="详细诊断数据" eyebrow="RAW SNAPSHOT"><details className="details"><summary>展开原始诊断快照</summary><pre className="diagnostic-json">{JSON.stringify(diagnostics||{},null,2)}</pre></details></Card>
  </div>
  <Card title="运行日志" eyebrow={visible.length+' / '+logs.length+' LINES'}><div className="log-toolbar"><div className="segment">{[['all','全部'],['relay','中继'],['p2p','P2P'],['proxy','代理'],['exit','出口']].map(x=><button key={x[0]} className={filter===x[0]?'active':''} onClick={()=>setFilter(x[0])}>{x[1]}</button>)}</div><span className="mini">{filter==='all'?'显示全部日志':'仅显示匹配分类的日志'}</span></div><div className="log-console">{visible.length?visible.map((x,i)=><div key={i} className={cx(/error|failed|失败|fatal|timeout/i.test(x)&&'log-error',/warn|retry|警告/i.test(x)&&'log-warn')}>{x}</div>):<div className="muted">当前分类暂无日志</div>}</div></Card></>
@@ -868,12 +870,12 @@ export default function App(){
  const syncTransferSummary=useCallback((running,total)=>setTransferSummary(old=>old.running===running&&old.total===total?old:{running,total}),[]);
  const pushHistory=useCallback(patch=>setHistory(h=>{const n={...h};for(const k in patch)n[k]=[...h[k],Number(patch[k])||0].slice(-SPARK_POINTS);return n}),[]);
  const applyStatus=useCallback(x=>{setStatus(x||{});pushHistory({latency:x?.connected?x.latency:0})},[pushHistory]);
- const toastTimer=useRef(null),exitInventoryKey=useRef(''),pageRef=useRef(page),messageIDs=useRef(new Set());
+ const savedGatewayRef=useRef({}),toastTimer=useRef(null),exitInventoryKey=useRef(''),pageRef=useRef(page),messageIDs=useRef(new Set());
  const toast=useCallback((message,t='normal')=>{clearTimeout(toastTimer.current);setToastState({message,t});toastTimer.current=setTimeout(()=>setToastState(null),3200)},[]);
  const theme=useCallback(mode=>{const m=['light','dark','system'].includes(mode)?mode:'system',dark=m==='dark'||(m==='system'&&matchMedia('(prefers-color-scheme: dark)').matches);document.documentElement.dataset.themeMode=m;document.documentElement.dataset.theme=dark?'dark':'light';document.documentElement.classList.toggle('dark',dark)},[]);
  const syncExitInventory=useCallback(async x=>{const summary=arr(x?.proxyExits),key=makeExitInventoryKey(x);if(exitInventoryKey.current===key)return;exitInventoryKey.current=key;if(!hasBridge('goGetProxyExits')){setExits(summary);setExitsReady(true);return}try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch{setExits(summary);setExitsReady(true)}},[]);
  const refreshStatus=useCallback(async()=>{if(!hasBridge('goGetStatus'))return null;try{const x=await callJSON('goGetStatus',{});applyStatus(x);void syncExitInventory(x);return x}catch{return null}},[applyStatus,syncExitInventory]);
- const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');setConfig({...EMPTY,...x,customExits:arr(x.customExits),socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},systemProxy:{...EMPTY.systemProxy,...x.systemProxy},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules),subscriptions:arr(x.routing?.subscriptions)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
+ const refreshConfig=useCallback(async()=>{try{const x=await callJSON('goGetConfig',null);if(!x||x.configError)throw new Error(x?.configError?('配置文件 '+(x.configPath||'路径未知')+' 读取失败：'+x.configError):'配置接口没有返回有效数据');savedGatewayRef.current=structuredClone(x.gateway||{});setConfig({...EMPTY,...x,customExits:arr(x.customExits),socks5:{...EMPTY.socks5,...x.socks5},http:{...EMPTY.http,...x.http},rdp:{...EMPTY.rdp,...x.rdp},p2p:{...EMPTY.p2p,...x.p2p},exitUpstream:{...EMPTY.exitUpstream,...x.exitUpstream},network:{...EMPTY.network,...x.network},systemProxy:{...EMPTY.systemProxy,...x.systemProxy},routing:{...EMPTY.routing,...x.routing,rules:arr(x.routing?.rules),subscriptions:arr(x.routing?.subscriptions)}});theme(x.theme||'system');setLoaded(true);setConfigError('');setDirty(false);return true}catch(e){setConfigError(e?.message||'配置读取失败');return false}},[theme]);
  const refreshNetworkCapabilities=useCallback(async()=>{if(!hasBridge('goGetNetworkCapabilities'))return null;try{const x=await callJSON('goGetNetworkCapabilities',{});setConfig(p=>({...p,networkCapabilities:x||{}}));return x}catch{return null}},[]);
  const refreshExits=useCallback(async()=>{if(hasBridge('goGetProxyExits'))try{setExits(arr(await callJSON('goGetProxyExits',[])));setExitsReady(true)}catch(e){toast('读取授权出口失败：'+e.message,'danger')}},[toast]);
  const refreshTargets=useCallback(async()=>{if(hasBridge('goGetRDPTargets'))try{setTargets(arr(await callJSON('goGetRDPTargets',[])))}catch(e){setTargets([]);toast(e.message,'danger')}},[toast]);
@@ -946,7 +948,7 @@ export default function App(){
  else if(page==='exits')content=<ExitsPage {...p} exits={exits} targets={targets} filePeers={filePeers} selectedExit={selectedExit} onSelectExit={select} onSpeed={id=>{setSpeedExit(id);setSpeedOpen(true)}} onSpeedAll={()=>setBatchSpeedOpen(true)} onConnectRDP={connectDeviceRDP} onFiles={openDeviceFiles} onRefresh={refreshExitInventory}/>;
  else if(page==='routing')content=<RoutingPage {...p} onGoto={requestPage} onDiscard={async()=>{await refreshConfig();toast('已放弃分流规则草稿')}}/>;
  else if(page==='dns')content=<DNSPage {...p} onDiscard={async()=>{await refreshConfig();toast('已放弃 DNS 设置草稿')}}/>;
- else if(page==='access')content=<AccessPage {...p} onRefreshCapabilities={refreshNetworkCapabilities} onConfigRefresh={async()=>{await refreshConfig();await refreshStatus()}}/>;
+ else if(page==='access')content=<AccessPage {...p} savedGateway={savedGatewayRef.current} onRefreshCapabilities={refreshNetworkCapabilities} onConfigRefresh={async()=>{await refreshConfig();await refreshStatus()}}/>;
  else if(page==='server')content=<ServerPage {...p} onRefresh={refreshStatus} onReload={()=>requestLifecycle('reload')}/>;
  else if(page==='exitshare')content=<ExitShare {...p}/>;
  else if(page==='files')content=null;

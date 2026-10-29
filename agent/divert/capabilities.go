@@ -12,17 +12,18 @@ var ErrPlatformNotReady = errors.New("system transparent proxy prerequisites are
 // engine or an installed driver. False capabilities must never be advertised
 // as working through best-effort packet rewriting.
 type Capabilities struct {
-	Platform            string `json:"platform"`
-	TCP                 bool   `json:"tcp"`
-	UDP                 bool   `json:"udp"`
-	IPv6                bool   `json:"ipv6"`
-	ProcessIdentity     bool   `json:"process_identity"`
-	OriginalDestination bool   `json:"original_destination"`
-	ReplyInjection      bool   `json:"reply_injection"`
-	LoopBypass          bool   `json:"loop_bypass"`
-	Hostnames           bool   `json:"hostnames"`
-	HostnameSource      string `json:"hostname_source,omitempty"`
-	UnavailableReason   string `json:"unavailable_reason,omitempty"`
+	Platform              string `json:"platform"`
+	TCP                   bool   `json:"tcp"`
+	UDP                   bool   `json:"udp"`
+	IPv6                  bool   `json:"ipv6"`
+	IPv6UnavailableReason string `json:"ipv6_unavailable_reason,omitempty"`
+	ProcessIdentity       bool   `json:"process_identity"`
+	OriginalDestination   bool   `json:"original_destination"`
+	ReplyInjection        bool   `json:"reply_injection"`
+	LoopBypass            bool   `json:"loop_bypass"`
+	Hostnames             bool   `json:"hostnames"`
+	HostnameSource        string `json:"hostname_source,omitempty"`
+	UnavailableReason     string `json:"unavailable_reason,omitempty"`
 }
 
 func PlatformCapabilities() Capabilities { return platformCapabilities() }
@@ -34,8 +35,13 @@ func Preflight(cfg Config) error {
 	if err := ValidateConfig(cfg); err != nil {
 		return err
 	}
-	caps := PlatformCapabilities()
-	if !caps.TCP || !caps.UDP || !caps.IPv6 || !caps.ProcessIdentity ||
+	return preflightCapabilities(cfg, PlatformCapabilities())
+}
+
+func preflightCapabilities(cfg Config, caps Capabilities) error {
+	// IPv6 is an optional address family; IPv4 interception remains useful
+	// when the kernel or its firewall frontend does not support IPv6.
+	if !caps.TCP || !caps.UDP || !caps.ProcessIdentity ||
 		!caps.OriginalDestination || !caps.ReplyInjection || !caps.LoopBypass {
 		return fmt.Errorf("%w (%s): %s; use SOCKS5/HTTP with network.mode empty", ErrUnsupportedPlatform, caps.Platform, caps.UnavailableReason)
 	}

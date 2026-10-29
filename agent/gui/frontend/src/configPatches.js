@@ -1,5 +1,16 @@
 import {splitRuleList} from './ruleLines.js';
 
+function gatewayPatch(g={}) {
+  return {enabled:!!g.enabled,interface:g.interface||'',source_cidrs:splitRuleList(g.source_cidrs),exit_id:g.exit_id||'',port:Number(g.port)||0,max_connections:Number(g.max_connections)||0};
+}
+
+// An unchanged disabled gateway must not request nftables cleanup when the
+// user only saves local listeners or the system transparent-proxy switch.
+export function changedGatewayPatch(current,saved) {
+  const patch=gatewayPatch(current);
+  return JSON.stringify(patch)===JSON.stringify(gatewayPatch(saved))?undefined:patch;
+}
+
 // Save only fields owned by each page. Never round-trip unrelated policy
 // fields through the UI defaults: an older GUI must not erase DNS settings
 // when the user merely reorders a routing rule.

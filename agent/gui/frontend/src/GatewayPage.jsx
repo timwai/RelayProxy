@@ -1,14 +1,8 @@
 import React from 'react';
 import {Badge,Card,Field,Input,Metric,Select,Setting,Switch,Textarea} from './App.jsx';
-import {ruleListText,splitRuleList} from './ruleLines.js';
+import {ruleListText} from './ruleLines.js';
 
 const DEFAULT_PORT=15080,DEFAULT_LIMIT=1024;
-
-// Only the fields owned by the gateway cards; saved together with the other
-// 接入 settings so the page keeps a single SaveBar.
-export function gatewayPatch(g){
- return {...g,enabled:!!g.enabled,source_cidrs:splitRuleList(g.source_cidrs),port:Number(g.port)||0,max_connections:Number(g.max_connections)||0};
-}
 
 // LAN gateway cards, rendered inside the 接入 page on Linux.
 export default function GatewaySection({config,status,exits,setv}) {

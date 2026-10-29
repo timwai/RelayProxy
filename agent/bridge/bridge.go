@@ -947,7 +947,7 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	dcfg := cfg.DivertConfig()
 	dcfg.Mode = b.agent.Config().NetworkMode
 	applyErr := b.agent.ApplyClientConfig(cfg.Routing, dcfg, cfg.Proxy.CustomExits, cfg.Proxy.DefaultExitID, cfg.Gateway)
-	if applyErr == nil {
+	if applyErr == nil && (reload || in.Gateway != nil) {
 		applyErr = b.agent.ApplyGatewayConfig(cfg.Gateway, in.Gateway != nil)
 	}
 	if err := applyErr; err != nil {

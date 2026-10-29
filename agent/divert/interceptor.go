@@ -33,6 +33,7 @@ type deferredUDPDevice interface {
 type packetDeviceDiagnostics struct {
 	Backend    string
 	State      string
+	Family     string
 	Reconnects uint64
 }
 
@@ -120,6 +121,7 @@ type Diagnostics struct {
 	InjectionError uint64 `json:"injectionError"`
 	CaptureBackend string `json:"captureBackend,omitempty"`
 	CaptureState   string `json:"captureState,omitempty"`
+	CaptureFamily  string `json:"captureFamily,omitempty"`
 	Reconnects     uint64 `json:"reconnects,omitempty"`
 	LastError      string `json:"lastError,omitempty"`
 }
@@ -224,6 +226,7 @@ func (i *packetInterceptor) Diagnostics() Diagnostics {
 		device := provider.PacketDeviceDiagnostics()
 		out.CaptureBackend = device.Backend
 		out.CaptureState = device.State
+		out.CaptureFamily = device.Family
 		out.Reconnects = device.Reconnects
 	}
 	if value := i.lastError.Load(); value != nil {

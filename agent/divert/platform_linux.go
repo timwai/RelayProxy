@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/netip"
 	"os"
@@ -31,35 +32,69 @@ const (
 
 func platformCapabilities() Capabilities {
 	caps := Capabilities{
-		Platform: "linux", TCP: true, UDP: true, IPv6: true, Hostnames: true, HostnameSource: "dns",
+		Platform: "linux", TCP: true, UDP: true, Hostnames: true, HostnameSource: "dns",
 		ProcessIdentity: true, OriginalDestination: true, ReplyInjection: true, LoopBypass: true,
 	}
-	if err := linuxPlatformReadiness(); err != nil {
+	binaries, err := linuxPlatformReadiness()
+	if err != nil {
 		caps.UnavailableReason = err.Error()
 	}
+	caps.IPv6 = binaries.ipv6 != ""
+	caps.IPv6UnavailableReason = binaries.ipv6Reason
 	return caps
 }
 
-func linuxPlatformReadiness() error {
+type linuxFirewallBinaries struct {
+	ipv4, ipv6 string
+	ipv6Reason string
+}
+
+// Probe the actual mangle interface: a userspace nft frontend can be present
+// even on a kernel that only supports legacy xtables. Keep each family's
+// selected binary for installation, hot updates and cleanup.
+func selectLinuxFirewallBinary(names ...string) (string, error) {
+	var failures []error
+	for _, name := range names {
+		binary, err := exec.LookPath(name)
+		if err == nil {
+			err = runLinuxFirewallCommand(binary, "-t", "mangle", "-S")
+		}
+		if err == nil {
+			return binary, nil
+		}
+		failures = append(failures, fmt.Errorf("%s: %w", name, err))
+	}
+	return "", errors.Join(failures...)
+}
+
+func linuxPlatformReadiness() (linuxFirewallBinaries, error) {
+	var binaries linuxFirewallBinaries
 	if os.Geteuid() != 0 {
 		caps, err := linuxEffectiveCapabilities()
 		if err != nil {
-			return fmt.Errorf("读取 Linux capabilities 失败: %w", err)
+			return binaries, fmt.Errorf("读取 Linux capabilities 失败: %w", err)
 		}
 		const required = (uint64(1) << unix.CAP_NET_ADMIN) | (uint64(1) << unix.CAP_NET_RAW)
 		if caps&required != required {
-			return errors.New("透明代理需要 root，或同时授予 CAP_NET_ADMIN 与 CAP_NET_RAW")
+			return binaries, errors.New("透明代理需要 root，或同时授予 CAP_NET_ADMIN 与 CAP_NET_RAW")
 		}
 	}
-	for _, binary := range []string{"iptables", "ip6tables"} {
-		if _, err := exec.LookPath(binary); err != nil {
-			return fmt.Errorf("未找到 %s（可使用基于 nftables 的 iptables 兼容前端）", binary)
-		}
+	var err error
+	binaries.ipv4, err = selectLinuxFirewallBinary("iptables", "iptables-legacy", "iptables-nft")
+	if err != nil {
+		return binaries, fmt.Errorf("IPv4 iptables mangle 不可用（需要 NET_ADMIN 和可用的 legacy 或 nft 后端）: %w", err)
 	}
 	if _, err := os.Stat("/proc/net"); err != nil {
-		return fmt.Errorf("/proc/net 不可用，无法解析进程连接: %w", err)
+		return binaries, fmt.Errorf("/proc/net 不可用，无法解析进程连接: %w", err)
 	}
-	return nil
+	binaries.ipv6, err = selectLinuxFirewallBinary("ip6tables", "ip6tables-legacy", "ip6tables-nft")
+	if err != nil {
+		binaries.ipv6Reason = fmt.Sprintf("IPv6 ip6tables mangle 不可用: %s", err)
+	} else if _, err := os.Stat("/proc/net/if_inet6"); err != nil {
+		binaries.ipv6 = ""
+		binaries.ipv6Reason = "内核 IPv6 接口不可用"
+	}
+	return binaries, nil
 }
 
 func linuxEffectiveCapabilities() (uint64, error) {
@@ -111,19 +146,20 @@ type linuxQueuePacket struct {
 }
 
 type linuxPacketDevice struct {
-	queue     linuxNFQueue
-	ctx       context.Context
-	cancel    context.CancelFunc
-	packets   chan linuxQueuePacket
-	raw4      int
-	raw6      int
-	firewall  *linuxFirewall
-	closeOnce sync.Once
-	closeErr  error
-	injectFn  func([]byte) error
+	queue       linuxNFQueue
+	ctx         context.Context
+	cancel      context.CancelFunc
+	packets     chan linuxQueuePacket
+	raw4        int
+	raw6        int
+	firewall    *linuxFirewall
+	closeOnce   sync.Once
+	closeErr    error
+	injectFn    func([]byte) error
+	ipv6Enabled bool
 }
 
-func newLinuxPacketDevice(relayIPs []string, dnsProtected bool) (*linuxPacketDevice, error) {
+func newLinuxPacketDevice(relayIPs []string, dnsProtected bool, binaries linuxFirewallBinaries) (*linuxPacketDevice, error) {
 	ctx, cancel := context.WithCancel(context.Background())
 	d := &linuxPacketDevice{ctx: ctx, cancel: cancel, packets: make(chan linuxQueuePacket, 1024), raw4: -1, raw6: -1}
 	fail := func(err error) (*linuxPacketDevice, error) {
@@ -136,8 +172,11 @@ func newLinuxPacketDevice(relayIPs []string, dnsProtected bool) (*linuxPacketDev
 	if d.raw4, err = openLinuxRawSocket(unix.AF_INET); err != nil {
 		return fail(fmt.Errorf("创建 IPv4 注入 socket 失败: %w", err))
 	}
-	if d.raw6, err = openLinuxRawSocket(unix.AF_INET6); err != nil {
-		return fail(fmt.Errorf("创建 IPv6 注入 socket 失败: %w", err))
+	if binaries.ipv6 != "" {
+		if d.raw6, err = openLinuxRawSocket(unix.AF_INET6); err != nil {
+			log.Printf("[divert] IPv6 注入 socket 不可用，仅接管 IPv4: %v", err)
+			binaries.ipv6 = ""
+		}
 	}
 	d.queue, err = nfqueue.Open(&nfqueue.Config{
 		NfQueue:      linuxQueueNumber,
@@ -147,16 +186,32 @@ func newLinuxPacketDevice(relayIPs []string, dnsProtected bool) (*linuxPacketDev
 		WriteTimeout: 2 * time.Second,
 	})
 	if err != nil {
-		return fail(fmt.Errorf("打开 NFQUEUE %d 失败: %w", linuxQueueNumber, err))
+		return fail(fmt.Errorf("打开 NFQUEUE %d 失败（请检查宿主机 nfnetlink_queue / xt_NFQUEUE 模块及 NET_ADMIN 权限）: %w", linuxQueueNumber, err))
 	}
 	if err := d.queue.RegisterWithErrorFunc(ctx, d.onPacket, d.onQueueError); err != nil {
-		return fail(fmt.Errorf("绑定 NFQUEUE %d 失败: %w", linuxQueueNumber, err))
+		return fail(fmt.Errorf("绑定 NFQUEUE %d 失败（请检查宿主机 nfnetlink_queue / xt_NFQUEUE 模块及 NET_ADMIN 权限）: %w", linuxQueueNumber, err))
 	}
-	d.firewall, err = installLinuxFirewall(relayIPs, dnsProtected)
+	d.firewall, err = installLinuxFirewall(relayIPs, dnsProtected, binaries)
 	if err != nil {
 		return fail(err)
 	}
+	if d.firewall.ip6tables == "" && d.raw6 >= 0 {
+		_ = unix.Close(d.raw6)
+		d.raw6 = -1
+	}
+	d.ipv6Enabled = d.firewall.ip6tables != ""
 	return d, nil
+}
+
+func (d *linuxPacketDevice) PacketDeviceDiagnostics() packetDeviceDiagnostics {
+	family, state := "ipv4", "running"
+	if d.ipv6Enabled {
+		family = "dual"
+	}
+	if d.ctx.Err() != nil {
+		state = "closed"
+	}
+	return packetDeviceDiagnostics{Backend: "nfqueue", State: state, Family: family}
 }
 
 func openLinuxRawSocket(family int) (int, error) {
@@ -335,7 +390,8 @@ func (d *linuxPacketDevice) Close() error {
 }
 
 func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
-	if err := linuxPlatformReadiness(); err != nil {
+	binaries, err := linuxPlatformReadiness()
+	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrPlatformNotReady, err)
 	}
 	if err := prepareLoopGuard(s); err != nil {
@@ -343,8 +399,16 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	}
 	var listeners []net.Listener
 	for _, family := range []struct{ network, address string }{{"tcp4", "0.0.0.0:0"}, {"tcp6", "[::]:0"}} {
+		if family.network == "tcp6" && binaries.ipv6 == "" {
+			continue
+		}
 		listener, err := net.Listen(family.network, family.address)
 		if err != nil {
+			if family.network == "tcp6" {
+				log.Printf("[divert] IPv6 监听不可用，仅接管 IPv4: %v", err)
+				binaries.ipv6 = ""
+				continue
+			}
 			for _, opened := range listeners {
 				_ = opened.Close()
 			}
@@ -352,12 +416,16 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 		}
 		listeners = append(listeners, listener)
 	}
-	device, err := newLinuxPacketDevice(s.loopGuard().RelayIPs, s.fakeIPEnabled() || s.proxyDNSEnabled())
+	device, err := newLinuxPacketDevice(s.loopGuard().RelayIPs, s.fakeIPEnabled() || s.proxyDNSEnabled(), binaries)
 	if err != nil {
 		for _, listener := range listeners {
 			_ = listener.Close()
 		}
 		return nil, err
+	}
+	if device.firewall.ip6tables == "" && len(listeners) > 1 {
+		_ = listeners[1].Close()
+		listeners = listeners[:1]
 	}
 	resolver := newLinuxProcessResolver()
 	i := newPacketInterceptor(s, device, listeners, resolver.lookup)
@@ -382,28 +450,35 @@ type linuxFirewall struct {
 	closeErr      error
 }
 
-func installLinuxFirewall(relayIPs []string, dnsProtected bool) (*linuxFirewall, error) {
-	iptables, err := exec.LookPath("iptables")
-	if err != nil {
+func installLinuxFirewall(relayIPs []string, dnsProtected bool, binaries linuxFirewallBinaries) (*linuxFirewall, error) {
+	f := &linuxFirewall{iptables: binaries.ipv4, ip6tables: binaries.ipv6, run: runLinuxFirewallCommand, dnsGuard: dnsProtected}
+	if err := f.install(relayIPs); err != nil {
 		return nil, err
-	}
-	ip6tables, err := exec.LookPath("ip6tables")
-	if err != nil {
-		return nil, err
-	}
-	f := &linuxFirewall{iptables: iptables, ip6tables: ip6tables, run: runLinuxFirewallCommand, dnsGuard: dnsProtected}
-	for _, binary := range []string{f.iptables, f.ip6tables} {
-		f.cleanupFamily(binary)
-		if err := f.installFamily(binary, relayIPs); err != nil {
-			_ = f.Close()
-			return nil, err
-		}
 	}
 	return f, nil
 }
 
+func (f *linuxFirewall) install(relayIPs []string) error {
+	f.cleanupFamily(f.iptables)
+	if err := f.installFamily(f.iptables, relayIPs); err != nil {
+		return err
+	}
+	if f.ip6tables != "" {
+		f.cleanupFamily(f.ip6tables)
+		if err := f.installFamily(f.ip6tables, relayIPs); err != nil {
+			// installFamily removes partially installed IPv6 rules. Keep the
+			// working IPv4 rules and omit IPv6 from later updates/cleanup.
+			log.Printf("[divert] IPv6 规则不可用，仅接管 IPv4: %v", err)
+			f.ip6tables = ""
+		}
+	}
+	return nil
+}
+
 func runLinuxFirewallCommand(binary string, args ...string) error {
-	command := exec.Command(binary, append([]string{"-w", "5"}, args...)...)
+	ctx, cancel := context.WithTimeout(context.Background(), 6*time.Second)
+	defer cancel()
+	command := exec.CommandContext(ctx, binary, append([]string{"-w", "5"}, args...)...)
 	if output, err := command.CombinedOutput(); err != nil {
 		return fmt.Errorf("%s %s: %w: %s", binary, strings.Join(args, " "), err, strings.TrimSpace(string(output)))
 	}
@@ -476,6 +551,9 @@ func (f *linuxFirewall) setDNSGuardMode(protected bool) error {
 	if f.dnsRuleStates == nil {
 		f.dnsRuleStates = make(map[string]bool, 4)
 		for _, family := range []string{f.iptables, f.ip6tables} {
+			if family == "" {
+				continue
+			}
 			for _, protocol := range []string{"tcp", "udp"} {
 				f.dnsRuleStates[family+"/"+protocol] = f.dnsGuard
 			}
@@ -483,6 +561,9 @@ func (f *linuxFirewall) setDNSGuardMode(protected bool) error {
 	}
 	var failures []error
 	for _, family := range []string{f.iptables, f.ip6tables} {
+		if family == "" {
+			continue
+		}
 		for _, item := range []struct {
 			protocol string
 			index    string
@@ -627,6 +708,9 @@ func (f *linuxFirewall) Close() error {
 		defer f.dnsMu.Unlock()
 		f.dnsClosed = true
 		for _, binary := range []string{f.ip6tables, f.iptables} {
+			if binary == "" {
+				continue
+			}
 			f.closeErr = errors.Join(f.closeErr, f.removeFamily(binary))
 		}
 	})

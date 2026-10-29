@@ -8,12 +8,99 @@ import (
 	"errors"
 	"net"
 	"net/netip"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
 
 	"github.com/florianl/go-nfqueue/v2"
 )
+
+func TestLinuxFirewallSelectsUsableBackend(t *testing.T) {
+	for _, tc := range []struct {
+		name, primary, legacy, want string
+	}{
+		{"default", "exit 0", "exit 1", "ip6tables"},
+		{"legacy fallback", "echo 'Invalid argument' >&2; exit 1", "exit 0", "ip6tables-legacy"},
+		{"missing default", "", "exit 0", "ip6tables-legacy"},
+		{"unavailable", "exit 1", "exit 1", ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			t.Setenv("PATH", dir)
+			for name, script := range map[string]string{"ip6tables": tc.primary, "ip6tables-legacy": tc.legacy} {
+				if script == "" {
+					continue
+				}
+				// Probes must query mangle only, never modify firewall rules.
+				body := "#!/bin/sh\n[ \"$*\" = '-w 5 -t mangle -S' ] || exit 99\n" + script + "\n"
+				if err := os.WriteFile(filepath.Join(dir, name), []byte(body), 0700); err != nil {
+					t.Fatal(err)
+				}
+			}
+			got, err := selectLinuxFirewallBinary("ip6tables", "ip6tables-legacy")
+			if tc.want == "" {
+				if err == nil || got != "" {
+					t.Fatalf("unusable backend accepted: %q, %v", got, err)
+				}
+			} else if err != nil || got != filepath.Join(dir, tc.want) {
+				t.Fatalf("backend = %q, %v; want %s", got, err, tc.want)
+			}
+		})
+	}
+}
+
+func TestLinuxIPv6FailureKeepsIPv4RulesAndDNSHotUpdates(t *testing.T) {
+	for _, withIPv6 := range []bool{false, true} {
+		var commands [][]string
+		f := &linuxFirewall{iptables: "iptables-legacy"}
+		if withIPv6 {
+			f.ip6tables = "ip6tables-legacy"
+		}
+		f.run = func(binary string, args ...string) error {
+			if binary == "" {
+				t.Fatal("empty optional IPv6 command executed")
+			}
+			commands = append(commands, append([]string{binary}, args...))
+			if binary == "ip6tables-legacy" && strings.Contains(strings.Join(args, " "), "-j NFQUEUE") {
+				return errors.New("IPv6 NFQUEUE unavailable")
+			}
+			return nil
+		}
+		if err := f.install(nil); err != nil || f.ip6tables != "" {
+			t.Fatalf("IPv4 installation failed without IPv6: %v", err)
+		}
+		attached := false
+		for _, cmd := range commands {
+			if cmd[0] != f.iptables {
+				continue
+			}
+			if attached && (cmd[3] == "-D" || cmd[3] == "-F" || cmd[3] == "-X") {
+				t.Fatalf("IPv6 failure removed working IPv4 rules: %v", cmd)
+			}
+			if cmd[3] == "-I" && cmd[4] == "OUTPUT" {
+				attached = true
+			}
+		}
+		if !attached {
+			t.Fatal("IPv4 rules were never attached")
+		}
+		commands = nil
+		if err := f.setDNSGuardMode(true); err != nil || len(commands) != 2 || len(f.dnsRuleStates) != 2 {
+			t.Fatalf("IPv4 DNS guard update = %v, commands=%v, states=%v", err, commands, f.dnsRuleStates)
+		}
+		for _, cmd := range commands {
+			if cmd[0] != f.iptables || cmd[3] != "-R" || strings.Contains(strings.Join(cmd, " "), "--queue-bypass") {
+				t.Fatalf("incorrect IPv4 DNS guard rule: %v", cmd)
+			}
+		}
+		commands = nil
+		if err := f.Close(); err != nil || len(commands) != 6 {
+			t.Fatalf("IPv4-only cleanup = %v, commands=%v", err, commands)
+		}
+	}
+}
 
 type testLinuxQueue struct {
 	verdicts []struct {

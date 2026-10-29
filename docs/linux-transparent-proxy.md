@@ -7,11 +7,28 @@ Linux Agent 使用 `mangle/OUTPUT -> NFQUEUE` 处理 TCP、UDP 和 IPv4/IPv6。D
 前置条件：
 
 - root，或同时拥有 `CAP_NET_ADMIN`、`CAP_NET_RAW`；
-- 内核启用 `NETFILTER_NETLINK_QUEUE`；
-- 安装 `iptables` 与 `ip6tables`。发行版提供的 nftables 兼容前端可以使用；
+- 内核启用 `NETFILTER_NETLINK_QUEUE` 和 `NETFILTER_XT_TARGET_NFQUEUE`，对应模块已在宿主机加载；
+- 安装可用的 IPv4 `iptables` mangle 后端。Agent 先探测默认前端，不可用时尝试 `iptables-legacy`、`iptables-nft`；IPv6 单独探测 `ip6tables`、`ip6tables-legacy`、`ip6tables-nft`，不修改系统 alternatives；
 - `/proc` 可见。进程归属通过 `/proc/net/{tcp,udp,tcp6,udp6}` 与 `/proc/<pid>/fd` 解析，并按五元组短期缓存。
 
 配置 `network.mode: divert` 后启动 Agent。Agent 创建独立的 `RELAYPROXY_OUT` / `RELAYPROXY_IN` chain；正常退出时删除规则。规则使用 `--queue-bypass`，因此进程崩溃或 NFQUEUE 未绑定时不会把主机网络永久黑洞。
+
+IPv6 是可选能力。缺少 IPv6 防火墙前端、监听或回注能力时，Agent 仍可接管 IPv4；IPv6 规则安装失败也不会撤销正常工作的 IPv4 规则。管理页显示实际接管的协议范围，此时 IPv6 流量不受透明代理接管。
+
+也可在 Agent Web 管理页（默认 `http://127.0.0.1:9090/`）打开「接入」→「Linux 透明代理」，启用「接管系统流量」并保存，然后重启 Agent 生效。该卡片会显示运行条件、接管状态、抓包后端和错误；权限或依赖不足时仍显示入口，并说明无法启用的原因。局域网网关位于同一页，单独控制 LAN 设备的接入。只改本机透明代理或本地监听设置时，不提交网关配置，也不执行网关的 nftables 清理；网关自己的 nftables / TPROXY 依赖不会阻止本机透明代理开关保存。
+
+## 旧内核 NAS
+
+容器共享宿主机内核。若 `nft list tables` 报 `Invalid argument`，但 `iptables -t mangle -S` 或 `iptables-legacy -t mangle -S` 正常，本机 NFQUEUE 透明代理仍可使用可用的 iptables 后端；局域网网关使用的 nftables / TPROXY 需要另外满足内核条件。
+
+NFQUEUE 模块需在 NAS 宿主机加载，例如：
+
+```bash
+sudo modprobe nfnetlink_queue
+sudo modprobe xt_NFQUEUE
+```
+
+若 NAS 的模块目录不符合 modprobe 的查找布局，应按厂商的模块管理方式加载匹配当前内核的 `.ko` 文件及依赖。重新启动后的自动加载也由宿主机负责；重装容器内的 nftables 不会补齐宿主机内核功能。
 
 ## Docker Compose
 

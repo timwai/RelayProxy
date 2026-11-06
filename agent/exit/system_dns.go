@@ -27,6 +27,12 @@ func (h *Handler) ResolveSystemDNS(ctx context.Context, req protocol.ExitDNSRequ
 	if req.RequestID == "" || len(req.RequestID) > protocol.MaxStringLen {
 		return answer, protocol.NewRelayError(protocol.ErrCodeInvalidRequest, "invalid DNS request identifier")
 	}
+	// If this Exit's own transparent DNS/53 capture is active, the OS
+	// resolver may reenter this Agent and recursively trigger another DNS
+	// request. Reject safely until a platform-specific bypass is available.
+	if h.cfg.SystemDNSAllowed != nil && !h.cfg.SystemDNSAllowed() {
+		return answer, protocol.NewRelayError(protocol.ErrCodeDNSFailed, "exit system DNS unavailable while DNS interception is active")
+	}
 	msg, host, err := protocol.ValidateExitDNSQuestion(req.Question)
 	if err != nil {
 		return answer, protocol.NewRelayError(protocol.ErrCodeInvalidRequest, err.Error())

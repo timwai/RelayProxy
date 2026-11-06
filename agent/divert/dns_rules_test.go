@@ -17,7 +17,7 @@ func TestDomainDNSRoutingSelectsLocalAndRemoteExit(t *testing.T) {
 			if host == "google.com" || host == "www.google.com" { return false, "us-exit" }
 			return true, ""
 		},
-		Guard: LoopGuard{RelayHost: "relay.example", RelayIPs: []netip.Addr{netip.MustParseAddr("198.51.100.4")}},
+		Guard: LoopGuard{RelayHost: "relay.example", RelayIPs: []string{"198.51.100.4"}},
 		ProxyReady: func() bool { return false },
 	})
 	remote := fakeDNSQuestion(t, "www.google.com", dnsmessage.TypeA)

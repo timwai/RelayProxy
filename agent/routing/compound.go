@@ -17,6 +17,10 @@ func CloneConfig(cfg Config) Config {
 	cfg.DoHBlockedIPs = slices.Clone(cfg.DoHBlockedIPs)
 	cfg.DNSUpstreams = slices.Clone(cfg.DNSUpstreams)
 	cfg.DNSDirectDomains = slices.Clone(cfg.DNSDirectDomains)
+	cfg.DNSRules = slices.Clone(cfg.DNSRules)
+	for i := range cfg.DNSRules {
+		cfg.DNSRules[i].Domains = slices.Clone(cfg.DNSRules[i].Domains)
+	}
 	if cfg.DNSAssociationEnabled != nil {
 		enabled := *cfg.DNSAssociationEnabled
 		cfg.DNSAssociationEnabled = &enabled

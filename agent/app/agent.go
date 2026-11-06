@@ -538,6 +538,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
 			UpstreamExitID: cfg.ExitUpstreamID, UpstreamDialer: a.groupUpstreamDialer(cfg.ExitUpstreamID),
 			AllowBrowserNetwork: cfg.BrowserNetworkShare,
+			SystemDNSAllowed:    func() bool { return !engine.FakeIPEnabled() && !engine.ProxyDNSEnabled() },
 			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
 			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: p2presume.DefaultReplayLimit,
 		})

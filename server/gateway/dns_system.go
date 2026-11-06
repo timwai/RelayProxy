@@ -66,6 +66,10 @@ func (r *StreamRouter) handleExitSystemDNS(ctx context.Context, header *protocol
 		_ = protocol.WriteJSON(clientStream, response)
 		return
 	}
+	if !hasCapability(exitSession, protocol.CapabilityTargetACL) {
+		fail(protocol.ErrCodeACLDenied, "selected exit does not enforce the Relay ACL")
+		return
+	}
 	// Only modern exits that enforce the Relay ACL are permitted. This
 	// prevents legacy or malicious paths from becoming unfiltered DNS oracles.
 	policy, err := r.targetPolicy(ctx, exitSession, hostname, 53, "udp")

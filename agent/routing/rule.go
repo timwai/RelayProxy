@@ -31,6 +31,25 @@ const (
 	DNSModeLocal DNSMode = "local"
 )
 
+// DNSAction chooses how a captured DNS/53 question is resolved.
+// This is independent from the subsequent application connection's route.
+type DNSAction string
+
+const (
+	DNSActionLocal  DNSAction = "LOCAL"
+	DNSActionRemote DNSAction = "REMOTE"
+)
+
+// DNSRule is matched before contacting any resolver. A wildcard suffix
+// (*.example.com) matches the base domain and all its subdomains.
+type DNSRule struct {
+	Name    string    `yaml:"name" json:"name"`
+	Enabled bool      `yaml:"enabled" json:"enabled"`
+	Domains []string  `yaml:"domains" json:"domains"`
+	Action  DNSAction `yaml:"action" json:"action"`
+	ExitID  string    `yaml:"exit_id,omitempty" json:"exit_id,omitempty"`
+}
+
 // Rule is a single routing rule. Rules are evaluated in order (first match wins).
 type Rule struct {
 	Entries          []string `yaml:"entries,omitempty" json:"entries,omitempty"`
@@ -86,7 +105,8 @@ type Config struct {
 	ForwardOtherDNS       bool          `yaml:"forward_other_dns,omitempty" json:"forward_other_dns,omitempty"`             // forward TXT/SRV through TLS resolver on selected proxy exit
 	DNSUpstreams          []DNSUpstream `yaml:"dns_upstreams,omitempty" json:"dns_upstreams,omitempty"`                     // custom DoH providers, replaces built-ins if nonempty
 	DNSExitID             string        `yaml:"dns_exit_id,omitempty" json:"dns_exit_id,omitempty"`                         // optional dedicated exit for upstream encrypted DNS
-	DNSDirectDomains      []string      `yaml:"dns_direct_domains,omitempty" json:"dns_direct_domains,omitempty"`           // explicit suffixes allowed to use the original DNS resolver
+	DNSDirectDomains      []string      `yaml:"dns_direct_domains,omitempty" json:"dns_direct_domains,omitempty"`
+	DNSRules              []DNSRule     `yaml:"dns_rules,omitempty" json:"dns_rules,omitempty"` // if present, first matching rule wins; unmatched names use LOCAL           // explicit suffixes allowed to use the original DNS resolver
 	DoHBlockedIPs         []string      `yaml:"doh_blocked_ips,omitempty" json:"doh_blocked_ips,omitempty"`                 // explicit IP/CIDR addresses to deny on HTTPS/443 TCP or UDP
 	DefaultAction         Action        `yaml:"default_action" json:"default_action"`                                       // When no rule matches in rule mode
 	Rules                 []Rule        `yaml:"rules"          json:"rules"`                                                // Ordered rule list

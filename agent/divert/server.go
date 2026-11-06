@@ -53,6 +53,7 @@ type Options struct {
 	BlockDoHEndpoints     func() bool          // opt-in domain-based DoH endpoint guard
 	ForwardOtherDNS       func() bool          // opt-in authenticated DoT via proxy for TXT/SRV
 	DNSExitID             func() string        // optional pinned exit for DNS, independent from app flows
+	DNSRoute              func(string) (bool, string) // per-domain LOCAL flag and REMOTE exit override; nil retains global DNS
 	DNSUpstreams          func() []DNSUpstream // optional custom pinned HTTPS resolvers from active policy
 	DNSDirectDomains      func() []string      // explicit domain suffix exceptions to encrypted/FakeIP DNS
 	DoHBlockedIPs         func() []string      // opt-in fixed HTTPS/443 IP or CIDR denylist

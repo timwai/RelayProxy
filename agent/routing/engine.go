@@ -144,6 +144,31 @@ func (e *Engine) DNSRoute(host string) (local bool, exitID string) {
 	return true, ""
 }
 
+// DNSResolver returns the transport for a matched REMOTE DNS rule. Legacy
+// policies and rules without a resolver select the established encrypted path.
+func (e *Engine) DNSResolver(host string) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if !e.config.ProxyDNSEnabled {
+		return "encrypted"
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	for _, rule := range e.config.DNSRules {
+		if !rule.Enabled {
+			continue
+		}
+		for _, domain := range rule.Domains {
+			if matchDNSRuleDomain(host, domain) {
+				if rule.Action == DNSActionRemote && rule.Resolver == "exit_system" {
+					return "exit_system"
+				}
+				return "encrypted"
+			}
+		}
+	}
+	return "encrypted"
+}
+
 func (e *Engine) DNSExitID() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

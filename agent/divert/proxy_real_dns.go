@@ -24,8 +24,14 @@ func (s *Server) interceptedDNSReply(ctx context.Context, query []byte, udp bool
 	if isRelayDNSQuestion(query, s.loopGuard().RelayHost) {
 		return s.fakeDNS.replyScoped(query, s.loopGuard().RelayHost, s.loopGuard().RelayIPs, "", false)
 	}
+	// Packet interception and the DNS/TCP resolver normally bypass LOCAL
+	// questions first. Fail closed if a platform cannot reinject local DNS.
+	if s.directDNSQuestion(query) {
+		return realProxyDNSReply(ctx, query, udp, nil)
+	}
+	exitID := s.remoteDNSExit(query)
 	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, query []byte) ([]byte, error) {
-		response, err := s.exchangeLimitedProxyDNS(ctx, "", query)
+		response, err := s.exchangeLimitedProxyDNS(ctx, exitID, query)
 		if err != nil {
 			s.reportProxyDNSError(err)
 		}

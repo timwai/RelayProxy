@@ -55,4 +55,5 @@ REMOTE 查询出口失败时返回 SERVFAIL，不回退本地明文查询；未�
 - 返回记录上限 16，DNS 问题与答案长度上限各 4096 字节，出口解析上限 7 秒；请求者总超时 8 秒，外层 DNS 限流池仍然生效。
 - 请求 ID、Question、RCode、A/AAAA 类型与 TTL 均验证；出口无响应、超时、验证失败、ACL 拒绝时返回 SERVFAIL，不访问入口系统 DNS。
 - 出口 OS 解析器的 Go API 无法可靠区分 NXDOMAIN 和“该记录类型不存在”（NODATA），暂统一返回空的 NOERROR 应答，避免错误地缓存整域不存在的结论。
+- **递归接管保护：** 若出口 Agent 自身开启 FakeIP 或真实 IP DNS/53 接管，`exit_system` 当前明确拒绝执行，返回失败（入口转为 SERVFAIL），避免出口系统 DNS 再次被 RelayProxy 接管形成递归。请关闭该出口上的 DNS 接管，或选用 `encrypted`。不同平台的系统 DNS、环回 DNS 与服务进程仍需实机验收。
 - 此阶段不支持将 `local:*` 自定义代理配置为出口系统 DNS。如果使用设备组，逐个试选符合规则的成员；任何 ACL 禁止错误不会切换到其他成员。

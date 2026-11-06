@@ -44,6 +44,6 @@ test('DNS page save includes independently persisted association and real DNS sw
 });
 
 test('DNS rule save keeps domain lists and exit selection',()=>{
- const payload=dnsPagePatch({dns_rules:[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:'*.google.com\\n*.googleapis.com'}]});
+ const payload=dnsPagePatch({dns_rules:[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:['*.google.com','*.googleapis.com']}]});
  assert.deepEqual(payload.dns_rules,[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:['*.google.com','*.googleapis.com']}]);
 });

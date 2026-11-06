@@ -19,7 +19,8 @@ func relayDNSQuery(t *testing.T) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	query, err := (dnsmessage.Message{Header: dnsmessage.Header{ID: 12, RecursionDesired: true}, Questions: []dnsmessage.Question{{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}}}).Pack()
+	question := dnsmessage.Message{Header: dnsmessage.Header{ID: 12, RecursionDesired: true}, Questions: []dnsmessage.Question{{Name: name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET}}}
+	query, err := question.Pack()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +66,8 @@ func TestRelayExitSystemDNSAuthorizesAndOverwritesForgedPolicy(t *testing.T) {
 					if err != nil {
 						return
 					}
-					answer, _ := (dnsmessage.Message{Header: dnsmessage.Header{ID: msg.ID, Response: true}, Questions: msg.Questions}).Pack()
+					response := dnsmessage.Message{Header: dnsmessage.Header{ID: msg.ID, Response: true}, Questions: msg.Questions}
+					answer, _ := response.Pack()
 					_ = protocol.WriteJSON(exitPeer, protocol.ExitDNSResponse{RequestID: req.RequestID, Success: true, Answer: answer})
 				}()
 			}

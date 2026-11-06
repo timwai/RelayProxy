@@ -573,6 +573,8 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			ForwardOtherDNS:       engine.ForwardOtherDNS,
 			DNSExitID:             engine.DNSExitID,
 			DNSRoute:              engine.DNSRoute,
+			DNSResolver:           engine.DNSResolver,
+			ExchangeExitSystemDNS: a.rawDialer.ExchangeExitSystemDNS,
 			DNSDirectDomains:      engine.DNSDirectDomains,
 			DNSUpstreams: func() []divert.DNSUpstream {
 				configured := engine.DNSUpstreams()
@@ -1431,7 +1433,8 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 		header, err := protocol.ReadStreamHeader(stream)
 		if err != nil || (header.Type != protocol.FrameTypeOpenTCP &&
 			header.Type != protocol.FrameTypeBrowserNetworkTCP &&
-			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest) {
+			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest &&
+			header.Type != protocol.FrameTypeExitSystemDNS) {
 			<-sem
 			_ = stream.Close()
 			continue

@@ -1,6 +1,7 @@
 package protocol
 
 import (
+	"net"
 	"fmt"
 	"strings"
 
@@ -62,4 +63,40 @@ func ValidateExitDNSQuestion(raw []byte) (dnsmessage.Message, string, error) {
 		}
 	}
 	return msg, host, nil
+}
+
+ 
+// ValidateExitDNSAnswer is used by the Relay and the requester. An exit may
+// return only the original A/AAAA question with up to 16 matching addresses.
+func ValidateExitDNSAnswer(question, answer []byte) ([]net.IP, error) {
+	request, _, err := ValidateExitDNSQuestion(question)
+	if err != nil {
+		return nil, err
+	}
+	if len(answer) < 12 || len(answer) > MaxExitDNSAnswerBytes {
+		return nil, fmt.Errorf("exit DNS answer exceeds size limit")
+	}
+	var response dnsmessage.Message
+	if err := response.Unpack(answer); err != nil || !response.Response ||
+		response.ID != request.ID || response.OpCode != 0 ||
+		len(response.Questions) != 1 || response.Questions[0] != request.Questions[0] ||
+		response.RCode != dnsmessage.RCodeSuccess || len(response.Answers) > MaxExitDNSAnswers {
+		return nil, fmt.Errorf("invalid exit DNS answer")
+	}
+	ips := make([]net.IP, 0, len(response.Answers))
+	for _, resource := range response.Answers {
+		if resource.Header.Name != request.Questions[0].Name || resource.Header.Type != request.Questions[0].Type ||
+			resource.Header.Class != dnsmessage.ClassINET || resource.Header.TTL > 300 {
+			return nil, fmt.Errorf("unexpected exit DNS resource")
+		}
+		switch v := resource.Body.(type) {
+		case *dnsmessage.AResource:
+			ips = append(ips, net.IP(append([]byte(nil), v.A[:]...)))
+		case *dnsmessage.AAAAResource:
+			ips = append(ips, net.IP(append([]byte(nil), v.AAAA[:]...)))
+		default:
+			return nil, fmt.Errorf("unsupported exit DNS resource")
+		}
+	}
+	return ips, nil
 }

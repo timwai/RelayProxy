@@ -18,7 +18,8 @@ func systemDNSQuestion(t *testing.T, kind dnsmessage.Type) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire, err := (dnsmessage.Message{Header: dnsmessage.Header{ID: 144, RecursionDesired: true}, Questions: []dnsmessage.Question{{Name: name, Type: kind, Class: dnsmessage.ClassINET}}}).Pack()
+	question := dnsmessage.Message{Header: dnsmessage.Header{ID: 144, RecursionDesired: true}, Questions: []dnsmessage.Question{{Name: name, Type: kind, Class: dnsmessage.ClassINET}}}
+	wire, err := question.Pack()
 	if err != nil {
 		t.Fatal(err)
 	}

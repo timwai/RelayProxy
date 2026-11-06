@@ -62,6 +62,12 @@ func ValidateConfig(cfg Config) error {
 		if rule.Action != DNSActionLocal && rule.Action != DNSActionRemote {
 			return fmt.Errorf("routing.dns_rules[%d]: action must be LOCAL or REMOTE", i)
 		}
+		if rule.Resolver != "" && rule.Resolver != "encrypted" && rule.Resolver != "exit_system" {
+			return fmt.Errorf("routing.dns_rules[%d]: resolver must be encrypted or exit_system", i)
+		}
+		if rule.Resolver == "exit_system" && (rule.Action != DNSActionRemote || strings.HasPrefix(rule.ExitID, "local:")) {
+			return fmt.Errorf("routing.dns_rules[%d]: exit_system needs a REMOTE device exit, not a local custom proxy", i)
+		}
 		if len(rule.Domains) == 0 || len(rule.Domains) > 64 {
 			return fmt.Errorf("routing.dns_rules[%d]: 1-64 domain patterns required", i)
 		}

@@ -41,8 +41,11 @@ func ValidateExitDNSQuestion(raw []byte) (dnsmessage.Message, string, error) {
 		return msg, "", fmt.Errorf("invalid exit DNS query size")
 	}
 	if err := msg.Unpack(raw); err != nil || msg.Response || msg.Truncated ||
-		msg.OpCode != 0 || len(msg.Questions) != 1 {
+		msg.OpCode != 0 || len(msg.Questions) != 1 || len(msg.Answers) != 0 || len(msg.Authorities) != 0 || len(msg.Additionals) > 1 {
 		return msg, "", fmt.Errorf("invalid exit DNS question")
+	}
+		if len(msg.Additionals) == 1 && msg.Additionals[0].Header.Type != dnsmessage.TypeOPT {
+		return msg, "", fmt.Errorf("unsupported exit DNS additional record")
 	}
 	q := msg.Questions[0]
 	if q.Class != dnsmessage.ClassINET || (q.Type != dnsmessage.TypeA && q.Type != dnsmessage.TypeAAAA) {
@@ -79,7 +82,9 @@ func ValidateExitDNSAnswer(question, answer []byte) ([]net.IP, error) {
 	if err := response.Unpack(answer); err != nil || !response.Response ||
 		response.ID != request.ID || response.OpCode != 0 ||
 		len(response.Questions) != 1 || response.Questions[0] != request.Questions[0] ||
-		response.RCode != dnsmessage.RCodeSuccess || len(response.Answers) > MaxExitDNSAnswers {
+		response.RCode != dnsmessage.RCodeSuccess || response.Truncated ||
+		len(response.Answers) > MaxExitDNSAnswers || len(response.Authorities) != 0 ||
+		len(response.Additionals) != 0 {
 		return nil, fmt.Errorf("invalid exit DNS answer")
 	}
 	ips := make([]net.IP, 0, len(response.Answers))

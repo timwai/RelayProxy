@@ -43,12 +43,12 @@ const (
 // DNSRule is matched before contacting any resolver. A wildcard suffix
 // (*.example.com) matches the base domain and all its subdomains.
 type DNSRule struct {
-	Name    string    `yaml:"name" json:"name"`
-	Enabled bool      `yaml:"enabled" json:"enabled"`
-	Domains []string  `yaml:"domains" json:"domains"`
-	Action  DNSAction `yaml:"action" json:"action"`
-	ExitID  string    `yaml:"exit_id,omitempty" json:"exit_id,omitempty"`
-	Resolver string   `yaml:"resolver,omitempty" json:"resolver,omitempty"` // encrypted (default) or exit_system
+	Name     string    `yaml:"name" json:"name"`
+	Enabled  bool      `yaml:"enabled" json:"enabled"`
+	Domains  []string  `yaml:"domains" json:"domains"`
+	Action   DNSAction `yaml:"action" json:"action"`
+	ExitID   string    `yaml:"exit_id,omitempty" json:"exit_id,omitempty"`
+	Resolver string    `yaml:"resolver,omitempty" json:"resolver,omitempty"` // encrypted (default) or exit_system
 }
 
 // Rule is a single routing rule. Rules are evaluated in order (first match wins).

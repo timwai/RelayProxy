@@ -589,7 +589,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   finally{setProbing(false)}
  };
  const r=config.routing||EMPTY.routing;
- const inventory=[...arr(exits).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
+ const inventory=[...withExitGroups(arr(exits),arr(r.device_groups)).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
  const change=next=>setv('routing',next);
  const updateDNSRule=(i,patch)=>change({...r,dns_rules:arr(r.dns_rules).map((x,j)=>j===i?{...x,...patch}:x)});
  const preset=currentDNSPreset(r);

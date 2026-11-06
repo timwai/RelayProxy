@@ -12,7 +12,8 @@ func exitDNSQuestion(t *testing.T, host string, qtype dnsmessage.Type) []byte {
 	if err != nil {
 		t.Fatal(err)
 	}
-	wire, err := (dnsmessage.Message{Header: dnsmessage.Header{ID: 41, RecursionDesired: true}, Questions: []dnsmessage.Question{{Name: name, Type: qtype, Class: dnsmessage.ClassINET}}}).Pack()
+	question := dnsmessage.Message{Header: dnsmessage.Header{ID: 41, RecursionDesired: true}, Questions: []dnsmessage.Question{{Name: name, Type: qtype, Class: dnsmessage.ClassINET}}}
+	wire, err := question.Pack()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -52,7 +53,8 @@ func TestExitDNSAnswerValidatesIDTypeAndAddressCount(t *testing.T) {
 		t.Fatal(err)
 	}
 	resource := dnsmessage.Resource{Header: dnsmessage.ResourceHeader{Name: msg.Questions[0].Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: ExitDNSTTLSeconds}, Body: &dnsmessage.AResource{A: [4]byte{203, 0, 113, 10}}}
-	reply, err := (dnsmessage.Message{Header: dnsmessage.Header{ID: msg.ID, Response: true}, Questions: msg.Questions, Answers: []dnsmessage.Resource{resource}}).Pack()
+	response := dnsmessage.Message{Header: dnsmessage.Header{ID: msg.ID, Response: true}, Questions: msg.Questions, Answers: []dnsmessage.Resource{resource}}
+	reply, err := response.Pack()
 	if err != nil {
 		t.Fatal(err)
 	}

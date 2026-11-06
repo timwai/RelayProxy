@@ -1,8 +1,8 @@
 package protocol
 
 import (
-	"net"
 	"fmt"
+	"net"
 	"strings"
 
 	"golang.org/x/net/dns/dnsmessage"
@@ -65,7 +65,6 @@ func ValidateExitDNSQuestion(raw []byte) (dnsmessage.Message, string, error) {
 	return msg, host, nil
 }
 
- 
 // ValidateExitDNSAnswer is used by the Relay and the requester. An exit may
 // return only the original A/AAAA question with up to 16 matching addresses.
 func ValidateExitDNSAnswer(question, answer []byte) ([]net.IP, error) {

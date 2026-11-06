@@ -11,6 +11,7 @@ import (
 // malformed selector into an accidental catch-all.
 func ValidateConfig(cfg Config) error {
 	refs := []string{cfg.DNSExitID}
+	refs = append(refs, DNSRuleExitIDs(cfg.DNSRules)...)
 	for _, r := range cfg.Rules {
 		refs = append(refs, r.ExitID)
 	}
@@ -51,6 +52,27 @@ func ValidateConfig(cfg Config) error {
 	}
 	if err := ValidateDNSUpstreams(cfg.DNSUpstreams); err != nil {
 		return err
+	}
+// DNS routing is opt-in through proxy_dns_enabled; keep inactive rules
+	// validated so a later mode switch cannot enable an unsafe wildcard.
+	if len(cfg.DNSRules) > 128 {
+		return fmt.Errorf("routing.dns_rules: maximum 128 rules")
+	}
+	for i, rule := range cfg.DNSRules {
+		if rule.Action != DNSActionLocal && rule.Action != DNSActionRemote {
+			return fmt.Errorf("routing.dns_rules[%d]: action must be LOCAL or REMOTE", i)
+		}
+		if len(rule.Domains) == 0 || len(rule.Domains) > 64 {
+			return fmt.Errorf("routing.dns_rules[%d]: 1-64 domain patterns required", i)
+		}
+		if rule.ExitID != "" && (rule.Action != DNSActionRemote || strings.TrimSpace(rule.ExitID) != rule.ExitID || strings.ContainsAny(rule.ExitID, " \\t\\r\\n/\\\\") || len(rule.ExitID) > 128) {
+			return fmt.Errorf("routing.dns_rules[%d]: invalid REMOTE exit identifier", i)
+		}
+		for j, domain := range rule.Domains {
+			if !validDNSRuleDomain(domain) {
+				return fmt.Errorf("routing.dns_rules[%d].domains[%d]: expected example.com or *.example.com", i, j)
+			}
+		}
 	}
 	if len(cfg.DNSDirectDomains) > 64 {
 		return fmt.Errorf("routing.dns_direct_domains: maximum 64 domain suffixes")

@@ -44,7 +44,7 @@ func ValidateExitDNSQuestion(raw []byte) (dnsmessage.Message, string, error) {
 		msg.OpCode != 0 || len(msg.Questions) != 1 || len(msg.Answers) != 0 || len(msg.Authorities) != 0 || len(msg.Additionals) > 1 {
 		return msg, "", fmt.Errorf("invalid exit DNS question")
 	}
-		if len(msg.Additionals) == 1 && msg.Additionals[0].Header.Type != dnsmessage.TypeOPT {
+	if len(msg.Additionals) == 1 && msg.Additionals[0].Header.Type != dnsmessage.TypeOPT {
 		return msg, "", fmt.Errorf("unsupported exit DNS additional record")
 	}
 	q := msg.Questions[0]

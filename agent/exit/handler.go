@@ -31,6 +31,7 @@ var udpPipeBufferPool = sync.Pool{
 type HandlerConfig struct {
 	ACLChecker          *acl.Checker
 	SystemDNSLookup     SystemDNSLookup // injectable OS resolver; nil uses net.DefaultResolver
+	SystemDNSAllowed    func() bool     // avoid recursion when this Exit captures its own DNS/53
 	ConnectTimeout      time.Duration
 	AllowBrowserNetwork bool // explicit local opt-in, separate from ordinary proxy.exit
 	UpstreamDialer      proxy.TunnelDialer

@@ -8,6 +8,30 @@ import (
 	"golang.org/x/net/dns/dnsmessage"
 )
 
+func authenticatedTestDNSResponse(t *testing.T, question []byte, address netip.Addr) []byte {
+	t.Helper()
+	var message dnsmessage.Message
+	if err := message.Unpack(question); err != nil {
+		t.Fatal(err)
+	}
+	if len(message.Questions) != 1 || !address.Is4() {
+		t.Fatal("invalid DNS fixture")
+	}
+	reply := dnsmessage.Message{
+		Header: dnsmessage.Header{ID: message.ID, Response: true, RecursionDesired: message.RecursionDesired, RecursionAvailable: true},
+		Questions: message.Questions,
+		Answers: []dnsmessage.Resource{{
+			Header: dnsmessage.ResourceHeader{Name: message.Questions[0].Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: 30},
+			Body: &dnsmessage.AResource{A: address.As4()},
+		}},
+	}
+	wire, err := reply.Pack()
+	if err != nil {
+		t.Fatal(err)
+	}
+	return wire
+}
+
 func TestExitSystemDNSSelectsRuleExitAndReturnsRealAddress(t *testing.T) {
 	callExit := ""
 	calls := 0

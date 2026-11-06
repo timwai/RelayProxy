@@ -97,3 +97,20 @@ func TestExitSystemDNSResolverFailuresDoNotFallback(t *testing.T) {
 		t.Fatalf("failure not closed: resp=%+v err=%v calls=%d", resp, err, calls)
 	}
 }
+
+func TestExitSystemDNSBlocksRecursiveDNSCapture(t *testing.T) {
+	called := false
+	h := NewHandler(HandlerConfig{
+		SystemDNSAllowed: func() bool { return false },
+		SystemDNSLookup: func(context.Context, string, string) ([]net.IP, error) {
+			called = true
+			return []net.IP{net.ParseIP("203.0.113.23")}, nil
+		},
+	})
+	resp, err := h.ResolveSystemDNS(context.Background(), protocol.ExitDNSRequest{
+		RequestID: "dns-guard", Question: systemDNSQuestion(t, dnsmessage.TypeA),
+	})
+	if err == nil || resp.Success || called {
+		t.Fatalf("recursive DNS capture guard failed: resp=%+v err=%v called=%t", resp, err, called)
+	}
+}

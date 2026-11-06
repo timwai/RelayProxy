@@ -108,3 +108,27 @@ func TestDNSRulesValidateAndClone(t *testing.T) {
 		})
 	}
 }
+
+func TestDomainDNSResolverSelectsOnlyRemoteSystemRules(t *testing.T) {
+	cfg:=DefaultConfig()
+	cfg.ProxyDNSEnabled=true
+	cfg.DNSRules=[]DNSRule{
+		{Name:"Google",Enabled:true,Domains:[]string{"*.google.com"},Action:DNSActionRemote,ExitID:"us",Resolver:"exit_system"},
+		{Name:"Legacy",Enabled:true,Domains:[]string{"*.example.com"},Action:DNSActionRemote,ExitID:"us"},
+	}
+	e,err:=newEngineSnapshot(cfg)
+	if err!=nil {t.Fatal(err)}
+	for _,tc:=range []struct{host,resolver string}{
+		{"google.com","exit_system"},
+		{"WWW.GOOGLE.COM.","exit_system"},
+		{"example.com","encrypted"},
+		{"missing.test","encrypted"},
+	}{
+		if got:=e.DNSResolver(tc.host);got!=tc.resolver{t.Errorf("host %s got %s want %s",tc.host,got,tc.resolver)}
+	}
+	cfg.DNSRules[0].Resolver="bogus"
+	if err:=ValidateConfig(cfg);err==nil{t.Fatal("accepted unknown resolver")}
+	cfg.DNSRules[0].Resolver="exit_system"
+	cfg.DNSRules[0].ExitID="local:proxy"
+	if err:=ValidateConfig(cfg);err==nil{t.Fatal("system DNS incorrectly selected a custom proxy")}
+}

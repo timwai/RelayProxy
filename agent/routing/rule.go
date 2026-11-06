@@ -48,6 +48,7 @@ type DNSRule struct {
 	Domains []string  `yaml:"domains" json:"domains"`
 	Action  DNSAction `yaml:"action" json:"action"`
 	ExitID  string    `yaml:"exit_id,omitempty" json:"exit_id,omitempty"`
+	Resolver string   `yaml:"resolver,omitempty" json:"resolver,omitempty"` // encrypted (default) or exit_system
 }
 
 // Rule is a single routing rule. Rules are evaluated in order (first match wins).

@@ -30,6 +30,7 @@ var udpPipeBufferPool = sync.Pool{
 
 type HandlerConfig struct {
 	ACLChecker          *acl.Checker
+	SystemDNSLookup     SystemDNSLookup // injectable OS resolver; nil uses net.DefaultResolver
 	ConnectTimeout      time.Duration
 	AllowBrowserNetwork bool // explicit local opt-in, separate from ordinary proxy.exit
 	UpstreamDialer      proxy.TunnelDialer
@@ -114,6 +115,8 @@ func (h *Handler) HandleStreamWithHeader(ctx context.Context, stream tunnel.Tunn
 		h.handleOpenUDP(ctx, stream)
 	case protocol.FrameTypeSpeedTest:
 		h.handleSpeedTest(stream)
+	case protocol.FrameTypeExitSystemDNS:
+		h.handleExitSystemDNS(ctx, stream)
 	default:
 		log.Printf("[ExitHandler] Unsupported frame type: %d", header.Type)
 	}

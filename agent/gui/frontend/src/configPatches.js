@@ -29,6 +29,7 @@ export function dnsPagePatch(r) {
     dns_exit_id:r.dns_exit_id||'',
     dns_upstreams:Array.isArray(r.dns_upstreams)?r.dns_upstreams:[],
     dns_direct_domains:splitRuleList(r.dns_direct_domains),
+    dns_rules:Array.isArray(r.dns_rules)?r.dns_rules.map(x=>({...x,domains:splitRuleList(x.domains)})):[],
     doh_blocked_ips:Array.isArray(r.doh_blocked_ips)?r.doh_blocked_ips:[],
   };
 }

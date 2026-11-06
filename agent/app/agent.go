@@ -572,6 +572,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			BlockDoHEndpoints:     engine.BlockDoHEndpoints,
 			ForwardOtherDNS:       engine.ForwardOtherDNS,
 			DNSExitID:             engine.DNSExitID,
+			DNSRoute:              engine.DNSRoute,
 			DNSDirectDomains:      engine.DNSDirectDomains,
 			DNSUpstreams: func() []divert.DNSUpstream {
 				configured := engine.DNSUpstreams()

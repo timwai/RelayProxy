@@ -616,6 +616,10 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
      <Field label="域名（每行一个）" className="full" help="使用 *.example.com 匹配该域名和全部子域名；example.com 只匹配根域名。">
       <Textarea rows="2" placeholder="*.google.com" value={ruleListText(rule.domains)} onChange={e=>updateDNSRule(i,{domains:e.target.value})}/>
      </Field>
+     <Field label="解析器类型" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.resolver||'encrypted'} onChange={e=>updateDNSRule(i,{resolver:e.target.value})}>
+      <option value="encrypted">出口访问加密 DoH / DoT（兼容旧版本）</option>
+      <option value="exit_system">使用出口设备的系统 DNS（A / AAAA）</option>
+     </Select></Field>
      <Field label="远程 DNS 出口" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.exit_id||''} onChange={e=>updateDNSRule(i,{exit_id:e.target.value})}>
       <option value="">跟随 DNS 专用出口 / 默认出口</option>
       {inventory.filter(x=>x.id).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}
@@ -630,7 +634,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   </div>)}
   <div className="actions end top-gap"><Button onClick={()=>change({...r,dns_rules:[...arr(r.dns_rules),{name:'',enabled:true,action:'REMOTE',domains:[],exit_id:''}]})}>添加 DNS 域名规则</Button></div>
   {arr(r.dns_rules).length>0&&preset!=='auto'&&<div className="notice warn top-gap">域名 DNS 出口规则仅在「自动」模式中生效；当前规则会保存但不执行。</div>}
-  <div className="mini top-gap">远程解析复用现有加密 DoH/DoT 通道（由指定出口发出），暂不使用出口操作系统 DNS。应用自带 DoH、环回 DNS 与系统缓存仍可能绕过该功能。</div>
+  <div className="mini top-gap">可为每条 REMOTE 规则选择出口系统 DNS（A/AAAA）或原有加密 DoH/DoT；TXT、SRV、HTTPS 等查询仍经同一出口的加密 DNS。出口系统 DNS 需要新版本 Relay 与 Exit，旧版本或断线将返回 SERVFAIL，不会回退本地。应用自带 DoH、环回 DNS 与系统缓存不在接管范围内。</div>
  </Card>
  {advancedOpen&&<>
   <Card title="域名关联与 DNS 出口" eyebrow="ADVANCED DNS">

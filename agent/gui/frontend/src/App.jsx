@@ -612,17 +612,17 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
    <div className="grow">
     <div className="form-grid">
      <Field label="名称"><Input value={rule.name||''} onChange={e=>updateDNSRule(i,{name:e.target.value})} placeholder="国外域名"/></Field>
-     <Field label="解析位置"><Select value={rule.action||'REMOTE'} onChange={e=>updateDNSRule(i,{action:e.target.value,exit_id:e.target.value==='REMOTE'?rule.exit_id||'':''})}><option value="REMOTE">指定出口远程解析</option><option value="LOCAL">本地系统 DNS</option></Select></Field>
+     <Field label="解析位置"><Select value={rule.action||'REMOTE'} onChange={e=>updateDNSRule(i,{action:e.target.value,exit_id:e.target.value==='REMOTE'?rule.exit_id||'':'',resolver:e.target.value==='REMOTE'?rule.resolver||'encrypted':'encrypted'})}><option value="REMOTE">指定出口远程解析</option><option value="LOCAL">本地系统 DNS</option></Select></Field>
      <Field label="域名（每行一个）" className="full" help="使用 *.example.com 匹配该域名和全部子域名；example.com 只匹配根域名。">
       <Textarea rows="2" placeholder="*.google.com" value={ruleListText(rule.domains)} onChange={e=>updateDNSRule(i,{domains:e.target.value})}/>
      </Field>
-     <Field label="解析器类型" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.resolver||'encrypted'} onChange={e=>updateDNSRule(i,{resolver:e.target.value})}>
+     <Field label="解析器类型" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.resolver||'encrypted'} onChange={e=>updateDNSRule(i,{resolver:e.target.value,exit_id:e.target.value==='exit_system'&&String(rule.exit_id||'').startsWith('local:')?'':rule.exit_id||''})}>
       <option value="encrypted">出口访问加密 DoH / DoT（兼容旧版本）</option>
       <option value="exit_system">使用出口设备的系统 DNS（A / AAAA）</option>
      </Select></Field>
      <Field label="远程 DNS 出口" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.exit_id||''} onChange={e=>updateDNSRule(i,{exit_id:e.target.value})}>
       <option value="">跟随 DNS 专用出口 / 默认出口</option>
-      {inventory.filter(x=>x.id).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}
+      {inventory.filter(x=>x.id&&(rule.resolver!=='exit_system'||!String(x.id).startsWith('local:'))).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}
       {rule.exit_id&&!inventory.some(x=>x.id===rule.exit_id)&&<option value={rule.exit_id}>{rule.exit_id}（不可用）</option>}
      </Select></Field>
     </div>

@@ -110,9 +110,10 @@ func (h *Handler) ResolveSystemDNS(ctx context.Context, req protocol.ExitDNSRequ
 			resources = append(resources, dnsmessage.Resource{Header: header, Body: &dnsmessage.AAAAResource{AAAA: v6}})
 		}
 	}
-	wire, err := (dnsmessage.Message{Header: dnsmessage.Header{
+	responseMessage := dnsmessage.Message{Header: dnsmessage.Header{
 		ID: msg.ID, Response: true, RecursionDesired: msg.RecursionDesired, RecursionAvailable: true,
-	}, Questions: msg.Questions, Answers: resources}).Pack()
+	}, Questions: msg.Questions, Answers: resources}
+	wire, err := responseMessage.Pack()
 	if err != nil || len(wire) > protocol.MaxExitDNSAnswerBytes {
 		return answer, fmt.Errorf("exit DNS response exceeds limit or cannot be encoded: %w", err)
 	}

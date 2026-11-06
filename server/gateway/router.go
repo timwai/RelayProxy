@@ -286,6 +286,8 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 		r.handleFileShare(ctx, header, clientStream, clientSession)
 	case protocol.FrameTypeOpenTCP:
 		r.handleOpenTCP(ctx, header, clientStream, clientSession, handshakeDeadline)
+	case protocol.FrameTypeExitSystemDNS:
+		r.handleExitSystemDNS(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenUDP:
 		r.handleOpenUDP(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeSpeedTest:

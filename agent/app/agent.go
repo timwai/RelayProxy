@@ -466,7 +466,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	if err := routing.ValidateCustomExits(cfg.CustomExits); err != nil {
 		return nil, err
 	}
-	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules, cfg.Routing.DNSExitID, cfg.Gateway.ExitID); err != nil {
+	if err := routing.ValidateCustomReferences(cfg.CustomExits, cfg.DefaultExitID, cfg.ExitUpstreamID, cfg.Routing.Rules, append([]string{cfg.Routing.DNSExitID, cfg.Gateway.ExitID}, routing.DNSRuleExitIDs(cfg.Routing.DNSRules)...)...); err != nil {
 		return nil, err
 	}
 	if err := routing.ValidateSubscriptionExitReferences(cfg.CustomExits, cfg.Routing.Subscriptions); err != nil {
@@ -538,6 +538,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
 			UpstreamExitID: cfg.ExitUpstreamID, UpstreamDialer: a.groupUpstreamDialer(cfg.ExitUpstreamID),
 			AllowBrowserNetwork: cfg.BrowserNetworkShare,
+			SystemDNSAllowed:    func() bool { return !engine.FakeIPEnabled() && !engine.ProxyDNSEnabled() },
 			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
 			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: p2presume.DefaultReplayLimit,
 		})
@@ -572,6 +573,9 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			BlockDoHEndpoints:     engine.BlockDoHEndpoints,
 			ForwardOtherDNS:       engine.ForwardOtherDNS,
 			DNSExitID:             engine.DNSExitID,
+			DNSRoute:              engine.DNSRoute,
+			DNSResolver:           engine.DNSResolver,
+			ExchangeExitSystemDNS: a.rawDialer.ExchangeExitSystemDNS,
 			DNSDirectDomains:      engine.DNSDirectDomains,
 			DNSUpstreams: func() []divert.DNSUpstream {
 				configured := engine.DNSUpstreams()
@@ -1430,7 +1434,8 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 		header, err := protocol.ReadStreamHeader(stream)
 		if err != nil || (header.Type != protocol.FrameTypeOpenTCP &&
 			header.Type != protocol.FrameTypeBrowserNetworkTCP &&
-			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest) {
+			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest &&
+			header.Type != protocol.FrameTypeExitSystemDNS) {
 			<-sem
 			_ = stream.Close()
 			continue
@@ -2294,7 +2299,7 @@ func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Conf
 	if err := exitgroup.Validate(routeCfg.DeviceGroups, defaultID, gatewayID, a.cfg.ExitUpstreamID); err != nil {
 		return err
 	}
-	if err := routing.ValidateCustomReferences(items, defaultID, a.cfg.ExitUpstreamID, routeCfg.Rules, routeCfg.DNSExitID, gatewayID); err != nil {
+	if err := routing.ValidateCustomReferences(items, defaultID, a.cfg.ExitUpstreamID, routeCfg.Rules, append([]string{routeCfg.DNSExitID, gatewayID}, routing.DNSRuleExitIDs(routeCfg.DNSRules)...)...); err != nil {
 		return err
 	}
 	if err := routing.ValidateSubscriptionExitReferences(items, routeCfg.Subscriptions); err != nil {
@@ -2374,7 +2379,7 @@ func (a *Agent) ApplyCustomExits(items []routing.CustomExit) error {
 	if a.closed.Load() {
 		return errors.New("agent closed")
 	}
-	if err := routing.ValidateCustomReferences(items, a.cfg.DefaultExitID, a.cfg.ExitUpstreamID, a.cfg.Routing.Rules, a.cfg.Routing.DNSExitID, a.cfg.Gateway.ExitID); err != nil {
+	if err := routing.ValidateCustomReferences(items, a.cfg.DefaultExitID, a.cfg.ExitUpstreamID, a.cfg.Routing.Rules, append([]string{a.cfg.Routing.DNSExitID, a.cfg.Gateway.ExitID}, routing.DNSRuleExitIDs(a.cfg.Routing.DNSRules)...)...); err != nil {
 		return err
 	}
 	a.dialer.SetCustomExits(items)

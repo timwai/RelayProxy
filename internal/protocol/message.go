@@ -38,6 +38,7 @@ const (
 	FrameTypeFileDirectCheck        FrameType = 0x18
 	FrameTypeFileDirectPunchPrepare FrameType = 0x19
 	FrameTypeFileShareVisibility    FrameType = 0x1A // Relay asks a host whether a named client has any active folder ACL
+	FrameTypeExitSystemDNS          FrameType = 0x1B // one authorized A/AAAA lookup via the exit OS resolver
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream

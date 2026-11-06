@@ -16,26 +16,46 @@ import (
 // A private resolver address alone is never a DNS bypass: home routers are
 // private too. Only a user-configured suffix permits plaintext local queries.
 func (s *Server) directDNSQuestion(query []byte) bool {
-	if s.opts.DNSDirectDomains == nil {
-		return false
+	if isRelayDNSQuestion(query, s.loopGuard().RelayHost) {
+		return false // Verified relay bootstrap must never query the system DNS.
 	}
-	domains := s.opts.DNSDirectDomains()
-	if len(domains) == 0 || isRelayDNSQuestion(query, s.loopGuard().RelayHost) {
-		return false // Preserve the relay's verified bootstrap answers.
+	if s.opts.DNSDirectDomains == nil && (s.opts.DNSRoute == nil || !s.proxyDNSEnabled()) {
+		return false
 	}
 	var question dnsmessage.Message
 	if err := question.Unpack(query); err != nil || question.Response || question.Truncated ||
 		question.OpCode != 0 || len(question.Questions) != 1 || question.Questions[0].Class != dnsmessage.ClassINET {
-		return false
+		return false // Malformed/multiple questions must not escape locally.
 	}
 	host := dnsName(question.Questions[0].Name)
-	for _, domain := range domains {
-		suffix := strings.ToLower(strings.TrimSuffix(domain, "."))
-		if suffix != "" && (host == suffix || strings.HasSuffix(host, "."+suffix)) {
-			return true
+	if s.opts.DNSDirectDomains != nil {
+		for _, domain := range s.opts.DNSDirectDomains() {
+			suffix := strings.ToLower(strings.TrimSuffix(domain, "."))
+			if suffix != "" && (host == suffix || strings.HasSuffix(host, "."+suffix)) {
+				return true // Legacy explicit exceptions retain precedence.
+			}
 		}
 	}
+	if s.proxyDNSEnabled() && s.opts.DNSRoute != nil {
+		local, _ := s.opts.DNSRoute(host)
+		return local
+	}
 	return false
+}
+
+// remoteDNSExit returns only an explicitly selected per-domain DNS exit.
+// An empty value continues to use dns_exit_id or the default agent exit.
+func (s *Server) remoteDNSExit(query []byte) string {
+	if !s.proxyDNSEnabled() || s.opts.DNSRoute == nil {
+		return ""
+	}
+	var question dnsmessage.Message
+	if err := question.Unpack(query); err != nil || question.Response || question.Truncated ||
+		question.OpCode != 0 || len(question.Questions) != 1 || question.Questions[0].Class != dnsmessage.ClassINET {
+		return ""
+	}
+	_, exitID := s.opts.DNSRoute(dnsName(question.Questions[0].Name))
+	return exitID
 }
 
 // TCP DNS is already terminated locally so each keep-alive query can follow

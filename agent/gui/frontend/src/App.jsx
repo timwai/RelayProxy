@@ -54,7 +54,7 @@ const EMPTY={
  rdp:{enabled:true,address:'127.0.0.1:3389'},
  p2p:{enabled:true,mode:'auto',punchTimeoutMs:1200,keepaliveSec:10,idleTimeoutSec:120,maxExitSessions:4,fallback:true,upnpAllowed:false},publicDirectAdvertise:'',
  networkMode:'',network:{mode:'',exclude_processes:[]},systemProxy:{mode:'',autoFollow:true,http:true,socks5:true,proxyIpLiterals:true},systemProxyStatus:{},platform:'',networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
- verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,device_groups:[],dns_exit_id:'',dns_upstreams:[],doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
+ verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,device_groups:[],dns_exit_id:'',dns_upstreams:[],dns_rules:[],doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
 };
 
 const cx=(...v)=>v.filter(Boolean).join(' ');
@@ -231,6 +231,7 @@ function CustomExitManager({config,save,toast,dirty,selectedExit,onSelectExit}){
   config.defaultExitId===id&&'默认出口',
   config.upstreamExitId===id&&'本机出口共享',
   config.routing?.dns_exit_id===id&&'DNS 专用出口',
+  ...arr(config.routing?.dns_rules).filter(r=>r.action==='REMOTE'&&r.exit_id===id).map(r=>'域名 DNS 规则：'+(r.name||'未命名')),
   ...arr(config.routing?.rules).filter(r=>r.exit_id===id).map(r=>'分流规则：'+(r.name||'未命名'))
  ].filter(Boolean);
  const update=(key,val)=>setDraft(x=>({...x,[key]:val}));
@@ -588,8 +589,9 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   finally{setProbing(false)}
  };
  const r=config.routing||EMPTY.routing;
- const inventory=[...arr(exits).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
+ const inventory=[...withExitGroups(arr(exits),arr(r.device_groups)).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
  const change=next=>setv('routing',next);
+ const updateDNSRule=(i,patch)=>change({...r,dns_rules:arr(r.dns_rules).map((x,j)=>j===i?{...x,...patch}:x)});
  const preset=currentDNSPreset(r);
  return <><PageHead title="DNS" desc="系统 DNS 的解析方式、加密 DNS 出口与防泄漏选项；实际接管状态请在「诊断」页查看。"/>
  <Card title="DNS 处理模式" eyebrow="DNS POLICY">
@@ -603,6 +605,36 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   <div className="notice top-gap">{preset==='auto'?'自动模式：接管可捕获的系统 DNS/53 查询，经代理出口解析真实 IP；连接中的已知域名交给出口解析。':preset==='real_ip'?'真实 IP 模式：保留系统 DNS，观察传统 DNS 响应以关联域名；DNS 查询可能从本机发出。':'FakeIP 模式：为接管的 DNS 查询分配虚拟地址，并在连接时恢复域名。'}</div>
   <div className="mini top-gap">透明代理需处于运行状态才能接管系统 DNS。Chrome 私有 DoH、环回 DNS 与 Agent 退出后的防泄漏不保证由此模式覆盖；可在诊断页检查。</div>
   <div className="actions end top-gap"><Button onClick={()=>setAdvancedOpen(!advancedOpen)}>{advancedOpen?'收起高级设置':'高级设置 ›'}</Button></div>
+ </Card>
+ <Card title="按域名选择 DNS 解析出口" eyebrow="DOMAIN DNS">
+  <div className="mini">{arr(r.dns_rules).length?'按顺序匹配 DNS/53 域名；未命中规则使用本地 DNS。指定远程解析的域名失败时不回退本地。':'尚未设置域名规则：保持原有 DNS 策略。添加规则后，未命中的域名使用本地 DNS。'}此功能在「自动」真实 IP 接管模式下生效，DNS 出口与后续流量分流互相独立。</div>
+  {arr(r.dns_rules).map((rule,i)=><div className="target-row top-gap" key={i}>
+   <div className="grow">
+    <div className="form-grid">
+     <Field label="名称"><Input value={rule.name||''} onChange={e=>updateDNSRule(i,{name:e.target.value})} placeholder="国外域名"/></Field>
+     <Field label="解析位置"><Select value={rule.action||'REMOTE'} onChange={e=>updateDNSRule(i,{action:e.target.value,exit_id:e.target.value==='REMOTE'?rule.exit_id||'':'',resolver:e.target.value==='REMOTE'?rule.resolver||'encrypted':'encrypted'})}><option value="REMOTE">指定出口远程解析</option><option value="LOCAL">本地系统 DNS</option></Select></Field>
+     <Field label="域名（每行一个）" className="full" help="使用 *.example.com 匹配该域名和全部子域名；example.com 只匹配根域名。">
+      <Textarea rows="2" placeholder="*.google.com" value={ruleListText(rule.domains)} onChange={e=>updateDNSRule(i,{domains:e.target.value})}/>
+     </Field>
+     <Field label="解析器类型" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.resolver||'encrypted'} onChange={e=>updateDNSRule(i,{resolver:e.target.value,exit_id:e.target.value==='exit_system'&&String(rule.exit_id||'').startsWith('local:')?'':rule.exit_id||''})}>
+      <option value="encrypted">出口访问加密 DoH / DoT（兼容旧版本）</option>
+      <option value="exit_system">使用出口设备的系统 DNS（A / AAAA）</option>
+     </Select></Field>
+     <Field label="远程 DNS 出口" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.exit_id||''} onChange={e=>updateDNSRule(i,{exit_id:e.target.value})}>
+      <option value="">跟随 DNS 专用出口 / 默认出口</option>
+      {inventory.filter(x=>x.id&&(rule.resolver!=='exit_system'||!String(x.id).startsWith('local:'))).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}
+      {rule.exit_id&&!inventory.some(x=>x.id===rule.exit_id)&&<option value={rule.exit_id}>{rule.exit_id}（不可用）</option>}
+     </Select></Field>
+    </div>
+    <div className="actions end top-gap">
+     <label className="check-line"><input type="checkbox" checked={rule.enabled!==false} onChange={e=>updateDNSRule(i,{enabled:e.target.checked})}/><span>启用</span></label>
+     <Button danger onClick={()=>change({...r,dns_rules:arr(r.dns_rules).filter((_,j)=>i!==j)})}>删除</Button>
+    </div>
+   </div>
+  </div>)}
+  <div className="actions end top-gap"><Button onClick={()=>change({...r,dns_rules:[...arr(r.dns_rules),{name:'',enabled:true,action:'REMOTE',domains:[],exit_id:''}]})}>添加 DNS 域名规则</Button></div>
+  {arr(r.dns_rules).length>0&&preset!=='auto'&&<div className="notice warn top-gap">域名 DNS 出口规则仅在「自动」模式中生效；当前规则会保存但不执行。</div>}
+  <div className="mini top-gap">可为每条 REMOTE 规则选择出口系统 DNS（A/AAAA）或原有加密 DoH/DoT；TXT、SRV、HTTPS 等查询仍经同一出口的加密 DNS。出口系统 DNS 需要新版本 Relay 与 Exit，旧版本或断线将返回 SERVFAIL，不会回退本地。应用自带 DoH、环回 DNS 与系统缓存不在接管范围内。</div>
  </Card>
  {advancedOpen&&<>
   <Card title="域名关联与 DNS 出口" eyebrow="ADVANCED DNS">

@@ -121,6 +121,54 @@ func (e *Engine) DNSDirectDomains() []string {
 	return append([]string(nil), e.config.DNSDirectDomains...)
 }
 
+// DNSRoute selects a DNS resolver before the client performs any lookup.
+// Without DNS rules, legacy global proxy-DNS behavior is unchanged.
+// With rules present, unmatched names intentionally use LOCAL resolution.
+func (e *Engine) DNSRoute(host string) (local bool, exitID string) {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if !e.config.ProxyDNSEnabled || len(e.config.DNSRules) == 0 {
+		return false, ""
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	for _, rule := range e.config.DNSRules {
+		if !rule.Enabled {
+			continue
+		}
+		for _, domain := range rule.Domains {
+			if matchDNSRuleDomain(host, domain) {
+				return rule.Action == DNSActionLocal, rule.ExitID
+			}
+		}
+	}
+	return true, ""
+}
+
+// DNSResolver returns the transport for a matched REMOTE DNS rule. Legacy
+// policies and rules without a resolver select the established encrypted path.
+func (e *Engine) DNSResolver(host string) string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if !e.config.ProxyDNSEnabled {
+		return "encrypted"
+	}
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	for _, rule := range e.config.DNSRules {
+		if !rule.Enabled {
+			continue
+		}
+		for _, domain := range rule.Domains {
+			if matchDNSRuleDomain(host, domain) {
+				if rule.Action == DNSActionRemote && rule.Resolver == "exit_system" {
+					return "exit_system"
+				}
+				return "encrypted"
+			}
+		}
+	}
+	return "encrypted"
+}
+
 func (e *Engine) DNSExitID() string {
 	e.mu.RLock()
 	defer e.mu.RUnlock()

@@ -2,6 +2,7 @@ package divert
 
 import (
 	"context"
+	"fmt"
 
 	"golang.org/x/net/dns/dnsmessage"
 )
@@ -24,8 +25,28 @@ func (s *Server) interceptedDNSReply(ctx context.Context, query []byte, udp bool
 	if isRelayDNSQuestion(query, s.loopGuard().RelayHost) {
 		return s.fakeDNS.replyScoped(query, s.loopGuard().RelayHost, s.loopGuard().RelayIPs, "", false)
 	}
+	// Packet interception and the DNS/TCP resolver normally bypass LOCAL
+	// questions first. Fail closed if a platform cannot reinject local DNS.
+	if s.directDNSQuestion(query) {
+		return realProxyDNSReply(ctx, query, udp, nil)
+	}
+	exitID := s.remoteDNSExit(query)
+	useExitSystem := false
+	if s.opts.DNSResolver != nil {
+		var question dnsmessage.Message
+		if err := question.Unpack(query); err == nil && len(question.Questions) == 1 &&
+			(question.Questions[0].Type == dnsmessage.TypeA || question.Questions[0].Type == dnsmessage.TypeAAAA) {
+			useExitSystem = s.opts.DNSResolver(dnsName(question.Questions[0].Name)) == "exit_system"
+		}
+	}
 	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, query []byte) ([]byte, error) {
-		response, err := s.exchangeLimitedProxyDNS(ctx, "", query)
+		var response []byte
+		var err error
+		if useExitSystem {
+			response, err = s.exchangeLimitedSystemDNS(ctx, exitID, query)
+		} else {
+			response, err = s.exchangeLimitedProxyDNS(ctx, exitID, query)
+		}
 		if err != nil {
 			s.reportProxyDNSError(err)
 		}
@@ -103,4 +124,21 @@ func realProxyDNSReply(ctx context.Context, raw []byte, udp bool, exchange func(
 // ExchangeGatewayDNS reuses authenticated encrypted DNS without enabling local capture.
 func (s *Server) ExchangeGatewayDNS(ctx context.Context, exitID string, query []byte, udp bool) []byte {
 	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, q []byte) ([]byte, error) { return s.exchangeLimitedProxyDNS(ctx, exitID, q) })
+}
+
+// exchangeLimitedSystemDNS shares the encrypted DNS concurrency budget while
+// selecting the remote OS resolver. It never falls back to local DNS or DoH.
+func (s *Server) exchangeLimitedSystemDNS(parent context.Context, routeExitID string, query []byte) ([]byte, error) {
+	ctx, cancel := context.WithTimeout(parent, proxyDNSOverallTimeout)
+	defer cancel()
+	select {
+	case s.dnsLimit <- struct{}{}:
+		defer func() { <-s.dnsLimit }()
+		if s.opts.ExchangeExitSystemDNS == nil {
+			return nil, fmt.Errorf("remote exit system DNS is unavailable")
+		}
+		return s.opts.ExchangeExitSystemDNS(ctx, s.dnsExitScope(routeExitID), query)
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
 }

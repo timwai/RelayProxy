@@ -661,7 +661,7 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 			// DNS exceptions. Remember its SYN so subsequent ACK/data are not
 			// mistaken for a pre-existing plaintext DNS session and dropped.
 			if p.Destination.Port() == 53 && metadata.ProcessID == i.server.loopGuard().SelfPID &&
-				i.server.opts.DNSDirectDomains != nil && len(i.server.opts.DNSDirectDomains()) != 0 {
+				(i.server.opts.DNSRoute != nil || (i.server.opts.DNSDirectDomains != nil && len(i.server.opts.DNSDirectDomains()) != 0)) {
 				route := &ClassifiedFlow{owner: i.server, key: key, flow: metadata,
 					decision: Decision{Action: ActionDirect, Rule: "local-dns-resolver"}}
 				i.mu.Lock()

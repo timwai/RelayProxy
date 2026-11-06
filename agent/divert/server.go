@@ -47,15 +47,18 @@ type Options struct {
 	LocalExitReady        func(string) bool
 	Traffic               *traffic.Registry
 	DefaultExitID         func() string
-	FakeIPEnabled         func() bool          // dynamically consulted for new transparent DNS queries
-	ProxyDNSEnabled       func() bool          // real A/AAAA and other DNS via proxy DoH/443 or DoT/853; not FakeIP
-	DNSAssociationEnabled func() bool          // observed DNS->real IP attribution; defaults to enabled
-	BlockDoHEndpoints     func() bool          // opt-in domain-based DoH endpoint guard
-	ForwardOtherDNS       func() bool          // opt-in authenticated DoT via proxy for TXT/SRV
-	DNSExitID             func() string        // optional pinned exit for DNS, independent from app flows
-	DNSUpstreams          func() []DNSUpstream // optional custom pinned HTTPS resolvers from active policy
-	DNSDirectDomains      func() []string      // explicit domain suffix exceptions to encrypted/FakeIP DNS
-	DoHBlockedIPs         func() []string      // opt-in fixed HTTPS/443 IP or CIDR denylist
+	FakeIPEnabled         func() bool                                           // dynamically consulted for new transparent DNS queries
+	ProxyDNSEnabled       func() bool                                           // real A/AAAA and other DNS via proxy DoH/443 or DoT/853; not FakeIP
+	DNSAssociationEnabled func() bool                                           // observed DNS->real IP attribution; defaults to enabled
+	BlockDoHEndpoints     func() bool                                           // opt-in domain-based DoH endpoint guard
+	ForwardOtherDNS       func() bool                                           // opt-in authenticated DoT via proxy for TXT/SRV
+	DNSExitID             func() string                                         // optional pinned exit for DNS, independent from app flows
+	DNSRoute              func(string) (bool, string)                           // per-domain LOCAL flag and REMOTE exit override; nil retains global DNS
+	DNSResolver           func(string) string                                   // per-domain resolver: encrypted or exit_system
+	ExchangeExitSystemDNS func(context.Context, string, []byte) ([]byte, error) // authorized per-exit OS resolver
+	DNSUpstreams          func() []DNSUpstream                                  // optional custom pinned HTTPS resolvers from active policy
+	DNSDirectDomains      func() []string                                       // explicit domain suffix exceptions to encrypted/FakeIP DNS
+	DoHBlockedIPs         func() []string                                       // opt-in fixed HTTPS/443 IP or CIDR denylist
 }
 
 // Server owns classified flows. OS interception is separately gated by a

@@ -25,7 +25,7 @@ test('routing rules save cannot overwrite DNS policies',()=>{
   dns_exit_id:'exit1',doh_blocked_ips:['1.1.1.1']};
  assert.deepEqual(routingPagePatch(r),{mode:'rule',default_action:'PROXY',rules:[{name:'proxy'}],subscriptions:[{name:'gfw',url:'https://example.com/list',enabled:true,action:'PROXY'}]});
  assert.deepEqual(Object.keys(dnsPagePatch(r)).sort(),
-  ['dns_mode','auto_detect_dns','dns_association_enabled','proxy_dns_enabled','fake_ip_enabled','block_doh_endpoints','forward_other_dns','dns_exit_id','dns_upstreams','dns_direct_domains','doh_blocked_ips'].sort());
+  ['dns_mode','auto_detect_dns','dns_association_enabled','proxy_dns_enabled','fake_ip_enabled','block_doh_endpoints','forward_other_dns','dns_exit_id','dns_upstreams','dns_direct_domains','dns_rules','doh_blocked_ips'].sort());
  assert.equal(dnsPagePatch(r).fake_ip_enabled,true);
 });
 
@@ -41,4 +41,9 @@ test('DNS page save includes independently persisted association and real DNS sw
  assert.equal(payload.proxy_dns_enabled,true);
  assert.equal(dnsPagePatch({dns_mode:'proxy'}).dns_association_enabled,true);
  assert.equal(dnsPagePatch({dns_mode:'proxy'}).proxy_dns_enabled,false);
+});
+
+test('DNS rule save keeps domain lists and exit selection',()=>{
+ const payload=dnsPagePatch({dns_rules:[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:['*.google.com','*.googleapis.com']}]});
+ assert.deepEqual(payload.dns_rules,[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:['*.google.com','*.googleapis.com']}]);
 });

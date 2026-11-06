@@ -94,6 +94,7 @@ func serveExitSession(ctx context.Context, session tunnel.TunnelSession, handler
 		stopHeader()
 		if err != nil || (header.Type != protocol.FrameTypeOpenTCP &&
 			header.Type != protocol.FrameTypeOpenUDP &&
+			header.Type != protocol.FrameTypeExitSystemDNS &&
 			header.Type != protocol.FrameTypeSpeedTest) {
 			<-streamSlots
 			_ = stream.Close()

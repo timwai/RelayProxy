@@ -106,10 +106,10 @@ type Config struct {
 	DNSUpstreams          []DNSUpstream `yaml:"dns_upstreams,omitempty" json:"dns_upstreams,omitempty"`                     // custom DoH providers, replaces built-ins if nonempty
 	DNSExitID             string        `yaml:"dns_exit_id,omitempty" json:"dns_exit_id,omitempty"`                         // optional dedicated exit for upstream encrypted DNS
 	DNSDirectDomains      []string      `yaml:"dns_direct_domains,omitempty" json:"dns_direct_domains,omitempty"`
-	DNSRules              []DNSRule     `yaml:"dns_rules,omitempty" json:"dns_rules,omitempty"` // if present, first matching rule wins; unmatched names use LOCAL           // explicit suffixes allowed to use the original DNS resolver
-	DoHBlockedIPs         []string      `yaml:"doh_blocked_ips,omitempty" json:"doh_blocked_ips,omitempty"`                 // explicit IP/CIDR addresses to deny on HTTPS/443 TCP or UDP
-	DefaultAction         Action        `yaml:"default_action" json:"default_action"`                                       // When no rule matches in rule mode
-	Rules                 []Rule        `yaml:"rules"          json:"rules"`                                                // Ordered rule list
+	DNSRules              []DNSRule     `yaml:"dns_rules,omitempty" json:"dns_rules,omitempty"`             // if present, first matching rule wins; unmatched names use LOCAL           // explicit suffixes allowed to use the original DNS resolver
+	DoHBlockedIPs         []string      `yaml:"doh_blocked_ips,omitempty" json:"doh_blocked_ips,omitempty"` // explicit IP/CIDR addresses to deny on HTTPS/443 TCP or UDP
+	DefaultAction         Action        `yaml:"default_action" json:"default_action"`                       // When no rule matches in rule mode
+	Rules                 []Rule        `yaml:"rules"          json:"rules"`                                // Ordered rule list
 }
 
 // DefaultConfig returns a sensible default routing configuration.

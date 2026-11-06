@@ -53,7 +53,7 @@ func ValidateConfig(cfg Config) error {
 	if err := ValidateDNSUpstreams(cfg.DNSUpstreams); err != nil {
 		return err
 	}
-// DNS routing is opt-in through proxy_dns_enabled; keep inactive rules
+	// DNS routing is opt-in through proxy_dns_enabled; keep inactive rules
 	// validated so a later mode switch cannot enable an unsafe wildcard.
 	if len(cfg.DNSRules) > 128 {
 		return fmt.Errorf("routing.dns_rules: maximum 128 rules")
@@ -65,7 +65,7 @@ func ValidateConfig(cfg Config) error {
 		if len(rule.Domains) == 0 || len(rule.Domains) > 64 {
 			return fmt.Errorf("routing.dns_rules[%d]: 1-64 domain patterns required", i)
 		}
-		if rule.ExitID != "" && (rule.Action != DNSActionRemote || strings.TrimSpace(rule.ExitID) != rule.ExitID || strings.ContainsAny(rule.ExitID, " \\t\\r\\n/\\\\") || len(rule.ExitID) > 128) {
+		if rule.ExitID != "" && (rule.Action != DNSActionRemote || strings.TrimSpace(rule.ExitID) != rule.ExitID || strings.ContainsAny(rule.ExitID, " \t\r\n/\\") || len(rule.ExitID) > 128) {
 			return fmt.Errorf("routing.dns_rules[%d]: invalid REMOTE exit identifier", i)
 		}
 		for j, domain := range rule.Domains {

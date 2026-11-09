@@ -60,12 +60,38 @@ export function validateDNSRule(rule={},fallbackExitId='') {
   return '';
 }
 
-function validIPAddress(value) {
+function parseIPAddress(value) {
   const ip=String(value??'').trim();
-  if(!ip||ip!==value)return false;
-  if(/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip))return ip.split('.').every(part=>Number(part)>=0&&Number(part)<=255);
-  if(!ip.includes(':'))return false;
-  try { new URL('http://['+ip+']/'); return true; } catch { return false; }
+  if(!ip||ip!==value||ip.includes('%'))return null;
+  if(/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)){
+    const octets=ip.split('.').map(Number);
+    if(!octets.every(part=>part>=0&&part<=255))return null;
+    return {family:4,octets};
+  }
+  if(!ip.includes(':'))return null;
+  try { new URL('http://['+ip+']/'); return {family:6,text:ip.toLowerCase()}; } catch { return null; }
+}
+
+function isUnicastIP(ip) {
+  if(!ip)return false;
+  if(ip.family===4){
+    const [a,b]=ip.octets;
+    return a!==0&&a!==127&&a<224&&!(a===169&&b===254);
+  }
+  const text=ip.text;
+  if(text==='::'||text==='::1'||text.startsWith('ff')||text.startsWith('::ffff:'))return false;
+  const first=parseInt(text.split(':')[0]||'0',16);
+  return !(first>=0xfe80&&first<=0xfebf);
+}
+
+function isPublicIP(ip) {
+  if(!isUnicastIP(ip))return false;
+  if(ip.family===4){
+    const [a,b]=ip.octets;
+    return a!==10&&!(a===172&&b>=16&&b<=31)&&!(a===192&&b===168);
+  }
+  const first=parseInt(ip.text.split(':')[0]||'0',16);
+  return !(first>=0xfc00&&first<=0xfdff);
 }
 
 function validDoHURL(value) {
@@ -90,7 +116,7 @@ export function validateDNSSettings(r={},defaultExitId='') {
   for(let i=0;i<upstreams.length;i++){
     const item=upstreams[i]||{};
     if(!validDoHURL(String(item.url||'')))return '第 '+(i+1)+' 个 DoH 上游地址无效：需要 HTTPS 域名和路径，例如 https://dns.example/dns-query';
-    if(!validIPAddress(item.bootstrap_ip))return '第 '+(i+1)+' 个 DoH 上游缺少有效的 Bootstrap IP';
+    if(!isUnicastIP(parseIPAddress(item.bootstrap_ip)))return '第 '+(i+1)+' 个 DoH 上游缺少有效的 Bootstrap IP';
   }
   const direct=splitRuleList(r.dns_direct_domains);
   if(direct.length>64)return '本地 DNS 例外最多 64 个域名';
@@ -100,7 +126,9 @@ export function validateDNSSettings(r={},defaultExitId='') {
   for(const value of blocked){
     const raw=String(value??'').trim();
     const parts=raw.split('/');
-    if(parts.length>2||!validIPAddress(parts[0])||(parts.length===2&&(!/^\d+$/.test(parts[1])||Number(parts[1])<1||Number(parts[1])>(parts[0].includes(':')?128:32))))return 'DoH 阻断地址格式无效：'+value;
+    const ip=parseIPAddress(parts[0]);
+    const minimum=ip?.family===4?24:48,maximum=ip?.family===4?32:128;
+    if(raw!==value||parts.length>2||!isPublicIP(ip)||(parts.length===2&&(!/^\d+$/.test(parts[1])||Number(parts[1])<minimum||Number(parts[1])>maximum)))return 'DoH 阻断地址格式无效：'+value;
   }
   if(r.proxy_dns_enabled&&(r.dns_mode==='local'||r.auto_detect_dns))return '代理 DNS 需要选择“代理解析”，不能同时启用本地 DNS 自动检测';
   if(r.proxy_dns_enabled&&r.fake_ip_enabled)return '真实 IP 代理 DNS 与 FakeIP 不能同时启用';

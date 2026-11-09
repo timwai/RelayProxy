@@ -748,7 +748,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     <div className="dns-subsection">
      <div className="dns-subsection-head"><div><strong>额外阻断的 DoH IP / CIDR</strong><div className="mini">仅阻断指定公共地址的 TCP/UDP 443；可能同时影响共享该 IP 的正常 HTTPS 服务。</div></div></div>
      <Field label="IP 或 CIDR（每行一个）" className="full">
-      <Textarea rows="3" value={ruleListText(r.doh_blocked_ips)} onChange={e=>change({...r,doh_blocked_ips:splitRuleList(e.target.value)})} placeholder={'1.1.1.1\\n8.8.8.8'}/>
+      <Textarea rows="3" value={ruleListText(r.doh_blocked_ips)} onChange={e=>change({...r,doh_blocked_ips:splitRuleList(e.target.value)})} placeholder={'1.1.1.1\n8.8.8.8'}/>
      </Field>
     </div>
     {!r.fake_ip_enabled&&(r.block_doh_endpoints||r.forward_other_dns)&&<div className="notice warn top-gap">当前配置存在 FakeIP 依赖项；请切换到 FakeIP 模式或关闭相关防护选项。</div>}

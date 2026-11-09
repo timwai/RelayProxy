@@ -47,3 +47,14 @@ test('DNS rule save keeps domain lists and exit selection',()=>{
  const payload=dnsPagePatch({dns_rules:[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:['*.google.com','*.googleapis.com']}]});
  assert.deepEqual(payload.dns_rules,[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:['*.google.com','*.googleapis.com']}]);
 });
+
+test('DNS save normalizes rule actions and never sends stale local exit references',()=>{
+ const payload=dnsPagePatch({dns_mode:'proxy',dns_rules:[
+  {name:'local',enabled:true,action:'LOCAL',resolver:'exit_system',exit_id:'local:proxy',domains:'intranet.example'},
+  {name:'remote',enabled:false,action:'REMOTE',resolver:'exit_system',exit_id:'device-1',domains:'*.example.com'}
+ ]});
+ assert.deepEqual(payload.dns_rules,[
+  {name:'local',enabled:true,action:'LOCAL',resolver:'encrypted',exit_id:'',domains:['intranet.example']},
+  {name:'remote',enabled:false,action:'REMOTE',resolver:'exit_system',exit_id:'device-1',domains:['*.example.com']}
+ ]);
+});

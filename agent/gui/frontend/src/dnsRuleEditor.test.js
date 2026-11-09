@@ -36,3 +36,11 @@ test('DoH upstreams require HTTPS hostname path and literal bootstrap IP',()=>{
  assert.equal(validateDNSSettings({...base,dns_upstreams:[{url:'https://dns.example/dns-query',bootstrap_ip:'1.1.1.1'}]}),'');
  assert.match(validateDNSSettings({...base,dns_upstreams:[{url:'http://dns.example/dns-query',bootstrap_ip:'1.1.1.1'}]}),/HTTPS/);
 });
+
+test('IP validation blocks loopback bootstrap and private or overly broad DoH blocks',()=>{
+ const base={dns_mode:'proxy',proxy_dns_enabled:true,fake_ip_enabled:false,dns_rules:[],dns_direct_domains:[],doh_blocked_ips:[]};
+ assert.match(validateDNSSettings({...base,dns_upstreams:[{url:'https://dns.example/dns-query',bootstrap_ip:'127.0.0.1'}]}),/Bootstrap IP/);
+ assert.match(validateDNSSettings({...base,doh_blocked_ips:['192.168.1.1']}),/格式无效/);
+ assert.match(validateDNSSettings({...base,doh_blocked_ips:['8.8.8.0/16']}),/格式无效/);
+ assert.equal(validateDNSSettings({...base,doh_blocked_ips:['8.8.8.8','1.1.1.0/24']}),'');
+});

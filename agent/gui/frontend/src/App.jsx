@@ -15,7 +15,6 @@ import FileSharingPage from './FileSharingPage.jsx';
 import useDialogFocus from './useDialogFocus.js';
 import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
-import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
 import {routingPagePatch,dnsPagePatch,changedGatewayPatch} from './configPatches.js';
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 import {rdpPathLabel} from './pathStatus.js';
@@ -755,7 +754,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     <div className="notice warn top-gap">以上开关不代表完整 DNS 防泄漏。环回 DNS、应用私有 DoH、系统缓存以及 Agent/驱动退出后的保护仍需单独验证。</div>
    </Card>
 
-   <Card title="DNS 出口诊断" eyebrow="05 · DIAGNOSTICS" action={<Button disabled={probing||dirty||saving} onClick={runDNSProbe}>{probing?'检测中…':'测试已保存的 DNS 上游'}</Button>}>
+   <Card title="DNS 出口诊断" eyebrow="05 · DIAGNOSTICS" action={<Button disabled={probing||dirty||saving} onClick={runDNSProbe}>{probing?'检测中…':'检测 DNS 上游（已保存配置）'}</Button>}>
     <div className="mini">使用当前已保存的 DNS 出口执行真实 DNS 查询，显示上游连通性和延迟。未保存的草稿不会参与测试。</div>
     {dirty&&<div className="notice warn top-gap">存在未保存的 DNS 修改。请先保存，再运行诊断。</div>}
     {probe?.error&&<div className="notice danger top-gap" role="alert">{probe.error}</div>}

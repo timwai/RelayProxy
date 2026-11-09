@@ -732,7 +732,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     <div className="dns-subsection">
      <div className="dns-subsection-head"><div><strong>本地 DNS 例外</strong><div className="mini">仅列出的域名及其子域名使用系统原定 DNS，适合企业内网域名；对应连接仍由分流规则决定。</div></div></div>
      <Field label="域名后缀（每行一个）" className="full">
-      <Textarea rows="3" value={ruleListText(r.dns_direct_domains)} onChange={e=>change({...r,dns_direct_domains:e.target.value})} placeholder={'corp.example\\nintranet.example.com'}/>
+      <Textarea rows="3" value={ruleListText(r.dns_direct_domains)} onChange={e=>change({...r,dns_direct_domains:e.target.value})} placeholder={'corp.example\nintranet.example.com'}/>
      </Field>
     </div>
    </Card>
@@ -780,7 +780,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
      <Field label="规则名称"><Input value={ruleEditor.draft.name} maxLength="80" onChange={e=>updateRuleDraft('name',e.target.value)} placeholder="例如：Google 服务"/></Field>
      <Field label="规则状态"><Select value={ruleEditor.draft.enabled?'on':'off'} onChange={e=>updateRuleDraft('enabled',e.target.value==='on')}><option value="on">启用</option><option value="off">停用（保留规则）</option></Select></Field>
      <Field label="匹配域名" className="full" help="每行一个。example.com 只匹配根域名；*.example.com 匹配根域名和所有子域名。最多 64 个。">
-      <Textarea rows="5" value={ruleEditor.draft.domains} onChange={e=>updateRuleDraft('domains',e.target.value)} placeholder={'google.com\\n*.googleapis.com\\n*.gstatic.com'}/>
+      <Textarea rows="5" value={ruleEditor.draft.domains} onChange={e=>updateRuleDraft('domains',e.target.value)} placeholder={'google.com\n*.googleapis.com\n*.gstatic.com'}/>
      </Field>
      <Field label="解析位置" className="full">
       <Select value={ruleEditor.draft.action} onChange={e=>setRuleEditor(old=>({...old,draft:{...old.draft,action:e.target.value,resolver:'encrypted',exit_id:''}}))}>

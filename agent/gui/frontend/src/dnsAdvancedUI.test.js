@@ -14,7 +14,7 @@ test('DNS page exposes a complete, always-visible configuration workflow',()=>{
   'validateDNSSettings','moveRule(rules,i,i-1)','moveRule(rules,i,i+1)',
   'normalizeDNSRuleDraft','validateDNSRule','保存 DNS 配置'
  ])assert.ok(page.includes(feature),'missing DNS page feature '+feature);
- assert.match(page,/role="radio" aria-label="DNS 解析模式"/);
+ assert.match(page,/role="radiogroup" aria-label="DNS 解析模式"/);
  assert.match(page,/aria-label="规则上移"/);
  assert.match(page,/aria-label="规则下移"/);
  assert.match(page,/call\('goProbeDNS'\)/);

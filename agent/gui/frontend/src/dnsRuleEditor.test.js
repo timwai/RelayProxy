@@ -68,3 +68,9 @@ test('DoH blocklist validation reads the same multiline draft as the textarea',(
  assert.match(validateDNSSettings({...base,doh_blocked_ips:'192.168.1.1\n'}),/格式无效/);
  assert.equal(validateDNSSettings({...base,doh_blocked_ips:'1.1.1.1\n8.8.8.0/24\n'}),'');
 });
+
+test('system DNS rule fallback is independent from encrypted DNS exit',()=>{
+ const base={dns_mode:'proxy',proxy_dns_enabled:true,fake_ip_enabled:false,dns_rules:[{action:'REMOTE',resolver:'exit_system',domains:'example.com'}],dns_upstreams:[],dns_direct_domains:[],doh_blocked_ips:[]};
+ assert.equal(validateDNSSettings({...base,dns_exit_id:'local:custom'},'device-1'),'');
+ assert.match(validateDNSSettings({...base,dns_exit_id:'device-1'},'local:custom'),/不支持本机自定义代理/);
+});

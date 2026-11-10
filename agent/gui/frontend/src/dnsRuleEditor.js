@@ -140,7 +140,7 @@ export function validateDNSSettings(r={},defaultExitId='') {
   const direct=splitRuleList(r.dns_direct_domains);
   if(direct.length>64)return '本地 DNS 例外最多 64 个域名';
   for(const domain of direct)if(!validDomain(domain,false))return '本地 DNS 例外域名无效：'+domain;
-  const blocked=Array.isArray(r.doh_blocked_ips)?r.doh_blocked_ips:[];
+  const blocked=splitRuleList(r.doh_blocked_ips);
   if(blocked.length>256)return '额外 DoH 阻断地址最多 256 条';
   for(const value of blocked){
     const raw=String(value??'').trim();

@@ -800,7 +800,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
         {ruleEditor.draft.exit_id&&!inventory.some(x=>x.id===ruleEditor.draft.exit_id)&&<option value={ruleEditor.draft.exit_id}>{ruleEditor.draft.exit_id}（当前不可用）</option>}
        </Select>
       </Field>
-      {ruleEditor.draft.resolver==='exit_system'&&<div className="mini dns-editor-note full">系统 DNS 由远端设备的操作系统解析。必须使用远端设备出口，不能选择本机自定义代理；若不单独指定，将跟随上方 DNS 专用出口或当前默认出口。</div>}
+      {ruleEditor.draft.resolver==='exit_system'&&<div className="mini dns-editor-note full">系统 DNS 由远端设备的操作系统解析。必须使用远端设备出口，不能选择本机自定义代理；若不单独指定，将跟随当前默认设备出口。</div>}
      </>}
     </div>
     {ruleError&&<div className="notice danger top-gap" role="alert">{ruleError}</div>}

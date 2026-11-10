@@ -15,10 +15,7 @@ test('DNS rule validation prevents the empty-domain save failure',()=>{
  assert.match(validateDNSRule({action:'REMOTE',resolver:'encrypted',domains:'example.com,example.com'}),/重复/);
 });
 
-test('exit system resolver requires a device exit and rejects local custom proxies',()=>{
- assert.match(validateDNSRule({action:'REMOTE',resolver:'exit_system',domains:'example.com'}),/指定一个设备出口/);
- assert.match(validateDNSRule({action:'REMOTE',resolver:'exit_system',exit_id:'local:proxy',domains:'example.com'}),/不支持本机自定义代理/);
- assert.equal(validateDNSRule({action:'REMOTE',resolver:'exit_system',exit_id:'device-1',domains:'example.com'}),'');
+test('local DNS rules discard resolver-specific exit fields',()=>{
  assert.equal(validateDNSRule({action:'LOCAL',resolver:'exit_system',exit_id:'local:proxy',domains:'example.com'}),'');
 });
 

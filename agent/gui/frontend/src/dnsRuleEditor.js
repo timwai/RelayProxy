@@ -115,7 +115,7 @@ function validDoHURL(value) {
 
 export function validateDNSSettings(r={},defaultExitId='') {
   const dnsExitID=String(r.dns_exit_id||'');
-  if(dnsExitID&&(dnsExitID!==dnsExitID.trim()||/[\\s/\\\\]/.test(dnsExitID)||dnsExitID.length>128))return '专用 DNS 出口 ID 格式无效';
+  if(dnsExitID&&(dnsExitID!==dnsExitID.trim()||/[\s/\\]/.test(dnsExitID)||dnsExitID.length>128))return '专用 DNS 出口 ID 格式无效';
   const rules=Array.isArray(r.dns_rules)?r.dns_rules:[];
   if(rules.length>128)return 'DNS 规则最多 128 条';
   for(let i=0;i<rules.length;i++){

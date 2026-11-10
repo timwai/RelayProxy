@@ -28,9 +28,12 @@ export function buildDNSRule(rule={}) {
 }
 
 function validDomain(value,allowWildcard=false) {
-  let domain=String(value??'').trim().toLowerCase();
+  const raw=String(value??'');
+  if(!raw||raw!==raw.trim()||raw.length>253)return false;
+  let domain=raw.toLowerCase();
   if(allowWildcard&&domain.startsWith('*.'))domain=domain.slice(2);
-  if(!domain||domain.includes('*')||domain.length>253||domain!==domain.trim())return false;
+  domain=domain.replace(/\.$/,'');
+  if(!domain||domain.includes('*'))return false;
   if(/^\d{1,3}(?:\.\d{1,3}){3}$/.test(domain))return false;
   return domain.split('.').every(label=>label.length>0&&label.length<=63&&
     label[0]!=='-'&&label[label.length-1]!=='-'&&/^[a-z0-9-]+$/.test(label));
@@ -51,9 +54,10 @@ export function validateDNSRule(rule={},fallbackExitId='') {
   const resolver=rule.resolver||'encrypted';
   if(!DNS_RESOLVERS.has(resolver))return '解析器类型无效';
   if(resolver==='exit_system'){
+    // An empty rule exit intentionally follows the current default device exit.
+    // DNSExitID is only for encrypted DNS and must not be used as this fallback.
     const exitId=String(rule.exit_id||fallbackExitId||'').trim();
-    if(!exitId)return '出口系统 DNS 必须指定一个设备出口';
-    if(exitId.startsWith('local:'))return '出口系统 DNS 不支持本机自定义代理，请选择设备出口';
+    if(exitId.startsWith('local:'))return '出口系统 DNS 不支持本机自定义代理，请选择设备出口或跟随设备默认出口';
   }
   const exitId=String(rule.exit_id||'');
   if(exitId&&(exitId!==exitId.trim()||/[\s/\\]/.test(exitId)||exitId.length>128))return 'DNS 出口 ID 格式无效';
@@ -96,11 +100,16 @@ function isPublicIP(ip) {
 
 function validDoHURL(value) {
   try {
+    if(typeof value!=='string'||!value||value!==value.trim()||value.length>512)return false;
     const u=new URL(value);
-    return u.protocol==='https:'&&!!u.hostname&&u.port===''&&
-      !u.username&&!u.password&&!u.search&&!u.hash&&u.pathname!=='/'&&
-      !/^\d+(?:\.\d+){3}$/.test(u.hostname)&&u.hostname.includes('.')&&
-      /^[a-z0-9.-]+$/i.test(u.hostname);
+    const authorityAndPath=value.slice(8).split(/[?#]/,1)[0];
+    const pathSeparator=authorityAndPath.indexOf('/');
+    const host=u.hostname;
+    if(u.protocol!=='https:'||!host||!(pathSeparator>0)||u.port!==''||
+      u.username||u.password||u.search||u.hash||/^\d+(?:\.\d+){3}$/.test(host)||
+      !host.includes('.')||host.length>253||!/^[a-z0-9.-]+$/i.test(host))return false;
+    return host.split('.').every(label=>label.length>0&&label.length<=63&&
+      label[0]!=='-'&&label[label.length-1]!=='-');
   } catch { return false; }
 }
 

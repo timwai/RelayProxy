@@ -58,3 +58,7 @@ test('DNS save normalizes rule actions and never sends stale local exit referenc
   {name:'remote',enabled:false,action:'REMOTE',resolver:'exit_system',exit_id:'device-1',domains:['*.example.com']}
  ]);
 });
+
+test('DNS direct domains are normalized without trailing root dots',()=>{
+ assert.deepEqual(dnsPagePatch({dns_direct_domains:['CORP.EXAMPLE.','intranet.example']}).dns_direct_domains,['corp.example','intranet.example']);
+});

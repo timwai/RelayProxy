@@ -619,8 +619,10 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   ...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id,kind:'custom'}))
  ].filter(x=>x.id);
  const deviceExits=inventory.filter(x=>x.kind!=='custom'&&!String(x.id).startsWith('local:'));
- const fallbackExitId=r.dns_exit_id||status.selectedExit||config.defaultExitId||'';
- const fallbackExit=inventory.find(x=>x.id===fallbackExitId);
+ const defaultExitId=status.selectedExit||config.defaultExitId||'';
+ const dnsExitId=r.dns_exit_id||defaultExitId;
+ const defaultExit=inventory.find(x=>x.id===defaultExitId);
+ const dnsExit=inventory.find(x=>x.id===dnsExitId);
  const preset=currentDNSPreset(r);
  const change=next=>{setProbe(null);setSaveError('');setv('routing',next)};
  const updateRule=(index,patch)=>change({...r,dns_rules:rules.map((item,i)=>i===index?{...item,...patch}:item)});
@@ -633,7 +635,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
  const commitRuleEditor=()=>{
   if(!ruleEditor)return;
   const rule=buildDNSRule(ruleEditor.draft);
-  const error=validateDNSRule(rule,fallbackExitId);
+  const error=validateDNSRule(rule,defaultExitId);
   if(error){setRuleError(error);return}
   const next=[...rules];
   if(ruleEditor.index<0)next.push(rule);else next[ruleEditor.index]=rule;
@@ -641,7 +643,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   setRuleEditor(null);setRuleError('');
  };
  const handleSave=async()=>{
-  const validation=validateDNSSettings(r,status.selectedExit||config.defaultExitId||'');
+  const validation=validateDNSSettings(r,defaultExitId);
   if(validation){setSaveError(validation);return}
   setSaving(true);setSaveError('');
   try{
@@ -664,7 +666,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   {id:'real_ip',title:'真实 IP / 仅关联',tag:'不接管 DNS',desc:'保留系统 DNS，只观察可见的 DNS 应答建立域名关联；查询本身可能从本机网络发出。'},
   {id:'fake_ip',title:'FakeIP',tag:'虚拟地址',desc:'为被接管的 DNS 查询分配虚拟 IP，再由连接映射还原域名；DoH 防护选项仅在此模式可用。'}
  ];
- const exitLabel=id=>{if(!id)return fallbackExit?.name||'跟随当前默认出口';return inventory.find(x=>x.id===id)?.name||id};
+ const exitLabel=(id,fallbackId=defaultExitId)=>{const target=id||fallbackId;if(!target)return '跟随当前默认出口';return inventory.find(x=>x.id===target)?.name||target};
  return <>
   <div className="dns-page">
    <Card title="DNS 解析模式" eyebrow="01 · RESOLUTION MODE" action={<Badge tone={preset==='auto'?'ok':preset==='fake_ip'?'blue':'neutral'}>{preset==='auto'?'代理解析':preset==='fake_ip'?'FakeIP':'仅关联'}</Badge>}>
@@ -697,7 +699,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
         <div className="dns-rule-content">
          <div className="dns-rule-heading"><strong>{rule.name||domains[0]||'未命名规则'}</strong><Badge tone={rule.enabled===false?'neutral':'ok'}>{rule.enabled===false?'已停用':'已启用'}</Badge><Badge tone={remote?'blue':'neutral'}>{remote?'远程解析':'本地解析'}</Badge></div>
          <div className="dns-rule-domains">{domains.length?domains.slice(0,5).map((domain,j)=><code key={domain+'-'+j}>{domain}</code>):<span className="dns-rule-invalid">尚未填写域名</span>}{domains.length>5&&<span className="dns-rule-more">+{domains.length-5}</span>}</div>
-         <div className="dns-rule-meta">{domains.length} 个域名 · {remote?resolver+' · '+exitLabel(rule.exit_id):'使用本机系统 DNS'}</div>
+         <div className="dns-rule-meta">{domains.length} 个域名 · {remote?resolver+' · '+exitLabel(rule.exit_id,rule.resolver==='exit_system'?defaultExitId:dnsExitId):'使用本机系统 DNS'}</div>
         </div>
         <div className="dns-rule-controls">
          <div className="dns-order-controls"><button type="button" aria-label="规则上移" title="上移" disabled={i===0} onClick={()=>change({...r,dns_rules:moveRule(rules,i,i-1)})}>↑</button><button type="button" aria-label="规则下移" title="下移" disabled={i===rules.length-1} onClick={()=>change({...r,dns_rules:moveRule(rules,i,i+1)})}>↓</button></div>
@@ -718,7 +720,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     <div className="form-grid top-gap">
      <Field label="专用加密 DNS 出口" help="用于代理 DNS 与自定义 DoH 上游；留空时跟随当前默认代理出口。">
       <Select value={r.dns_exit_id||''} onChange={e=>change({...r,dns_exit_id:e.target.value})}>
-       <option value="">跟随当前默认出口{fallbackExit?'（'+fallbackExit.name+'）':''}</option>
+       <option value="">跟随当前默认出口{defaultExit?'（'+defaultExit.name+'）':''}</option>
        {inventory.map(x=><option value={x.id} key={x.id}>{x.name}{x.kind==='custom'?' · 本机代理':''}</option>)}
        {r.dns_exit_id&&!inventory.some(x=>x.id===r.dns_exit_id)&&<option value={r.dns_exit_id}>{r.dns_exit_id}（当前不可用）</option>}
       </Select>

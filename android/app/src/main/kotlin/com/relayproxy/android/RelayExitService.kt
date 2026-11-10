@@ -74,6 +74,12 @@ class RelayExitService : Service() {
                 .toString()
         }.getOrElse { status }
 
+        // Called on the Activity's measurement worker, never on the main thread
+        // or the service executor used for lifecycle/reconfiguration.
+        fun probeExitJson(deviceId: String): String =
+            activeInstance?.core?.probeExitJSON(deviceId)
+                ?: throw IllegalStateException("服务未运行")
+
         fun activeApplicationsJson(): String =
             activeInstance?.readActiveApplicationsJson()
                 ?: """{"applications":[],"activeConnections":0,"trackedConnections":0}"""

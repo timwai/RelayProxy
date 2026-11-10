@@ -172,6 +172,8 @@ type Client struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
+	probeMu             sync.Mutex
+	probeEpoch          uint64 // guarded by mu; invalidates probes across control reconnections
 	mu                  sync.RWMutex
 	status              statusSnapshot
 	messages            []protocol.PushMessage
@@ -972,6 +974,7 @@ func (c *Client) onTunnelStateChange(_, newState tunnel.State, sess tunnel.Tunne
 		return
 	}
 	c.status.ConnectionState = string(newState)
+	c.probeEpoch++
 	if newState != tunnel.StateConnected {
 		c.clientApproved.Store(false)
 		c.status.ClientApproved = false
@@ -1042,7 +1045,7 @@ func (c *Client) serveSession(sess tunnel.TunnelSession) error {
 	}
 
 	transportCaps := []string{
-		"tcp", protocol.UDPModeStream, protocol.CapabilityTargetACL,
+		"tcp", protocol.UDPModeStream, protocol.CapabilityTargetACL, protocol.CapabilitySpeedTest,
 		protocol.CapabilityRuntimeState, protocol.CapabilityResourceInventoryPush,
 	}
 	if c.cfg.ClientEnabled {
@@ -1515,7 +1518,7 @@ func (c *Client) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSe
 				return
 			}
 			switch header.Type {
-			case protocol.FrameTypeOpenTCP, protocol.FrameTypeOpenUDP:
+			case protocol.FrameTypeOpenTCP, protocol.FrameTypeOpenUDP, protocol.FrameTypeSpeedTest:
 				if exitApproved {
 					c.handler.HandleStreamWithHeader(ctx, s, header)
 				} else {
@@ -1587,7 +1590,7 @@ func (c *Client) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunn
 		}
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 		header, err := protocol.ReadStreamHeader(stream)
-		if err != nil || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP) {
+		if err != nil || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest) {
 			<-admission
 			_ = stream.Close()
 			continue

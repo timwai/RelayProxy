@@ -478,7 +478,7 @@ func TestWSSReceiverDiagnosticCodeIsValidatedAndAudited(t *testing.T) {
 		"messageId": env.MessageID, "status": "FAILED",
 		"errorCode": "INDEXEDDB_FAILURE",
 	})
-	if reply := readWSSControl(t, a); reply["type"] != "SYNC_ACK" || reply["status"] != "FAILED" {
+	if reply := readWSSControl(t, a); reply["type"] != "SYNC_ACK" || reply["status"] != "FAILED" || reply["errorCode"] != "INDEXEDDB_FAILURE" {
 		t.Fatalf("source did not receive terminal failure: %v", reply)
 	}
 	if reply := readWSSControl(t, b); reply["type"] != "SYNC_STATUS" {

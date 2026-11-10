@@ -9,16 +9,23 @@ func (m *Manager) wakeMaintenanceLocked() {
 	m.maintenanceWake = make(chan struct{})
 }
 
-// maintainWhileActive leaves no timer armed when there is no work. Map changes
-// wake the loop immediately without postponing an already scheduled check.
-func (m *Manager) maintainWhileActive(interval time.Duration, includeStarting bool, check func(time.Time)) {
+// maintainWhileActive leaves no timer armed when there is no work. Network
+// checks include pending attempts and unexpired cooldowns so switching to a
+// reachable network can wake a failed path. Map changes wake both loops.
+func (m *Manager) maintainWhileActive(interval time.Duration, includePending bool, check func(time.Time)) {
 	timer := time.NewTimer(interval)
 	timer.Stop()
 	defer timer.Stop()
 	var tick <-chan time.Time
 	for {
 		m.mu.Lock()
-		active := len(m.sessions) > 0 || (includeStarting && len(m.starting) > 0)
+		active := len(m.sessions) > 0
+		if includePending {
+			active = active || len(m.starting) > 0
+			for _, failure := range m.cooldowns {
+				active = active || time.Now().Before(failure.until)
+			}
+		}
 		wake := m.maintenanceWake
 		m.mu.Unlock()
 		if active && tick == nil {

@@ -186,7 +186,7 @@ func (a *Agent) tryFileDirectMode(ctx context.Context, hostID string, req protoc
 			continue
 		}
 		_ = conn.SetDeadline(time.Time{})
-		return &fileDirectStream{conn}, response, nil
+		return newFileDirectStream(conn), response, nil
 	}
 	if lastErr == nil {
 		lastErr = errors.New("no file direct candidate reachable")

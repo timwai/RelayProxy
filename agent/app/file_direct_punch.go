@@ -6,9 +6,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/apernet/quic-go"
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/punch"
 	"relayproxy/internal/protocol"
@@ -145,12 +147,19 @@ func (r *fileDirectRuntime) runPunchedFileQUIC(ctx context.Context, socket *net.
 type filePunchedQUICStream struct {
 	*fileQUICStream
 	transport *quic.Transport
+	socket    *net.UDPConn
+	closeOnce sync.Once
+	closeErr  error
 }
 
 func (s *filePunchedQUICStream) FileTransferPath() string { return "p2p_quic" }
 
 func (s *filePunchedQUICStream) Close() error {
-	return errors.Join(s.fileQUICStream.Close(), s.transport.Close())
+	s.closeOnce.Do(func() {
+		// Transport does not own a caller-supplied PacketConn.
+		s.closeErr = errors.Join(s.fileQUICStream.Close(), s.transport.Close(), s.socket.Close())
+	})
+	return s.closeErr
 }
 
 // QUIC's TLS certificate is pinned to the Server-attested file-host leaf,
@@ -222,8 +231,11 @@ func (a *Agent) tryPunchedFileQUIC(ctx context.Context, socket *net.UDPConn, off
 		return fail(fmt.Errorf("punched file request rejected: %s", response.Error))
 	}
 	_ = stream.SetDeadline(time.Time{})
+	info := netpath.Describe("p2p_quic", session.LocalAddr(), session.RemoteAddr())
+	info.CandidateType = netpath.MatchCandidate(session.RemoteAddr(), peers)
 	return &filePunchedQUICStream{
-		fileQUICStream: &fileQUICStream{TunnelStream: stream, session: session},
+		fileQUICStream: &fileQUICStream{TunnelStream: stream, session: session, info: info},
 		transport:      transport,
+		socket:         socket,
 	}, response, nil
 }

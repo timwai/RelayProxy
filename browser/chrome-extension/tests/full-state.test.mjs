@@ -4,12 +4,14 @@ import {webcrypto} from 'node:crypto';
 import {getOrCreateIdentity} from '../src/device-identity.js';
 import {encryptSnapshot,decryptSnapshot} from '../src/session-envelope.js';
 import {captureAllCookies,applyAllCookies} from '../src/cookies-all.js';
+import {cookieAccessOrigins} from '../src/cookie-access.js';
 import {captureWebStorage,prepareWebStorageRestore} from '../src/web-storage.js';
+import {failureDiagnostic} from '../src/sync-diagnostics.js';
 
 globalThis.crypto ||= webcrypto;
 const policy={siteOrigin:'https://example.com',schemaVersion:2,allCookies:true,
   localStorage:true,sessionStorage:true};
-function profile(origin='https://example.com'){
+function profile(origin='https://example.com',granted=null){
   const state=new Map(),jar=new Map(),secrets=new Map();
   const page={local:new Map(),session:new Map()};
   const idb={createObjectStore(){},transaction(){
@@ -36,15 +38,20 @@ function profile(origin='https://example.com'){
   },close(){}};
   const cookieKey=c=>JSON.stringify([c.domain,c.path,c.name,!!c.hostOnly,c.partitionKey?.topLevelSite||'']);
   const api={
+    permissions:{async contains({origins}){return !granted||origins.every(o=>granted.has(o));}},
     storage:{local:{
       async get(k){if(Array.isArray(k))return Object.fromEntries(k.map(x=>[x,state.get(x)]));return {[k]:state.get(k)};},
       async set(o){for(const [k,v] of Object.entries(o))state.set(k,v);}
     }},
     cookies:{
       async getAll({url,domain,partitionKey}){
-        return [...jar.values()].filter(c=>(partitionKey!==undefined || !c.partitionKey) && (domain?
-          c.domain.replace(/^\./,'')===domain :
-          new URL(url).hostname===c.domain.replace(/^\./,'')&&new URL(url).pathname.startsWith(c.path)));
+        return [...jar.values()].filter(c=>{
+          const host=c.domain.replace(/^\./,'');
+          if(granted&&!granted.has((c.secure?'https:':'http:')+'//'+host+'/*'))return false;
+          return (partitionKey!==undefined || !c.partitionKey) && (domain?
+          (host===domain||host.endsWith('.'+domain)) :
+          new URL(url).hostname===c.domain.replace(/^\./,'')&&new URL(url).pathname.startsWith(c.path));
+        });
       },
       async set(d){
         const c={name:d.name,value:d.value,domain:d.domain||new URL(d.url).hostname,
@@ -68,10 +75,10 @@ function profile(origin='https://example.com'){
     scripting:{async executeScript({func,args}){
       const old={location:globalThis.location,localStorage:globalThis.localStorage,
         sessionStorage:globalThis.sessionStorage};
-      function store(map){return {
+      function store(map){return Object.create({
         get length(){return map.size;},key(i){return [...map.keys()][i]??null;},
         getItem(k){return map.get(k)??null;},setItem(k,v){map.set(k,v);},removeItem(k){map.delete(k);}
-      };}
+      });}
       globalThis.location={origin};
       globalThis.localStorage=store(page.local);
       globalThis.sessionStorage=store(page.session);
@@ -84,6 +91,59 @@ function profile(origin='https://example.com'){
   }}};
 }
 function use(p){globalThis.chrome=p.chrome;globalThis.indexedDB=p.indexedDB;}
+test('HTTPS IP SESSION without Secure needs HTTP read permission and supports explicit overwrite',async()=>{
+  const origin='https://10.99.32.130:30009',selected={...policy,siteOrigin:origin};
+  const granted=new Set(['https://10.99.32.130/*']);
+  const a=profile(origin,granted);use(a);
+  await a.chrome.cookies.set({url:origin+'/',name:'SESSION',value:'source-session',
+    path:'/',secure:false,httpOnly:true,sameSite:'lax'});
+  assert.deepEqual(await a.chrome.cookies.getAll({domain:'10.99.32.130',partitionKey:{}}),[],
+    'Chrome filters non-Secure cookies against HTTP permissions even on HTTPS sites');
+  await assert.rejects(captureAllCookies(selected),/Cookie 访问权限不完整/);
+  for(const pattern of cookieAccessOrigins(origin))granted.add(pattern);
+  const snapshot=await captureAllCookies(selected);
+  assert.equal(snapshot.cookies.length,1);
+  assert.equal(snapshot.cookies[0].secure,false);
+  const targetGrants=new Set(['https://10.99.32.130/*']);
+  const b=profile(origin,targetGrants);use(b);
+  await b.chrome.cookies.set({url:origin+'/',name:'SESSION',value:'target-session',
+    path:'/',secure:false,httpOnly:true,sameSite:'lax'});
+  await assert.rejects(applyAllCookies('ip-session',snapshot,selected,{allowOverwrite:true}),/Cookie 访问权限不完整/);
+  assert.equal([...b.jar.values()][0].value,'target-session');
+  for(const pattern of cookieAccessOrigins(origin))targetGrants.add(pattern);
+  await assert.rejects(applyAllCookies('ip-session',snapshot,selected),/CONFLICT/);
+  const result=await applyAllCookies('ip-session',snapshot,selected,{allowOverwrite:true});
+  assert.equal(result.status,'APPLIED');
+  assert.equal((await captureAllCookies(selected)).cookies[0].value,'source-session');
+});
+
+test('parent-domain permissions include shared SESSION but exclude unrelated host-only and sibling cookies',async()=>{
+  const origin='https://app.example.com',selected={...policy,siteOrigin:origin};
+  const granted=new Set(['https://app.example.com/*','http://app.example.com/*']);
+  const a=profile(origin,granted);use(a);
+  for(const [name,domain] of [['SESSION','example.com'],['sibling','other.example.com']])
+    await a.chrome.cookies.set({url:origin+'/',name,domain,value:'test',
+      path:'/',secure:false,httpOnly:true});
+  await a.chrome.cookies.set({url:'http://example.com/',name:'parent-only',value:'private',
+    path:'/',secure:false,httpOnly:true});
+  await assert.rejects(captureAllCookies(selected),/Cookie 访问权限不完整/);
+  for(const pattern of cookieAccessOrigins(origin))granted.add(pattern);
+  const snapshot=await captureAllCookies(selected);
+  assert.deepEqual(snapshot.cookies.map(c=>c.name),['SESSION']);
+});
+
+test('same-value cookies still restore Secure HttpOnly SameSite and expiry attributes',async()=>{
+  const source=profile();use(source);
+  await source.chrome.cookies.set({url:policy.siteOrigin+'/',name:'SESSION',value:'same-value',
+    path:'/',secure:true,httpOnly:true,sameSite:'strict',expirationDate:Date.now()/1000+3600});
+  const snapshot=await captureAllCookies(policy);
+  const target=profile();use(target);
+  await target.chrome.cookies.set({url:policy.siteOrigin+'/',name:'SESSION',value:'same-value',
+    path:'/',secure:false,httpOnly:false,sameSite:'lax'});
+  await assert.rejects(applyAllCookies('attrs',snapshot,policy),/CONFLICT/);
+  await applyAllCookies('attrs',snapshot,policy,{allowOverwrite:true});
+  assert.deepEqual(await captureAllCookies(policy),snapshot);
+});
 test('v2 captures every path and domain Cookie without listing names',async()=>{
   const a=profile(),b=profile();use(a);
   await a.chrome.cookies.set({url:'https://example.com',name:'root',value:'1',
@@ -290,4 +350,121 @@ test('v4 only Session Storage does not even read Local Storage from page',async(
   await txn.apply();await txn.commit();
   assert.equal(b.page.local.get('secret-key'),'receiver-only');
   assert.equal(b.page.session.get('tab'),'selected');
+});
+
+test('Storage missing write reply cannot commit silently or repeat a write',async()=>{
+ const b=profile();use(b);
+ const original=b.chrome.scripting.executeScript;
+ let writes=0;
+ b.chrome.scripting.executeScript=async request=>{
+  if(request.func.name==='mutate'){
+   writes++;
+   await original(request);
+   return [{result:undefined}];
+  }
+  return original(request);
+ };
+ const txn=await prepareWebStorageRestore('lost-reply',{local:{token:'source'},session:{}},policy);
+ await assert.rejects(txn.apply(),/Storage 读取\/写入失败/);
+ assert.equal(writes,1,'ambiguous write must not be retried');
+ assert.ok((await b.chrome.storage.local.get('browserSyncStorageRestoreJournal')).browserSyncStorageRestoreJournal['lost-reply']);
+});
+
+test('Storage detects partial successful-looking writes and rolls back every changed key',async()=>{
+ const b=profile();use(b);b.page.local.set('one','before-one');b.page.local.set('two','before-two');
+ const original=b.chrome.scripting.executeScript;
+ let first=true;
+ b.chrome.scripting.executeScript=async request=>{
+  if(first&&request.func.name==='mutate'){
+   first=false;
+   const args=[...request.args];args[1]=args[1].slice(1);
+   return original({...request,args});
+  }
+  return original(request);
+ };
+ const txn=await prepareWebStorageRestore('partial',
+  {local:{one:'after-one',two:'after-two'},session:{tab:'session'}},policy,{allowOverwrite:true});
+ await assert.rejects(txn.apply(),/Storage 写入后键值不一致/);
+ assert.equal(await txn.rollback(),true);
+ assert.deepEqual(Object.fromEntries(b.page.local),{one:'before-one',two:'before-two'});
+ assert.equal(b.page.session.size,0);
+ assert.equal((await b.chrome.storage.local.get('browserSyncStorageRestoreJournal')).browserSyncStorageRestoreJournal.partial,undefined);
+});
+
+test('Storage cannot commit values changed to undefined or removed by website after apply',async()=>{
+ for(const action of ['undefined','remove']){
+  const b=profile();use(b);
+  const txn=await prepareWebStorageRestore('changed',
+   {local:{token:'source-token'},session:{tab:'source-tab'}},policy);
+  await txn.apply();
+  if(action==='undefined')b.page.local.set('token','undefined');
+  else b.page.session.delete('tab');
+  await assert.rejects(txn.commit(),/Storage 写入后键值不一致/);
+  assert.equal(await txn.rollback(),false,'concurrent website data must not be overwritten during rollback');
+ }
+});
+
+test('Storage input rejects actual undefined without converting it to the literal string',async()=>{
+ const b=profile();use(b);
+ await assert.rejects(prepareWebStorageRestore('bad-value',
+  {local:{token:undefined},session:{}},policy),/Key\/Value/);
+ assert.equal(b.page.local.size,0);
+});
+
+test('Storage preflight refuses website mutation before any write even with overwrite consent',async()=>{
+ const b=profile();use(b);
+ const txn=await prepareWebStorageRestore('preflight',
+  {local:{token:'source-token'},session:{}},policy,{allowOverwrite:true});
+ b.page.local.set('token','new-website-login');
+ await assert.rejects(txn.apply(),/CONFLICT/);
+ assert.equal(b.page.local.get('token'),'new-website-login');
+ assert.equal(await txn.rollback(),true,'a rejected preflight made no changes to undo');
+ assert.equal(b.page.local.get('token'),'new-website-login');
+ assert.equal((await b.chrome.storage.local.get('browserSyncStorageRestoreJournal')).browserSyncStorageRestoreJournal.preflight,undefined);
+});
+
+test('Storage preserves quota failure reason and rolls back without pausing an unchanged page',async()=>{
+ const b=profile();use(b);
+ const original=b.chrome.scripting.executeScript;
+ b.chrome.scripting.executeScript=async request=>{
+  if(request.func.name==='mutate')return [{result:{__relayStorageError:'STORAGE_QUOTA',applied:0}}];
+  return original(request);
+ };
+ const txn=await prepareWebStorageRestore('quota',{local:{token:'source-token'},session:{}},policy);
+ await assert.rejects(txn.apply(),error=>{
+  assert.deepEqual(failureDiagnostic(error,'apply_storage'),
+   {errorCode:'STORAGE_FAILURE',stage:'apply_storage',reason:'STORAGE_QUOTA'});
+  return true;
+ });
+ b.page.local.set('unrelated','website-value');
+ assert.equal(await txn.rollback(),true);
+ assert.deepEqual([...b.page.local],[['unrelated','website-value']]);
+});
+
+test('Storage capture retries bounded unstable reads without dropping keys',async()=>{
+ const b=profile();use(b);
+ const original=b.chrome.scripting.executeScript;
+ let reads=0;
+ b.chrome.scripting.executeScript=async request=>{
+  if(request.func.name==='readBoth')b.page.session.set('counter',String(++reads));
+  return original(request);
+ };
+ await assert.rejects(captureWebStorage(policy),/采集期间持续变化/);
+ assert.equal(reads,3);
+});
+
+test('Storage transaction never applies to a replacement document in the same tab',async()=>{
+ const b=profile();use(b);
+ const original=b.chrome.scripting.executeScript;
+ let documentId='first-document';
+ b.chrome.scripting.executeScript=async request=>{
+  if(request.target.documentIds&&!request.target.documentIds.includes(documentId))
+   throw new Error('document was replaced');
+  return (await original(request)).map(reply=>({...reply,frameId:0,documentId}));
+ };
+ const txn=await prepareWebStorageRestore('navigation',
+  {local:{token:'source-token'},session:{}},policy);
+ documentId='new-document';
+ await assert.rejects(txn.apply(),/document was replaced/);
+ assert.equal(b.page.local.size,0);
 });

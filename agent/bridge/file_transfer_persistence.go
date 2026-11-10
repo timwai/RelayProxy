@@ -129,6 +129,7 @@ func (m *fileTransferManager) restoreTasksLocked() error {
 		item.Speed = 0
 		item.Destination = ""
 		item.TransportPath = ""
+		item.PathInfo = nil
 		item.Error = ""
 		m.records[item.ID] = &fileTransferRecord{FileTransfer: item}
 		m.order = append(m.order, item.ID)
@@ -154,6 +155,7 @@ func (m *fileTransferManager) persistTasksLocked() error {
 		}
 		item := record.FileTransfer
 		item.Error, item.TransportPath, item.Destination = "", "", ""
+		item.PathInfo = nil
 		item.Speed = 0
 		snapshot.Records = append(snapshot.Records, item)
 		if len(snapshot.Records) >= 100 {

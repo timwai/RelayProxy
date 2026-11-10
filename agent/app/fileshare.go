@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"relayproxy/agent/fileshare"
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -22,9 +23,11 @@ import (
 type fileTransportStream struct {
 	tunnel.TunnelStream
 	path string
+	info protocol.ConnectionPath
 }
 
-func (s *fileTransportStream) FileTransferPath() string { return s.path }
+func (s *fileTransportStream) ConnectionPath() protocol.ConnectionPath { return s.info }
+func (s *fileTransportStream) FileTransferPath() string                { return s.path }
 
 func fileTransferPath(stream tunnel.TunnelStream) string {
 	if stream != nil {
@@ -175,7 +178,7 @@ func (a *Agent) openRemoteFile(ctx context.Context, targetDeviceID string, req p
 	}()
 	if fileSharePrefersDirect(req.Action) && !a.fileDirectRecentlyUnreachable(targetDeviceID, req.ShareID) {
 		if direct, response, directErr := a.tryFileDirect(ctx, targetDeviceID, req); directErr == nil {
-			return &fileTransportStream{TunnelStream: direct, path: fileTransferPath(direct)}, response, nil
+			return &fileTransportStream{TunnelStream: direct, path: fileTransferPath(direct), info: netpath.From(direct, fileTransferPath(direct))}, response, nil
 		}
 	}
 	sess, _, err := a.fileSharingSession()
@@ -229,7 +232,7 @@ func (a *Agent) openRemoteFile(ctx context.Context, targetDeviceID string, req p
 	if sess.Transport() == tunnel.TransportQUIC {
 		pathName = "relay_quic"
 	}
-	return &fileTransportStream{TunnelStream: stream, path: pathName}, response, nil
+	return &fileTransportStream{TunnelStream: stream, path: pathName, info: netpath.Describe(pathName, sess.LocalAddr(), sess.RemoteAddr())}, response, nil
 }
 
 func (a *Agent) RemoteFileShares(ctx context.Context, deviceID string) ([]protocol.FileShareDescriptor, error) {
@@ -283,6 +286,15 @@ func (a *Agent) DownloadRemoteFileResuming(ctx context.Context, deviceID, shareI
 // actually used for this attempt, not just the route preference.
 func (a *Agent) DownloadRemoteFileResumingWithPath(ctx context.Context, deviceID, shareID, relativePath string,
 	dst io.ReadWriteSeeker, progress func(int64, int64), pathChanged func(string)) (int64, error) {
+	var callback func(protocol.ConnectionPath)
+	if pathChanged != nil {
+		callback = func(p protocol.ConnectionPath) { pathChanged(p.Path) }
+	}
+	return a.DownloadRemoteFileResumingWithPathInfo(ctx, deviceID, shareID, relativePath, dst, progress, callback)
+}
+
+func (a *Agent) DownloadRemoteFileResumingWithPathInfo(ctx context.Context, deviceID, shareID, relativePath string,
+	dst io.ReadWriteSeeker, progress func(int64, int64), pathChanged func(protocol.ConnectionPath)) (int64, error) {
 	offset, err := dst.Seek(0, io.SeekEnd)
 	if err != nil {
 		return 0, err
@@ -310,7 +322,7 @@ func (a *Agent) DownloadRemoteFileResumingWithPath(ctx context.Context, deviceID
 }
 
 func (a *Agent) downloadRemoteFileAt(ctx context.Context, deviceID, shareID, relativePath string,
-	dst io.Writer, offset int64, prefix string, digest hash.Hash, progress func(int64, int64), pathChanged func(string)) (int64, error) {
+	dst io.Writer, offset int64, prefix string, digest hash.Hash, progress func(int64, int64), pathChanged func(protocol.ConnectionPath)) (int64, error) {
 	stream, result, err := a.openRemoteFile(ctx, deviceID, protocol.FileShareRequest{
 		Action: protocol.FileShareDownload, ShareID: shareID, Path: relativePath,
 		Offset: offset, PrefixSHA256: prefix,
@@ -322,7 +334,7 @@ func (a *Agent) downloadRemoteFileAt(ctx context.Context, deviceID, shareID, rel
 	stop := tunnel.InterruptOnCancel(ctx, stream)
 	defer stop()
 	if pathChanged != nil {
-		pathChanged(fileTransferPath(stream))
+		pathChanged(netpath.From(stream, fileTransferPath(stream)))
 	}
 	if result.Size < offset || result.Offset != offset {
 		return 0, errors.New("invalid remote resume response")

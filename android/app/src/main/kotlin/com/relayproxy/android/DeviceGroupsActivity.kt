@@ -77,6 +77,7 @@ class DeviceGroupsActivity : Activity() {
 
     private fun inventory(): Inventory {
         val status = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        val state = ExitNodeState.from(status)
         val names = ExitDisplayNames.fromStatus(status, store.customExitNames())
         val online = mutableMapOf<String, Boolean>()
         val devices = mutableListOf<String>()
@@ -87,7 +88,7 @@ class DeviceGroupsActivity : Activity() {
                 val id = item.optString("deviceId").trim()
                 if (id.isBlank()) continue
                 devices.add(id)
-                online[id] = item.optBoolean("online", true)
+                online[id] = state.connected && id in state.online
             }
         }
         return Inventory(names, online, devices)

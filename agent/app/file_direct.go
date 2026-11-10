@@ -21,6 +21,7 @@ import (
 	"time"
 
 	"github.com/apernet/quic-go"
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/upnp"
 	"relayproxy/internal/protocol"
@@ -59,7 +60,15 @@ type fileDirectRuntime struct {
 	wg             sync.WaitGroup
 }
 
-type fileDirectStream struct{ *tls.Conn }
+type fileDirectStream struct {
+	*tls.Conn
+	info protocol.ConnectionPath
+}
+
+func newFileDirectStream(conn *tls.Conn) *fileDirectStream {
+	return &fileDirectStream{Conn: conn, info: netpath.Describe("direct_tls", conn.LocalAddr(), conn.RemoteAddr())}
+}
+func (s *fileDirectStream) ConnectionPath() protocol.ConnectionPath { return s.info }
 
 func (s *fileDirectStream) CloseWrite() error        { return s.Conn.CloseWrite() }
 func (s *fileDirectStream) FileTransferPath() string { return "direct_tls" }
@@ -541,7 +550,7 @@ func (r *fileDirectRuntime) serveConnection(conn net.Conn) {
 	if store == nil {
 		return
 	}
-	store.Serve(ctx, &fileDirectStream{tlsConn}, clientID)
+	store.Serve(ctx, newFileDirectStream(tlsConn), clientID)
 }
 
 func (a *Agent) serveFileDirectGrant(ctx context.Context, stream tunnel.TunnelStream, clientID string) {

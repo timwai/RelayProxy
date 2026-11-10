@@ -494,7 +494,7 @@ func (h *Handler) connect(w http.ResponseWriter, r *http.Request) {
 						"Agent 出口不可用：请检查在线状态、proxy.exit 授权及浏览器与 Agent 所属身份是否一致")
 				case h.Store.OfferNetworkBinding(ctx, device.ID, msg.RuleID, msg.Host, msg.ExitDeviceID) != nil:
 					payload = networkRuleError(msg.RequestID, "NETWORK_OFFER_DENIED",
-						"网络绑定未创建：请确认 HTTPS 443 域名有效、接收端具备 receive 权限且与来源端身份一致")
+						"网络绑定未创建：请确认站点主机和端口有效、接收端具备 receive 权限且与来源端身份一致")
 				default:
 					payload = map[string]any{"type": "NETWORK_UPDATED", "requestId": msg.RequestID,
 						"ruleId": msg.RuleID, "status": "offered"}

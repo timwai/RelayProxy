@@ -4,6 +4,7 @@ import (
 	"context"
 	"io"
 	"net"
+	"relayproxy/internal/protocol"
 	"testing"
 	"time"
 )
@@ -13,6 +14,9 @@ type pathTestConn struct {
 	path string
 }
 
+func (c *pathTestConn) ConnectionPath() protocol.ConnectionPath {
+	return protocol.ConnectionPath{Path: c.path, Network: "lan", Transport: "tcp"}
+}
 func (c *pathTestConn) RDPPath() string { return c.path }
 
 type pathTestPacketConn struct{ *controllerPacketConn }
@@ -60,12 +64,23 @@ func TestControllerReportsAcceptedTCPPathsAndClearsClosedChannels(t *testing.T) 
 			if tcp, _ := c.PathStatus(); tcp != path {
 				t.Fatalf("actual path=%s, want %s", tcp, path)
 			}
+
+			details, _ := c.PathDetails()
+			if len(details) != 1 || details[0].Path != path {
+				t.Fatalf("accepted details=%+v", details)
+			}
+			if path == "tcp_p2p" && details[0].Network != "lan" {
+				t.Fatalf("lost LAN detail: %+v", details)
+			}
 			_ = peer.Close()
 			_ = local.Close()
 			deadline := time.Now().Add(time.Second)
 			for {
 				tcp, _ := c.PathStatus()
 				if tcp == "waiting" {
+					if details, _ := c.PathDetails(); len(details) != 0 {
+						t.Fatalf("closed channel retained details: %+v", details)
+					}
 					break
 				}
 				if time.Now().After(deadline) {

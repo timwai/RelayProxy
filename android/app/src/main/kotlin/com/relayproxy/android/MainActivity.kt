@@ -40,12 +40,14 @@ import android.widget.Toast
 import org.json.JSONArray
 import org.json.JSONObject
 import java.util.ArrayDeque
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 /**
  * RelayProxy Android 客户端全新现代主控制台。
  * 遵循 Material 3 规范与网络态势感知设计，提供 4-Tab 一级架构：
  * 1. 控制台 (Dashboard): 核心态势、实时吞吐波形、三维度量、分流模式切换、双核独立控制、链路诊断
- * 2. 出口节点 (Nodes): 自动优选、已授权节点列表、实时 RTT 延迟、P2P 支持标签、一键测速与切换
+ * 2. 出口节点 (Nodes): 自动优选、已授权节点在线状态、真实响应延迟、实际检测路径与出口切换
  * 3. 分流规则 (Routing): VPN 应用接管范围、应用选择器入口、规则卡片流与即时启停
  * 4. 配置身份 (Settings): 服务端凭证、16位身份 ID、网络调度策略、传输端口与回环代理
  *
@@ -157,6 +159,13 @@ class MainActivity : Activity() {
     private var lastTotalBytesDown: Long = 0
     private var lastSampleTimestamp: Long = 0
     private var isPingingNodes = false
+    private val nodeProbeExecutor = Executors.newSingleThreadExecutor()
+    private var nodeProbeTask: Future<*>? = null
+    @Volatile private var nodeProbeGeneration = 0
+    private var probingNodeId: String? = null
+    private var nodeProbeTargets = emptySet<String>()
+    private val nodeLatencies = mutableMapOf<String, ExitLatency>()
+    private val nodeProbeErrors = mutableMapOf<String, String>()
 
     private val handler = Handler(Looper.getMainLooper())
     private val messagePopupQueue = ArrayDeque<JSONObject>()
@@ -202,7 +211,26 @@ class MainActivity : Activity() {
         handler.post(pollStatus)
     }
 
+    override fun onDestroy() {
+        cancelNodeProbes()
+        nodeProbeExecutor.shutdownNow()
+        super.onDestroy()
+    }
+
+    private fun cancelNodeProbes() {
+        nodeProbeGeneration++
+        nodeProbeTask?.cancel(true)
+        nodeProbeTask = null
+        isPingingNodes = false
+        probingNodeId = null
+        nodeProbeTargets = emptySet()
+    }
+
     override fun onPause() {
+        cancelNodeProbes()
+        // Presence changes while polling is paused must not revive old results.
+        nodeLatencies.clear()
+        nodeProbeErrors.clear()
         RelayExitService.setUiVisible(false)
         RelayVpnService.setUiVisible(false)
         unregisterMessageReceiver()
@@ -947,7 +975,7 @@ class MainActivity : Activity() {
         header.addView(titles, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.WRAP_CONTENT, 1f))
 
         val pingAllBtn = TextView(this).apply {
-            text = "全部测速"
+            text = "检测在线出口"
             textSize = 12f
             setTextColor(UiPalette.brand)
             typeface = Typeface.DEFAULT_BOLD
@@ -1106,14 +1134,20 @@ class MainActivity : Activity() {
         }
     }
 
-    private fun renderNodesList(exitsArray: JSONArray?) {
+    private fun renderNodesList(exitsArray: JSONArray?, state: ExitNodeState) {
         if (!::nodesListContainer.isInitialized) return
         nodesListContainer.removeAllViews()
 
         val store = ConfigStore(this)
         val config = store.load()
         val selectedExit = config.defaultExitId
-        renderDeviceGroups(config.routing.deviceGroups, selectedExit, exitsArray)
+        if (::nodePingAllButton.isInitialized) {
+            val canProbe = state.online.any(state::canProbe)
+            nodePingAllButton.text = if (isPingingNodes) "检测中…" else "检测在线出口"
+            nodePingAllButton.isEnabled = canProbe && !isPingingNodes
+            nodePingAllButton.alpha = if (nodePingAllButton.isEnabled) 1f else 0.45f
+        }
+        renderDeviceGroups(config.routing.deviceGroups, selectedExit, exitsArray, state)
         autoNodeRadioDot.visibility = if (selectedExit.isBlank()) View.VISIBLE else View.INVISIBLE
 
         if (exitsArray == null || exitsArray.length() == 0) {
@@ -1131,6 +1165,8 @@ class MainActivity : Activity() {
             val item = exitsArray.optJSONObject(i) ?: continue
             val deviceId = item.optString("deviceId", "")
             val name = item.optString("name", deviceId.take(12))
+            if (deviceId.isBlank()) continue
+            val isOnline = state.connected && deviceId in state.online
             val isSelected = (deviceId == selectedExit)
 
             val nodeCard = UiKit.card(
@@ -1140,8 +1176,11 @@ class MainActivity : Activity() {
                 backgroundColor = if (isSelected) UiPalette.surfaceElevated else UiPalette.surface,
                 borderColor = if (isSelected) UiPalette.brandSoftBorder else UiPalette.line
             ).apply {
-                isClickable = true
-                isFocusable = true
+                isEnabled = isOnline
+                isClickable = isOnline
+                isFocusable = isOnline
+                alpha = if (isOnline) 1f else 0.55f
+                contentDescription = "$name，${state.presence(deviceId)}" + if (isSelected) "，已选中" else ""
                 setOnClickListener { selectExitNode(deviceId) }
             }
 
@@ -1180,7 +1219,9 @@ class MainActivity : Activity() {
                 setTextColor(UiPalette.ink)
                 typeface = Typeface.DEFAULT_BOLD
             })
-            titleRow.addView(UiKit.chip(this, "P2P 支持", UiPalette.success, UiPalette.successSoft, radiusDp = 4).apply {
+            titleRow.addView(UiKit.chip(this, state.presence(deviceId),
+                if (isOnline) UiPalette.success else UiPalette.muted,
+                if (isOnline) UiPalette.successSoft else UiPalette.surfaceElevated, radiusDp = 4).apply {
                 textSize = 9f
                 val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
                     leftMargin = dp(6)
@@ -1203,16 +1244,33 @@ class MainActivity : Activity() {
                 gravity = Gravity.END
             }
             val rttText = TextView(this).apply {
-                text = if (isPingingNodes) "测速中…" else "${(20..60).random()} ms"
+                text = when {
+                    !isOnline -> "—"
+                    probingNodeId == deviceId -> "检测中…"
+                    nodeProbeErrors.containsKey(deviceId) -> "检测失败"
+                    nodeLatencies.containsKey(deviceId) -> "${nodeLatencies.getValue(deviceId).latencyMs} ms"
+                    else -> "未检测"
+                }
                 textSize = 13f
-                setTextColor(UiPalette.success)
+                setTextColor(if (nodeProbeErrors.containsKey(deviceId)) UiPalette.warning else if (isOnline) UiPalette.success else UiPalette.muted)
+                contentDescription = nodeProbeErrors[deviceId] ?: text
+                tooltipText = nodeProbeErrors[deviceId]
                 typeface = Typeface.MONOSPACE
             }
             rightStatus.addView(rttText)
             rightStatus.addView(TextView(this).apply {
-                text = "QUIC 直连"
+                text = if (isOnline) nodeLatencies[deviceId]?.let { ExitLatency.pathLabel(it.path, it.network) } ?: "未检测路径" else state.presence(deviceId)
                 textSize = 9.5f
                 setTextColor(UiPalette.placeholder)
+            })
+            rightStatus.addView(TextView(this).apply {
+                text = "检测延迟"
+                textSize = 11f
+                setPadding(dp(8), dp(6), 0, dp(2))
+                isEnabled = state.canProbe(deviceId) && !isPingingNodes
+                alpha = if (isEnabled) 1f else 0.4f
+                setTextColor(UiPalette.brand)
+                setOnClickListener { triggerNodeProbes(listOf(deviceId)) }
             })
             row.addView(rightStatus)
 
@@ -1228,7 +1286,7 @@ class MainActivity : Activity() {
      * 设备分组与设备出口卡片同列展示：分组卡片沿用节点卡的布局，
      * 右侧显示在线成员数，标题带「分组」标签以区分单台设备。
      */
-    private fun renderDeviceGroups(groups: List<DeviceGroupConfig>, selectedExit: String, exitsArray: JSONArray?) {
+    private fun renderDeviceGroups(groups: List<DeviceGroupConfig>, selectedExit: String, exitsArray: JSONArray?, state: ExitNodeState) {
         val online = mutableMapOf<String, Boolean>()
         val names = mutableMapOf<String, String>()
         if (exitsArray != null) {
@@ -1236,7 +1294,7 @@ class MainActivity : Activity() {
                 val item = exitsArray.optJSONObject(i) ?: continue
                 val id = item.optString("deviceId", "")
                 if (id.isBlank()) continue
-                online[id] = item.optBoolean("online", true)
+                online[id] = state.connected && id in state.online
                 names[id] = item.optString("name", id.take(12))
             }
         }
@@ -1525,6 +1583,11 @@ class MainActivity : Activity() {
     }
 
     private fun selectExitNode(deviceId: String) {
+        if (deviceId.isNotBlank() && !deviceId.startsWith("local:") && !deviceId.startsWith("group:") &&
+            !(currentExitNodeState().let { it.connected && deviceId in it.online })) {
+            Toast.makeText(this, "出口离线或状态未知，暂不可切换", Toast.LENGTH_SHORT).show()
+            return
+        }
         val store = ConfigStore(this)
         val saved = runCatching { store.save(store.load().copy(defaultExitId = deviceId)) }
         if (saved.isFailure) {
@@ -1537,16 +1600,71 @@ class MainActivity : Activity() {
         renderStatus()
     }
 
-    private fun triggerPingAllNodes() {
+    private fun currentExitNodeState(): ExitNodeState {
+        val store = ConfigStore(this)
+        val config = store.load()
+        val status = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+        return ExitNodeState.from(status, config.clientEnabled || store.isVpnDesiredRunning())
+    }
+
+    private fun triggerPingAllNodes() = triggerNodeProbes(currentExitNodeState().online.toList())
+
+    private fun reconcileNodeProbeState(state: ExitNodeState) {
+        val valid = if (state.connected && state.authorized) state.online else emptySet()
+        nodeLatencies.keys.retainAll(valid)
+        nodeProbeErrors.keys.retainAll(valid)
+        if (isPingingNodes && !valid.containsAll(nodeProbeTargets)) cancelNodeProbes()
+    }
+
+    private fun triggerNodeProbes(ids: List<String>) {
         if (isPingingNodes) return
+        val state = currentExitNodeState()
+        val targets = ids.distinct().filter(state::canProbe)
+        if (targets.isEmpty()) {
+            Toast.makeText(this, "请先启用已授权代理客户端，并确认出口在线", Toast.LENGTH_LONG).show()
+            return
+        }
+        val generation = ++nodeProbeGeneration
         isPingingNodes = true
-        Toast.makeText(this, "正在测试全部可用出口 RTT 延迟…", Toast.LENGTH_SHORT).show()
+        nodeProbeTargets = targets.toSet()
+        targets.forEach { nodeLatencies.remove(it); nodeProbeErrors.remove(it) }
         renderStatus()
-        handler.postDelayed({
-            isPingingNodes = false
-            renderStatus()
-            Toast.makeText(this, "全节点测速完成", Toast.LENGTH_SHORT).show()
-        }, 900)
+        nodeProbeTask = nodeProbeExecutor.submit {
+            var succeeded = 0
+            var failed = 0
+            var skipped = 0
+            for (id in targets) {
+                if (nodeProbeGeneration != generation || Thread.currentThread().isInterrupted) break
+                val latest = runCatching { JSONObject(RelayExitService.statusJson()) }.getOrNull()
+                if (!ExitNodeState.from(latest).canProbe(id)) { skipped++; continue }
+                handler.post {
+                    if (nodeProbeGeneration == generation) { probingNodeId = id; renderStatus() }
+                }
+                val result = runCatching { ExitLatency.parse(RelayExitService.probeExitJson(id), id) }
+                if (result.isSuccess) succeeded++ else failed++
+                handler.post {
+                    val latestState = currentExitNodeState()
+                    reconcileNodeProbeState(latestState)
+                    if (nodeProbeGeneration == generation) {
+                        if (latestState.canProbe(id)) {
+                            result.onSuccess { nodeLatencies[id] = it }
+                                .onFailure { nodeProbeErrors[id] = it.message ?: "检测失败" }
+                        }
+                        probingNodeId = null
+                        renderStatus()
+                    }
+                }
+            }
+            handler.post {
+                if (nodeProbeGeneration == generation) {
+                    isPingingNodes = false
+                    probingNodeId = null
+                    nodeProbeTargets = emptySet()
+                    renderStatus()
+                    Toast.makeText(this, "延迟检测结束：成功 $succeeded，失败 $failed，跳过 $skipped", Toast.LENGTH_LONG).show()
+                }
+            }
+        }
     }
 
     // =========================================================================
@@ -2829,6 +2947,8 @@ class MainActivity : Activity() {
         }
         val desiredExit = store.isDesiredRunning()
         val desiredVpn = store.isVpnDesiredRunning()
+        val nodeState = ExitNodeState.from(obj, config.clientEnabled || desiredVpn)
+        reconcileNodeProbeState(nodeState)
 
         // 1. 计算实时上下行速率
         val now = System.currentTimeMillis()
@@ -2992,7 +3112,14 @@ class MainActivity : Activity() {
             selectedExit.startsWith("local:") -> "本机代理 · 不经过 Relay 出口节点"
             else -> "默认已绑定出口节点"
         }
-        activeNodeLatency.text = if (latency > 0) "$latency ms" else "—"
+        val selectedState = nodeState
+        activeNodeLatency.text = if (selectedState.connected && selectedExit in selectedState.online) {
+            nodeLatencies[selectedExit]?.let { "${it.latencyMs} ms" } ?: "未检测"
+        } else "—"
+        if (selectedExit.isNotBlank() && !selectedExit.startsWith("local:") && !selectedExit.startsWith("group:") &&
+            (!selectedState.connected || selectedExit !in selectedState.online)) {
+            activeNodeSubtitle.text = "${selectedState.presence(selectedExit)} · 当前默认出口不可用"
+        }
 
         // 双核状态卡片
         if (vpnState == "RUNNING") {
@@ -3041,7 +3168,7 @@ class MainActivity : Activity() {
             settingDeviceIdText.text = formatDeviceId(currentDeviceId)
         }
 
-        renderNodesList(exits)
+        renderNodesList(exits, nodeState)
     }
 
     // =========================================================================

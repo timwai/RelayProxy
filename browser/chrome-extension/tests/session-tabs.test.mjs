@@ -30,3 +30,38 @@ test('v2 rejects incognito and invalid restored tab identifiers',async()=>{
   await assert.rejects(showRestoredWebsiteTab(-1,'https://example.com'),/identifier/);
   await assert.rejects(showRestoredWebsiteTab(4,'https://example.com'),/missing or navigated/);
 });
+
+function reloadFixture({after,removed=false,rejectReload=false}){
+ const updates=new Set(),removals=new Set();
+ let reloaded=false;
+ globalThis.chrome={tabs:{
+  async get(id){return {id,url:reloaded?after:'https://example.com/account',status:'complete'};},
+  async reload(id){
+   if(rejectReload)throw new Error('reload denied');
+   reloaded=true;
+   if(removed)for(const callback of removals)callback(id);
+   else for(const callback of updates)callback(id,{status:'complete'});
+  },
+  onUpdated:{addListener(f){updates.add(f);},removeListener(f){updates.delete(f);}},
+  onRemoved:{addListener(f){removals.add(f);},removeListener(f){removals.delete(f);}}
+ }};
+ return {updates,removals};
+}
+test('reload waits for completion and cleans up event listeners',async()=>{
+ const {reloadRestoredWebsiteTab}=await import('../src/session-tabs.js');
+ const fixture=reloadFixture({after:'https://example.com/account'});
+ await reloadRestoredWebsiteTab(42,'https://example.com');
+ assert.equal(fixture.updates.size,0);assert.equal(fixture.removals.size,0);
+});
+test('reload refuses post-refresh cross-origin navigation, closed tabs and Chrome errors',async()=>{
+ const {reloadRestoredWebsiteTab}=await import('../src/session-tabs.js');
+ for(const [setup,pattern] of [
+  [{after:'https://other.example/path'},/跳转/],
+  [{after:'https://example.com',removed:true},/已关闭/],
+  [{after:'https://example.com',rejectReload:true},/reload denied/]
+ ]){
+  const fixture=reloadFixture(setup);
+  await assert.rejects(reloadRestoredWebsiteTab(42,'https://example.com'),pattern);
+  assert.equal(fixture.updates.size,0);assert.equal(fixture.removals.size,0);
+ }
+});

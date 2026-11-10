@@ -6,9 +6,11 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"errors"
 	"io"
 	"net"
 	"net/http"
+	"net/http/httputil"
 	"strings"
 	"sync"
 	"time"
@@ -16,6 +18,7 @@ import (
 	"github.com/google/uuid"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 	"relayproxy/server/session"
 )
 
@@ -153,8 +156,9 @@ func (p *NetworkProxy) authorizedExit(ctx context.Context, deviceID, host string
 }
 func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	if r.TLS == nil || r.Method != http.MethodConnect || r.ProtoMajor != 1 {
-		http.Error(w, "HTTPS CONNECT only", http.StatusMethodNotAllowed)
+	forwardHTTP := r.Method != http.MethodConnect && r.URL != nil && r.URL.IsAbs() && r.URL.Scheme == "http"
+	if r.TLS == nil || (!forwardHTTP && r.Method != http.MethodConnect) || r.ProtoMajor != 1 {
+		http.Error(w, "authenticated HTTPS proxy required", http.StatusMethodNotAllowed)
 		return
 	}
 	select {
@@ -170,41 +174,36 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "proxy authentication required", http.StatusProxyAuthRequired)
 		return
 	}
-	host, port, err := net.SplitHostPort(r.Host)
-	if err != nil || port != "443" || !validNetworkHost(host) || r.URL == nil || r.URL.Host != "" && r.URL.Host != r.Host {
+	authority := r.Host
+	if forwardHTTP && r.URL.Port() == "" {
+		authority = net.JoinHostPort(r.URL.Hostname(), "80")
+	}
+	host, rawPort, err := net.SplitHostPort(authority)
+	if err != nil || r.URL == nil || r.URL.User != nil || r.URL.Fragment != "" ||
+		(r.URL.Host != "" && !strings.EqualFold(r.URL.Host, r.Host)) {
 		http.Error(w, "site is not allowed", http.StatusForbidden)
 		return
 	}
-	exit, err := p.authorizedExit(r.Context(), lease.deviceID, host)
+	target, err := normalizeNetworkTarget(net.JoinHostPort(strings.ToLower(host), rawPort))
+	if err != nil {
+		http.Error(w, "site is not allowed", http.StatusForbidden)
+		return
+	}
+	exit, err := p.authorizedExit(r.Context(), lease.deviceID, target)
 	if err != nil {
 		http.Error(w, "network binding denied or exit offline", http.StatusForbidden)
 		return
 	}
-	ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
-	defer cancel()
-	stream, err := exit.Tunnel.OpenStream(ctx)
+	if forwardHTTP {
+		p.serveForwardHTTP(w, r, lease, target, exit)
+		return
+	}
+	stream, err := p.openNetworkStream(r.Context(), lease, target, exit)
 	if err != nil {
 		http.Error(w, "exit unavailable", http.StatusBadGateway)
 		return
 	}
 	defer stream.Close()
-	reqID := uuid.NewString()
-	_ = stream.SetDeadline(time.Now().Add(12 * time.Second))
-	header := &protocol.StreamHeader{Type: browserExitStreamType(exit), RequestID: reqID,
-		ClientDeviceID: lease.deviceID, ExitDeviceID: exit.DeviceID}
-	if err = protocol.WriteStreamHeader(stream, header); err == nil {
-		err = protocol.WriteJSON(stream, protocol.OpenTCPRequest{
-			RequestID: reqID, Host: host, Port: 443, TimeoutMs: 10000, RelayPolicy: p.relayPolicy})
-	}
-	if err != nil {
-		http.Error(w, "exit handshake failed", http.StatusBadGateway)
-		return
-	}
-	var reply protocol.OpenTCPResponse
-	if err = protocol.ReadJSON(stream, &reply); err != nil || !reply.Success || reply.RequestID != reqID {
-		http.Error(w, "exit refused connection", http.StatusBadGateway)
-		return
-	}
 	hijacker, ok := w.(http.Hijacker)
 	if !ok {
 		http.Error(w, "CONNECT unsupported", http.StatusInternalServerError)
@@ -224,9 +223,53 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	deadline := lease.expires
 	_ = client.SetDeadline(deadline)
 	_ = stream.SetDeadline(deadline)
-	// Authorization is not a one-time handshake: revoking either browser
-	// device, its rule, the Exit grant, or the local opt-in must terminate
-	// established CONNECT streams too. Fail closed on DB errors.
+	stopWatch := p.watchNetworkStream(r.Context(), lease, target, exit, func() {
+		_ = client.Close()
+		_ = stream.Close()
+	})
+	defer stopWatch()
+	done := make(chan struct{}, 2)
+	go func() { _, _ = io.Copy(stream, buffer); done <- struct{}{} }()
+	go func() { _, _ = io.Copy(client, stream); done <- struct{}{} }()
+	<-done
+	_ = client.Close()
+	_ = stream.Close()
+	<-done
+}
+
+func (p *NetworkProxy) openNetworkStream(ctx context.Context, lease networkLease, target string, exit *session.DeviceSession) (tunnel.TunnelStream, error) {
+	host, port, err := parseNetworkTarget(target)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	defer cancel()
+	stream, err := exit.Tunnel.OpenStream(ctx)
+	if err != nil {
+		return nil, err
+	}
+	_ = stream.SetDeadline(time.Now().Add(12 * time.Second))
+	reqID := uuid.NewString()
+	header := &protocol.StreamHeader{Type: browserExitStreamType(exit), RequestID: reqID,
+		ClientDeviceID: lease.deviceID, ExitDeviceID: exit.DeviceID}
+	if err = protocol.WriteStreamHeader(stream, header); err == nil {
+		err = protocol.WriteJSON(stream, protocol.OpenTCPRequest{
+			RequestID: reqID, Host: host, Port: port, TimeoutMs: 10000, RelayPolicy: p.relayPolicy})
+	}
+	var reply protocol.OpenTCPResponse
+	if err == nil {
+		err = protocol.ReadJSON(stream, &reply)
+	}
+	if err != nil || !reply.Success || reply.RequestID != reqID {
+		_ = stream.Close()
+		return nil, errors.New("exit handshake failed")
+	}
+	_ = stream.SetDeadline(lease.expires)
+	return stream, nil
+}
+
+// Both CONNECT and HTTP streams close promptly when a binding is revoked.
+func (p *NetworkProxy) watchNetworkStream(ctx context.Context, lease networkLease, target string, exit *session.DeviceSession, closeStream func()) func() {
 	stopWatch := make(chan struct{})
 	watchStopped := make(chan struct{})
 	go func() {
@@ -238,28 +281,62 @@ func (p *NetworkProxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			case <-stopWatch:
 				return
 			case <-p.shutdown:
-			case <-r.Context().Done():
+			case <-ctx.Done():
 			case <-exit.Tunnel.Done():
 			case <-ticker.C:
-				current, checkErr := p.authorizedExit(r.Context(), lease.deviceID, host)
+				current, checkErr := p.authorizedExit(ctx, lease.deviceID, target)
 				if checkErr == nil && current == exit && time.Now().Before(lease.expires) {
 					continue
 				}
 			}
-			_ = client.Close()
-			_ = stream.Close()
+			closeStream()
 			return
 		}
 	}()
-	done := make(chan struct{}, 2)
-	go func() { _, _ = io.Copy(stream, buffer); done <- struct{}{} }()
-	go func() { _, _ = io.Copy(client, stream); done <- struct{}{} }()
-	<-done
-	_ = client.Close()
-	_ = stream.Close()
-	<-done
-	close(stopWatch)
-	<-watchStopped
+	return func() { close(stopWatch); <-watchStopped }
+}
+
+type networkHTTPConn struct {
+	net.Conn
+	stop func()
+	once sync.Once
+}
+
+func (c *networkHTTPConn) Close() error {
+	err := c.Conn.Close()
+	c.once.Do(c.stop)
+	return err
+}
+
+func (p *NetworkProxy) serveForwardHTTP(w http.ResponseWriter, r *http.Request, lease networkLease, target string, exit *session.DeviceSession) {
+	transport := &http.Transport{
+		DisableCompression: true, DisableKeepAlives: true,
+		DialContext: func(ctx context.Context, network, address string) (net.Conn, error) {
+			// The transport must only dial the host/port authorized above.
+			requested, err := normalizeNetworkTarget(strings.ToLower(address))
+			if err != nil || requested != target {
+				return nil, ErrRuleDenied
+			}
+			stream, err := p.openNetworkStream(ctx, lease, target, exit)
+			if err != nil {
+				return nil, err
+			}
+			stop := p.watchNetworkStream(r.Context(), lease, target, exit, func() { _ = stream.Close() })
+			return &networkHTTPConn{Conn: tunnel.NewNetConnAdapter(stream, nil, nil), stop: stop}, nil
+		},
+	}
+	defer transport.CloseIdleConnections()
+	proxy := &httputil.ReverseProxy{
+		Transport: transport,
+		Rewrite: func(pr *httputil.ProxyRequest) {
+			pr.Out.Header.Del("Proxy-Authorization")
+			pr.Out.Header.Del("Proxy-Connection")
+		},
+		ErrorHandler: func(w http.ResponseWriter, r *http.Request, err error) {
+			http.Error(w, "exit unavailable", http.StatusBadGateway)
+		},
+	}
+	proxy.ServeHTTP(w, r)
 }
 func (p *NetworkProxy) Close(ctx context.Context) error {
 	// net/http hijacked CONNECT streams are owned by the public Relay

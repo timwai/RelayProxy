@@ -4,9 +4,11 @@ package divert
 
 import (
 	"bytes"
+	"crypto/rand"
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"sync"
@@ -41,6 +43,10 @@ func winDivertDependencies(executable string) error {
 // extractEmbeddedWinDivert runs only when starting interception, after the
 // elevation check. ProgramData avoids writing beside a portable/read-only EXE.
 func extractEmbeddedWinDivert() (string, error) {
+	return prepareEmbeddedWinDivert(false)
+}
+
+func prepareEmbeddedWinDivert(repairPermissions bool) (string, error) {
 	files, err := bundledWinDivertFiles()
 	if err != nil {
 		return "", err
@@ -52,11 +58,15 @@ func extractEmbeddedWinDivert() (string, error) {
 	root = filepath.Join(root, "RelayProxy-WinDivert")
 	// Both levels are administrator-owned and writable only by Administrators
 	// and SYSTEM. Refuse pre-existing user-owned folders and reparse points.
-	if err := ensureWinDivertDirectory(root); err != nil {
+	ensureDirectory := ensureWinDivertDirectory
+	if repairPermissions {
+		ensureDirectory = repairWinDivertDirectory
+	}
+	if err := ensureDirectory(root); err != nil {
 		return "", err
 	}
 	directory := filepath.Join(root, windivert.Version+"-"+windivert.ArchiveSHA256[:16])
-	if err := ensureWinDivertDirectory(directory); err != nil {
+	if err := ensureDirectory(directory); err != nil {
 		return "", err
 	}
 	if err := materializeWinDivert(directory, files); err != nil {
@@ -72,6 +82,14 @@ const (
 )
 
 func ensureWinDivertDirectory(directory string) error {
+	return prepareWinDivertDirectory(directory, false)
+}
+
+func repairWinDivertDirectory(directory string) error {
+	return prepareWinDivertDirectory(directory, true)
+}
+
+func prepareWinDivertDirectory(directory string, repairPermissions bool) error {
 	descriptor, err := windows.SecurityDescriptorFromString(winDivertDirectorySDDL)
 	if err != nil {
 		return err
@@ -86,20 +104,75 @@ func ensureWinDivertDirectory(directory string) error {
 	if err := windows.CreateDirectory(path, &attributes); err != nil && !errors.Is(err, windows.ERROR_ALREADY_EXISTS) {
 		return fmt.Errorf("创建 WinDivert 驱动目录失败（需要管理员权限）: %w", err)
 	}
-	if err := plainWinDivertPath(directory, true); err != nil {
+	access := uint32(windows.READ_CONTROL)
+	if repairPermissions {
+		access |= windows.DELETE
+	}
+	handle, err := windows.CreateFile(path, access, windows.FILE_SHARE_READ|windows.FILE_SHARE_WRITE,
+		nil, windows.OPEN_EXISTING, windows.FILE_FLAG_BACKUP_SEMANTICS|windows.FILE_FLAG_OPEN_REPARSE_POINT, 0)
+	if err != nil {
+		return fmt.Errorf("打开 WinDivert 驱动目录失败 %s: %w", directory, err)
+	}
+	defer windows.CloseHandle(handle)
+	var info windows.ByHandleFileInformation
+	if err := windows.GetFileInformationByHandle(handle, &info); err != nil {
 		return err
 	}
-	actual, err := windows.GetNamedSecurityInfo(directory, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
+	if info.FileAttributes&windows.FILE_ATTRIBUTE_REPARSE_POINT != 0 || info.FileAttributes&windows.FILE_ATTRIBUTE_DIRECTORY == 0 {
+		return fmt.Errorf("WinDivert 路径不能是链接或其他文件类型: %s", directory)
+	}
+	actual, err := windows.GetSecurityInfo(handle, windows.SE_FILE_OBJECT, windows.OWNER_SECURITY_INFORMATION|windows.DACL_SECURITY_INFORMATION)
 	if err != nil {
 		return err
 	}
+	if repairPermissions && validateWinDivertDirectoryOwner(actual) == nil && validateWinDivertDirectorySecurity(actual) != nil {
+		// Retire the unsafe directory instead of trusting its existing files
+		// or handles after an ACL reset. Rename the validated handle itself;
+		// never follow a link or adopt a directory owned by an ordinary user.
+		backup := directory + ".unsafe-" + rand.Text()
+		if err := renameWinDivertDirectory(handle, backup); err != nil {
+			return fmt.Errorf("隔离 WinDivert 旧目录失败 %s（请退出客户端后重试安装/修复）: %w", directory, err)
+		}
+		log.Printf("[divert] Unsafe runtime directory retired to %s; rebuilding from verified embedded files", backup)
+		if err := prepareWinDivertDirectory(directory, false); err != nil {
+			return err
+		}
+		return nil
+	}
 	if err := validateWinDivertDirectorySecurity(actual); err != nil {
-		return fmt.Errorf("WinDivert 驱动目录权限不安全 %s: %w", directory, err)
+		sddl := "<missing>"
+		if actual != nil {
+			sddl = actual.String()
+		}
+		return fmt.Errorf("WinDivert 驱动目录权限不安全 %s: %w (SDDL: %s)", directory, err, sddl)
 	}
 	return nil
 }
 
-func validateWinDivertDirectorySecurity(descriptor *windows.SECURITY_DESCRIPTOR) error {
+func renameWinDivertDirectory(handle windows.Handle, destination string) error {
+	name, err := windows.UTF16FromString(destination)
+	if err != nil {
+		return err
+	}
+	name = name[:len(name)-1]
+	// FILE_RENAME_INFO has a variable-length UTF-16 filename. Keep its native
+	// alignment on both Windows amd64 and arm64.
+	type renameInfo struct {
+		ReplaceIfExists uint32
+		RootDirectory   windows.Handle
+		FileNameLength  uint32
+		FileName        [1]uint16
+	}
+	var layout renameInfo
+	size := uint32(unsafe.Offsetof(layout.FileName)) + uint32(len(name)*2)
+	buffer := make([]byte, size)
+	info := (*renameInfo)(unsafe.Pointer(&buffer[0]))
+	info.FileNameLength = uint32(len(name) * 2)
+	copy(unsafe.Slice(&info.FileName[0], len(name)), name)
+	return windows.SetFileInformationByHandle(handle, windows.FileRenameInfo, &buffer[0], size)
+}
+
+func validateWinDivertDirectoryOwner(descriptor *windows.SECURITY_DESCRIPTOR) error {
 	if descriptor == nil {
 		return errors.New("missing security descriptor")
 	}
@@ -107,12 +180,19 @@ func validateWinDivertDirectorySecurity(descriptor *windows.SECURITY_DESCRIPTOR)
 	if err != nil || owner == nil || (!owner.IsWellKnown(windows.WinBuiltinAdministratorsSid) && !owner.IsWellKnown(windows.WinLocalSystemSid)) {
 		return errors.New("directory must be owned by Administrators or SYSTEM")
 	}
+	return nil
+}
+
+func validateWinDivertDirectorySecurity(descriptor *windows.SECURITY_DESCRIPTOR) error {
+	if err := validateWinDivertDirectoryOwner(descriptor); err != nil {
+		return err
+	}
 	control, _, err := descriptor.Control()
 	if err != nil || control&windows.SE_DACL_PROTECTED == 0 {
 		return errors.New("directory permissions must not inherit user write access")
 	}
 	acl, _, err := descriptor.DACL()
-	if err != nil || acl == nil || acl.AceCount != 2 {
+	if err != nil || acl == nil || acl.AceCount < 2 {
 		return errors.New("directory must allow only Administrators and SYSTEM")
 	}
 	var administrators, system bool
@@ -126,8 +206,14 @@ func validateWinDivertDirectorySecurity(descriptor *windows.SECURITY_DESCRIPTOR)
 			return errors.New("unexpected directory permission entry")
 		}
 		sid := (*windows.SID)(unsafe.Pointer(&ace.SidStart))
-		administrators = administrators || sid.IsWellKnown(windows.WinBuiltinAdministratorsSid)
-		system = system || sid.IsWellKnown(windows.WinLocalSystemSid)
+		switch {
+		case sid.IsWellKnown(windows.WinBuiltinAdministratorsSid):
+			administrators = true
+		case sid.IsWellKnown(windows.WinLocalSystemSid):
+			system = true
+		default:
+			return fmt.Errorf("directory must allow only Administrators and SYSTEM; unexpected SID %s", sid.String())
+		}
 	}
 	if !administrators || !system {
 		return errors.New("directory must allow only Administrators and SYSTEM")

@@ -1761,12 +1761,12 @@
       $('home-exit').textContent = st.selectedExit ? proxyExitDisplayName(st.selectedExit) : '自动选择';
       $('exit-current').textContent = st.selectedExit ? proxyExitDisplayName(st.selectedExit) : '自动选择';
       $('home-streams').textContent = st.activeStreams || 0;
-      var directStateNames = {AVAILABLE:'可用',IDLE:'空闲',CONNECTING:'连接中',DISCOVERING:'发现地址',RENDEZVOUS:'协商中',PUNCHING:'打洞中',QUIC_HANDSHAKE:'QUIC 握手',READY:'已直连',FAILED:'失败',DEGRADED:'已降级',COOLDOWN:'冷却中',UNAVAILABLE:'不可用',CLOSED:'已关闭'};
+      var directStateNames = {AVAILABLE:'可用',IDLE:'空闲',CONNECTING:'连接中',DISCOVERING:'发现地址',RENDEZVOUS:'协商中',PUNCHING:'打洞中',QUIC_HANDSHAKE:'QUIC 握手',READY:'直连就绪',FAILED:'失败',DEGRADED:'已降级',COOLDOWN:'冷却中',UNAVAILABLE:'不可用',CLOSED:'已关闭'};
       var directPathNames = {public_direct_quic:'Public Direct QUIC',p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
       var directState = st.directState || st.p2pState || (up ? 'IDLE' : 'CLOSED');
       var directPath = st.directPath || st.p2pPath || (up ? (st.transport === 'quic' ? 'relay_quic' : 'relay_tls') : '');
       $('home-p2p-state').textContent = directStateNames[directState] || directState;
-      $('home-p2p-path').textContent = directPathNames[directPath] || directPath || '—';
+      $('home-p2p-path').textContent = Array.isArray(st.activeProxyPaths) ? (Array.from(new Set(st.activeProxyPaths.map(function(p){return observedPathLabel(p);}))).join(' + ') || '暂无活动代理连接') : '未提供实际连接路径';
       var directDetail = '';
       if (st.directError) directDetail = st.directError;
       else if (directPath === 'public_direct_quic' && directState === 'READY') directDetail = '已通过服务端验证的公网端点直连 Exit，无需 P2P 协商。';
@@ -1774,7 +1774,8 @@
       else if (directState === 'COOLDOWN') directDetail = '当前直连路径处于冷却；自动模式会继续使用可用的下一层路径。';
       else if (directState === 'CONNECTING' || directState === 'PUNCHING' || directState === 'RENDEZVOUS' || directState === 'QUIC_HANDSHAKE') directDetail = '后台建立直连中；自动模式不会阻塞应用连接。';
       else if (!up) directDetail = 'Relay 未连接，Direct Path 控制面不可用。';
-      else directDetail = st.selectedExit ? '当前使用 ' + (directPathNames[directPath] || directPath || 'Relay') + '。' : '选择 Exit 后会按策略建立可用直连。';
+      else directDetail = st.selectedExit ? '可用路径 ' + (directPathNames[directPath] || directPath || 'Relay') + '。' : '选择 Exit 后会按策略建立可用直连。';
+      directDetail += ' 可用路径：' + observedPathLabel(st.directPathInfo, directPath) + '。';
       var directMetrics = [];
       var directRtt = st.directRttMs || st.p2pRttMs || 0;
       var directUp = st.directBytesUp || st.p2pBytesUp || 0;
@@ -1850,6 +1851,13 @@
         (running ? 'text-emerald-600 dark:text-emerald-400' : 'text-slate-500 dark:text-slate-400');
     }
 
+    function observedPathLabel(info, fallback) {
+      var path = info && info.path || fallback || '';
+      if (!info || path.indexOf('relay') === 0) return {relay_quic:'中继 · QUIC',relay_tls:'中继 · TLS',relay:'中继'}[path] || path || '未知路径';
+      var scope = {lan:'局域网直连',public:path.indexOf('p2p') >= 0 ? 'P2P 公网直连' : '公网直连',virtual:'虚拟网络直连',loopback:'本机直连',unknown:'直连（网络范围未知）'}[info.network] || '直连（网络范围未知）';
+      return scope + (info.transport ? ' · ' + info.transport.toUpperCase() : '');
+    }
+
     function rdpPathLabel(path, protocol) {
       var names = {tcp_p2p:'P2P TCP 直连', udp_p2p:'P2P UDP 直连', relay:'Relay 中继', disabled:'未启用'};
       return names[path] || path || (protocol === 'udp' ? '等待连接' : 'Relay 中继');
@@ -1864,8 +1872,9 @@
         $('rdp-active-name').textContent = (target && target.name) || 'RDP 已就绪';
         $('rdp-active-id').textContent = st.rdpTargetId || '';
         $('rdp-listen-address').textContent = st.rdpListenAddr;
-        $('rdp-path-tcp').textContent = rdpPathLabel(st.rdpPathTcp, 'tcp');
-        $('rdp-path-udp').textContent = rdpPathLabel(st.rdpPathUdp, 'udp');
+        var session = (st.rdpSessions || []).find(function(s){return s.deviceId === st.rdpTargetId;});
+        $('rdp-path-tcp').textContent = session && session.pathInfoTcp && session.pathInfoTcp.length ? session.pathInfoTcp.map(function(p){return observedPathLabel(p);}).join(' + ') : rdpPathLabel(st.rdpPathTcp, 'tcp');
+        $('rdp-path-udp').textContent = session && session.pathInfoUdp ? observedPathLabel(session.pathInfoUdp) : rdpPathLabel(st.rdpPathUdp, 'udp');
         $('rdp-udp-state').textContent = st.rdpUdpReason || (st.rdpUdpActive ? 'UDP 正在转发' : st.rdpUdpEnabled ? '等待 RDP 客户端发起 UDP' : '当前连接仅使用 TCP');
       }
       renderRDPTargets();
@@ -2577,7 +2586,7 @@
           (record.host || record.ip || '未知目标') + (record.port ? ':' + record.port : ''),
           String(record.protocol || '').toUpperCase(),
           record.action || '—',
-          (record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地')) + (record.path ? ' · ' + record.path : ''),
+          (record.exit_id || (record.action === 'PROXY' ? '自动选择' : '本地')) + (record.path ? ' · ' + observedPathLabel(record.pathInfo, record.path) : ''),
           formatTrafficBytes(record.upload_rate, true),
           formatTrafficBytes(record.download_rate, true)
         ];

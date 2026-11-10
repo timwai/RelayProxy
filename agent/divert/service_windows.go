@@ -3,6 +3,7 @@
 package divert
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
@@ -29,6 +30,7 @@ const (
 	windowsNetworkServiceDisplayName   = "RelayProxy Network Service"
 	windowsNetworkPipeName             = `\\.\pipe\RelayProxyNetwork-v5`
 	windowsNetworkHandshakeTimeout     = 15 * time.Second
+	windowsFirewallCommandTimeout      = 5 * time.Second
 	windowsTransparentFirewallRuleName = "RelayProxy Transparent Proxy"
 
 	networkServiceModeFlagName   = "relayproxy-network-service"
@@ -434,7 +436,9 @@ func serveWindowsNetworkSession(file *os.File) error {
 	}
 	program, err := windowsNetworkClientExecutable(file)
 	if err != nil {
-		return fmt.Errorf("读取透明代理客户端进程路径失败: %w", err)
+		err = fmt.Errorf("读取透明代理客户端进程路径失败: %w", err)
+		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(err.Error())})
+		return err
 	}
 	if err := installWindowsTransparentFirewallRule(ports, program); err != nil {
 		message := "配置透明代理 Windows Firewall 入站规则失败: " + err.Error()
@@ -524,10 +528,22 @@ func runWindowsNetsh(args ...string) error {
 	if err != nil {
 		return err
 	}
-	command := exec.Command(path, args...)
-	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true}
+	ctx, cancel := context.WithTimeout(context.Background(), windowsFirewallCommandTimeout)
+	defer cancel()
+	return runWindowsFirewallCommand(ctx, path, args...)
+}
+
+func runWindowsFirewallCommand(ctx context.Context, path string, args ...string) error {
+	// Firewall RPCs can stall during service recovery or resume. Bound both
+	// rule changes and cleanup so one stale session cannot retain the only pipe.
+	command := exec.CommandContext(ctx, path, args...)
+	command.SysProcAttr = &syscall.SysProcAttr{HideWindow: true, CreationFlags: windows.CREATE_NO_WINDOW}
+	command.WaitDelay = networkErrorWriteTimeout
 	output, err := command.CombinedOutput()
 	if err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("Windows Firewall 命令超时或已取消: %w", errors.Join(ctx.Err(), err))
+		}
 		message := strings.TrimSpace(string(output))
 		if message == "" {
 			return err
@@ -594,12 +610,12 @@ func connectWindowsServicePipeNamed(pipeName, filter string, tcpPorts []uint16) 
 			break
 		}
 		if !errors.Is(lastErr, windows.ERROR_PIPE_BUSY) && !errors.Is(lastErr, windows.ERROR_FILE_NOT_FOUND) {
-			return nil, lastErr
+			return nil, fmt.Errorf("连接 Network Service 管道 %s 失败: %w", pipeName, lastErr)
 		}
 		time.Sleep(100 * time.Millisecond)
 	}
 	if lastErr != nil {
-		return nil, lastErr
+		return nil, fmt.Errorf("等待 Network Service 管道 %s 超时: %w", pipeName, lastErr)
 	}
 	file := os.NewFile(uintptr(handle), pipeName)
 	if file == nil {
@@ -625,17 +641,17 @@ func handshakeWindowsServicePipe(file *os.File, filter string, tcpPorts []uint16
 		return err
 	}
 	if err := writeNetworkFrame(file, nil, networkFrame{kind: networkFrameHello, payload: helloPayload}); err != nil {
-		return err
+		return fmt.Errorf("发送 Network Service 握手失败: %w", err)
 	}
 	reply, err := readNetworkFrame(file)
 	if err != nil {
-		return err
+		return fmt.Errorf("读取 Network Service 握手响应失败: %w", err)
 	}
 	switch reply.kind {
 	case networkFrameReady:
 		return nil
 	case networkFrameError:
-		return errors.New(strings.TrimSpace(string(reply.payload)))
+		return fmt.Errorf("Network Service 启动抓包失败: %s", strings.TrimSpace(string(reply.payload)))
 	default:
 		return fmt.Errorf("RelayProxy Network Service 返回未知握手帧 %d", reply.kind)
 	}
@@ -1059,6 +1075,11 @@ func installWindowsNetworkService(allowedSID string) error {
 	if err := clearWindowsRelayProxyPendingDeletes(); err != nil {
 		return fmt.Errorf("清理 Network Service 待删除记录失败: %w", err)
 	}
+	// Validate and publish the same trusted runtime the SYSTEM broker will
+	// load, before claiming installation or repair succeeded.
+	if _, err := prepareEmbeddedWinDivert(true); err != nil {
+		return fmt.Errorf("准备 Network Service 的 WinDivert 运行库失败: %w", err)
+	}
 	executable, err := stageWindowsNetworkServiceExecutable()
 	if err != nil {
 		return err
@@ -1101,19 +1122,36 @@ func installWindowsNetworkService(allowedSID string) error {
 		return fmt.Errorf("配置 RelayProxy Network Service 非正常退出恢复失败: %w", err)
 	}
 
+	return restartWindowsNetworkService(service)
+}
+
+type windowsNetworkServiceController interface {
+	Query() (svc.Status, error)
+	Control(svc.Cmd) (svc.Status, error)
+	Start(...string) error
+}
+
+func restartWindowsNetworkService(service windowsNetworkServiceController) error {
+	// An explicit repair must replace the broker process even when its version
+	// and SCM configuration match. Running does not prove its pipe is responsive.
 	status, err := service.Query()
 	if err != nil {
-		return err
+		return fmt.Errorf("查询 RelayProxy Network Service 状态失败: %w", err)
 	}
-	if status.State != svc.Running {
-		if err := service.Start(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
-			return fmt.Errorf("启动 RelayProxy Network Service 失败: %w", err)
+	if status.State != svc.Stopped {
+		if status.State != svc.StopPending {
+			if _, err := service.Control(svc.Stop); err != nil && !errors.Is(err, windows.ERROR_SERVICE_NOT_ACTIVE) {
+				return fmt.Errorf("停止 RelayProxy Network Service 以执行修复失败: %w", err)
+			}
+		}
+		if err := waitWindowsServiceState(service, svc.Stopped, 20*time.Second); err != nil {
+			return err
 		}
 	}
-	if err := waitWindowsServiceState(service, svc.Running, 10*time.Second); err != nil {
-		return err
+	if err := service.Start(); err != nil && !errors.Is(err, windows.ERROR_SERVICE_ALREADY_RUNNING) {
+		return fmt.Errorf("启动 RelayProxy Network Service 失败: %w", err)
 	}
-	return nil
+	return waitWindowsServiceState(service, svc.Running, 10*time.Second)
 }
 
 func openOrCreateWindowsNetworkService(manager *mgr.Mgr, executable, binaryPath, allowedSID string) (*mgr.Service, error) {
@@ -1493,7 +1531,7 @@ func scheduleWindowsPathDeleteOnReboot(path string) error {
 	return windows.MoveFileEx(name, nil, windows.MOVEFILE_DELAY_UNTIL_REBOOT)
 }
 
-func waitWindowsServiceState(service *mgr.Service, wanted svc.State, timeout time.Duration) error {
+func waitWindowsServiceState(service interface{ Query() (svc.Status, error) }, wanted svc.State, timeout time.Duration) error {
 	deadline := time.Now().Add(timeout)
 	for time.Now().Before(deadline) {
 		status, err := service.Query()

@@ -1,3 +1,29 @@
+## 2026-10-27：0.1.1 同步失败与暂停诊断
+
+发送端显示“同步失败”、接收端显示“已暂停”，表示接收端没有完成恢复；暂停后的快照会继续被拒绝。升级不会自动清除已有恢复日志或暂停标记。请覆盖原来的解压目录并重新加载扩展，确认设置页显示 **0.1.1**；检查目标网站状态后，在接收端“会话与出口规则”点击“我已检查登录状态，恢复此规则”，再按需勾选“允许本次覆盖现有登录数据”请求同步。
+
+设置页和快捷面板现在显示固定分类的失败阶段/原因，回滚包装和暂停摘要保留原始诊断，不保存 Cookie/Storage 值或网站异常原文。Chrome 注入的 Storage 操作通过固定错误对象报告权限、空间不足和页面变化，避免抛错后只得到空结果。写前校验明确拒绝且没有完成任何原生写操作时，不再因网页状态与旧预检不同而误报部分回滚；已经发生的写入仍需回滚验证。新建目标页完成加载后会复查状态，避免错过完成事件而超时。同步状态变化仅从本地读取，不为每次 ACK 请求 Server 列表。
+
+已有 Server 可直接使用接收端本地详情。Server 更新后还会向发送端转发经过校验的固定错误码；没有更新 Server 时，发送端仍可能只有笼统错误，应查看接收端详情。首个实际失败的原因需要据接收端新诊断判断，不将后续“已暂停”当作最初原因。
+
+## 2026-10-27：Storage 完整性与标签页选择
+
+修复扩展设置处于前台时总是采集同站点第一个标签页的问题：现在优先当前活动网站标签页，否则选择最近激活的同站点标签页；无法区分多个候选时明确提示。来源采集的 Web Storage 与 IndexedDB 使用同一个选定标签页。Session Storage 属于单个标签页，同站点其他标签页的会话不会混入。同步前请先激活两端要使用的网站页面，再打开扩展设置操作。
+
+Local/Session Storage 的键值保持原始字符串，不对 JSON 解析/重编码、不把实际 `undefined` 转成字符串。采集连续两次读取完整快照；写入前核对预检状态、按文档 ID 固定目标，写入后和提交前逐键回读；发现漏写、并发网站改写或导航则失败/暂停，不再仅凭注入调用返回就宣告成功。回滚后同样核验完整写前状态。
+
+**包含 Web Storage 的同步不再强制刷新网站**，以免网站启动脚本从旧内存/默认值重建 Storage 并写入 `"undefined"` 或清除 Session 键。同步后保留已恢复的同一个标签页，勾选“同步成功后打开页面”只会激活它；需要网站重新读取登录状态时可手动刷新。网站自行修改自身 Storage 仍可能发生；在成功确认前已观察到的变更会暂停恢复。
+
+新增真实 Chromium HTTP 双 Profile 回归，包括多个同站点标签页、300 多个键、JSON/Unicode/空字符串/特殊键名；完整 WSS 直连和 HTTPS 反代流程验证每种 Storage 的 300 个键与 420 KiB/280 KiB 大值，并用一个会在登录后加载时写入 `"undefined"`/删 Session 的测试页面验证同步不会触发该初始化。用户报告的内网网站当前无法从开发环境连接，因此不将自有测试等同于该站点实机验收。
+
+## 2026-10-27：非 Secure Cookie 与站点网络绑定
+
+HTTPS 站点可以同步不带 `Secure` 的 `SESSION`。Chrome 按 Cookie 自身的 Secure 属性和域名检查读取权限，因此授权 HTTPS 站点时同时请求该主机的 HTTP 权限，以及可能使用的精确 Cookie 父域权限。同步仍只处理已配对站点可使用的 Cookie，不导出父域的 host-only Cookie 或兄弟站点 Cookie。更新后，已有站点需在两端“站点授权”中点击 **补全 Cookie 权限**；缺少权限会明确报错，避免误报空快照同步成功。接收端勾选“覆盖现有登录状态（仅本次）”后重新请求同步。Cookie 值相同但 Secure、HttpOnly、SameSite、会话/到期属性不同也会恢复并核验。
+
+站点网络绑定支持 **HTTP/HTTPS、合法 TCP 端口、DNS 名称、IPv4/IPv6 和内网主机**，例如 `https://10.99.32.130:30009`、`http://intranet:8080`、`https://[fd00::1]:9443`。绑定按主机和端口匹配，Server 将实际端口传给出口 Agent；HTTP 正向代理支持请求体和 Upgrade。来源 Agent 网络绑定需同时更新 Server 与扩展；旧版不带端口的域名绑定继续表示 443。已有 Agent 出口协议无需变更，Relay/Agent ACL 仍需允许目标地址与端口。
+
+本地验证包含 Node 回归、Go TCP/HTTP/Upgrade/撤销集成，以及真实 Chromium HTTPS/IP 测试：复现 HTTPS-only 权限漏读非 Secure Cookie，双 Profile 覆盖 HttpOnly SESSION，并核验测试网站实际收到的值。运行 `npm run test:chromium` 将同时执行既有站点状态测试和该权限回归。
+
 ## Browser Sync 真实 Relay TLS/WSS + Chromium A/B 集成测试
 
 CI 独立运行 `node browser/chrome-extension/tests/chromium-wss-e2e.mjs`。首先编译 `go build -o <临时测试可执行文件> ./browser/chrome-extension/tests/wss-fixture`，由测试程序以一次性随机 Bearer 令牌启动两个仅监听 `127.0.0.1` 的随机端口：真实 `server/browser_sync.NewHandler` HTTPS/WSS 和仅供 CI 调用的 Store 管理员批准/撤销接口。**管理员控制接口从未接入正式 Server 路由，也不能与生产数据一起运行。** CI 使用单独的 throwaway Chromium 141 双 Profile，且仅为自签测试 HTTPS 证书开启 `--ignore-certificate-errors`、仅为 `127.0.0.1` 增加 Host 授权；这两项不属于正式 Chrome 扩展安装包。
@@ -58,7 +84,7 @@ Chrome 扩展 **完整设置 → 站点授权** 可以从已打开的标签页�
 
 - **HTTP 的 Cookie 限制**：只同步在 HTTP 上可用的非 `Secure` Cookie；即使 Chrome 域名查询返回 HTTPS 的 `Secure` Cookie，也不会导出。HTTP 中无效的分区 Cookie 与 `SameSite=None` 非安全 Cookie 被排除/拒绝。原有 v1 命名 Cookie 规则保持 HTTPS-only，需要 HTTP 网站同步请创建 v2 规则。
 - **Web Storage**：在已授权 HTTP Origin 的单个标签页中采集及恢复全部 Local Storage、Session Storage Key，仍遵守大小限制、冲突保护与事务回滚。`http://host` 与 `https://host` 为不同的 Storage Origin。
-- **网络绑定**：当前按配对网站绑定 Agent 出口的功能仅支持 HTTPS 443；HTTP 配对不显示站点绑定入口。Chrome 全局 Agent 代理仍可独立使用，但不能保证 HTTP 网页加密。
+- **网络绑定**：按配对网站的主机和 TCP 端口绑定 Agent 出口，支持 HTTP/HTTPS、DNS/IP 和自定义端口。Chrome 全局 Agent 代理仍可独立使用，但不能保证 HTTP 网页加密。
 - **安全警告**：RelayProxy 只保护 **A↔B 会话同步** 的端到端加密；HTTP 网站上的 Cookie、Token、请求本身仍可能被窃听与篡改。**Server Admin** 的连接地址与 WSS 身份认证始终要求 HTTPS/TLS，绝不降级。
 
 ## 首次接入：仅审批浏览器设备
@@ -205,7 +231,7 @@ Go 侧使用 `go test ./internal/browser_sync ./server/browser_sync ./server/api
 
 ## B 端本机 Agent 可选出口（开发预览）
 
-使用 B 本机 Agent 时，浏览器扩展可为已配对的 HTTPS 会话规则指定独立回环接入端口。Agent `browser_sync.local_proxy` 仅需 `enabled: true` 和 `listen: "127.0.0.1:21291"`，不需要 Token、用户名密码或 Agent 域名白名单，也不依赖通用 SOCKS5/HTTP/透明代理开关；实际出站遵循 Agent 的 Relay/P2P/QUIC/自定义出口路由，DIRECT/REJECT 不会静默直连。**此无鉴权回环代理也可以被同机其他进程使用**，须在可信设备上显式启用。来源 A 的远端网络代理仍保留独立认证。详见 [网络绑定设计](../../docs/browser-session-network-binding.md)。
+使用 B 本机 Agent 时，浏览器扩展可为已配对的 HTTP/HTTPS 会话规则指定独立回环接入端口。Agent `browser_sync.local_proxy` 仅需 `enabled: true` 和 `listen: "127.0.0.1:21291"`，不需要 Token、用户名密码或 Agent 域名白名单，也不依赖通用 SOCKS5/HTTP/透明代理开关；实际出站遵循 Agent 的 Relay/P2P/QUIC/自定义出口路由，DIRECT/REJECT 不会静默直连。**此无鉴权回环代理也可以被同机其他进程使用**，须在可信设备上显式启用。来源 A 的远端网络代理仍保留独立认证。详见 [网络绑定设计](../../docs/browser-session-network-binding.md)。
 
 ## 独立全 Chrome 网络代理（已集成、待真机验收）
 

@@ -12,6 +12,8 @@ import (
 
 	"github.com/apernet/quic-go"
 	quicprofile "relayproxy/internal/congestion"
+	"relayproxy/internal/netpath"
+	"relayproxy/internal/protocol"
 )
 
 // QUICStreamAdapter adapts quic.Stream to TunnelStream
@@ -112,6 +114,7 @@ func (s *QUICStreamAdapter) Abort() {
 // QUICSession implements TunnelSession using quic-go
 type QUICSession struct {
 	conn             *quic.Conn
+	pathInfo         atomic.Pointer[protocol.ConnectionPath]
 	datagrams        *datagramMux
 	peerDatagrams    atomic.Bool
 	peerStreamResume atomic.Bool
@@ -167,6 +170,20 @@ func NewQUICSession(conn *quic.Conn) *QUICSession {
 	s := &QUICSession{conn: conn, congestionController: "bbr-aggressive"}
 	s.datagrams = newDatagramMux(s)
 	return s
+}
+
+// SetConnectionPath attaches observed metadata to the exact session handed to
+// stream/datagram consumers, without wrapping away native QUIC capabilities.
+func (s *QUICSession) SetConnectionPath(info protocol.ConnectionPath) { s.pathInfo.Store(&info) }
+
+func (s *QUICSession) ConnectionPath() protocol.ConnectionPath {
+	if p := s.pathInfo.Load(); p != nil {
+		if s.conn != nil {
+			return netpath.Revalidate(*p, s.LocalAddr(), s.RemoteAddr())
+		}
+		return *p
+	}
+	return protocol.ConnectionPath{}
 }
 
 // UseBrutal switches an established QUIC session to Hysteria Brutal.

@@ -328,6 +328,45 @@ func ProbeReflexive(ctx context.Context, rendezvous string, conn *net.UDPConn, p
 // are verified against their responding server, and do not depend on DNS
 // answer ordering. Successful families survive failures of the other family.
 func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn, protocolName string) ([]protocol.P2PCandidate, error) {
+	if conn == nil {
+		return nil, ErrProbeUnavailable
+	}
+	defer conn.SetReadDeadline(time.Time{})
+	return probeReflexiveAll(ctx, rendezvous, conn, protocolName, func(buffer []byte, until time.Time) (int, netip.AddrPort, error) {
+		_ = conn.SetReadDeadline(until)
+		return conn.ReadFromUDPAddrPort(buffer)
+	})
+}
+
+// ProbeDatagram is a fixed-size response forwarded by an endpoint's sole UDP
+// reader. The probe still authenticates the nonce and responding server.
+type ProbeDatagram struct {
+	Data   [ProbeResponseSize]byte
+	Remote netip.AddrPort
+}
+
+// ProbeReflexiveAllWithPackets never reads conn or changes its deadlines.
+// This permits LAN punching/data traffic while discovery uses the same NAT
+// mapping. The caller must forward probe responses from its sole UDP reader.
+func ProbeReflexiveAllWithPackets(ctx context.Context, rendezvous string, conn *net.UDPConn, protocolName string, packets <-chan ProbeDatagram) ([]protocol.P2PCandidate, error) {
+	return probeReflexiveAll(ctx, rendezvous, conn, protocolName, func(buffer []byte, until time.Time) (int, netip.AddrPort, error) {
+		timer := time.NewTimer(time.Until(until))
+		defer timer.Stop()
+		select {
+		case <-ctx.Done():
+			return 0, netip.AddrPort{}, ctx.Err()
+		case <-timer.C:
+			return 0, netip.AddrPort{}, context.DeadlineExceeded
+		case packet, ok := <-packets:
+			if !ok {
+				return 0, netip.AddrPort{}, ErrProbeUnavailable
+			}
+			return copy(buffer, packet.Data[:]), packet.Remote, nil
+		}
+	})
+}
+
+func probeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn, protocolName string, read func([]byte, time.Time) (int, netip.AddrPort, error)) ([]protocol.P2PCandidate, error) {
 	if conn == nil || rendezvous == "" || (protocolName != "udp" && protocolName != "tcp") {
 		return nil, ErrProbeUnavailable
 	}
@@ -371,7 +410,6 @@ func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn
 	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
 		deadline = d
 	}
-	defer conn.SetReadDeadline(time.Time{})
 	pending := make(map[uint64]netip.AddrPort, len(destinations))
 	var lastErr error
 	for _, remote := range destinations {
@@ -424,8 +462,7 @@ func ProbeReflexiveAll(ctx context.Context, rendezvous string, conn *net.UDPConn
 		if nextSend.Before(readUntil) {
 			readUntil = nextSend
 		}
-		_ = conn.SetReadDeadline(readUntil)
-		n, sender, readErr := conn.ReadFromUDPAddrPort(buffer)
+		n, sender, readErr := read(buffer, readUntil)
 		if readErr != nil {
 			if ne, ok := readErr.(net.Error); ok && ne.Timeout() {
 				continue

@@ -178,27 +178,16 @@ func (s *Store) ApproveEnrollment(ctx context.Context, id, identityID string, ca
 		return err
 	}
 	defer tx.Rollback()
-	var identityState, extensionState string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM identities WHERE id=?`, identityID).Scan(&identityState); err != nil || identityState != "active" {
-		return errors.New("identity not active")
+	identityID, err = resolveApprovalIdentity(ctx, tx, id, identityID)
+	if err != nil {
+		return err
 	}
+	var extensionState string
 	if err := tx.QueryRowContext(ctx, `SELECT state FROM browser_sync_extensions WHERE extension_id=?`, extensionID).Scan(&extensionState); err != nil {
 		return err
 	}
 	if extensionState != "pending" && extensionState != "approved" {
 		return ErrNotFound // revoked extensions cannot be enrolled
-	}
-	// An administrator approves the identity requested by this browser,
-	// not an unrelated identity selected at approval time. Enrollment remains
-	// unprivileged: identity existence and capability grants are checked below.
-	var requestedIdentity string
-	requestErr := tx.QueryRowContext(ctx, `SELECT requested_identity_id FROM browser_sync_identity_requests
-		WHERE device_id=?`, id).Scan(&requestedIdentity)
-	if requestErr != nil && !errors.Is(requestErr, sql.ErrNoRows) {
-		return requestErr
-	}
-	if requestErr == nil && requestedIdentity != identityID {
-		return errors.New("approval identity differs from device enrollment request")
 	}
 	if err := checkApprovedBrowserDeviceQuota(ctx, tx, identityID); err != nil {
 		return err

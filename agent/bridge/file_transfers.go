@@ -17,24 +17,26 @@ import (
 	"time"
 
 	"relayproxy/agent/app"
+	"relayproxy/internal/protocol"
 )
 
 type FileTransfer struct {
-	ID             string  `json:"id"`
-	DeviceID       string  `json:"deviceId"`
-	ShareID        string  `json:"shareId"`
-	RelativePath   string  `json:"relativePath"`
-	FileName       string  `json:"fileName"`
-	Direction      string  `json:"direction"`
-	TransportPath  string  `json:"transportPath,omitempty"`
-	Destination    string  `json:"destination,omitempty"`
-	RequiresSaveAs bool    `json:"requiresSaveAs,omitempty"`
-	State          string  `json:"state"`
-	Total          int64   `json:"total"`
-	Done           int64   `json:"done"`
-	Speed          float64 `json:"speed"`
-	Error          string  `json:"error,omitempty"`
-	StartedAt      int64   `json:"startedAt"`
+	ID             string                   `json:"id"`
+	DeviceID       string                   `json:"deviceId"`
+	ShareID        string                   `json:"shareId"`
+	RelativePath   string                   `json:"relativePath"`
+	FileName       string                   `json:"fileName"`
+	Direction      string                   `json:"direction"`
+	PathInfo       *protocol.ConnectionPath `json:"pathInfo,omitempty"`
+	TransportPath  string                   `json:"transportPath,omitempty"`
+	Destination    string                   `json:"destination,omitempty"`
+	RequiresSaveAs bool                     `json:"requiresSaveAs,omitempty"`
+	State          string                   `json:"state"`
+	Total          int64                    `json:"total"`
+	Done           int64                    `json:"done"`
+	Speed          float64                  `json:"speed"`
+	Error          string                   `json:"error,omitempty"`
+	StartedAt      int64                    `json:"startedAt"`
 }
 
 type fileTransferRecord struct {
@@ -180,7 +182,7 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 	lastTime := time.Now()
 	lastDone := int64(0)
 	for attempt := 0; attempt < 4; attempt++ {
-		_, err = m.agent.DownloadRemoteFileResumingWithPath(ctx, record.DeviceID, record.ShareID, record.RelativePath, file, func(done, total int64) {
+		_, err = m.agent.DownloadRemoteFileResumingWithPathInfo(ctx, record.DeviceID, record.ShareID, record.RelativePath, file, func(done, total int64) {
 			m.mu.Lock()
 			record.Done, record.Total = done, total
 			elapsed := time.Since(lastTime)
@@ -194,9 +196,10 @@ func (m *fileTransferManager) downloadToDisk(ctx context.Context, record *fileTr
 				lastDone, lastTime = done, time.Now()
 			}
 			m.mu.Unlock()
-		}, func(path string) {
+		}, func(path protocol.ConnectionPath) {
 			m.mu.Lock()
-			record.TransportPath = path
+			record.TransportPath = path.Path
+			record.PathInfo = &path
 			m.mu.Unlock()
 		})
 		if err == nil {

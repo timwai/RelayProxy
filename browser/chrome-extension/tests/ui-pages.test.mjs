@@ -167,3 +167,17 @@ test('outgoing session receipts use one serialized mutation path including revoc
   assert.doesNotMatch(session,/const latest=.*PENDING_DELIVERY/);
   assert.match(session,/payload\.cookies\?\.length\|\|0/);
 });
+
+
+test('Storage restore keeps the exact verified tab without forced website reload',()=>{
+  const sync=readFileSync(new URL('../src/session-sync.js',import.meta.url),'utf8');
+  assert.match(sync,/if\(txn\)await txn\.verifySiteState\(\);\s*else await reloadRestoredWebsiteTab/);
+});
+
+test('Options and popup show sanitized failure details and Options refreshes on transfer results',()=>{
+ const options=asset('options.js'),popup=asset('popup.js');
+ assert.match(options,/diagnosticText\(rule\.lastTransfer\)/);
+ assert.match(popup,/diagnosticText\(rule\.lastTransfer\)/);
+ assert.match(options,/changes\.browserSyncTransferStatus\|\|changes\.browserSyncRestorePaused/);
+ assert.match(options,/getManifest\(\)\.version/);
+});

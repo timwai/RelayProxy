@@ -61,6 +61,7 @@ func (m *Manager) recordFailureError(exitID string, err error) {
 	s.kind, s.reason = kind, err.Error()
 	s.until = time.Now().Add(failureDelay(kind, s.count))
 	m.cooldowns[exitID] = s
+	m.wakeMaintenanceLocked()
 	m.mu.Unlock()
 }
 

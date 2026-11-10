@@ -1,5 +1,5 @@
 // Opt-in Browser Sync network binding. The receiver only needs Chrome.
-// The proxy is configured for exact first-party HTTPS hosts; no DIRECT
+// The proxy is configured for the paired site's TCP host and port; no DIRECT
 // fallback is ever returned for a bound hostname.
 import {sendControl} from './server-api.js';
 import {getSettings} from './rules.js';
@@ -14,19 +14,21 @@ const BLACKHOLE='PROXY 127.0.0.1:9';
 let refreshing=null;
 
 export function safeHostname(host){
-  return typeof host==='string' && host.length>=4 && host.length<=253 &&
-    host===host.toLowerCase() &&
-    /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/.test(host) &&
-    !['local','internal','localhost','arpa'].some(t=>host.endsWith('.'+t)) &&
-    !host.split('.').every(part=>/^[0-9]+$/.test(part)) &&
+  if(typeof host!=='string'||!host||host.length>253||host!==host.toLowerCase())return false;
+  if(host.startsWith('[')){
+    try{return new URL('http://'+host+'/').hostname===host&&/^\[[0-9a-f:.]+\]$/.test(host);}
+    catch{return false;}
+  }
+  return /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$/.test(host)&&
     !host.split('.').some(t=>t.length>63);
 }
 export function parseBoundHost(origin){
   const url=new URL(origin);
-  if(url.protocol!=='https:'||url.port!==''||url.pathname!=='/'||
+  if(!['http:','https:'].includes(url.protocol)||url.pathname!=='/'||
      url.search||url.hash||url.username||url.password||!safeHostname(url.hostname))
-    throw new Error('网络绑定仅支持 HTTPS 443 精确站点域名');
-  return url.hostname;
+    throw new Error('网络绑定需要有效的 HTTP/HTTPS 站点地址');
+  const port=url.port|| (url.protocol==='https:'?'443':'80');
+  return url.hostname+(port==='443'?'':':'+port);
 }
 export function relayProxyFromServerOrigin(origin){
   const url=new URL(origin);
@@ -46,9 +48,9 @@ export function proxyEndpoint(host,port){
 // Chromium CONNECT at the Chrome boundary but uses Agent-native routing,
 // not Agent's general-purpose SOCKS/HTTP services.
 export function buildPAC(desired,endpoint=null,local=null,globalLocal=null,serverOrigin=''){
-  const map={};
+  const map=Object.create(null);
   const target=endpoint||BLACKHOLE;
-  if(!/^(HTTPS [a-z0-9.-]+:[0-9]{1,5}|PROXY 127\.0\.0\.1:9)$/.test(target))
+  if(!/^(HTTPS (?:[a-z0-9.-]+|\[[0-9a-f:.]+\]):[0-9]{1,5}|PROXY 127\.0\.0\.1:9)$/.test(target))
     throw new Error('非法代理规则');
   for(const entry of Object.values(desired||{})){
     const host=parseBoundHost(entry.siteOrigin);
@@ -57,7 +59,7 @@ export function buildPAC(desired,endpoint=null,local=null,globalLocal=null,serve
     const route=entry.mode==='local_agent'?
       (local && local.port===entry.port?'PROXY 127.0.0.1:'+entry.port:BLACKHOLE):target;
     if(map[host] && map[host]!==route)
-      throw new Error('同一域名不能绑定到不同 Agent 出口');
+      throw new Error('同一主机和端口不能绑定到不同 Agent 出口');
     map[host]=route;
   }
   // The local Agent may itself use this Relay for its tunnel. Sending
@@ -70,7 +72,7 @@ export function buildPAC(desired,endpoint=null,local=null,globalLocal=null,serve
     if(relayURL.protocol!=='https:' || relayURL.username || relayURL.password ||
         relayURL.pathname!=='/' || relayURL.search || relayURL.hash)
       throw new Error('RelayProxy HTTPS Server 地址无效');
-    const relayHost=relayURL.hostname.toLowerCase();
+    const relayHost=parseBoundHost(serverOrigin);
     if(!Object.prototype.hasOwnProperty.call(map,relayHost))
       map[relayHost]='DIRECT';
   }
@@ -78,7 +80,11 @@ export function buildPAC(desired,endpoint=null,local=null,globalLocal=null,serve
     ? 'PROXY 127.0.0.1:'+checkLocalPort(globalLocal.port) : 'DIRECT';
   return 'function FindProxyForURL(url, host) {\n'+
     '  var sites='+JSON.stringify(map)+';\n'+
+    '  var match=String(url).match(/^([a-z]+):\\/\\/(\\[[^\\]]+\\]|[^\\/:]+)(?::([0-9]+))?/i);\n'+
+    '  var port=match&&(match[3]||(/^(https|wss)$/i.test(match[1])?"443":"80"));\n'+
     '  var key=String(host).toLowerCase();\n'+
+    '  if(key.indexOf(":")>=0&&key.charAt(0)!=="[")key="["+key+"]";\n'+
+    '  if(port&&port!=="443")key+=":"+port;\n'+
     '  return Object.prototype.hasOwnProperty.call(sites,key) ? sites[key] : '+JSON.stringify(otherwise)+';\n}';
 }
 export async function desiredNetwork(){
@@ -282,8 +288,8 @@ export function proxyAuthDecision(details,lease,now=Date.now()){
   if(!details?.isProxy || details.scheme?.toLowerCase()!=='basic')return {};
   // Only the remote Relay Server authenticates. The B-local Agent loopback
   // CONNECT endpoint intentionally sends no 407 and receives no credentials.
-  if(String(details.challenger?.host).toLowerCase()==='127.0.0.1')return {};
-  if(!lease || String(details.challenger?.host).toLowerCase()!==lease.host ||
+  const authHost=host=>String(host).toLowerCase().replace(/^\[|\]$/g,'');
+  if(!lease || lease.username!=='browser' || authHost(details.challenger?.host)!==authHost(lease.host) ||
     Number(details.challenger?.port)!==lease.port)return {};
   if(!Number.isSafeInteger(lease.expiresAt) || now>=lease.expiresAt)
     return {cancel:true};

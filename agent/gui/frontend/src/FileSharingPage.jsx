@@ -1,3 +1,4 @@
+import {pathLabel} from '../../../../internal/webui/pathLabel.mjs';
 import React, {useCallback,useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
 import {call,callJSON} from './bridge.js';
@@ -98,7 +99,7 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
      return;
     }
     if(result?.state==='ready'){
-     const label=({'p2p_quic':'P2P QUIC','direct_quic':'QUIC','direct_tls':'TLS'})[result.path]||'直连';
+     const label=pathLabel(result.pathInfo,result.path);
      setWarmStatus(label+' 路径已预探测');
     }else setWarmStatus('Relay 回退可用');
    }catch(e){if(active)setWarmStatus('Relay 回退可用')}
@@ -677,7 +678,7 @@ export default function FileSharingPage({toast,initialDevice='',active=true,navi
     transfers.map(item=><div className="file-share-task" key={item.id}>
      <div className="file-share-task-title"><div className="grow"><b>{item.direction==='upload'?'上传 · ':'下载 · '}{item.fileName}</b><div className="mini mono">{item.deviceId} · {item.direction==='upload'?'远程共享文件夹':item.destination||'下载中'}</div></div><span className={'badge '+(item.state==='completed'?'ok':item.state==='failed'?'danger':'neutral')}>{({'running':item.direction==='upload'?'上传中':'下载中','completed':'已完成','failed':'失败','cancelled':'已取消','paused':'已暂停'})[item.state]||item.state}</span></div>
      <div className="file-share-task-track"><div style={{width:(item.total>0?Math.min(100,item.done/item.total*100):0)+'%'}}/></div>
-     <div className="file-share-task-meta"><span>{formatFileBytes(item.done)} / {item.total>0?formatFileBytes(item.total):'计算中'} · {item.total>0?Math.floor(item.done/item.total*100):0}%</span><span>{item.transportPath==='p2p_quic'?'P2P QUIC':item.transportPath==='direct_quic'?'直连 QUIC':item.transportPath=== 'direct_tls'?'直连 TLS':item.transportPath==='relay_quic'?'Relay QUIC':item.transportPath==='relay_tls'?'Relay TLS':'协商中'}{item.state==='running'?' · '+formatFileBytes(item.speed)+'/s':''}</span></div>
+     <div className="file-share-task-meta"><span>{formatFileBytes(item.done)} / {item.total>0?formatFileBytes(item.total):'计算中'} · {item.total>0?Math.floor(item.done/item.total*100):0}%</span><span>{item.transportPath?pathLabel(item.pathInfo,item.transportPath):'协商中'}{item.state==='running'?' · '+formatFileBytes(item.speed)+'/s':''}</span></div>
      {item.error&&<div className="notice danger">{item.error}</div>}
      {item.direction==='download'&&item.state==='completed'&&!globalThis.wails?.Call?.ByName&&<button type="button" className="btn" onClick={()=>{
        if(globalThis.wails?.Call?.ByName){toast?.(item.destination||'文件已保存到选择的位置');return}

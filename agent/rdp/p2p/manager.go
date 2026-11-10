@@ -15,6 +15,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/punch"
 	"relayproxy/internal/p2p/secure"
@@ -469,35 +470,21 @@ func (m *Manager) startTargetUDP(item *Session) (err error) {
 	item.udpStarting = false
 	item.mu.Unlock()
 
-	// CandidateUpdate is sent after the per-session socket exists. The
-	// coordinator forwards it to the controller and keeps the token in memory.
-	// A per-session socket has a different NAT mapping from the registration
-	// socket, so probe the current port instead of reusing a stale candidate.
-	udpCandidates := candidate.DiscoverWithLimit(conn.LocalAddr().(*net.UDPAddr).Port, 0, candidate.MaxCandidates-2)
-	m.mu.Lock()
-	rendezvous := m.rendezvous
-	m.mu.Unlock()
-	if rendezvous != "" {
-		probeCtx, cancel := context.WithTimeout(m.ctx, 2*time.Second)
-		if reflexives, probeErr := candidate.ProbeReflexiveAll(probeCtx, rendezvous, conn, "udp"); probeErr == nil {
-			udpCandidates = append(udpCandidates, reflexives...)
-		}
-		cancel()
-	}
-	if len(udpCandidates) > 0 {
-		select {
-		case <-item.closed:
-			return net.ErrClosed
-		default:
-		}
-		item.publishCandidates(m.ctx, "udp", udpCandidates)
-	}
 	go m.targetUDPReadLoop(item)
 	go m.targetUDPLocalReadLoop(item)
 	return nil
 }
 
 func (m *Manager) targetUDPReadLoop(item *Session) {
+	item.mu.Lock()
+	socket := item.udp
+	item.mu.Unlock()
+	if socket == nil {
+		return
+	}
+	handleProbe, stopDiscovery := item.startUDPDiscovery(m.ctx, socket)
+	defer stopDiscovery()
+
 	buffer := make([]byte, secure.MaxDataPayload+64)
 	fragment := make([]byte, protocol.UDPFragmentHeaderSize+protocol.UDPFragmentPayload)
 	assembled := make([]byte, protocol.MaxUDPDatagramPayload)
@@ -513,6 +500,10 @@ func (m *Manager) targetUDPReadLoop(item *Session) {
 			return
 		}
 		source = netip.AddrPortFrom(source.Addr().Unmap(), source.Port())
+		if handleProbe(buffer[:n], source) {
+			continue
+		}
+
 		packet, err := secure.DecodePunchPacket(buffer[:n], item.Token)
 		if err == nil && packet.SessionID == item.ID {
 			if packet.Type == secure.PunchRequest {
@@ -714,8 +705,7 @@ func (s *Session) DialTCP(ctx context.Context) (net.Conn, error) {
 }
 
 func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
-	candidates := s.candidateList(ctx, "udp")
-	if len(candidates) == 0 {
+	if len(s.candidateList(ctx, "udp")) == 0 {
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
@@ -740,37 +730,26 @@ func (s *Session) DialUDP(ctx context.Context) (net.PacketConn, error) {
 	stopCancel := tunnel.InterruptOnCancel(ctx, conn)
 	defer stopCancel()
 	tunnel.TuneUDPConn(conn)
-	// The controller's registration socket is not the socket used for this
-	// association. Publish the actual bound port before punching so the target
-	// can validate and reply to the same NAT mapping.
-	localCandidates := candidate.DiscoverWithLimit(conn.LocalAddr().(*net.UDPAddr).Port, 0, candidate.MaxCandidates-2)
-	if len(localCandidates) > 0 {
-		s.publishCandidates(ctx, "udp", localCandidates)
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	s.manager.mu.Lock()
-	rendezvous := s.manager.rendezvous
-	s.manager.mu.Unlock()
-	if rendezvous != "" {
-		probeCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		if reflexives, probeErr := candidate.ProbeReflexiveAll(probeCtx, rendezvous, conn, "udp"); probeErr == nil {
-			localCandidates = append(localCandidates, reflexives...)
-			s.publishCandidates(ctx, "udp", localCandidates)
-		}
-		cancel()
-	}
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	result, err := punch.PunchResponder(ctx, conn, candidates, s.ID, s.Token, 1200*time.Millisecond)
+
+	handleProbe, stopDiscovery := s.startUDPDiscovery(ctx, conn)
+	defer stopDiscovery()
+	// Preserve the previous discovery + punch budget for late WAN candidates;
+	// LAN candidates are tried immediately within this same bounded attempt.
+	result, err := punch.PunchResponderWithOptions(ctx, conn, s.ID, s.Token, 3200*time.Millisecond, punch.ResponderOptions{
+		Candidates: func() []protocol.P2PCandidate {
+			s.mu.Lock()
+			defer s.mu.Unlock()
+			return append([]protocol.P2PCandidate(nil), s.candidates...)
+		},
+		HandleDatagram: handleProbe,
+	})
 	if err != nil {
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}
 		return nil, err
 	}
+	stopDiscovery()
 	stopCancel()
 	if err := ctx.Err(); err != nil {
 		return nil, err
@@ -886,7 +865,11 @@ func (s *Session) trackConn(conn net.Conn) net.Conn {
 	if conn == nil {
 		return nil
 	}
-	tracked := &trackedConn{Conn: conn, owner: s}
+	info := netpath.Describe("tcp_p2p", conn.LocalAddr(), conn.RemoteAddr())
+	s.mu.Lock()
+	info.CandidateType = netpath.MatchCandidate(conn.RemoteAddr(), s.candidates)
+	s.mu.Unlock()
+	tracked := &trackedConn{Conn: conn, owner: s, info: info}
 	s.mu.Lock()
 	select {
 	case <-s.closed:
@@ -907,7 +890,14 @@ func (s *Session) trackPacketConn(conn net.PacketConn) net.PacketConn {
 	if conn == nil {
 		return nil
 	}
-	tracked := &trackedPacketConn{PacketConn: conn, owner: s}
+	info := netpath.Basic("udp_p2p")
+	if endpoint, ok := conn.(interface{ RemoteAddr() net.Addr }); ok {
+		info = netpath.Describe("udp_p2p", conn.LocalAddr(), endpoint.RemoteAddr())
+		s.mu.Lock()
+		info.CandidateType = netpath.MatchCandidate(endpoint.RemoteAddr(), s.candidates)
+		s.mu.Unlock()
+	}
+	tracked := &trackedPacketConn{PacketConn: conn, owner: s, info: info}
 	s.mu.Lock()
 	select {
 	case <-s.closed:
@@ -939,10 +929,12 @@ func (s *Session) removePacketConn(conn net.PacketConn) {
 type trackedConn struct {
 	net.Conn
 	owner *Session
+	info  protocol.ConnectionPath
 	once  sync.Once
 }
 
-func (c *trackedConn) RDPPath() string { return "tcp_p2p" }
+func (c *trackedConn) ConnectionPath() protocol.ConnectionPath { return c.info }
+func (c *trackedConn) RDPPath() string                         { return "tcp_p2p" }
 
 func (c *trackedConn) Close() error {
 	var err error
@@ -956,10 +948,12 @@ func (c *trackedConn) Close() error {
 type trackedPacketConn struct {
 	net.PacketConn
 	owner *Session
+	info  protocol.ConnectionPath
 	once  sync.Once
 }
 
-func (c *trackedPacketConn) RDPPath() string { return "udp_p2p" }
+func (c *trackedPacketConn) ConnectionPath() protocol.ConnectionPath { return c.info }
+func (c *trackedPacketConn) RDPPath() string                         { return "udp_p2p" }
 
 func (c *trackedPacketConn) Close() error {
 	var err error

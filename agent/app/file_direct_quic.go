@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/apernet/quic-go"
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/upnp"
 	"relayproxy/internal/protocol"
@@ -21,6 +22,7 @@ const fileDirectQUICALPN = "relayproxy-file-direct-quic-v1"
 // Each QUIC connection is file-scoped and has exactly one authenticated
 // bidirectional stream. It cannot be reused for Proxy, RDP, or browser access.
 type fileQUICStream struct {
+	info protocol.ConnectionPath
 	tunnel.TunnelStream
 	session *tunnel.QUICSession
 }
@@ -31,7 +33,8 @@ func (s *fileQUICStream) Close() error {
 	return errors.Join(streamErr, sessionErr)
 }
 
-func (s *fileQUICStream) FileTransferPath() string { return "direct_quic" }
+func (s *fileQUICStream) ConnectionPath() protocol.ConnectionPath { return s.info }
+func (s *fileQUICStream) FileTransferPath() string                { return "direct_quic" }
 
 func fileDirectQUICServerTLS(config *tls.Config) *tls.Config {
 	cfg := config.Clone()
@@ -275,7 +278,7 @@ func (a *Agent) tryFileQUIC(ctx context.Context, offer protocol.FileDirectOffer,
 			continue
 		}
 		_ = stream.SetDeadline(time.Time{})
-		return &fileQUICStream{TunnelStream: stream, session: session}, response, nil
+		return &fileQUICStream{TunnelStream: stream, session: session, info: netpath.Describe("direct_quic", session.LocalAddr(), session.RemoteAddr())}, response, nil
 	}
 	return nil, protocol.FileShareResponse{}, lastErr
 }

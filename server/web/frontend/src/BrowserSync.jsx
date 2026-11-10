@@ -1,6 +1,7 @@
 import React,{useCallback,useEffect,useMemo,useState} from 'react';
 import {api,json,fmtDate,list} from './api.js';
 import {subscribeLiveUpdates} from './live-updates.js';
+import {findBrowserIdentity} from './browser-sync-identity.js';
 
 // This admin page displays metadata only. Website origins, policies, secrets,
 // encrypted payloads and browser public/private keys are never rendered here.
@@ -86,7 +87,7 @@ export function BrowserSyncAdmin({identities=[]}){
   // Administrators review/reject that binding; they cannot silently assign
   // the pending device to a different identity from this screen.
   const requestedIdentity=id=>devices.find(d=>d.id===id)?.requestedIdentityId||'';
-  const validIdentity=id=>activeIdentities.some(item=>item.id===requestedIdentity(id));
+  const validIdentity=id=>!!findBrowserIdentity(activeIdentities,requestedIdentity(id));
   const deviceAction=async(id,mode)=>{
     if(busy)return;
     if(mode==='revoke'&&!window.confirm('撤销后该浏览器将不能继续同步，相关配对规则也会失效。确定撤销？'))return;
@@ -239,6 +240,7 @@ export function BrowserSyncAdmin({identities=[]}){
           <tbody>{visible.map(d=>{
             const caps=capabilities[d.id]||{send:true,receive:false};
             const stat=stats.get(d.id)||{};
+            const identity=findBrowserIdentity(activeIdentities,d.requestedIdentityId);
             return <tr key={d.id}>
               <td><div className="browser-sync-device-name">{d.name||'Chrome 浏览器'}</div>
                 <small className="browser-sync-device-id" title={d.id}>{d.id}</small>
@@ -255,9 +257,9 @@ export function BrowserSyncAdmin({identities=[]}){
               <td>{d.state==='pending'?<div className="browser-sync-approve-controls">
                 <div className="browser-sync-requested-identity" title={d.requestedIdentityId||''}>
                   {d.requestedIdentityId
-                    ? (activeIdentities.find(i=>i.id===d.requestedIdentityId)?.name||d.requestedIdentityId)
+                    ? (identity?.name||d.requestedIdentityId)
                     : '未提交身份 ID'}
-                  {d.requestedIdentityId&&activeIdentities.some(i=>i.id===d.requestedIdentityId)
+                  {identity
                     ? <small className="browser-sync-device-extra">申请身份 ID：{d.requestedIdentityId}</small>
                     : <small className="browser-sync-device-extra">此身份未启用，暂不可批准</small>}
                 </div>

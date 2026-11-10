@@ -39,7 +39,7 @@ func main() {
 	defer db.Close()
 	db.SetMaxOpenConns(1)
 	ctx := context.Background()
-	if _, err := db.ExecContext(ctx, "CREATE TABLE identities(id TEXT PRIMARY KEY,status TEXT NOT NULL)"); err != nil {
+	if _, err := db.ExecContext(ctx, "CREATE TABLE identities(id TEXT PRIMARY KEY,short_id TEXT UNIQUE,status TEXT NOT NULL)"); err != nil {
 		log.Fatal(err)
 	}
 	if _, err := db.ExecContext(ctx, "INSERT INTO identities(id,status) VALUES('id_1','active')"); err != nil {

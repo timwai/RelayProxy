@@ -25,28 +25,28 @@ Chrome 扩展的 **RelayProxy HTTPS Server** 应填写公网中继地址 `https:
 当 B 设备希望经 A 的 Agent 出口访问已同步的网站时，需要满足以下条件：
 
 1. 来源 A、接收 B 的 Chrome 扩展设备由 Server 管理员审批，且归属同一 Identity；A 具备 send、B 具备 receive 权限。
-2. A/B 已完成加密网站策略配对及双端确认；网络共享还需要 A 主动选择一个**在线** Agent 和准确 HTTPS 网站、B 再次确认站点网络绑定。
-3. A Agent 持有管理员分配的 `proxy.exit` 授权，设备归属相同 Identity，并且 **Agent 本机** 在 Web/GUI → 本机出口共享里开启“允许浏览器网络共享”（配置 `exit.browser_network_share: true`，重启或重连后签名宣告能力）。
-4. Server 在每个 HTTPS CONNECT 请求中核验接收浏览器的短期令牌、配对有效性、绑定的唯一精确域名、Agent 仍在线、身份一致性、`proxy.exit` 能力、Agent 的本地共享授权，并在已建立连接存活期间持续复核权限。Agent 的出口目标 ACL 及 Server Relay ACL 均不能被绕过。
+2. A/B 已完成加密网站策略配对及双端确认；网络共享还需要 A 主动选择一个**在线** Agent 和准确 HTTP/HTTPS 网站（含端口）、B 再次确认站点网络绑定。
+3. Agent 持有管理员分配的 `proxy.exit` 授权，设备归属相同 Identity 且在线。声明本机浏览器共享能力的 Agent 使用专用 Browser Network 帧；其他获授权远程 Agent 使用普通 TCP 出口帧。
+4. Server 在每个通过 TLS 入口发送的 CONNECT 或 HTTP 正向代理请求中核验接收浏览器的短期令牌、配对有效性、绑定的唯一主机与端口、Agent 仍在线、身份一致性、`proxy.exit` 能力，并在已建立连接存活期间持续复核权限。Agent 的出口目标 ACL 及 Server Relay ACL 均不能被绕过。
 
-代理功能仅支持配对 HTTPS 网站的 **443/TCP**，不支持任意 HTTP CONNECT 端口、IP / localhost、第三方域名或通用开放代理。A Agent 的 DNS 在出口侧解析。全局浏览器代理是另一项显式开关，**无需开启**。
+站点代理支持 **HTTP/HTTPS、1–65535 TCP 端口、DNS、IPv4/IPv6 和内网主机**，例如 `https://10.99.32.130:30009`。精确绑定按主机和端口匹配，旧版裸域名绑定仍表示 443；不同端口需要对应配对与双方确认。HTTP 使用正向代理，HTTPS 使用 CONNECT，Upgrade 流量同样沿已授权出口传输。扩展与 Server 必须一同更新；Relay/Agent 现有 ACL 仍须允许目标。A Agent 的 DNS 在出口侧解析。全局浏览器代理是另一项显式开关，**无需开启**。
 
 ## 三、数据与协议
 
 ```text
 A Chrome  -- 浏览器配对 / Cookie-Storage E2EE --> Relay Server TLS/TCP
 B Chrome  -- 浏览器配对 / WSS 会话同步 -------> Relay Server TLS/TCP
-B Chrome  -- HTTPS CONNECT 精确配对域名 -----> Relay Server TLS/TCP
+B Chrome  -- HTTPS 代理：配对主机和端口 -----> Relay Server TLS/TCP
                                                     |
                                                     v
                                                A Agent Exit
                                                     |
                                                     v
-                                               目标 HTTPS 网站
+                                               目标 HTTP/HTTPS 网站
 ```
 
-- 单个 TLS/TCP 端口仍同时服务旧 Agent 原生中继隧道、原有公开消息推送、Chrome HTTPS/WSS 与 Browser Sync CONNECT。路由只白名单允许 Browser Sync 注册/WSS、经过认证的 CONNECT 和公开消息推送；**绝不复用 Admin 登录或控制台接口**。
-- Server 不解密 Cookie/Storage，会话端到端加密与设备签名、时序和回滚逻辑保持原状。Server 可见 CONNECT 的精确域名、出口 ID 和请求元数据。
+- 单个 TLS/TCP 端口仍同时服务旧 Agent 原生中继隧道、原有公开消息推送、Chrome HTTPS/WSS 与 Browser Sync CONNECT。路由只白名单允许 Browser Sync 注册/WSS、经过认证的 CONNECT/HTTP 正向代理和公开消息推送；**绝不复用 Admin 登录或控制台接口**。
+- Server 不解密 Cookie/Storage，会话端到端加密与设备签名、时序和回滚逻辑保持原状。Server 可见目标主机/端口和出口 ID。普通 HTTP 正向代理的请求与响应也可被 Relay 读取；目标 HTTPS 仍由浏览器与网站协商 TLS。
 - `NETWORK_TOKEN` 只返回接收设备的短期代理令牌与到期时间。Chrome 使用自身已认证的 `RelayProxy HTTPS Server` Origin 推导主机和端口。切换 Server Origin 时清理原有凭据，禁止令牌绑定到旧的代理地址。
 - Cookie/Storage 同步与网络绑定解耦；关闭/撤销 Agent 网络共享不会自动删除已恢复的网站登录信息。
 - 旧 YAML 中 `browser_sync.network_proxy` 会被**只读迁移 shim** 接受并在规范化时清除；重新保存配置后不再写出。旧 Server/扩展不能和新 `NETWORK_TOKEN` 互通网络代理功能，应同时升级。

@@ -30,6 +30,15 @@ function listenLocalServer(){
         res.end(JSON.stringify({user:value}));
         return;
       }
+      if(url.pathname==='/storage-bootstrap'){
+        res.setHeader('Content-Type','text/html; charset=utf-8');
+        // Model an app booting from stale defaults after the new login Cookie
+        // arrives. Reloading after an otherwise correct restore destroys data.
+        const signedIn=/(?:^|;\s*)rp_e2e_session=alice(?:;|$)/.test(req.headers.cookie||'');
+        res.end('<!doctype html><title>Storage bootstrap fixture</title>'+
+          (signedIn?'<script>for(let i=0;i<50;i++){localStorage.setItem("rp_e2e_local_"+i,undefined);sessionStorage.removeItem("rp_e2e_session_"+i);}</script>':''));
+        return;
+      }
       res.setHeader('Content-Type','text/html; charset=utf-8');
       res.end('<!doctype html><meta charset="utf-8"><title>RelayProxy owned test site</title><h1>RelayProxy E2E</h1>');
     });
@@ -75,6 +84,12 @@ async function sourceSiteState(page,origin){
     localStorage.setItem('rp_e2e_access','alice-local-token');
     localStorage.setItem('rp_e2e_second','second-key');
     sessionStorage.setItem('rp_e2e_tab','alice-session-token');
+    for(let i=0;i<300;i++){
+      localStorage.setItem('rp_e2e_local_'+i,JSON.stringify({index:i,text:'中文\n😀',nested:[false,null,'undefined']}));
+      sessionStorage.setItem('rp_e2e_session_'+i,'session-'+i+'\n中文😀');
+    }
+    localStorage.setItem('rp_e2e_large','L'.repeat(420*1024));
+    sessionStorage.setItem('rp_e2e_large','S'.repeat(280*1024));
     await new Promise((resolve,reject)=>{
       const open=indexedDB.open('rp-e2e-auth',1);
       open.onupgradeneeded=()=>{
@@ -232,11 +247,21 @@ async function verifyTargetSite(page,origin){
     });
     return {local:localStorage.getItem('rp_e2e_access'),
       second:localStorage.getItem('rp_e2e_second'),
-      session:sessionStorage.getItem('rp_e2e_tab'),record};
+      session:sessionStorage.getItem('rp_e2e_tab'),record,
+      localComplete:Array.from({length:300},(_,i)=>
+        localStorage.getItem('rp_e2e_local_'+i)===JSON.stringify({index:i,text:'中文\n😀',nested:[false,null,'undefined']})).every(Boolean),
+      sessionComplete:Array.from({length:300},(_,i)=>
+        sessionStorage.getItem('rp_e2e_session_'+i)==='session-'+i+'\n中文😀').every(Boolean),
+      largeLocal:localStorage.getItem('rp_e2e_large')==='L'.repeat(420*1024),
+      largeSession:sessionStorage.getItem('rp_e2e_large')==='S'.repeat(280*1024)};
   });
   assert.equal(state.local,'alice-local-token');
   assert.equal(state.second,'second-key');
   assert.equal(state.session,'alice-session-token');
+  assert.equal(state.localComplete,true,'all 300 Local Storage keys and JSON strings must match');
+  assert.equal(state.sessionComplete,true,'all 300 Session Storage keys must match in this exact tab');
+  assert.equal(state.largeLocal,true,'420 KiB Local Storage value must survive compression and restoration');
+  assert.equal(state.largeSession,true,'280 KiB Session Storage value must survive compression and restoration');
   assert.deepEqual(state.record,{id:'primary',user:'alice',token:'alice-indexeddb-token',
     blob:true,validDate:true});
 }

@@ -1,5 +1,6 @@
 // Popup is an operational dashboard only. Permission prompts, site grants,
 // pairing confirmation and account-overwrite policy live in options.html.
+import {diagnosticText} from './sync-diagnostics.js';
 const $ = id => document.getElementById(id);
 const feedback = (message, error = false) => {
   const node = $('message');
@@ -70,6 +71,8 @@ function renderRules(rules, siteOrigin) {
     const detail = el('div','rule-detail',STATES[rule.lastTransfer?.state] || '等待同步');
     if (['PARTIAL','CONFLICT','FAILED'].includes(rule.lastTransfer?.state)) detail.classList.add('attention');
     info.append(main,detail);
+    const diagnostic=diagnosticText(rule.lastTransfer);
+    if(diagnostic)info.append(el('div','rule-detail attention',diagnostic));
     const buttons = el('div','quick-actions');
     let openAfter=null;
     if(rule.role==='target'){

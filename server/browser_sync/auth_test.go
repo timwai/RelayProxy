@@ -24,10 +24,10 @@ func testBrowserStore(t *testing.T) *Store {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`CREATE TABLE identities(id TEXT PRIMARY KEY,status TEXT NOT NULL)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE identities(id TEXT PRIMARY KEY,short_id TEXT UNIQUE,status TEXT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := db.Exec(`INSERT INTO identities(id,status) VALUES('id_1','active')`); err != nil {
+	if _, err := db.Exec(`INSERT INTO identities(id,short_id,status) VALUES('id_1','a1b2c3d4e5f6g7h8','active')`); err != nil {
 		t.Fatal(err)
 	}
 	store, err := NewStore(db)

@@ -159,6 +159,11 @@ func TestDialUDPCancelsBlockedRendezvousProbe(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer probe.Close()
+	// Keep punching pending as well: a reachable LAN peer is now allowed to
+	// win while the rendezvous is silent.
+	session.mu.Lock()
+	session.candidates = []protocol.RDPCandidate{{Protocol: "udp", Type: "lan", Address: probe.LocalAddr().String()}}
+	session.mu.Unlock()
 	session.manager.rendezvous = probe.LocalAddr().String()
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -171,8 +176,15 @@ func TestDialUDPCancelsBlockedRendezvousProbe(t *testing.T) {
 		done <- err
 	}()
 	_ = probe.SetReadDeadline(time.Now().Add(time.Second))
-	if _, _, err := probe.ReadFromUDP(make([]byte, 64)); err != nil {
-		t.Fatal(err)
+	var buf [64]byte
+	for {
+		n, _, err := probe.ReadFromUDP(buf[:])
+		if err != nil {
+			t.Fatal(err)
+		}
+		if n == 16 { // rendezvous request, rather than a punch request
+			break
+		}
 	}
 	cancel()
 	select {

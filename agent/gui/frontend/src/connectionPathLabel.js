@@ -1,7 +1,9 @@
+import {pathLabel} from '../../../../internal/webui/pathLabel.mjs';
 // Traffic snapshots retain stable device IDs. Resolve names only at render time,
 // so existing records reflect device renames without rewriting audit data.
 export function connectionPathLabel(connection = {}, exits = []) {
-  const path = String(connection?.path || '').trim();
+  const rawPath = String(connection?.path || '').trim();
+  const path = connection?.pathInfo?.path === rawPath ? pathLabel(connection.pathInfo, rawPath) : rawPath;
   const action = String(connection?.action || '').toUpperCase();
   const exitID = String(connection?.resolved_exit_id || connection?.exit_id || connection?.exitId || '').trim();
   if (action !== 'PROXY' || !exitID) return path || action || '—';

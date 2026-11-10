@@ -1,8 +1,11 @@
 import { parseSiteOrigin, getSettings, updateSettings } from './rules.js';
+import {cookieAccessOrigins} from './cookie-access.js';
+import {diagnosticText,ruleTransferStatus,TRANSFER_STATUS_KEYS} from './sync-diagnostics.js';
 
 const $ = id => document.getElementById(id);
 const status = text => { $('message').textContent = text; $('message').className = ''; };
 const failure = error => { $('message').textContent = String(error.message || error); $('message').className = 'error'; };
+$('extension-version').textContent='扩展版本 '+chrome.runtime.getManifest().version;
 
 function renderSites(sites) {
   const list = $('sites');
@@ -13,6 +16,14 @@ function renderSites(sites) {
   for (const origin of sites) {
     const li = document.createElement('li');
     li.append(textNode('span',origin));
+    const repair=document.createElement('button');
+    repair.textContent='补全 Cookie 权限';
+    repair.addEventListener('click',async()=>{
+      try{
+        const granted=await chrome.permissions.request({origins:cookieAccessOrigins(origin)});
+        status(granted?'站点 Cookie 权限已补全，请重新请求同步。':'Cookie 权限未获授予。');
+      }catch(error){failure(error);}
+    });
     const remove=document.createElement('button');
     remove.textContent='移除授权';remove.title='停止该站点后续同步';
     remove.addEventListener('click',async()=>{
@@ -21,7 +32,7 @@ function renderSites(sites) {
         status('已撤销站点同步授权；原网站登录状态未清除。');
       }catch(error){failure(error);}
     });
-    li.append(remove);list.append(li);
+    li.append(repair,remove);list.append(li);
     const option = document.createElement('option');
     option.value = origin;
     option.textContent = origin;
@@ -89,9 +100,7 @@ $('add-site').addEventListener('click', async () => {
       '此网站使用 HTTP：网站登录 Cookie 和 Storage 可能在网络中被窃取或篡改。' +
       'RelayProxy 只加密设备间的同步数据，无法加密您与网站之间的 HTTP 连接。仍要授权此站点吗？'))return;
     // Call request() directly from a user click; never grant silently.
-    const websiteURL = new URL(origin);
-    const pattern = `${websiteURL.protocol}//${websiteURL.hostname}/*`;
-    const granted = await chrome.permissions.request({ origins: [pattern] });
+    const granted = await chrome.permissions.request({origins:cookieAccessOrigins(origin)});
     if (!granted) return status('站点权限未获授予。');
     const settings = await getSettings();
     if (!settings.sites.includes(origin)) {
@@ -156,9 +165,11 @@ async function ask(message) {
 }
 
 let cachedRules = [];
+let cachedPeers = [];
 
 async function refreshPairing() {
   const peers = (await ask({ type: 'LIST_PEERS' })).peers || [];
+  cachedPeers=peers;
   const select = $('target');
   const previous = select.value;
   select.replaceChildren();
@@ -208,6 +219,8 @@ function renderRules(rules,peers=[]) {
         CONFLICT:'目标已有不同登录状态',UNKNOWN:'结果尚不确定，可重试或等待对账',
         PARTIAL:'浏览器状态恢复不完整，已暂停接收，必须人工检查'};
       card.append(textNode('p', '最近同步：' + translated[rule.lastTransfer.state]));
+      const diagnostic=diagnosticText(rule.lastTransfer);
+      if(diagnostic)card.append(textNode('p','失败详情：'+diagnostic,'error'));
     }
     if (!rule.valid) {
       card.append(textNode('p', rule.error || '尚未找到经核验的设备密钥，无法授权。', 'error'));
@@ -223,6 +236,8 @@ function renderRules(rules,peers=[]) {
             sessionStorage:'Session Storage',indexedDB:'IndexedDB'}[key]))
           .join(' / ');
       card.append(textNode('p','同步范围：'+selected));
+      if(rule.policy.localStorage||rule.policy.sessionStorage)
+        card.append(textNode('p','Storage 使用本机最近激活的同站点标签页。同步前请先点击要使用的网站标签页；Session Storage 不会合并其他标签页。写入后保留当前页面，需要网站重新读取登录状态时请手动刷新。'));
       card.append(textNode('div', '配对校验码：' + rule.code, 'code'));
       if (rule.status === 'offered' &&
           ((rule.role === 'target' && !rule.targetApproved) ||
@@ -244,8 +259,9 @@ function renderRules(rules,peers=[]) {
               const website = new URL(rule.policy.siteOrigin);
               if(website.protocol==='http:' && !window.confirm(
                 '确认接收来自 HTTP 网站的会话？此站点本身并未加密，Cookie 和登录数据可能在访问网站时被窃取。'))return;
-              const pattern = website.protocol + '//' + website.hostname + '/*';
-              const granted = await chrome.permissions.request({ origins: [pattern] });
+              const origins=rule.policy.allCookies?cookieAccessOrigins(rule.policy.siteOrigin)
+                :[website.protocol+'//'+website.hostname+'/*'];
+              const granted = await chrome.permissions.request({origins});
               if (!granted) { status('未授权目标站点。'); return; }
               await ask({ type: 'ACCEPT_RULE', ruleId: rule.id, confirmed: true, pairingCode: rule.code });
             } else {
@@ -258,10 +274,10 @@ function renderRules(rules,peers=[]) {
         card.append(button);
       }
     }
-    if(rule.status==='active' && rule.valid && rule.policy.siteOrigin.startsWith('https://')){
+    if(rule.status==='active' && rule.valid){
       if(rule.network?.status==='offered' && rule.role==='target'){
         card.append(textNode('p','来源设备申请：访问 '+rule.network.host+
-          ' 时经由 Agent '+rule.network.exitDeviceId+' 出口。仅 HTTPS 443。'));
+          ' 时经由 Agent '+rule.network.exitDeviceId+' 出口。'));
         const approve=document.createElement('button');
         approve.textContent='接受网络绑定邀请';
         approve.disabled=!rule.network.matchingHost;
@@ -334,7 +350,7 @@ function renderRules(rules,peers=[]) {
         card.append(revoke);
       }
     }
-    if (rule.status==='active' && rule.valid && rule.role==='target' && rule.policy.siteOrigin.startsWith('https://')){
+    if (rule.status==='active' && rule.valid && rule.role==='target'){
       const current=rule.localNetworkMode==='local_agent'?'本机 Agent':rule.localNetworkMode==='source_agent'?'已授权远程 Agent':'未启用';
       card.append(textNode('p','当前站点网络出口：'+current));
       const local=document.createElement('button');
@@ -523,6 +539,7 @@ activateSettingsSection(window.location.hash.slice(1));
 // alarm. This lightweight UI refresh only reads Chrome's local connection
 // state; it never polls an unapproved Server or resubmits enrollment.
 let previousConnected=false;
+let transferRefreshTimer=null;
 async function updateConnectionState(){
   const result=await chrome.runtime.sendMessage({type:'GET_STATUS'});
   if(!result?.ok)return;
@@ -547,6 +564,18 @@ load().then(()=>{
     if(area==='local'&&(changes.browserSyncConnectionNotice||
        changes.browserSyncPendingEnrollment))
       updateConnectionState().catch(()=>{});
+    if(area==='local'&&(changes.browserSyncTransferStatus||changes.browserSyncRestorePaused)){
+      clearTimeout(transferRefreshTimer);
+      transferRefreshTimer=setTimeout(async()=>{
+        // A local result must not turn every SENDING/RELAYED/ACK transition
+        // into Server list queries and exhaust the control-frame budget.
+        try{
+          const stored=await chrome.storage.local.get(TRANSFER_STATUS_KEYS);
+          for(const rule of cachedRules)rule.lastTransfer=ruleTransferStatus(rule.id,stored);
+          renderRules(cachedRules,cachedPeers);
+        }catch{ /* a manual refresh can recover a closed page */ }
+      },100);
+    }
   });
   document.addEventListener('visibilitychange',()=>{
     if(document.visibilityState==='visible')updateConnectionState().catch(()=>{});

@@ -57,6 +57,7 @@ type Session struct {
 }
 
 type PeerReport struct {
+	PathInfo         protocol.ConnectionPath
 	Path             string
 	Reason           string
 	RTTMs            int64
@@ -538,6 +539,9 @@ func (c *Coordinator) pathReport(device *session.DeviceSession, message protocol
 	if message.Path != "" && message.Path != protocol.P2PPathDirectQUIC && message.Path != protocol.P2PPathRelayQUIC && message.Path != protocol.P2PPathRelayTLS {
 		return p2pError(protocol.ErrCodeInvalidRequest, "unsupported P2P path")
 	}
+	if message.PathInfo != nil && !message.PathInfo.ValidFor(message.Path) {
+		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P path details")
+	}
 	if message.ActiveStreams < 0 || message.ActiveStreams > maxReportedActiveStreams {
 		return p2pError(protocol.ErrCodeInvalidRequest, "invalid P2P active stream count")
 	}
@@ -569,6 +573,9 @@ func (c *Coordinator) pathReport(device *session.DeviceSession, message protocol
 		Path: message.Path, Reason: reason, RTTMs: message.RTTMs,
 		CandidateSummary: message.CandidateSummary, FallbackCount: message.FallbackCount,
 		ActiveStreams: message.ActiveStreams, BytesUp: message.BytesUp, BytesDown: message.BytesDown, UpdatedAt: now,
+	}
+	if message.PathInfo != nil {
+		report.PathInfo = *message.PathInfo
 	}
 	if device.DeviceID == item.ClientDeviceID {
 		item.ClientReport = report

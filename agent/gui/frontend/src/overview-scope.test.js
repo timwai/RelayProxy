@@ -37,8 +37,8 @@ test('Device Center no longer owns a global current-exit path diagnostic card',(
  assert.doesNotMatch(app,/function ActiveProxyPath/);
  assert.doesNotMatch(deviceCenter,/当前代理实际路径/);
  assert.match(deviceCenter,/onSpeed\(selected\.id\)/);
- assert.match(rdp,/rdpPathLabel\(s\.pathTcp\)/);
- assert.match(rdp,/rdpPathLabel\(s\.pathUdp\)/);
+ assert.match(rdp,/rdpPathLabel\(s\.pathTcp,s\.pathInfoTcp\)/);
+ assert.match(rdp,/rdpPathLabel\(s\.pathUdp,s\.pathInfoUdp\)/);
 });
 
 test('per-device speed dialog is fixed to card target and checks real link evidence one row at a time',()=>{

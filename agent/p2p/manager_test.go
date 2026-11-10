@@ -14,6 +14,7 @@ import (
 	"relayproxy/internal/acl"
 	p2pupnp "relayproxy/internal/p2p/upnp"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 )
 
 func testDescription(address, fingerprint string) LocalDescription {
@@ -255,26 +256,36 @@ func TestLANAgentsEstablishDirectQUICWithoutRendezvous(t *testing.T) {
 	exitSession.setPeer([]protocol.P2PCandidate{chosenClient}, clientFP)
 	go exitSession.establish(false)
 	go clientSession.establish(true)
-	for _, tc := range []struct {
-		name  string
-		ready <-chan *Session
-		want  *Session
-	}{
-		{"client", client.ReadySessions(), clientSession},
-		{"exit", exit.ReadySessions(), exitSession},
-	} {
+	select {
+	case actual := <-exit.ReadySessions():
+		if actual != exitSession || actual.State() != StateReady {
+			t.Fatalf("unexpected LAN Exit session %+v", actual)
+		}
+	case <-ctx.Done():
+		t.Fatalf("LAN Exit never became READY: %+v", exitSession.Snapshot())
+	}
+	for clientSession.State() != StateReady {
 		select {
-		case actual := <-tc.ready:
-			if actual != tc.want || actual.State() != StateReady {
-				t.Fatalf("%s selected unexpected LAN session %+v", tc.name, actual)
-			}
 		case <-ctx.Done():
-			t.Fatalf("%s LAN QUIC never became READY; client=%+v exit=%+v", tc.name, clientSession.Snapshot(), exitSession.Snapshot())
+			t.Fatalf("LAN Client never became READY: %+v", clientSession.Snapshot())
+		case <-time.After(time.Millisecond):
 		}
 	}
-	if _, ok := client.ReadyForExit("exit"); !ok {
-		t.Fatal("authenticated LAN QUIC was not returned as a client direct path")
+	if len(client.ready) != 0 {
+		t.Fatal("Client session queued an unused inbound-stream notification")
 	}
+	if selected, ok := client.ReadyForExit("exit"); !ok {
+		t.Fatal("LAN Client not ready")
+	} else {
+		info := selected.(protocol.ConnectionPathProvider).ConnectionPath()
+		if info.Path != "p2p_quic" || info.RemoteAddress != chosenExit.Address || info.CandidateType != "host" {
+			t.Fatalf("selected session lost path metadata: %+v", info)
+		}
+		if !tunnel.PeerSupportsDatagrams(selected) {
+			t.Fatal("metadata stripped native datagram capability")
+		}
+	}
+
 	if _, ok := exitSession.Tunnel(); !ok {
 		t.Fatal("LAN exit did not retain authenticated direct QUIC")
 	}

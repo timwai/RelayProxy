@@ -3,7 +3,7 @@ import test from 'node:test';
 import {recordTelemetry, routeBreakdown, appendSample, formatRate, SAMPLE_INTERVAL_MS, MAX_SAMPLES} from './telemetry.js';
 
 const dashboard = {onlineDevices:3,onlineExits:2,activeConnections:7,activeP2PSessions:1,todayUpload:4096,todayDownload:8192,exitNodes:[{deviceId:'server',deviceName:'Relay Server',activeStreams:2}]};
-const sess = (bytesUp,bytesDown,connectedAt='2026-10-09T05:00:00Z',directPath='relay_quic') => ({clientDeviceId:'device-a',connectedAt,bytesUp,bytesDown,peerDiagnostics:{payload:{status:{directPath}}}});
+const sess = (bytesUp,bytesDown,connectedAt='2026-10-09T05:00:00Z',directPath='relay_quic') => ({clientDeviceId:'device-a',connectedAt,bytesUp,bytesDown,peerDiagnostics:{payload:{status:{directPath,activeProxyPaths:[{path:directPath}] }}}});
 
 test('first sample has no fabricated traffic rate; subsequent samples reflect actual deltas', () => {
   const first = recordTelemetry(dashboard,[sess(1024,2048)],[],null,1000);
@@ -38,7 +38,7 @@ test('measure only sessions that persist across consecutive snapshots', () => {
 
 test('derive honest route breakdown only from reported path, not guessed transport', () => {
   const routes=routeBreakdown([sess(0,0,undefined,'p2p_quic'),sess(0,0,undefined,'public_direct_quic'),sess(0,0),{clientDeviceId:'device-c',transport:'quic'}]);
-  assert.deepEqual(routes,{p2p:1,publicDirect:1,relay:1,unknown:1});
+  assert.deepEqual(routes,{p2p:1,publicDirect:1,relay:1,mixed:0,idle:0,unknown:1});
 });
 
 test('zero, missing and invalid values remain safe',()=>{
@@ -59,4 +59,9 @@ test('history is bounded to real samples, no artificial backfill',()=>{
   assert.equal(history[0].timestamp,20);
   assert.equal(history.at(-1).timestamp,MAX_SAMPLES+19);
   assert.equal(SAMPLE_INTERVAL_MS,10000);
+});
+
+test('readiness cannot override actual idle or mixed paths',()=>{
+ const session=status=>({peerDiagnostics:{payload:{status}}});
+ assert.deepEqual(routeBreakdown([session({directPath:'p2p_quic'}),session({directPath:'p2p_quic',activeProxyPaths:[]}),session({activeProxyPaths:[{path:'p2p_quic'},{path:'relay_tls'}]})]),{p2p:0,publicDirect:0,relay:0,mixed:1,idle:1,unknown:1});
 });

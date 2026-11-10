@@ -33,6 +33,7 @@ import (
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
 	"relayproxy/internal/exitgroup"
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/netutil"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
@@ -266,6 +267,9 @@ type AgentStatus struct {
 	RDPUDPReason         string                     `json:"rdpUdpReason,omitempty"`
 	RDPPathTCP           string                     `json:"rdpPathTcp,omitempty"`
 	RDPPathUDP           string                     `json:"rdpPathUdp,omitempty"`
+	DirectPathInfo       *protocol.ConnectionPath   `json:"directPathInfo,omitempty"`
+	P2PPathInfo          *protocol.ConnectionPath   `json:"p2pPathInfo,omitempty"`
+	ActiveProxyPaths     []protocol.ConnectionPath  `json:"activeProxyPaths"`
 	DirectState          string                     `json:"directState,omitempty"`
 	DirectPath           string                     `json:"directPath,omitempty"`
 	DirectError          string                     `json:"directError,omitempty"`
@@ -301,16 +305,18 @@ var ErrRestartRequired = errors.New("agent role change requires restart")
 
 // RDPSessionStatus describes one independent per-device RDP tunnel.
 type RDPSessionStatus struct {
-	DeviceID   string `json:"deviceId"`
-	Name       string `json:"name"`
-	ListenAddr string `json:"listenAddr"`
-	HostAlias  string `json:"hostAlias,omitempty"`
-	HostsError string `json:"hostsError,omitempty"`
-	UDPEnabled bool   `json:"udpEnabled"`
-	UDPActive  bool   `json:"udpActive"`
-	UDPReason  string `json:"udpReason,omitempty"`
-	PathTCP    string `json:"pathTcp"`
-	PathUDP    string `json:"pathUdp"`
+	DeviceID    string                    `json:"deviceId"`
+	Name        string                    `json:"name"`
+	ListenAddr  string                    `json:"listenAddr"`
+	HostAlias   string                    `json:"hostAlias,omitempty"`
+	HostsError  string                    `json:"hostsError,omitempty"`
+	UDPEnabled  bool                      `json:"udpEnabled"`
+	UDPActive   bool                      `json:"udpActive"`
+	UDPReason   string                    `json:"udpReason,omitempty"`
+	PathInfoTCP []protocol.ConnectionPath `json:"pathInfoTcp,omitempty"`
+	PathInfoUDP *protocol.ConnectionPath  `json:"pathInfoUdp,omitempty"`
+	PathTCP     string                    `json:"pathTcp"`
+	PathUDP     string                    `json:"pathUdp"`
 }
 
 type Agent struct {
@@ -1163,6 +1169,8 @@ func (a *Agent) sendRDPControlRequest(ctx context.Context, sess tunnel.TunnelSes
 		return protocol.RDPControlMessage{}, err
 	}
 	defer stream.Close()
+	stopCancel := tunnel.InterruptOnCancel(ctx, stream)
+	defer stopCancel()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = stream.SetDeadline(deadline)
 	} else {
@@ -1582,6 +1590,7 @@ func (a *Agent) Status() AgentStatus {
 		conn := a.rdpConnections[id]
 		udpEnabled, udpActive, udpReason := conn.UDPStatus()
 		tcpPath, udpPath := conn.PathStatus()
+		tcpInfo, udpInfo := conn.PathDetails()
 		if udpEnabled {
 			if udpActive {
 				udpReason = "UDP 已建立，路径：" + udpPath
@@ -1594,7 +1603,7 @@ func (a *Agent) Status() AgentStatus {
 				udpReason = "当前传输不提供 RDP UDP"
 			}
 		}
-		item := RDPSessionStatus{DeviceID: id, Name: conn.Target.Name, ListenAddr: conn.ClientAddress(), HostAlias: conn.HostAlias, HostsError: conn.HostsError, UDPEnabled: udpEnabled, UDPActive: udpActive, UDPReason: udpReason, PathTCP: tcpPath, PathUDP: udpPath}
+		item := RDPSessionStatus{DeviceID: id, Name: conn.Target.Name, ListenAddr: conn.ClientAddress(), HostAlias: conn.HostAlias, HostsError: conn.HostsError, UDPEnabled: udpEnabled, UDPActive: udpActive, UDPReason: udpReason, PathTCP: tcpPath, PathUDP: udpPath, PathInfoTCP: tcpInfo, PathInfoUDP: udpInfo}
 		st.RDPSessions = append(st.RDPSessions, item)
 		if id == a.rdpActiveTarget {
 			st.RDPListenAddr, st.RDPTargetID = conn.ClientAddress(), id
@@ -1625,6 +1634,8 @@ func (a *Agent) Status() AgentStatus {
 			st.DirectFallbackCount = path.FallbackCount
 			if directSession, ready := proxyDirect.ReadyForExit(st.SelectedExit); ready {
 				st.DirectPath = string(protocol.ProxyPathPublicDirectQUIC)
+				info := netpath.Describe(st.DirectPath, directSession.LocalAddr(), directSession.RemoteAddr())
+				st.DirectPathInfo = &info
 				if diagnostics := tunnel.DiagnoseSession(directSession); diagnostics != nil && diagnostics.QUIC != nil {
 					st.DirectRTTMs = int64(diagnostics.QUIC.SmoothedRTTMS)
 					st.DirectBytesUp = diagnostics.QUIC.BytesSent
@@ -1639,6 +1650,10 @@ func (a *Agent) Status() AgentStatus {
 		if path, ok := proxyP2P.PathStatus(st.SelectedExit); ok {
 			st.P2PState = string(path.State)
 			st.P2PPath = path.Path
+			if path.PathInfo.Path != "" {
+				info := path.PathInfo
+				st.P2PPathInfo = &info
+			}
 			st.P2PError = path.Error
 			st.P2PFailureKind = path.FailureKind
 			st.P2PRetryAfterMS = path.RetryAfterMS
@@ -1657,6 +1672,7 @@ func (a *Agent) Status() AgentStatus {
 			if st.DirectPath == "" && path.Path != "" {
 				st.DirectState = string(path.State)
 				st.DirectPath = path.Path
+				st.DirectPathInfo = st.P2PPathInfo
 				st.DirectError = path.Error
 				st.DirectRTTMs = path.RTTMs
 				st.DirectFallbackCount = path.FallbackCount
@@ -1694,6 +1710,7 @@ func (a *Agent) Status() AgentStatus {
 			st.DirectBytesDown = st.TunnelDiagnostics.QUIC.BytesReceived
 		}
 	}
+	st.ActiveProxyPaths = a.traffic.ActivePaths(st.SelectedExit)
 	if st.RDPListenAddr != "" && !st.RDPUDPEnabled {
 		switch st.Transport {
 		case string(tunnel.TransportTLS):

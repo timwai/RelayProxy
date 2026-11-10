@@ -276,24 +276,9 @@ func (s *Store) Approve(ctx context.Context, id, identityID string, canSend, can
 		return err
 	}
 	defer tx.Rollback()
-	var status string
-	if err := tx.QueryRowContext(ctx, `SELECT status FROM identities WHERE id=?`, identityID).Scan(&status); err != nil {
-		return errors.New("identity does not exist")
-	}
-	if status != "active" {
-		return errors.New("identity is not active")
-	}
-	// An administrator approves the identity requested by this browser,
-	// not an unrelated identity selected at approval time. Enrollment remains
-	// unprivileged: identity existence and capability grants are checked below.
-	var requestedIdentity string
-	requestErr := tx.QueryRowContext(ctx, `SELECT requested_identity_id FROM browser_sync_identity_requests
-		WHERE device_id=?`, id).Scan(&requestedIdentity)
-	if requestErr != nil && !errors.Is(requestErr, sql.ErrNoRows) {
-		return requestErr
-	}
-	if requestErr == nil && requestedIdentity != identityID {
-		return errors.New("approval identity differs from device enrollment request")
+	identityID, err = resolveApprovalIdentity(ctx, tx, id, identityID)
+	if err != nil {
+		return err
 	}
 	if err := checkApprovedBrowserDeviceQuota(ctx, tx, identityID); err != nil {
 		return err

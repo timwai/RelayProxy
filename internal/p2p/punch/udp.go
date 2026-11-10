@@ -9,6 +9,7 @@ import (
 	"log"
 	"net"
 	"net/netip"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -62,7 +63,23 @@ func PunchResponder(ctx context.Context, conn *net.UDPConn, candidates []protoco
 	return punch(ctx, conn, candidates, sessionID, key, timeout, false)
 }
 
-func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCandidate, sessionID uint64, key []byte, timeout time.Duration, symmetric bool) (*UDPResult, error) {
+// ResponderOptions lets a single UDP reader serve discovery and punching.
+// Candidates must return a bounded, validated snapshot of the current hints.
+// HandleDatagram may consume discovery responses before punch decoding.
+type ResponderOptions struct {
+	Candidates     func() []protocol.P2PCandidate
+	HandleDatagram func([]byte, netip.AddrPort) bool
+}
+
+func PunchResponderWithOptions(ctx context.Context, conn *net.UDPConn, sessionID uint64, key []byte, timeout time.Duration, options ResponderOptions) (*UDPResult, error) {
+	return punch(ctx, conn, nil, sessionID, key, timeout, false, options)
+}
+
+func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCandidate, sessionID uint64, key []byte, timeout time.Duration, symmetric bool, opts ...ResponderOptions) (*UDPResult, error) {
+	var options ResponderOptions
+	if len(opts) > 0 {
+		options = opts[0]
+	}
 	if conn == nil || sessionID == 0 || len(key) < 16 {
 		return nil, errors.New("invalid P2P UDP punch session")
 	}
@@ -96,7 +113,7 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 			observation.priority = candidate.Priority
 		}
 	}
-	if len(addresses) == 0 {
+	if len(addresses) == 0 && options.Candidates == nil {
 		return nil, errors.New("no usable P2P UDP candidates")
 	}
 	pending := make(map[uint64]pendingPunch, len(addresses)*2)
@@ -108,6 +125,30 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 			return nil, err
 		}
 		now := time.Now()
+		if options.Candidates != nil {
+			current := options.Candidates()
+			if !slices.Equal(current, candidates) {
+				// Replace old hints and their proofs as one generation. Never
+				// accumulate unlimited addresses across candidate updates.
+				candidates = append([]protocol.P2PCandidate(nil), current...)
+				addresses = addresses[:0]
+				clear(observations)
+				clear(pending)
+				learned = 0
+				settleUntil, nextSend = time.Time{}, time.Time{}
+				for _, item := range candidates {
+					address, err := netip.ParseAddrPort(item.Address)
+					if item.Protocol != "udp" || err != nil {
+						continue
+					}
+					address = netip.AddrPortFrom(address.Addr().Unmap(), address.Port())
+					if _, exists := observations[address]; !exists {
+						addresses = append(addresses, address)
+						observations[address] = &punchObservation{priority: item.Priority}
+					}
+				}
+			}
+		}
 		if (!settleUntil.IsZero() && !now.Before(settleUntil)) || !now.Before(deadline) {
 			if remote, observation, ok := bestPunchObservation(observations); ok {
 				_ = conn.SetReadDeadline(time.Time{})
@@ -126,7 +167,7 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 					delete(pending, nonce)
 				}
 			}
-			if err := sendPunchRound(conn, sessionID, key, addresses, pending); err != nil {
+			if err := sendPunchRound(conn, sessionID, key, addresses, pending); err != nil && options.Candidates == nil {
 				return nil, err
 			}
 			nextSend = time.Now().Add(80 * time.Millisecond)
@@ -147,6 +188,9 @@ func punch(ctx context.Context, conn *net.UDPConn, candidates []protocol.P2PCand
 			return nil, err
 		}
 		remote = netip.AddrPortFrom(remote.Addr().Unmap(), remote.Port())
+		if options.HandleDatagram != nil && options.HandleDatagram(buffer[:n], remote) {
+			continue
+		}
 		packet, decodeErr := secure.DecodePunchPacket(buffer[:n], key)
 		if decodeErr != nil || packet.SessionID != sessionID {
 			continue
@@ -473,6 +517,8 @@ func (c *PacketConn) Close() error {
 	})
 	return err
 }
+func (c *PacketConn) RemoteAddr() net.Addr { return net.UDPAddrFromAddrPort(c.remotePort) }
+
 func (c *PacketConn) LocalAddr() net.Addr                { return c.conn.LocalAddr() }
 func (c *PacketConn) SetDeadline(t time.Time) error      { return c.conn.SetDeadline(t) }
 func (c *PacketConn) SetReadDeadline(t time.Time) error  { return c.conn.SetReadDeadline(t) }

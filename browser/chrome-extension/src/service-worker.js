@@ -3,6 +3,8 @@
 import { getOrCreateIdentity } from './device-identity.js';
 import {PENDING_ENROLLMENT_KEY,recordEnrollment,pollPendingEnrollment,validPendingEnrollment} from './enrollment-auto.js';
 import { getSettings, updateSettings, parseServerOrigin } from './rules.js';
+import {cookieAccessOrigins,requireCookieAccess} from './cookie-access.js';
+import {ruleTransferStatus,TRANSFER_STATUS_KEYS} from './sync-diagnostics.js';
 import { registerBrowser, connectBrowser, currentConnectionState, disconnect, sendControl, onBrowserConnectionChange } from './server-api.js';
 import { createEncryptedOffer, decryptEncryptedOffer, pairingCode } from './envelope.js';
 import { getTrustedPeer, pinPeer } from './rules.js';
@@ -169,12 +171,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
             summary.localNetworkPort=desired[summary.id].port||null;
           }
         }
-        const transfer = (await chrome.storage.local.get('browserSyncTransferStatus')).browserSyncTransferStatus || {};
-        const paused = (await chrome.storage.local.get('browserSyncRestorePaused')).browserSyncRestorePaused || {};
-        const interrupted = (await chrome.storage.local.get('browserSyncRestoreJournal')).browserSyncRestoreJournal || {};
+        const transfers=await chrome.storage.local.get(TRANSFER_STATUS_KEYS);
         for (const summary of rules) {
-          summary.lastTransfer = paused[summary.id] || interrupted[summary.id]
-            ? {state:'PARTIAL',time:Date.now()} : (transfer[summary.id] || null);
+          summary.lastTransfer=ruleTransferStatus(summary.id,transfers);
         }
         return { ok: true, rules };
       }
@@ -227,6 +226,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (!(await chrome.permissions.contains({ origins: [`${url.protocol}//${url.hostname}/*`] }))) {
           throw new Error('请先在扩展中授予接收网站权限');
         }
+        if(summary.policy.allCookies)await requireCookieAccess(origin);
         await sendControl('RULE_ACCEPT', { ruleId: message.ruleId });
         await pinPeer(summary.source);
         const settings = await getSettings();
@@ -283,8 +283,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
           await stopNetworkGuard(id);
           await forgetRuleLocalState(id);
         }
-        const url=new URL(origin);
-        await chrome.permissions.remove({origins:[url.protocol+'//'+url.hostname+'/*']});
+        const remaining=await getSettings();
+        const retained=new Set(remaining.sites.flatMap(cookieAccessOrigins));
+        if(remaining.serverOrigin){
+          const serverURL=new URL(remaining.serverOrigin);
+          retained.add(serverURL.protocol+'//'+serverURL.hostname+'/*');
+        }
+        const removeOrigins=cookieAccessOrigins(origin).filter(pattern=>!retained.has(pattern));
+        if(removeOrigins.length)await chrome.permissions.remove({origins:removeOrigins});
         return {ok:true};
       }
       case 'REVOKE_RULE':

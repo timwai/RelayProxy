@@ -3,6 +3,8 @@
 // Never store cookie values in extension storage; only keyed HMAC ownership tags.
 import {validatePolicy} from './envelope.js';
 import {cookieValueTag} from './device-identity.js';
+import {cookieAccessHosts,requireCookieAccess} from './cookie-access.js';
+import {syncFailure} from './sync-diagnostics.js';
 
 const ownerKey='browserSyncManagedAllCookieHmacV2';
 const journalKey='browserSyncRestoreJournal';
@@ -30,9 +32,8 @@ const supportsOrigin=(c,origin)=>{
   return true;
 };
 async function allFor(origin){
-  const host=hostOf(origin),labels=host.split('.');
-  const suffixes=[host];
-  for(let i=1;i<labels.length-1;i++)suffixes.push(labels.slice(i).join('.'));
+  await requireCookieAccess(origin);
+  const suffixes=cookieAccessHosts(origin);
   // Chrome returns only unpartitioned cookies when partitionKey is omitted.
   // An empty partitionKey requests all partitions; subsequent filtering
   // limits the snapshot to the approved site's own top-level context.
@@ -51,6 +52,7 @@ function fromChrome(c){
       ...(typeof c.partitionKey.hasCrossSiteAncestor==='boolean'
         ?{hasCrossSiteAncestor:c.partitionKey.hasCrossSiteAncestor}:{})}}:{})};
 }
+const sameCookie=(a,b)=>JSON.stringify(fromChrome(a))===JSON.stringify(fromChrome(b));
 function checked(c,origin){
   if(!c||typeof c!=='object'||!supportsOrigin(c,origin)||
     c.name.length>256||c.value.length>8192||c.path.length>1024||c.domain.length>256||
@@ -108,9 +110,9 @@ export async function applyAllCookies(ruleId,snapshot,policy,{allowOverwrite=fal
   const operations=[],updated=plain(managed);
   for(const [id,c] of next){
     const old=current.get(id),tag=old&&await cookieValueTag(ruleId,id,old.value);
-    if(old&&old.value!==c.value&&!allowOverwrite&&managed[id]!==tag)
+    if(old&&!sameCookie(old,c)&&!allowOverwrite&&managed[id]!==tag)
       throw new Error('CONFLICT: 接收端已有不同 Cookie 登录状态');
-    if(!old||old.value!==c.value){
+    if(!old||!sameCookie(old,c)){
       operations.push({kind:'set',id,c,old});
       updated[id]=await cookieValueTag(ruleId,id,c.value);
     }else if(managed[id]!==tag)delete updated[id];
@@ -141,35 +143,37 @@ export async function applyAllCookies(ruleId,snapshot,policy,{allowOverwrite=fal
     for(const op of operations){
       changes.push(op);
       if(op.kind==='set'){
-        const actual=await chrome.cookies.set(writeDetails(op.c,p.siteOrigin));
-        if(!actual||cookieIdentity(actual)!==op.id||actual.value!==op.c.value)
-          throw new Error('Cookie 写入校验失败');
+        let actual;
+        try{actual=await chrome.cookies.set(writeDetails(op.c,p.siteOrigin));}
+        catch(error){throw syncFailure('Cookie 写入失败','COOKIE_REJECTED',error);}
+        if(!actual||cookieIdentity(actual)!==op.id||!sameCookie(actual,op.c))
+          throw syncFailure('Cookie 写入校验失败',actual?'COOKIE_MISMATCH':'COOKIE_REJECTED');
       }else{
         const removed=await chrome.cookies.remove(removeDetails(op.old,p.siteOrigin));
-        if(!removed)throw new Error('Cookie 删除失败');
+        if(!removed)throw syncFailure('Cookie 删除失败','COOKIE_DELETE_FAILED');
       }
     }
     state[ruleId]=updated;
     const live=(await chrome.storage.local.get(journalKey))[journalKey]||{};
     delete live[ruleId];
     await chrome.storage.local.set({[ownerKey]:state,[journalKey]:live});
-  }catch{
+  }catch(error){
     for(const op of changes.reverse()){
       try{
         const latest=await allFor(p.siteOrigin),present=latest.get(op.id);
         if(op.kind==='set'){
-          if(present?.value===op.c.value){
+          if(present&&sameCookie(present,op.c)){
             if(op.old){
               const replaced=await chrome.cookies.set(writeDetails(fromChrome(op.old),p.siteOrigin));
-              if(!replaced||replaced.value!==op.old.value)restored=false;
+              if(!replaced||!sameCookie(replaced,op.old))restored=false;
             }else if(!await chrome.cookies.remove(removeDetails(op.c,p.siteOrigin)))restored=false;
-          }else if((op.old&&present?.value===op.old.value)||(!op.old&&!present)){
+          }else if((op.old&&present&&sameCookie(present,op.old))||(!op.old&&!present)){
             // An API failure made no change.
           }else restored=false;
         }else if(!present){
           const replaced=await chrome.cookies.set(writeDetails(fromChrome(op.old),p.siteOrigin));
-          if(!replaced||replaced.value!==op.old.value)restored=false;
-        }else if(present.value!==op.old.value)restored=false;
+          if(!replaced||!sameCookie(replaced,op.old))restored=false;
+        }else if(!sameCookie(present,op.old))restored=false;
       }catch{restored=false;}
     }
     if(restored){
@@ -178,8 +182,8 @@ export async function applyAllCookies(ruleId,snapshot,policy,{allowOverwrite=fal
         delete live[ruleId];await chrome.storage.local.set({[journalKey]:live});
       }catch{restored=false;}
     }
-    throw new Error(restored?'APPLY_FAILED: Cookie 应用失败并已回滚':
-      'PARTIAL_ROLLBACK: Cookie 恢复失败，已暂停自动同步');
+    throw syncFailure(restored?'APPLY_FAILED: Cookie 应用失败并已回滚':
+      'PARTIAL_ROLLBACK: Cookie 恢复失败，已暂停自动同步',null,error);
   }
   return {count:next.size,removed:operations.filter(o=>o.kind==='delete').length,status:'APPLIED'};
 }

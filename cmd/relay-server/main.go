@@ -661,8 +661,13 @@ func main() {
 			snapshots := proxyP2PCoordinator.Snapshots()
 			out := make([]api.P2PSessionRuntimeStatus, 0, len(snapshots))
 			peer := func(report serverp2p.PeerReport) api.P2PPeerRuntimeReport {
+				var info *protocol.ConnectionPath
+				if report.PathInfo.Path != "" {
+					p := report.PathInfo
+					info = &p
+				}
 				return api.P2PPeerRuntimeReport{
-					Path: report.Path, Reason: report.Reason, RTTMs: report.RTTMs,
+					Path: report.Path, PathInfo: info, Reason: report.Reason, RTTMs: report.RTTMs,
 					CandidateSummary: report.CandidateSummary, FallbackCount: report.FallbackCount,
 					ActiveStreams: report.ActiveStreams, BytesUp: report.BytesUp,
 					BytesDown: report.BytesDown, UpdatedAt: report.UpdatedAt,

@@ -250,6 +250,7 @@ func TestPathReportStoresSanitizedPeerTelemetry(t *testing.T) {
 		SessionID: ack.SessionID, SessionToken: ack.SessionToken,
 		Path: protocol.P2PPathDirectQUIC, RTTMs: 18, CandidateSummary: "local:lan=1,reflexive=1;peer:lan=1,reflexive=0",
 		FallbackCount: 2, ActiveStreams: 3, BytesUp: 100, BytesDown: 200,
+		PathInfo: &protocol.ConnectionPath{Path: "p2p_quic", Network: "lan", Transport: "quic", CandidateType: "host", RemoteAddress: "192.168.1.10:1234"},
 	})
 	if response.Type != protocol.P2PControlLeaseAck {
 		t.Fatalf("client path report rejected: %#v", response)
@@ -266,7 +267,7 @@ func TestPathReportStoresSanitizedPeerTelemetry(t *testing.T) {
 	if !ok {
 		t.Fatal("missing P2P session snapshot")
 	}
-	if snapshot.ClientReport.Path != protocol.P2PPathDirectQUIC || snapshot.ClientReport.RTTMs != 18 ||
+	if snapshot.ClientReport.PathInfo.Network != "lan" || snapshot.ClientReport.PathInfo.RemoteAddress != "192.168.1.10:1234" || snapshot.ClientReport.Path != protocol.P2PPathDirectQUIC || snapshot.ClientReport.RTTMs != 18 ||
 		snapshot.ClientReport.CandidateSummary != "local:lan=1,reflexive=1;peer:lan=1,reflexive=0" ||
 		snapshot.ClientReport.FallbackCount != 2 || snapshot.ClientReport.ActiveStreams != 3 ||
 		snapshot.ClientReport.BytesUp != 100 || snapshot.ClientReport.BytesDown != 200 || snapshot.ClientReport.UpdatedAt.IsZero() {

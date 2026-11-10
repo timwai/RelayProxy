@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"relayproxy/internal/acl"
+	"relayproxy/internal/netpath"
 	directp2p "relayproxy/internal/p2p"
 	"relayproxy/internal/p2p/candidate"
 	"relayproxy/internal/p2p/punch"
@@ -142,6 +143,7 @@ type Snapshot struct {
 	PeerCandidates   []protocol.P2PCandidate
 	PeerFingerprint  string
 	State            State
+	PathInfo         protocol.ConnectionPath
 	Path             string
 	Error            string
 	RTTMs            int64
@@ -159,6 +161,7 @@ type PathStatus struct {
 	ExitDeviceID     string
 	ExpiresAt        int64
 	State            State
+	PathInfo         protocol.ConnectionPath
 	Path             string
 	Error            string
 	RTTMs            int64
@@ -257,8 +260,9 @@ func (m *Manager) Close() error {
 	return nil
 }
 
-// ReadySessions emits sessions after UDP punching, fingerprint verification and
-// the direct QUIC handshake have all succeeded.
+// ReadySessions emits Exit-side sessions after UDP punching, fingerprint
+// verification and the direct QUIC handshake have all succeeded. Client-side
+// sessions are available through ReadyForExit instead.
 func (m *Manager) ReadySessions() <-chan *Session {
 	if m == nil {
 		return nil
@@ -699,7 +703,7 @@ func (m *Manager) PathStatus(exitDeviceID string) (PathStatus, bool) {
 		best = PathStatus{
 			SessionID: snapshot.ID, ClientDeviceID: snapshot.ClientDeviceID,
 			ExitDeviceID: snapshot.ExitDeviceID, ExpiresAt: snapshot.ExpiresAt,
-			State: snapshot.State, Path: snapshot.Path, Error: snapshot.Error,
+			State: snapshot.State, Path: snapshot.Path, PathInfo: snapshot.PathInfo, Error: snapshot.Error,
 			RTTMs: snapshot.RTTMs, CandidateSummary: snapshot.CandidateSummary,
 			FallbackCount: snapshot.FallbackCount, BytesUp: snapshot.BytesUp, BytesDown: snapshot.BytesDown,
 		}
@@ -844,6 +848,7 @@ func (s *Session) Snapshot() Snapshot {
 	}
 	s.mu.RLock()
 	path := ""
+	var pathInfo protocol.ConnectionPath
 	stats := directp2p.QUICStats{
 		RTT:       time.Duration(s.lastRTTMs) * time.Millisecond,
 		BytesSent: s.lastBytesUp, BytesReceived: s.lastBytesDown,
@@ -852,6 +857,7 @@ func (s *Session) Snapshot() Snapshot {
 		path = protocol.P2PPathDirectQUIC
 		if s.direct != nil {
 			stats = s.direct.Stats()
+			pathInfo = s.direct.ConnectionPath()
 		}
 	}
 	local := append([]protocol.P2PCandidate(nil), s.localCandidates...)
@@ -864,7 +870,7 @@ func (s *Session) Snapshot() Snapshot {
 	out := Snapshot{
 		ID: s.ID, ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
 		ExpiresAt: s.ExpiresAt.Load(), PeerCandidates: peer,
-		PeerFingerprint: s.peerFingerprint, State: s.state, Path: path, Error: s.lastError,
+		PeerFingerprint: s.peerFingerprint, State: s.state, Path: path, PathInfo: pathInfo, Error: s.lastError,
 		RTTMs: stats.RTT.Milliseconds(), CandidateSummary: candidateSummary,
 		FallbackCount: fallbackCount, BytesUp: stats.BytesSent, BytesDown: stats.BytesReceived,
 	}
@@ -1036,6 +1042,9 @@ func (s *Session) establish(clientRole bool) {
 		s.failDirect(err)
 		return
 	}
+	info := direct.ConnectionPath()
+	info.CandidateType = netpath.MatchCandidate(direct.RemoteAddr(), candidates)
+	direct.SetConnectionPath(info)
 	if direct.QUICSession != nil {
 		if brutalTxBPS > 0 {
 			tunnel.UseBrutal(direct.QUICSession, brutalTxBPS, s.manager.disableLossCompensation)
@@ -1081,6 +1090,13 @@ func (s *Session) enqueueReady(direct *directp2p.QUICSession) bool {
 			_ = direct.Close()
 		}
 		return false
+	}
+	// Clients are selected through ReadyForExit and may have no queue consumer.
+	s.mu.RLock()
+	clientRole := s.clientRole
+	s.mu.RUnlock()
+	if clientRole {
+		return true
 	}
 	select {
 	case s.manager.ready <- s:
@@ -1184,6 +1200,14 @@ func (s *Session) reportPath(path, reason string) {
 		return
 	}
 	snapshot := s.Snapshot()
+	// Keep the wire summary compatible with peers that accept only counts.
+	// Snapshot's UPnP suffix is a local diagnostic, not part of this protocol.
+	summary, _, _ := strings.Cut(snapshot.CandidateSummary, " upnp=")
+	var pathInfo *protocol.ConnectionPath
+	if path != "" && snapshot.PathInfo.Path == path {
+		info := snapshot.PathInfo
+		pathInfo = &info
+	}
 	go func() {
 		ctx, cancel := context.WithTimeout(s.manager.ctx, 3*time.Second)
 		defer cancel()
@@ -1191,7 +1215,7 @@ func (s *Session) reportPath(path, reason string) {
 			Type: protocol.P2PControlPathReport, SessionID: s.ID,
 			ClientDeviceID: s.ClientDeviceID, ExitDeviceID: s.ExitDeviceID,
 			SessionToken: append([]byte(nil), s.Token...), Path: path, Reason: reason,
-			RTTMs: snapshot.RTTMs, CandidateSummary: snapshot.CandidateSummary,
+			RTTMs: snapshot.RTTMs, CandidateSummary: summary, PathInfo: pathInfo,
 			FallbackCount: snapshot.FallbackCount, BytesUp: snapshot.BytesUp, BytesDown: snapshot.BytesDown,
 		})
 	}()

@@ -16,7 +16,9 @@ import (
 	"sync/atomic"
 	"time"
 
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/netutil"
+	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
 
@@ -51,6 +53,7 @@ type Connection struct {
 	mu          sync.Mutex
 	localUDP    netip.AddrPort
 	tcpPaths    map[string]int
+	tcpPathInfo map[protocol.ConnectionPath]int
 	udpActive   atomic.Bool
 	udpError    atomic.Value // string; the latest UDP association error
 	onClose     func()
@@ -115,6 +118,22 @@ func (c *Connection) PathStatus() (tcp, udp string) {
 		}
 	}
 	return tcp, udp
+}
+
+// PathDetails includes only accepted channels and the current UDP association.
+func (c *Connection) PathDetails() (tcp []protocol.ConnectionPath, udp *protocol.ConnectionPath) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	tcp = make([]protocol.ConnectionPath, 0, len(c.tcpPathInfo))
+	for p := range c.tcpPathInfo {
+		tcp = append(tcp, p)
+	}
+	sort.Slice(tcp, func(i, j int) bool { return fmt.Sprint(tcp[i]) < fmt.Sprint(tcp[j]) })
+	if c.remoteUDP != nil {
+		p := netpath.From(c.remoteUDP, connectionPath(c.remoteUDP))
+		udp = &p
+	}
+	return
 }
 
 func connectionPath(conn any) string {
@@ -309,15 +328,24 @@ func (c *Connection) handleTCP(ctx context.Context, local net.Conn, dial func(co
 	}
 	defer remote.Close()
 	path := connectionPath(remote)
+	info := netpath.From(remote, path)
 	c.mu.Lock()
 	if c.tcpPaths == nil {
 		c.tcpPaths = make(map[string]int)
 	}
 	c.tcpPaths[path]++
+	if c.tcpPathInfo == nil {
+		c.tcpPathInfo = make(map[protocol.ConnectionPath]int)
+	}
+	c.tcpPathInfo[info]++
 	c.mu.Unlock()
 	defer func() {
 		c.mu.Lock()
 		c.tcpPaths[path]--
+		c.tcpPathInfo[info]--
+		if c.tcpPathInfo[info] == 0 {
+			delete(c.tcpPathInfo, info)
+		}
 		if c.tcpPaths[path] == 0 {
 			delete(c.tcpPaths, path)
 		}

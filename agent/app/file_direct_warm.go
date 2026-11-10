@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/protocol"
 )
 
@@ -13,12 +14,14 @@ import (
 // Every subsequent file request still needs a fresh one-time Server ticket,
 // host authorization and TLS fingerprint validation.
 type FileDirectWarmStatus struct {
-	State string `json:"state"`
-	Path  string `json:"path,omitempty"`
+	State    string                   `json:"state"`
+	PathInfo *protocol.ConnectionPath `json:"pathInfo,omitempty"`
+	Path     string                   `json:"path,omitempty"`
 }
 
 type fileDirectWarmHint struct {
 	state string
+	info  *protocol.ConnectionPath
 	path  string
 	until time.Time
 	epoch uint64
@@ -51,7 +54,7 @@ func (a *Agent) PrewarmRemoteFileDirect(ctx context.Context, deviceID, shareID s
 	a.fileWarmMu.Lock()
 	if hint, ok := a.fileWarmHints[key]; ok && hint.epoch == epoch && now.Before(hint.until) {
 		a.fileWarmMu.Unlock()
-		return FileDirectWarmStatus{State: hint.state, Path: hint.path}, nil
+		return FileDirectWarmStatus{State: hint.state, Path: hint.path, PathInfo: hint.info}, nil
 	}
 	if a.fileWarmSlots == nil {
 		a.fileWarmSlots = make(chan struct{}, 2)
@@ -94,6 +97,8 @@ func (a *Agent) PrewarmRemoteFileDirect(ctx context.Context, deviceID, shareID s
 	if err == nil && authorized {
 		result.State = "ready"
 		result.Path = fileTransferPath(stream)
+		info := netpath.From(stream, result.Path)
+		result.PathInfo = &info
 		ttl = fileDirectWarmReadyTTL
 	}
 	if stream != nil {
@@ -105,7 +110,7 @@ func (a *Agent) PrewarmRemoteFileDirect(ctx context.Context, deviceID, shareID s
 	}
 	a.fileWarmMu.Lock()
 	if current, ok := a.fileWarmHints[key]; ok && current.epoch == epoch {
-		a.fileWarmHints[key] = fileDirectWarmHint{state: result.State, path: result.Path, epoch: epoch, until: time.Now().Add(ttl)}
+		a.fileWarmHints[key] = fileDirectWarmHint{state: result.State, path: result.Path, info: result.PathInfo, epoch: epoch, until: time.Now().Add(ttl)}
 	}
 	a.fileWarmMu.Unlock()
 	return result, nil

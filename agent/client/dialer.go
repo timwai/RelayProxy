@@ -509,11 +509,13 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 			_ = endpoint.Close()
 			return nil, err
 		}
-		return newResumableTCPConn(d, endpoint, resumeState, exitNodeID, host, port, localAddr, remoteAddr, path), nil
+		return newResumableTCPConn(d, endpoint, resumeState, exitNodeID, host, port, localAddr, remoteAddr, sessionPathInfo(sess, path), pathSource(sess)), nil
 	}
 	return &tcpPathConn{
 		NetConnAdapter: &tunnel.NetConnAdapter{Stream: stream, LocalAddrVal: localAddr, RemoteAddrVal: remoteAddr},
 		path:           path,
+		info:           sessionPathInfo(sess, path),
+		source:         pathSource(sess),
 	}, nil
 }
 
@@ -567,7 +569,7 @@ func (d *TunnelDialer) dialUDPWithOptions(ctx context.Context, exitNodeID string
 	if direct && d.directFallbackEnabled() {
 		attemptCtx, cancelAttempt = d.directAttemptContext(ctx)
 	}
-	conn, err := d.dialUDPOnSession(attemptCtx, sess, exitNodeID, host, port, opts)
+	conn, err := d.dialUDPOnSession(attemptCtx, sess, exitNodeID, host, port, opts, selected.Path)
 	retryableDirectFailure := direct && retryableDirectUDPHandshakeError(ctx, err)
 	if err == nil || !retryableDirectFailure {
 		cancelAttempt()
@@ -578,7 +580,7 @@ func (d *TunnelDialer) dialUDPWithOptions(ctx context.Context, exitNodeID string
 	alternate := d.prepareDirectFallback(attemptCtx, exitNodeID, selected, err, relay)
 	if alternate.Session != nil && attemptCtx.Err() == nil {
 		if !opts.DatagramRequired || tunnel.PeerSupportsDatagrams(alternate.Session) {
-			conn, alternateErr := d.dialUDPOnSession(attemptCtx, alternate.Session, exitNodeID, host, port, opts)
+			conn, alternateErr := d.dialUDPOnSession(attemptCtx, alternate.Session, exitNodeID, host, port, opts, alternate.Path)
 			if alternateErr == nil || !retryableDirectUDPHandshakeError(ctx, alternateErr) {
 				cancelAttempt()
 				return conn, alternateErr
@@ -598,7 +600,7 @@ func (d *TunnelDialer) dialUDPWithOptions(ctx context.Context, exitNodeID string
 	if relay == nil || (opts.DatagramRequired && !tunnel.PeerSupportsDatagrams(relay)) {
 		return nil, err
 	}
-	return d.dialUDPOnSession(ctx, relay, exitNodeID, host, port, opts)
+	return d.dialUDPOnSession(ctx, relay, exitNodeID, host, port, opts, relaySessionPath(relay))
 }
 
 func retryableDirectUDPHandshakeError(ctx context.Context, err error) bool {
@@ -612,7 +614,11 @@ func retryableDirectUDPHandshakeError(ctx context.Context, err error) bool {
 	return relayErr.Code == protocol.ErrCodeDatagramRequired
 }
 
-func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, opts UDPDialOptions) (net.PacketConn, error) {
+func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, opts UDPDialOptions, paths ...protocol.ProxyPath) (net.PacketConn, error) {
+	path := relaySessionPath(sess)
+	if len(paths) > 0 {
+		path = paths[0]
+	}
 	stream, err := sess.OpenStream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
@@ -706,11 +712,11 @@ func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelS
 			return nil, fmt.Errorf("invalid UDP association negotiation")
 		}
 		keepDatagrams = true
-		return tunnel.NewUDPDatagramConn(datagrams, stream, remoteAddr), nil
+		return &packetPathConn{PacketConn: tunnel.NewUDPDatagramConn(datagrams, stream, remoteAddr), info: sessionPathInfo(sess, path), source: pathSource(sess)}, nil
 	}
 	if resp.Mode != "" && resp.Mode != protocol.UDPModeStream {
 		_ = stream.Close()
 		return nil, fmt.Errorf("unsupported UDP mode %q", resp.Mode)
 	}
-	return newUDPTunnelConn(stream, remoteAddr), nil
+	return &packetPathConn{PacketConn: newUDPTunnelConn(stream, remoteAddr), info: sessionPathInfo(sess, path), source: pathSource(sess)}, nil
 }

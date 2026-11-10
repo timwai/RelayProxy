@@ -3,6 +3,7 @@
 package divert
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net"
@@ -15,8 +16,125 @@ import (
 	"time"
 
 	"golang.org/x/sys/windows"
+	"golang.org/x/sys/windows/svc"
 	"golang.org/x/sys/windows/svc/mgr"
 )
+
+type testWindowsServiceController struct {
+	state      svc.State
+	operations []string
+	stopErr    error
+	startErr   error
+}
+
+func (s *testWindowsServiceController) Query() (svc.Status, error) {
+	status := svc.Status{State: s.state}
+	if s.state == svc.StopPending {
+		s.state = svc.Stopped
+	}
+	return status, nil
+}
+
+func (s *testWindowsServiceController) Control(cmd svc.Cmd) (svc.Status, error) {
+	if cmd != svc.Stop {
+		return svc.Status{}, fmt.Errorf("unexpected control %d", cmd)
+	}
+	s.operations = append(s.operations, "stop")
+	if s.stopErr != nil {
+		return svc.Status{}, s.stopErr
+	}
+	s.state = svc.StopPending
+	return svc.Status{State: s.state}, nil
+}
+
+func (s *testWindowsServiceController) Start(...string) error {
+	s.operations = append(s.operations, "start")
+	if s.startErr != nil {
+		return s.startErr
+	}
+	if s.state != svc.Stopped {
+		return errors.New("service started before old process stopped")
+	}
+	s.state = svc.Running
+	return nil
+}
+
+func TestWindowsNetworkServiceRepairRestartsRunningBroker(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		state svc.State
+		want  string
+	}{
+		{"running", svc.Running, "stop,start"},
+		{"stopped", svc.Stopped, "start"},
+		{"stopping", svc.StopPending, "start"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			service := &testWindowsServiceController{state: tc.state}
+			if err := restartWindowsNetworkService(service); err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Join(service.operations, ","); got != tc.want || service.state != svc.Running {
+				t.Fatalf("repair operations=%s state=%d, want %s and running", got, service.state, tc.want)
+			}
+		})
+	}
+}
+
+func TestWindowsNetworkServiceRepairPreservesStopAndStartFailures(t *testing.T) {
+	failure := errors.New("SCM refused operation")
+	for _, tc := range []struct {
+		name    string
+		service testWindowsServiceController
+		want    string
+	}{
+		{"stop", testWindowsServiceController{state: svc.Running, stopErr: failure}, "stop"},
+		{"start", testWindowsServiceController{state: svc.Stopped, startErr: failure}, "start"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := restartWindowsNetworkService(&tc.service); !errors.Is(err, failure) {
+				t.Fatalf("repair error=%v, want SCM failure", err)
+			}
+			if got := strings.Join(tc.service.operations, ","); got != tc.want {
+				t.Fatalf("operations=%s, want %s", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestWindowsFirewallCommandTimesOut(t *testing.T) {
+	t.Setenv("RELAYPROXY_FIREWALL_COMMAND_HELPER", "stall")
+	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+	defer cancel()
+	started := time.Now()
+	err := runWindowsFirewallCommand(ctx, os.Args[0], "-test.run=^TestWindowsFirewallCommandHelperProcess$")
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("firewall error=%v, want deadline exceeded", err)
+	}
+	if time.Since(started) > 3*time.Second {
+		t.Fatal("stalled firewall command blocked broker recovery")
+	}
+}
+
+func TestWindowsFirewallCommandPreservesFailureOutput(t *testing.T) {
+	t.Setenv("RELAYPROXY_FIREWALL_COMMAND_HELPER", "fail")
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	err := runWindowsFirewallCommand(ctx, os.Args[0], "-test.run=^TestWindowsFirewallCommandHelperProcess$")
+	if err == nil || !strings.Contains(err.Error(), "firewall policy rejected rule") {
+		t.Fatalf("firewall output lost: %v", err)
+	}
+}
+
+func TestWindowsFirewallCommandHelperProcess(t *testing.T) {
+	switch os.Getenv("RELAYPROXY_FIREWALL_COMMAND_HELPER") {
+	case "stall":
+		time.Sleep(30 * time.Second)
+	case "fail":
+		fmt.Fprintln(os.Stderr, "firewall policy rejected rule")
+		os.Exit(1)
+	}
+}
 
 func TestWatchWindowsProcessExitInvokesCallback(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestWindowsProcessWatcherHelperProcess$")
@@ -511,5 +629,54 @@ func TestWindowsServiceHandshakeTimesOutIfBrokerStopsReplying(t *testing.T) {
 	}
 	if time.Since(started) > time.Second {
 		t.Fatal("stalled broker held startup beyond the handshake deadline")
+	}
+}
+
+func TestWindowsServiceHandshakePreservesBrokerStartupError(t *testing.T) {
+	sid, err := currentWindowsUserSID()
+	if err != nil {
+		t.Fatal(err)
+	}
+	name := fmt.Sprintf(`\\.\pipe\RelayProxy-Test-Startup-Error-%d-%d`, os.Getpid(), time.Now().UnixNano())
+	handle, err := createWindowsNetworkPipeNamed(name, sid)
+	if err != nil {
+		t.Fatal(err)
+	}
+	stop, done := make(chan struct{}), make(chan error, 1)
+	defer close(stop)
+	const detail = "配置透明代理 Windows Firewall 入站规则失败: firewall policy rejected rule"
+	go func() {
+		if err := connectWindowsNetworkPipe(handle, stop); err != nil {
+			_ = windows.CloseHandle(handle)
+			done <- err
+			return
+		}
+		server := os.NewFile(uintptr(handle), name)
+		defer server.Close()
+		if err := server.SetDeadline(time.Now().Add(3 * time.Second)); err != nil {
+			done <- err
+			return
+		}
+		if _, err := readNetworkFrame(server); err != nil {
+			done <- err
+			return
+		}
+		done <- writeNetworkFrame(server, nil, networkFrame{kind: networkFrameError, payload: []byte(detail)})
+	}()
+	client, err := connectWindowsServicePipeNamed(name, "outbound", []uint16{45001})
+	if client != nil {
+		_ = client.Close()
+		t.Error("failed handshake returned an open capture pipe")
+	}
+	if err == nil || !strings.Contains(err.Error(), detail) {
+		t.Errorf("broker startup cause lost: %v", err)
+	}
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatal(err)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("startup failure worker leaked")
 	}
 }

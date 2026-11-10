@@ -20,13 +20,13 @@ export function sessionCounters(sessions = []) {
 }
 
 export function routeBreakdown(sessions = []) {
-  const counts = {p2p: 0, publicDirect: 0, relay: 0, unknown: 0};
+  const counts = {p2p: 0, publicDirect: 0, relay: 0, mixed: 0, idle: 0, unknown: 0};
   for (const session of Array.isArray(sessions) ? sessions : []) {
-    const path = session?.peerDiagnostics?.payload?.status?.directPath;
-    if (path === 'p2p_quic') counts.p2p++;
-    else if (path === 'public_direct_quic') counts.publicDirect++;
-    else if (path === 'relay_quic' || path === 'relay_tls') counts.relay++;
-    else counts.unknown++;
+    const paths = session?.peerDiagnostics?.payload?.status?.activeProxyPaths;
+    if (!Array.isArray(paths)) { counts.unknown++; continue; }
+    if (!paths.length) { counts.idle++; continue; }
+    const kinds = new Set(paths.map(({path}) => path === 'p2p_quic' ? 'p2p' : path === 'public_direct_quic' ? 'publicDirect' : path === 'relay_quic' || path === 'relay_tls' ? 'relay' : 'unknown'));
+    counts[kinds.size > 1 ? 'mixed' : [...kinds][0]]++;
   }
   return counts;
 }

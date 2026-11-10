@@ -232,6 +232,10 @@ func TestResumableTCPDirectLossRecoversThroughRelayWithoutRedialingTarget(t *tes
 		t.Fatalf("after P2P loss fallbacks=%d directFailures=%d, want 1/1", fallbacks.Load(), directFailures.Load())
 	}
 
+	info := registry.Snapshot().Connections[0].PathInfo
+	if info == nil || info.Path != "relay_quic" || info.CandidateType != "" {
+		t.Fatalf("stale details after recovery: %+v", info)
+	}
 	// A later Relay stream loss should rebind the same logical stream again,
 	// without redialing the target or counting a second P2P fallback.
 	relay.closeActive(t)

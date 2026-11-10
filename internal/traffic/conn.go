@@ -65,6 +65,9 @@ func WrapPacketConn(pc net.PacketConn, record *Record) net.PacketConn {
 	if record == nil {
 		return pc
 	}
+	if source, ok := pc.(proxyPathSource); ok {
+		record.setPathSource(source)
+	}
 	if source, ok := pc.(interface{ SelectedExitID() string }); ok {
 		record.SetResolvedExit(source.SelectedExitID())
 	}

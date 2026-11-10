@@ -5,6 +5,7 @@ package traffic
 import (
 	"net/netip"
 	"path"
+	"relayproxy/internal/protocol"
 	"sort"
 	"strings"
 	"sync"
@@ -39,18 +40,19 @@ type Metadata struct {
 
 type Connection struct {
 	Metadata
-	ID           uint64      `json:"id"`
-	State        string      `json:"state"`
-	Path         string      `json:"path,omitempty"` // last bound TCP proxy path; absent when unknown
-	Error        string      `json:"error,omitempty"`
-	StartedAt    time.Time   `json:"started_at"`
-	EndedAt      *time.Time  `json:"ended_at,omitempty"`
-	Duration     float64     `json:"duration"`
-	Upload       uint64      `json:"upload"`
-	Download     uint64      `json:"download"`
-	UploadRate   float64     `json:"upload_rate"`
-	DownloadRate float64     `json:"download_rate"`
-	DownloadIO   *DownloadIO `json:"download_io,omitempty"`
+	ID           uint64                   `json:"id"`
+	State        string                   `json:"state"`
+	PathInfo     *protocol.ConnectionPath `json:"pathInfo,omitempty"`
+	Path         string                   `json:"path,omitempty"` // last bound TCP proxy path; absent when unknown
+	Error        string                   `json:"error,omitempty"`
+	StartedAt    time.Time                `json:"started_at"`
+	EndedAt      *time.Time               `json:"ended_at,omitempty"`
+	Duration     float64                  `json:"duration"`
+	Upload       uint64                   `json:"upload"`
+	Download     uint64                   `json:"download"`
+	UploadRate   float64                  `json:"upload_rate"`
+	DownloadRate float64                  `json:"download_rate"`
+	DownloadIO   *DownloadIO              `json:"download_io,omitempty"`
 }
 
 type Snapshot struct {
@@ -133,6 +135,15 @@ type Record struct {
 // transport recovery. Retain them only while the connection is active.
 type proxyPathSource interface {
 	ProxyPath() string
+}
+
+func setConnectionPath(c *Connection, source proxyPathSource) {
+	c.Path = source.ProxyPath()
+	if p, ok := source.(protocol.ConnectionPathProvider); ok {
+		info := p.ConnectionPath()
+		c.Path = info.Path
+		c.PathInfo = &info
+	}
 }
 
 func (r *Record) setPathSource(source proxyPathSource) {
@@ -274,7 +285,7 @@ func (r *Record) Finish(state string, err error) {
 	}
 	now := registry.now()
 	if r.pathSource != nil {
-		r.connection.Path = r.pathSource.ProxyPath()
+		setConnectionPath(&r.connection, r.pathSource)
 		r.pathSource = nil // History must not retain a connection or its dialer.
 	}
 	r.finished = true
@@ -320,6 +331,53 @@ func (r *Registry) ClearRecent() {
 	r.omitted = uint64(r.unlistedActive)
 }
 
+// ActivePaths is a compact view of accepted proxy connections for one exit.
+// Readiness and completed history must never appear as current data usage.
+func (r *Registry) ActivePaths(exitID string) []protocol.ConnectionPath {
+	paths := []protocol.ConnectionPath{}
+	if r == nil {
+		return paths
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	seen := make(map[protocol.ConnectionPath]bool)
+	for _, record := range r.active {
+		c := record.connection
+		id := c.ResolvedExitID
+		if id == "" {
+			id = c.ExitID
+		}
+		if c.State != "active" || c.Action != "PROXY" || id != exitID {
+			continue
+		}
+		if record.pathSource != nil {
+			setConnectionPath(&c, record.pathSource)
+		}
+		if c.Path == "" {
+			continue
+		}
+		info := protocol.ConnectionPath{Path: c.Path, Network: "unknown"}
+		if c.PathInfo != nil {
+			info = *c.PathInfo
+		}
+		if !seen[info] {
+			seen[info] = true
+			paths = append(paths, info)
+		}
+	}
+	sort.Slice(paths, func(i, j int) bool {
+		a, b := paths[i], paths[j]
+		if a.Path != b.Path {
+			return a.Path < b.Path
+		}
+		if a.Network != b.Network {
+			return a.Network < b.Network
+		}
+		return a.RemoteAddress < b.RemoteAddress
+	})
+	return paths
+}
+
 func (r *Registry) Snapshot() Snapshot {
 	if r == nil {
 		return Snapshot{Connections: []Connection{}, RateWindow: 2, SampledAt: time.Now()}
@@ -336,7 +394,11 @@ func (r *Registry) Snapshot() Snapshot {
 	appendRecord := func(record *Record) {
 		c := record.connection
 		if record.pathSource != nil {
-			c.Path = record.pathSource.ProxyPath()
+			setConnectionPath(&c, record.pathSource)
+		}
+		if c.PathInfo != nil {
+			p := *c.PathInfo
+			c.PathInfo = &p
 		}
 		if record.downloadIO != nil {
 			c.DownloadIO = record.downloadIO.Snapshot()

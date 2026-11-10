@@ -8,11 +8,13 @@ import { decryptEncryptedOffer } from './envelope.js';
 import { encryptSnapshot, decryptSnapshot, isTransferRequestId } from './session-envelope.js';
 import { captureCookies, applyCookies } from './cookies.js';
 import {captureAllCookies,applyAllCookies} from './cookies-all.js';
-import {captureWebStorage,prepareWebStorageRestore} from './web-storage.js';
+import {requireCookieAccess} from './cookie-access.js';
+import {captureWebStorage,prepareWebStorageRestore,tabFor} from './web-storage.js';
 import {captureIndexedDB,prepareIndexedDBRestore,JOURNAL_KEY as IDB_JOURNAL} from './indexeddb-sync.js';
-import {showRestoredWebsiteTab} from './session-tabs.js';
+import {showRestoredWebsiteTab,reloadRestoredWebsiteTab} from './session-tabs.js';
 import { shouldReconcile, acceptDeliveryAck, isTerminalAck, nextSessionSequence, validOverwriteGrant, OVERWRITE_GRANT_TTL_MS, nextReconnectDelay, shouldRetryConnection, singleFlight, nextDeliveryStatus, clearPendingIfMessageMatches } from './lifecycle.js';
 import {ensureNetworkForRule} from './network-binding.js';
+import {failureCode,failureDiagnostic,safeDiagnostic,syncFailure} from './sync-diagnostics.js';
 
 const sourceBusy = new Set();
 const sourceDirty = new Set();
@@ -67,12 +69,14 @@ function clearPendingDelivery(ruleId,messageId){
   return mutatePendingDelivery(ruleId,previous=>
     clearPendingIfMessageMatches(previous,messageId));
 }
-function setStatus(ruleId,result,messageId='') {
+function setStatus(ruleId,result,messageId='',diagnostic={}) {
   const write=statusWriteQueue.catch(()=>{}).then(async()=>{
     const all=(await chrome.storage.local.get(statusKey))[statusKey]||{};
     const next=nextDeliveryStatus(all[ruleId],result,messageId);
     if(next===all[ruleId])return;
-    all[ruleId]=next;
+    if(result==='PARTIAL'&&diagnostic.reason==='RESTORE_PAUSED'&&all[ruleId]?.state==='PARTIAL')
+      diagnostic={...diagnostic,...safeDiagnostic(all[ruleId])};
+    all[ruleId]={...next,...safeDiagnostic(diagnostic)};
     await chrome.storage.local.set({[statusKey]:all});
   });
   statusWriteQueue=write;
@@ -105,6 +109,7 @@ async function ruleContext(ruleId) {
   const url=new URL(policy.siteOrigin);
   if(!(await chrome.permissions.contains({origins:[url.protocol+'//'+url.hostname+'/*']})))
     throw new Error('当前浏览器没有指定站点权限');
+  if(policy.allCookies)await requireCookieAccess(policy.siteOrigin);
   return {rule,remote,policy,sourceRole,targetRole};
 }
 
@@ -119,18 +124,27 @@ export async function sendSnapshot(ruleId, transferRequestId='') {
   sourceBusy.add(ruleId);
   let transmissionAttempted=false;
   let outgoingMessageId='';
+  let stage='context';
   try{
     const ctx=await ruleContext(ruleId);
     if(!ctx.sourceRole)throw new Error('只有来源设备可以发送登录状态');
+    // One transfer uses one selected website tab even if focus changes while
+    // Cookie, Web Storage and IndexedDB captures await separate Chrome APIs.
+    stage='source_tab';
+    const tabId=ctx.policy.localStorage||ctx.policy.sessionStorage||ctx.policy.indexedDB
+      ?await tabFor(ctx.policy.siteOrigin):null;
     // Scope is a signed, encrypted pairing policy. Never collect an
     // unchecked category, even transiently before encryption.
-    const payload=ctx.policy.schemaVersion>=2
-      ? {schemaVersion:2,siteOrigin:ctx.policy.siteOrigin,
-          ...(ctx.policy.allCookies?await captureAllCookies(ctx.policy):{}),
-          ...(ctx.policy.localStorage||ctx.policy.sessionStorage
-            ?{storage:await captureWebStorage(ctx.policy)}:{}),
-          ...(ctx.policy.indexedDB?{indexedDB:await captureIndexedDB(ctx.policy)}:{})}
-      : await captureCookies(ctx.policy);
+    let payload;
+    if(ctx.policy.schemaVersion>=2){
+      payload={schemaVersion:2,siteOrigin:ctx.policy.siteOrigin};
+      if(ctx.policy.allCookies){stage='capture_cookies';Object.assign(payload,await captureAllCookies(ctx.policy));}
+      if(ctx.policy.localStorage||ctx.policy.sessionStorage){
+        stage='capture_storage';payload.storage=await captureWebStorage(ctx.policy,{tabId});
+      }
+      if(ctx.policy.indexedDB){stage='capture_indexeddb';payload.indexedDB=await captureIndexedDB(ctx.policy,{tabId});}
+    }else{stage='capture_cookies';payload=await captureCookies(ctx.policy);}
+    stage='encrypt';
     const stored=(await chrome.storage.local.get(LAST_SEQUENCE))[LAST_SEQUENCE]||{};
     // The server is authoritative after a crash, upgrade or lost local
     // storage. A lower local counter must never cause silent replay failures.
@@ -152,6 +166,7 @@ export async function sendSnapshot(ruleId, transferRequestId='') {
       ruleId,messageId:outgoingMessageId,createdAt:Date.now()
     }));
     await setStatus(ruleId,'SENDING',outgoingMessageId);
+    stage='send';
     transmissionAttempted=true;
     const ack=await sendControl('SESSION_SNAPSHOT',{envelope});
     if(ack.status!=='RELAYED')throw new Error('中继没有接受加密快照');
@@ -165,13 +180,13 @@ export async function sendSnapshot(ruleId, transferRequestId='') {
       // outstanding ACK. No data was sent in this attempt.
       if(outgoingMessageId)
         await clearPendingDelivery(ruleId,outgoingMessageId);
-      await setStatus(ruleId,'FAILED');
+      await setStatus(ruleId,'FAILED','',failureDiagnostic(error,stage));
     }else{
       // WSS timeout does not prove the website restore failed. Keep the
       // opaque receipt ID for reconciliation after worker restart.
       const latest=await getPendingDelivery(ruleId);
       if(latest?.messageId===outgoingMessageId)
-        await setStatus(ruleId,'UNKNOWN',outgoingMessageId);
+        await setStatus(ruleId,'UNKNOWN',outgoingMessageId,failureDiagnostic(error,stage));
     }
     throw error;
   }finally{
@@ -231,16 +246,7 @@ export async function syncThenOpen(ruleId,transferRequestId='') {
 // Only fixed categories leave the browser. Never send arbitrary exception
 // messages, website origin names or decrypted session payloads to Server.
 export function browserRestoreFailureCode(error) {
-  const message=String(error?.message||'');
-  if(message.startsWith('PARTIAL_ROLLBACK:'))return 'PARTIAL_ROLLBACK';
-  if(message.startsWith('CONFLICT:'))return 'CONFLICT';
-  if(/旧会话快照|replay|sequence/i.test(message))return 'REPLAY_REJECTED';
-  if(/IndexedDB|indexeddb/i.test(message))return 'INDEXEDDB_FAILURE';
-  if(/cookie.{0,60}(?:failed|失败|rejected|denied|回滚|写入)|(?:failed|失败).{0,60}cookie/i.test(message))return 'COOKIE_FAILURE';
-  if(/storage/i.test(message))return 'STORAGE_FAILURE';
-  if(/解密|decrypt|signature/i.test(message))return 'DECRYPT_FAILED';
-  if(/网络|proxy|PAC|出口|connect|network/i.test(message))return 'NETWORK_UNAVAILABLE';
-  return 'UNSPECIFIED';
+  return failureCode(error);
 }
 
 // Consume BEFORE any mutation, so a failed restore or MV3 restart cannot
@@ -269,6 +275,8 @@ async function handleIncomingSnapshot(envelope) {
   if(typeof ruleId!=='string'||ruleId.length>128)return;
   let result='FAILED';
   let diagnostic='UNSPECIFIED';
+  let stage='context';
+  let detail={};
   try{
     const ctx=await ruleContext(ruleId);
     if(!ctx.targetRole||ctx.remote.id!==envelope.sourceBrowserDeviceId ||
@@ -285,7 +293,9 @@ async function handleIncomingSnapshot(envelope) {
     const sequences=(await chrome.storage.local.get(LAST_APPLIED))[LAST_APPLIED]||{};
     if(!Number.isSafeInteger(envelope.sequence)||envelope.sequence<=Number(sequences[ruleId]||0))
       throw new Error('旧会话快照已拒绝');
+    stage='decrypt';
     const payload=await decryptSnapshot(envelope,ctx.remote);
+    stage='network';
     await ensureNetworkForRule(ruleId,ctx.policy.siteOrigin);
     const allowOverwrite=await consumeOneTimeOverwrite(ruleId,ctx.policy.siteOrigin,envelope.transferRequestId);
     let restoredTabId=null;
@@ -301,31 +311,43 @@ async function handleIncomingSnapshot(envelope) {
            has('indexedDB')!==!!ctx.policy.indexedDB)
           throw new Error('快照范围与已签名配对数据类型不一致');
         const useStorage=ctx.policy.localStorage||ctx.policy.sessionStorage;
+        stage='preflight_storage';
         const txn=useStorage
           ?await prepareWebStorageRestore(ruleId,payload.storage,ctx.policy,
             {allowOverwrite:allowOverwrite}):null;
+        stage='preflight_indexeddb';
         const idb=ctx.policy.indexedDB
           ?await prepareIndexedDBRestore(ruleId,payload.indexedDB,ctx.policy,
             {allowOverwrite:allowOverwrite,tabId:txn?.tabId??null}):null;
         let applied=false;
         try{
-          if(idb)await idb.apply();
-          if(txn)await txn.apply();
-          if(ctx.policy.allCookies)
+          if(idb){stage='apply_indexeddb';await idb.apply();}
+          if(txn){stage='apply_storage';await txn.apply();}
+          if(ctx.policy.allCookies){
+            stage='apply_cookies';
             await applyAllCookies(ruleId,payload,ctx.policy,{allowOverwrite:allowOverwrite});
+          }
           applied=true;
-          if(txn)await txn.commit();
-          if(idb)await idb.commit();
+          if(txn){stage='commit_storage';await txn.commit();}
+          if(idb){stage='commit_indexeddb';await idb.commit();}
           restoredTabId=txn?.tabId??idb?.tabId??null;
-          if(restoredTabId!==null)await chrome.tabs.reload(restoredTabId).catch(()=>{});
+          if(restoredTabId!==null){
+            stage='verify_site';
+            // Loading the app again can overwrite freshly restored Storage
+            // from stale in-memory/bootstrap state (including "undefined").
+            // Preserve this tab and its verified values until the user reloads.
+            if(txn)await txn.verifySiteState();
+            else await reloadRestoredWebsiteTab(restoredTabId,ctx.policy.siteOrigin);
+          }
         }catch(error){
           const storageRolledBack=txn?await txn.rollback():true;
           const idbRolledBack=idb?await idb.rollback():true;
           if(!storageRolledBack||!idbRolledBack||applied)
-            throw new Error('PARTIAL_ROLLBACK: Cookie、Storage 或 IndexedDB 恢复不完整');
+            throw syncFailure('PARTIAL_ROLLBACK: Cookie、Storage 或 IndexedDB 恢复不完整',null,error);
           throw error;
         }
       }else{
+        stage='apply_cookies';
         await applyCookies(ruleId,payload,ctx.policy,{allowOverwrite:allowOverwrite});
       }
       sequences[ruleId]=envelope.sequence;
@@ -347,10 +369,10 @@ async function handleIncomingSnapshot(envelope) {
       }
     }catch(error){
       const code=String(error.message||'');
-      if(code.startsWith('CONFLICT:')){result='CONFLICT';diagnostic='CONFLICT';}
+      if(code.startsWith('CONFLICT:')){result='CONFLICT';diagnostic='CONFLICT';detail=failureDiagnostic(error,stage);}
       else throw error;
     }
-    await setStatus(ruleId,result);
+    await setStatus(ruleId,result,'',detail);
   }catch(error){
     diagnostic=browserRestoreFailureCode(error);
     // An incomplete rollback can leave a mixed website login state.
@@ -360,7 +382,7 @@ async function handleIncomingSnapshot(envelope) {
       paused[ruleId]=true;
       await chrome.storage.local.set({[PAUSED_RESTORE]:paused});
     }
-    await setStatus(ruleId,paused[ruleId]?'PARTIAL':'FAILED');
+    await setStatus(ruleId,paused[ruleId]?'PARTIAL':'FAILED','',failureDiagnostic(error,stage));
   }
   try{
     if(typeof envelope.messageId==='string')
@@ -391,7 +413,8 @@ onServerPush(async message => {
   if(message.type==='SYNC_ACK'&&typeof message.ruleId==='string'){
     const item=await getPendingDelivery(message.ruleId);
     if(!acceptDeliveryAck(item,message,Date.now()))return;
-    await setStatus(message.ruleId,message.status,item.messageId);
+    await setStatus(message.ruleId,message.status,item.messageId,
+      message.status==='APPLIED'?{}:{stage:'remote_restore',errorCode:message.errorCode||'UNSPECIFIED'});
     if(isTerminalAck(message.status))
       await clearPendingDelivery(message.ruleId,item.messageId);
   }

@@ -70,12 +70,14 @@ func (d *windowsPacketDevice) Close() error {
 }
 
 func openWindowsPacketDevice(filter string, tcpPorts []uint16) (packetDevice, error) {
-	if device, err := openWindowsServicePacketDevice(filter, tcpPorts); err == nil {
+	device, serviceErr := openWindowsServicePacketDevice(filter, tcpPorts)
+	if serviceErr == nil {
 		return device, nil
 	}
 	if !windows.GetCurrentProcessToken().IsElevated() {
-		return nil, fmt.Errorf("RelayProxy Network Service 未运行或无法配置 Windows Firewall；请在 Network Service 中执行安装/修复")
+		return nil, fmt.Errorf("RelayProxy Network Service 无法启动透明代理；请在 Network Service 中执行安装/修复；具体原因: %w", serviceErr)
 	}
+	log.Printf("[divert] Network Service capture unavailable, trying elevated direct capture: %v", serviceErr)
 	program, err := os.Executable()
 	if err != nil {
 		return nil, fmt.Errorf("读取透明代理进程路径失败: %w", err)

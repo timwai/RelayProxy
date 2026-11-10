@@ -102,6 +102,14 @@
 
 > **当前实现（2026-10-11）：** Browser Sync 在 `browser_sync.enabled: true` 且 Server TLS/Admin TLS 正常时自动复用既有 TLS/TCP 中继端口。**`browser_sync.network_proxy` 整块已废弃**，不再支持单独 `listen`、`advertise`、`allowed_exit_ids`、独立监听和 Server Web 出口配置表单。B Chrome 通过已配置的 Relay HTTPS Server Origin 访问网关；网络出口仍需同身份、`proxy.exit`、Agent 本地明确 opt-in 和 A/B 双端网络绑定同意。以下含旧配置的历史条目仅为进度留档，不再适用于现行版本。相关功能尚待 CI 和真实设备验收。
 
+> **2026-10-27 · 修复 Server Web 浏览器设备批准按钮因公开身份 ID 置灰：** 身份管理显示 16 位 `shortId`，扩展按此提交申请，但审批页面及 Store 原先仅接受内部 `id`。现在页面按公开 ID 或历史内部 ID 识别有效身份，审批事务将公开 ID 解析为内部 ID 后校验已保存的申请归属、启用状态及设备配额，并按内部 ID 保存授权；保留原始申请内容，已有待审批申请无需重新提交。覆盖公开/内部 ID 互用、大小写、跨身份替换拒绝、禁用/未知身份及配额共享；新增真实数据库与注册/管理员审批 HTTP 路由集成测试。已通过本地 `go test ./server/browser_sync ./server/api ./internal/browser_sync`、`go test ./server/web ./browser/chrome-extension/tests/wss-fixture`、Server React 83 项测试及前端构建。此记录仅确认本地回归；本次未运行真实 Chrome 双端验收或远端 CI，不改变其他发布准入项的状态。
+
+> **2026-10-27 · 非 Secure SESSION 与站点端口限制修复（本地验证）：** 针对 HTTPS/IP 自定义端口站点的 SESSION 不变，补全 HTTPS 站点的 HTTP Cookie 读取权限与精确父域权限，并在采集、接收前检查授权完整性；已有站点可通过“补全 Cookie 权限”迁移。IPv4 不再被拆成伪父域。值相同而属性不同的 Cookie 也会回写并核验。站点网络绑定支持 HTTP/HTTPS、DNS/IPv4/IPv6/内网主机与合法 TCP 端口；PAC 按主机和端口选择出口，Server 不再写死 443，新增普通 HTTP 转发并移除转发中的代理凭据。旧裸域名绑定仍按 443 解释，设备批准、双端绑定确认、短期令牌及 Relay/Agent ACL 继续执行。扩展 Node 115 项、Go 相关包及网络绑定 race 检查、真实 Chromium HTTPS/IP 权限与 SESSION 覆盖、真实 Server WSS 直连和 HTTPS 反代双 Profile 流程均已通过本地回归；Windows/macOS 生产双设备及远端 CI 状态未变更。
+
+> **2026-10-27 · Local/Session Storage 完整性修复：** 真实 Chromium 复现设置页在前台时误选旧站点标签页，导致来源 Session Storage 300 多个键缺失。改为活动/最近激活网站标签页，候选无法区分时明确失败，同一次来源 Web Storage/IndexedDB 固定同一 tab；采集完整稳定快照，恢复固定文档 ID、写前比较、写后/提交前逐键校验与完整回滚验证，实际非字符串值拒绝写入。Web Storage 恢复不再强制刷新目标页面，避免应用启动脚本将正确数据重置成字符串 `"undefined"` 或清除 Session 键；同步后打开只激活原标签页。新增 Node 故障回归、真实 HTTP Chromium 双 Profile 300 多键与特殊键名，以及 WSS 直连/HTTPS 反代 300 键+700 KiB 完整性、破坏性网站启动脚本场景。本地 129 项 Node、真实 Chromium、WSS 直连和 HTTPS 反代均通过。该用户内网站点无法直连，具体网站实机验收仍需两端更新扩展后确认；远端 CI/其他发布准入状态不变。
+
+> **2026-10-27 · 0.1.1 同步失败/暂停诊断：** 用户确认发送端 FAILED、接收端已暂停；服务端现有审计含 Cookie 失败与部分回滚，只能确认恢复未完成，尚不能确定用户内网站点首次失败的具体异常。补充本地固定阶段/原因，Storage 注入返回结构化固定错误，Cookie/跨类型回滚保留 cause 分类，暂停摘要保留首次诊断并识别三类恢复日志；Settings/Popup 显示详情、Settings 显示扩展版本并从本地刷新传输结果。明确未写入的 Storage 预检拒绝不再因并发网页变化而误报部分回滚，补上新建页面错过加载完成事件时的状态复查，未取消真正不完整恢复的暂停保护。Server 向发送端 ACK 转发已有白名单错误码，不传原始异常。已有暂停必须由接收端检查后恢复；不能以更新扩展自动视为处理完成。本地 135 项 Node、三个真实 Chromium 脚本、Go browser_sync/api、真实 WSS 直连和 HTTPS 反代均通过，新增真实原生 Storage 空间不足→本地/发送端诊断→Options 自动显示→清理后重试→完整 Profile 重启回归。测试状态观察使用本地 Chrome storage，避免测试本身重复 LIST_RULES 耗尽 Server 查询限频。生产用户站点仍待更新与复测。
+
 # RelayProxy Browser Session Sync — 开发进度与发布准入清单
 
 > **持续维护的进度文档（Living Tracker）**  

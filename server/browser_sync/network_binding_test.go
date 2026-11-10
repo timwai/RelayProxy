@@ -98,13 +98,15 @@ func TestNetworkBindingCancelAndReinviteRequiresNewTargetConsent(t *testing.T) {
 }
 
 func TestNetworkBindingHostRestrictions(t *testing.T) {
-	for _, host := range []string{"127.0.0.1", "LOCALHOST", "localhost", "a.local", "a.internal", "a.arpa", "[::1]", "bad_.example.com", "bad.example.com:443", "a..example.com", "EXAMPLE.COM", "a.example.com/evil", "example.com\nProxy-Authorization"} {
+	for _, host := range []string{"LOCALHOST", "[bad]", "bad_.example.com", "bad.example.com:0", "a:65536", "a:+443", "a..example.com", "EXAMPLE.COM", "a.example.com/evil", "example.com\nProxy-Authorization", "*.example.com", "user@host:80"} {
 		if validNetworkHost(host) {
 			t.Fatalf("invalid host allowed: %q", host)
 		}
 	}
-	if !validNetworkHost("login.example.com") {
-		t.Fatal("safe exact host rejected")
+	for _, target := range []string{"login.example.com", "example.com:8443", "10.99.32.130:30009", "localhost:80", "a.local", "[::1]", "[::1]:9443"} {
+		if !validNetworkHost(target) {
+			t.Fatalf("valid target rejected: %s", target)
+		}
 	}
 }
 func TestNetworkProxyLeaseAuthAndCONNECTIsolation(t *testing.T) {

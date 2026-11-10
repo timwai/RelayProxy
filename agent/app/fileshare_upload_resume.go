@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"relayproxy/agent/fileshare"
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -28,6 +29,15 @@ func (a *Agent) UploadRemoteFileResuming(ctx context.Context, deviceID, shareID,
 // attempt, including Relay fallback after a failed direct handshake.
 func (a *Agent) UploadRemoteFileResumingWithPath(ctx context.Context, deviceID, shareID, relativePath string,
 	src io.ReadSeeker, size int64, progress func(int64, int64), pathChanged func(string)) (int64, error) {
+	var callback func(protocol.ConnectionPath)
+	if pathChanged != nil {
+		callback = func(p protocol.ConnectionPath) { pathChanged(p.Path) }
+	}
+	return a.UploadRemoteFileResumingWithPathInfo(ctx, deviceID, shareID, relativePath, src, size, progress, callback)
+}
+
+func (a *Agent) UploadRemoteFileResumingWithPathInfo(ctx context.Context, deviceID, shareID, relativePath string,
+	src io.ReadSeeker, size int64, progress func(int64, int64), pathChanged func(protocol.ConnectionPath)) (int64, error) {
 	if src == nil || size < 0 || size > fileshare.MaxUploadSize {
 		return 0, errors.New("invalid resumable upload source or size")
 	}
@@ -50,7 +60,7 @@ func (a *Agent) UploadRemoteFileResumingWithPath(ctx context.Context, deviceID, 
 			}
 		} else {
 			if pathChanged != nil {
-				pathChanged(fileTransferPath(stream))
+				pathChanged(netpath.From(stream, fileTransferPath(stream)))
 			}
 			if ready.UploadID == "" || len(ready.UploadID) != 48 ||
 				(uploadID != "" && ready.UploadID != uploadID) ||

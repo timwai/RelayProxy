@@ -81,15 +81,16 @@ type RDPIngressRuntimeStatus struct {
 }
 
 type P2PPeerRuntimeReport struct {
-	Path             string    `json:"path,omitempty"`
-	Reason           string    `json:"reason,omitempty"`
-	RTTMs            int64     `json:"rttMs,omitempty"`
-	CandidateSummary string    `json:"candidateSummary,omitempty"`
-	FallbackCount    uint64    `json:"fallbackCount,omitempty"`
-	ActiveStreams    int       `json:"activeStreams,omitempty"`
-	BytesUp          uint64    `json:"bytesUp,omitempty"`
-	BytesDown        uint64    `json:"bytesDown,omitempty"`
-	UpdatedAt        time.Time `json:"updatedAt,omitempty"`
+	PathInfo         *protocol.ConnectionPath `json:"pathInfo,omitempty"`
+	Path             string                   `json:"path,omitempty"`
+	Reason           string                   `json:"reason,omitempty"`
+	RTTMs            int64                    `json:"rttMs,omitempty"`
+	CandidateSummary string                   `json:"candidateSummary,omitempty"`
+	FallbackCount    uint64                   `json:"fallbackCount,omitempty"`
+	ActiveStreams    int                      `json:"activeStreams,omitempty"`
+	BytesUp          uint64                   `json:"bytesUp,omitempty"`
+	BytesDown        uint64                   `json:"bytesDown,omitempty"`
+	UpdatedAt        time.Time                `json:"updatedAt,omitempty"`
 }
 
 type P2PSessionRuntimeStatus struct {

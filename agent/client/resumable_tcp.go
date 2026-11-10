@@ -16,6 +16,11 @@ import (
 
 const resumeRecoveryTimeout = 10 * time.Second
 
+type pathBinding struct {
+	info   protocol.ConnectionPath
+	source protocol.ConnectionPathProvider
+}
+
 type resumableTCPConn struct {
 	dialer   *TunnelDialer
 	endpoint *p2presume.Endpoint
@@ -30,7 +35,7 @@ type resumableTCPConn struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
 	closeOnce sync.Once
-	path      atomic.Value // protocol.ProxyPath: most recently bound transport path
+	path      atomic.Value // pathBinding: most recently bound transport
 }
 
 func newResumableTCPConn(
@@ -40,7 +45,8 @@ func newResumableTCPConn(
 	exitID, host string,
 	port uint16,
 	localAddr, remoteAddr net.Addr,
-	path protocol.ProxyPath,
+	info protocol.ConnectionPath,
+	source protocol.ConnectionPathProvider,
 ) net.Conn {
 	ctx, cancel := context.WithCancel(context.Background())
 	conn := &resumableTCPConn{
@@ -49,7 +55,7 @@ func newResumableTCPConn(
 		localAddr: localAddr, remoteAddr: remoteAddr,
 		ctx: ctx, cancel: cancel,
 	}
-	conn.path.Store(path)
+	conn.path.Store(pathBinding{info, source})
 	go conn.recoveryLoop()
 	return conn
 }
@@ -62,7 +68,15 @@ func (c *resumableTCPConn) currentPath() protocol.ProxyPath {
 	if value == nil {
 		return ""
 	}
-	return value.(protocol.ProxyPath)
+	return protocol.ProxyPath(value.(pathBinding).info.Path)
+}
+
+func (c *resumableTCPConn) ConnectionPath() protocol.ConnectionPath {
+	if v := c.path.Load(); v != nil {
+		binding := v.(pathBinding)
+		return currentPathInfo(binding.source, binding.info)
+	}
+	return protocol.ConnectionPath{}
 }
 
 func (c *resumableTCPConn) ProxyPath() string { return c.currentPath().String() }
@@ -285,7 +299,7 @@ func (c *resumableTCPConn) tryRelayRebind(
 	if err := c.endpoint.Bind(stream, nextGeneration); err != nil {
 		return err
 	}
-	c.path.Store(relaySessionPath(relay))
+	c.path.Store(pathBinding{sessionPathInfo(relay, relaySessionPath(relay)), pathSource(relay)})
 	owned = false
 	return nil
 }

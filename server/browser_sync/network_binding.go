@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -24,20 +25,62 @@ type NetworkBinding struct {
 	Status       string `json:"status"`
 }
 
-var networkHost = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$`)
+var networkHost = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*$`)
 
 func validNetworkHost(host string) bool {
-	if host == "" || len(host) > 253 || host != strings.ToLower(host) || !networkHost.MatchString(host) ||
-		net.ParseIP(host) != nil || strings.HasSuffix(host, ".local") || strings.HasSuffix(host, ".internal") ||
-		strings.HasSuffix(host, ".localhost") || strings.HasSuffix(host, ".arpa") {
-		return false
+	_, _, err := parseNetworkTarget(host)
+	return err == nil
+}
+
+// Legacy bindings contain a bare hostname and mean TCP/443. New bindings may
+// name any legal DNS/IP target and TCP port, without changing stored old rules.
+func parseNetworkTarget(target string) (string, uint16, error) {
+	host, port := target, 443
+	bracketed := strings.HasPrefix(target, "[")
+	if strings.Contains(target, ":") && !(strings.HasPrefix(target, "[") && strings.HasSuffix(target, "]")) {
+		var rawPort string
+		var err error
+		host, rawPort, err = net.SplitHostPort(target)
+		if err != nil {
+			return "", 0, ErrRuleDenied
+		}
+		port, err = strconv.Atoi(rawPort)
+		if err != nil || port < 1 || port > 65535 || strings.Trim(rawPort, "0123456789") != "" {
+			return "", 0, ErrRuleDenied
+		}
+	} else if strings.HasPrefix(host, "[") && strings.HasSuffix(host, "]") {
+		host = strings.TrimSuffix(strings.TrimPrefix(host, "["), "]")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.String(), uint16(port), nil
+	}
+	if bracketed || host == "" || len(host) > 253 || host != strings.ToLower(host) || !networkHost.MatchString(host) {
+		return "", 0, ErrRuleDenied
 	}
 	for _, part := range strings.Split(host, ".") {
 		if len(part) > 63 {
-			return false
+			return "", 0, ErrRuleDenied
 		}
 	}
-	return true
+	return host, uint16(port), nil
+}
+
+func networkTargetKey(host string, port uint16) string {
+	if port == 443 {
+		if strings.Contains(host, ":") {
+			return "[" + host + "]"
+		}
+		return host
+	}
+	return net.JoinHostPort(host, strconv.Itoa(int(port)))
+}
+
+func normalizeNetworkTarget(target string) (string, error) {
+	host, port, err := parseNetworkTarget(target)
+	if err != nil {
+		return "", err
+	}
+	return networkTargetKey(host, port), nil
 }
 
 func (s *Store) EnsureNetworkSchema(ctx context.Context) error {
@@ -54,6 +97,7 @@ func (s *Store) OfferNetworkBinding(ctx context.Context, sourceID, ruleID, host,
 	if !validNetworkHost(host) || len(exitID) < 5 || len(exitID) > 128 || exitID == "server" {
 		return ErrRuleDenied
 	}
+	host, _ = normalizeNetworkTarget(host)
 	if _, err := uuid.Parse(ruleID); err != nil {
 		return ErrRuleDenied
 	}
@@ -116,6 +160,7 @@ func (s *Store) AcceptNetworkBinding(ctx context.Context, targetID, ruleID, host
 	if err != nil || !target.Receive || !validNetworkHost(host) {
 		return ErrRuleDenied
 	}
+	host, _ = normalizeNetworkTarget(host)
 	rule, err := s.ActiveRule(ctx, ruleID)
 	if err != nil || !rule.Active || !rule.TargetApproved || !rule.SourceApproved ||
 		!rule.KeyFingerprintsVerified || rule.TargetBrowserDeviceID != targetID {
@@ -161,6 +206,7 @@ func (s *Store) NetworkDestination(ctx context.Context, receiverID, host string)
 	if !validNetworkHost(host) {
 		return "", ErrRuleDenied
 	}
+	host, _ = normalizeNetworkTarget(host)
 	receiver, err := s.deviceAllowed(ctx, receiverID)
 	if err != nil || !receiver.Receive {
 		return "", ErrRuleDenied

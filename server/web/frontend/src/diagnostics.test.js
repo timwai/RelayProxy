@@ -19,3 +19,12 @@ test('P2P reports retain failure reasons and endpoint summaries',()=>{
  assert.equal(r.name,'Relay QUIC');assert.equal(r.reason,'unreachable IPv6');
  assert.match(r.detail,/回退 2 次/);assert.match(r.detail,/IPv4 only/);
 });
+
+test('available LAN transport does not imply active proxy traffic',()=>{
+ const info={path:'p2p_quic',network:'lan',transport:'quic'};
+ const row=summarizeSession({peerDiagnostics:{payload:{status:{directPath:'p2p_quic',directPathInfo:info,activeProxyPaths:[]}}}});
+ assert.equal(row.directPath,'局域网直连 · QUIC');
+ assert.equal(row.activePaths,'暂无活动代理连接');
+ assert.equal(summarizePathReport({path:'p2p_quic',pathInfo:info}).name,'局域网直连 · QUIC');
+ assert.equal(summarizePathReport({path:'relay_tls',pathInfo:info}).name,'中继 · TLS');
+});

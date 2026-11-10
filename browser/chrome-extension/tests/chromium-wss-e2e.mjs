@@ -78,6 +78,11 @@ async function workerCommand(profile,message){
   assert.equal(value?.ok,true,`MV3 ${message.type}: ${value?.error||'no response'}`);
   return value;
 }
+async function localTransfer(profile,ruleId){
+  return profile.options.evaluate(async ruleId=>
+    (await chrome.storage.local.get('browserSyncTransferStatus'))
+      .browserSyncTransferStatus?.[ruleId],ruleId);
+}
 
 async function setServerAndSite(profile,serverOrigin,siteOrigin,name){
   const saved=await profile.options.evaluate(async({serverOrigin,siteOrigin,name})=>{
@@ -135,7 +140,8 @@ async function main(){
   const siteA=await a.context.newPage();
   const siteB=await b.context.newPage();
   await sourceSiteState(siteA,siteOrigin);
-  await siteB.goto(siteOrigin+'/');
+  await siteB.goto(siteOrigin+'/storage-bootstrap');
+  const initialTargetDocument=await siteB.evaluate(()=>performance.timeOrigin);
   assert.deepEqual(await siteB.evaluate(async()=>(await(await fetch('/whoami')).json())),
     {user:'anonymous'});
 
@@ -213,6 +219,11 @@ async function main(){
   assert.equal(active.status,'active');
   assert.equal(active.keysConfirmed,true);
   assert.ok(active.sourceApproved&&active.targetApproved);
+  // Pairing above uses worker controls. Populate the Options rule cards once,
+  // as the normal Accept/Confirm UI does, before testing live local updates.
+  await b.options.locator('a[href="#pairing-section"]').click();
+  await b.options.locator('#refresh-pairing').click();
+  await b.options.locator('a[href="#rules-section"]').click();
 
   // Observe only the opaque message ID in Chrome storage; no credentials
   // or encrypted website contents pass through the test controller.
@@ -248,6 +259,38 @@ async function main(){
   });
   await siteB.waitForLoadState('domcontentloaded');
   await verifyTargetSite(siteB,siteOrigin);
+  assert.equal(await siteB.evaluate(()=>performance.timeOrigin),initialTargetDocument,
+    'Storage restore forced an app reload which can replace values with undefined');
+  // Subsequent reconnect/restart cases use the passive fixture. This case
+  // independently verifies that sync does not trigger destructive app boot.
+  await siteB.goto(siteOrigin+'/');
+
+  // Exercise an actual native Storage quota failure through the complete
+  // MV3/WSS restore path. The fixed diagnosis must survive scripting IPC,
+  // rollback, local status persistence and the sender's safe ACK category.
+  await siteA.evaluate(()=>localStorage.setItem('quota-incoming','x'.repeat(3*1024*1024)));
+  await siteB.evaluate(()=>localStorage.setItem('quota-filler','x'.repeat(3*1024*1024)));
+  await workerCommand(a,{type:'SEND_SESSION',ruleId:offer.ruleId});
+  await eventually('receiver retains native Storage failure detail',async()=>{
+    const status=await localTransfer(b,offer.ruleId);
+    return status?.state==='FAILED'&&status.stage==='apply_storage'&&status.reason==='STORAGE_QUOTA';
+  });
+  await eventually('sender receives safe Storage failure ACK',async()=>{
+    const status=await localTransfer(a,offer.ruleId);
+    return status?.state==='FAILED'&&status.errorCode==='STORAGE_FAILURE'&&status.stage==='remote_restore';
+  });
+  await eventually('Options shows the completed transfer failure without manual refresh',async()=>
+    (await b.options.locator('#pairing-rules').textContent()).includes('目标页面 Storage 空间不足'));
+  assert.equal(await siteB.evaluate(()=>localStorage.getItem('quota-incoming')),null);
+  await siteA.evaluate(()=>localStorage.removeItem('quota-incoming'));
+  await siteB.evaluate(()=>localStorage.removeItem('quota-filler'));
+  await workerCommand(a,{type:'SEND_SESSION',ruleId:offer.ruleId});
+  for(const profile of [a,b])await eventually('clean retry succeeds after quota failure',async()=>{
+    return (await localTransfer(profile,offer.ruleId))?.state==='APPLIED';
+  });
+  // Additional failure/retry snapshots share the production five transfers
+  // per ten-second window with subsequent reconnect coverage.
+  await sleep(10000);
 
   // A lost ACK must be recovered from the durable server receipt after
   // a real WSS disconnect. Reinsert the opaque pending ID to model an MV3
@@ -375,6 +418,11 @@ async function main(){
     // cookie values, encryption payloads or session storage.
     console.error('Post-restart ACK outcome categories:',
       JSON.stringify(await diagnosticCategories(fixture)));
+    console.error('Post-restart local diagnostic:',await restartedB.options.evaluate(async ruleId=>{
+      const stored=await chrome.storage.local.get('browserSyncTransferStatus');
+      const {safeDiagnostic}=await import(chrome.runtime.getURL('src/sync-diagnostics.js'));
+      return safeDiagnostic(stored.browserSyncTransferStatus?.[ruleId]);
+    },offer.ruleId));
     throw error;
   }
   await verifyTargetSite(restartedSiteB,siteOrigin);

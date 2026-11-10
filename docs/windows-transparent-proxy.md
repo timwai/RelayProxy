@@ -101,6 +101,10 @@ Windows GUI 的“系统透明代理”区域会显示 `RelayProxy Network Servi
 
 “安装 / 修复服务”会请求一次 UAC，重新发布受保护的 broker 程序、更新 Windows Service 配置并启动服务。“卸载服务”会先关闭已保存的 `network.mode=divert`，再通过一次 UAC 停止并删除 `RelayProxyNetwork` 服务，同时清理 `%ProgramData%\RelayProxy-Network-Service\` 下的 broker 程序；因此下次启动不会自动把刚卸载的服务重新安装。WinDivert 的受保护运行库目录保留，供管理员直连诊断路径复用。
 
+显式安装/修复会停止并重新启动 broker，即使版本和配置未变，避免复用 SCM 仍显示“运行中”但管道已无响应的服务进程。此操作会中断当前透明代理连接。Firewall 规则的添加、删除各限制为 5 秒，防止旧会话在清理规则时无限占住 broker。抓包重试失败时，界面和日志会保留管道连接、握手、Firewall 或 WinDivert 的具体错误，便于区分故障阶段。
+
+安装/修复还会提前准备并校验 `%ProgramData%\RelayProxy-WinDivert` 中的内嵌运行库。目录所有者必须为 Administrators 或 SYSTEM，受保护的 ACL 仅允许这两者完全控制；重复的同类授权可以接受。若可信所有者的目录 ACL 不合格，提权安装程序会把旧目录保留为相邻的 `.unsafe-<随机标识>` 目录，再以正确权限新建缓存并从已校验的内嵌包释放文件。普通抓包启动不会执行这项目录替换；普通用户所有的目录和重解析点仍拒绝使用。权限错误包含实际 SDDL，便于排查后续权限变化。
+
 服务安装/修复时会配置 Windows SCM 故障恢复：异常退出后依次在 1 秒、5 秒、15 秒后自动重启，24 小时后重置失败计数。Agent 每秒独立检查透明代理是否仍在运行，即使 Relay 会话一直在线，也会在抓包停止后重新启动。启动失败按 2、4、8、16、30 秒退避重试，后续间隔最多 30 秒；服务恢复后无需重启整个 GUI/Agent。重启仍要求 Relay 已完成认证，退出客户端后停止重试。手工“停止服务”或“卸载服务”属于正常停止，不会被故障恢复策略强行拉起。
 
 如果使用一段时间或休眠唤醒后出现 `packet injection failed ... RelayProxyNetwork-v5: The pipe is being closed`，表示 Agent 与本机网络服务的数据管道已关闭。这条写入错误本身无法区分服务退出、驱动错误或报文处理超时。Agent 会释放旧抓包和 TCP/UDP 流状态，再以新监听端口和过滤器建立新抓包连接；不会向新管道重放未确认的注入或完成帧。已有应用连接可能需要重连。

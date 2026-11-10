@@ -162,6 +162,6 @@ func (h *Handler) relayAcknowledgementWithCode(ctx context.Context, receiverID, 
 	// claim that B's accepted ACK failed merely because pushing to A failed.
 	// No arbitrary client-provided reason: prevents secret leakage in ACKs.
 	_ = source.send(ctx, map[string]any{"type": "SYNC_ACK", "ruleId": ruleID,
-		"messageId": messageID, "status": status})
+		"messageId": messageID, "status": status, "errorCode": code})
 	return nil
 }

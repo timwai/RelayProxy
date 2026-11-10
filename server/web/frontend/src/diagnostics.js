@@ -1,3 +1,4 @@
+import {pathLabel,activePathLabel} from '../../../../internal/webui/pathLabel.mjs';
 // Normalize fields actually returned by /sessions/active and /p2p/sessions.
 // Keep these independent of React so they can be tested against legacy wire shapes.
 export const pathNames={public_direct_quic:'Public Direct QUIC',p2p_quic:'P2P QUIC',relay_quic:'Relay QUIC',relay_tls:'Relay TLS'};
@@ -20,7 +21,8 @@ export function summarizeSession(session, devices=[]) {
     relayLost:relay?.sent_packets_lost,
     remoteRelayRttMs:remoteRelay?.smoothed_rtt_ms,
     remoteRelayLost:remoteRelay?.sent_packets_lost,
-    directPath:peer.directPath ? pathNames[peer.directPath]||peer.directPath : '',
+    activePaths:activePathLabel(peer.activeProxyPaths),
+    directPath:peer.directPathInfo ? pathLabel(peer.directPathInfo,peer.directPath) : peer.directPath ? pathNames[peer.directPath]||peer.directPath : '',
     directState:peer.directState||'',
     directRttMs:peer.directRttMs||0,
     directEndpoint:peer.directEndpoint||'',
@@ -44,5 +46,5 @@ export function summarizePathReport(r) {
   if(r.bytesUp>0||r.bytesDown>0)detail.push('↑ '+r.bytesUp+' B · ↓ '+r.bytesDown+' B');
   if(r.fallbackCount>0)detail.push('回退 '+r.fallbackCount+' 次');
   if(r.candidateSummary)detail.push(r.candidateSummary);
-  return {name:pathNames[r.path]||r.path||(r.reason?'已降级':'等待报告'),detail:detail.join(' · '),reason:r.reason||''};
+  return {name:(r.pathInfo?pathLabel(r.pathInfo,r.path):pathNames[r.path]||r.path)||(r.reason?'已降级':'等待报告'),detail:detail.join(' · '),reason:r.reason||''};
 }

@@ -10,6 +10,7 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -26,6 +27,7 @@ func (s *browserEchoStream) CloseWrite() error { return s.Close() }
 type browserEchoTunnel struct {
 	requests chan protocol.OpenTCPRequest
 	frames   chan protocol.FrameType
+	serve    func(net.Conn)
 }
 
 func (s *browserEchoTunnel) OpenStream(ctx context.Context) (tunnel.TunnelStream, error) {
@@ -50,7 +52,11 @@ func (s *browserEchoTunnel) OpenStream(ctx context.Context) (tunnel.TunnelStream
 		}); err != nil {
 			return
 		}
-		_, _ = io.Copy(agent, agent)
+		if s.serve != nil {
+			s.serve(agent)
+		} else {
+			_, _ = io.Copy(agent, agent)
+		}
 	}()
 	return &browserEchoStream{Conn: client}, nil
 }
@@ -267,5 +273,204 @@ func TestBrowserExitStreamTypePreservesLocalOptInAndRemoteFallback(t *testing.T)
 	remote := &session.DeviceSession{}
 	if got := browserExitStreamType(remote); got != protocol.FrameTypeOpenTCP {
 		t.Fatalf("remote proxy.exit Agent requires ordinary egress frame: %v", got)
+	}
+}
+
+func TestNetworkProxyHTTPAndCustomPortTargets(t *testing.T) {
+	for _, tc := range []struct {
+		target, host string
+		port         uint16
+		forward      bool
+	}{
+		{"10.99.32.130:30009", "10.99.32.130", 30009, false},
+		{"[fd00::1]:9443", "fd00::1", 9443, false},
+		{"intranet:8080", "intranet", 8080, false},
+		{"10.99.32.130:30009", "10.99.32.130", 30009, true},
+		{"[fd00::1]:9443", "fd00::1", 9443, true},
+		{"localhost:80", "localhost", 80, true},
+	} {
+		t.Run(fmt.Sprintf("%s/HTTP=%v", tc.target, tc.forward), func(t *testing.T) {
+			store := testBrowserStore(t)
+			source, receiver, ruleID := approvedDeliveryRule(t, store)
+			ctx := context.Background()
+			const exitID = "dev_custom_target_exit"
+			if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, tc.target, exitID); err != nil {
+				t.Fatal(err)
+			}
+			if err := store.AcceptNetworkBinding(ctx, receiver.ID, ruleID, tc.target); err != nil {
+				t.Fatal(err)
+			}
+			sessions := session.NewManager()
+			echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 2)}
+			received := make(chan *http.Request, 1)
+			if tc.forward {
+				echo.serve = func(conn net.Conn) {
+					request, err := http.ReadRequest(bufio.NewReader(conn))
+					if err != nil {
+						return
+					}
+					body, _ := io.ReadAll(request.Body)
+					_ = request.Body.Close()
+					request.Body = io.NopCloser(strings.NewReader(string(body)))
+					received <- request
+					_, _ = fmt.Fprintf(conn, "HTTP/1.1 200 OK\r\nContent-Length: %d\r\nConnection: close\r\n\r\n%s", len(body), body)
+				}
+			}
+			sessions.Register(&session.DeviceSession{DeviceID: exitID, IdentityID: "id_1",
+				Grants: []string{protocol.CapabilityProxyExit}, Tunnel: echo})
+			defer sessions.Unregister(exitID)
+			proxy := NewNetworkProxy(store, sessions)
+			defer proxy.Close(ctx)
+			lease, err := proxy.Issue(ctx, receiver.ID)
+			if err != nil {
+				t.Fatal(err)
+			}
+			server := httptest.NewTLSServer(proxy)
+			defer server.Close()
+			auth := "Basic " + base64.StdEncoding.EncodeToString([]byte("browser:"+lease["token"].(string)))
+			if tc.forward {
+				proxyURL, _ := url.Parse(server.URL)
+				transport := &http.Transport{Proxy: http.ProxyURL(proxyURL), TLSClientConfig: server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()}
+				defer transport.CloseIdleConnections()
+				client := &http.Client{Transport: transport, Timeout: 5 * time.Second}
+				authority := tc.target
+				if tc.port == 80 {
+					authority = tc.host
+				}
+				request, _ := http.NewRequest(http.MethodPost, "http://"+authority+"/login?from=browser", strings.NewReader("owned-fixture-payload"))
+				request.Header.Set("Proxy-Authorization", auth)
+				request.Header.Set("Cookie", "SESSION=owned-fixture")
+				response, err := client.Do(request)
+				if err != nil {
+					t.Fatal(err)
+				}
+				body, _ := io.ReadAll(response.Body)
+				_ = response.Body.Close()
+				if response.StatusCode != 200 || string(body) != "owned-fixture-payload" {
+					t.Fatalf("HTTP forwarding failed: %d %s", response.StatusCode, body)
+				}
+				select {
+				case request := <-received:
+					if request.Header.Get("Proxy-Authorization") != "" || request.Header.Get("Cookie") != "SESSION=owned-fixture" || request.URL.String() != "/login?from=browser" || request.Host != authority {
+						t.Fatalf("forward request altered or leaked proxy credentials: %#v", request)
+					}
+				case <-time.After(time.Second):
+					t.Fatal("HTTP request not received by Agent")
+				}
+			} else {
+				config := server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+				config.NextProtos = []string{"http/1.1"}
+				conn, err := tls.Dial("tcp", strings.TrimPrefix(server.URL, "https://"), config)
+				if err != nil {
+					t.Fatal(err)
+				}
+				defer conn.Close()
+				_ = conn.SetDeadline(time.Now().Add(5 * time.Second))
+				// Buffered payload checks that bytes already read with CONNECT are retained.
+				_, err = fmt.Fprintf(conn, "CONNECT %s HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: %s\r\n\r\nhello", tc.target, tc.target, auth)
+				if err != nil {
+					t.Fatal(err)
+				}
+				reader := bufio.NewReader(conn)
+				response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodConnect})
+				if err != nil || response.StatusCode != 200 {
+					t.Fatalf("CONNECT failed: %v %v", response, err)
+				}
+				data := make([]byte, 5)
+				if _, err := io.ReadFull(reader, data); err != nil || string(data) != "hello" {
+					t.Fatalf("CONNECT payload: %q %v", data, err)
+				}
+			}
+			select {
+			case request := <-echo.requests:
+				if request.Host != tc.host || request.Port != tc.port {
+					t.Fatalf("wrong TCP destination: %+v", request)
+				}
+			case <-time.After(time.Second):
+				t.Fatal("Agent not dialed")
+			}
+			// The same approved token must not grant access to another TCP port.
+			request := httptest.NewRequest(http.MethodConnect, net.JoinHostPort(tc.host, "30010"), nil)
+			request.TLS = &tls.ConnectionState{}
+			request.Header.Set("Proxy-Authorization", auth)
+			result := httptest.NewRecorder()
+			proxy.ServeHTTP(result, request)
+			if result.Code != http.StatusForbidden {
+				t.Fatalf("unapproved port accepted: %d", result.Code)
+			}
+		})
+	}
+}
+
+func TestNetworkProxyHTTPUpgradeAndRevocation(t *testing.T) {
+	store := testBrowserStore(t)
+	source, receiver, ruleID := approvedDeliveryRule(t, store)
+	ctx := context.Background()
+	const target = "10.99.32.130:30009"
+	const exitID = "dev_http_upgrade_exit"
+	if err := store.OfferNetworkBinding(ctx, source.ID, ruleID, target, exitID); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.AcceptNetworkBinding(ctx, receiver.ID, ruleID, target); err != nil {
+		t.Fatal(err)
+	}
+	received := make(chan *http.Request, 1)
+	echo := &browserEchoTunnel{requests: make(chan protocol.OpenTCPRequest, 1), serve: func(conn net.Conn) {
+		reader := bufio.NewReader(conn)
+		request, err := http.ReadRequest(reader)
+		if err != nil {
+			return
+		}
+		received <- request
+		if _, err = io.WriteString(conn, "HTTP/1.1 101 Switching Protocols\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n"); err != nil {
+			return
+		}
+		_, _ = io.Copy(conn, reader)
+	}}
+	sessions := session.NewManager()
+	sessions.Register(&session.DeviceSession{DeviceID: exitID, IdentityID: "id_1", Grants: []string{protocol.CapabilityProxyExit}, Tunnel: echo})
+	defer sessions.Unregister(exitID)
+	proxy := NewNetworkProxy(store, sessions)
+	defer proxy.Close(ctx)
+	lease, err := proxy.Issue(ctx, receiver.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server := httptest.NewTLSServer(proxy)
+	defer server.Close()
+	config := server.Client().Transport.(*http.Transport).TLSClientConfig.Clone()
+	config.NextProtos = []string{"http/1.1"}
+	conn, err := tls.Dial("tcp", strings.TrimPrefix(server.URL, "https://"), config)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+	_ = conn.SetDeadline(time.Now().Add(8 * time.Second))
+	auth := base64.StdEncoding.EncodeToString([]byte("browser:" + lease["token"].(string)))
+	_, err = fmt.Fprintf(conn, "GET http://%s/ws HTTP/1.1\r\nHost: %s\r\nProxy-Authorization: Basic %s\r\nConnection: Upgrade\r\nUpgrade: websocket\r\n\r\n", target, target, auth)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reader := bufio.NewReader(conn)
+	response, err := http.ReadResponse(reader, &http.Request{Method: http.MethodGet})
+	if err != nil || response.StatusCode != 101 {
+		t.Fatalf("upgrade failed: %v %v", response, err)
+	}
+	request := <-received
+	if request.Header.Get("Proxy-Authorization") != "" || request.Header.Get("Upgrade") != "websocket" {
+		t.Fatal("upgrade lost or proxy credentials leaked")
+	}
+	if _, err = conn.Write([]byte("hello")); err != nil {
+		t.Fatal(err)
+	}
+	data := make([]byte, 5)
+	if _, err = io.ReadFull(reader, data); err != nil || string(data) != "hello" {
+		t.Fatalf("upgrade relay failed: %q %v", data, err)
+	}
+	if err := store.RevokeNetworkBinding(ctx, receiver.ID, ruleID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = reader.Read(make([]byte, 1)); err != io.EOF {
+		t.Fatalf("revoked HTTP upgrade stayed active: %v", err)
 	}
 }

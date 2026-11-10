@@ -10,7 +10,7 @@ func PublicRelayHandler(push, browser, proxy http.Handler) http.Handler {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("Cache-Control", "no-store")
 		switch {
-		case req.Method == http.MethodConnect:
+		case req.Method == http.MethodConnect || req.URL.IsAbs() && req.URL.Scheme == "http":
 			if proxy == nil {
 				http.Error(w, "browser network proxy disabled", http.StatusForbidden)
 				return

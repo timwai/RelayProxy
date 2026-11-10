@@ -46,6 +46,12 @@ func (c *selectedExitConn) ProxyPath() string {
 	}
 	return ""
 }
+func (c *selectedExitConn) ConnectionPath() protocol.ConnectionPath {
+	if p, ok := c.Conn.(protocol.ConnectionPathProvider); ok {
+		return p.ConnectionPath()
+	}
+	return protocol.ConnectionPath{Path: c.ProxyPath(), Network: "unknown"}
+}
 func (c *selectedExitConn) CloseWrite() error {
 	if p, ok := c.Conn.(interface{ CloseWrite() error }); ok {
 		return p.CloseWrite()
@@ -64,6 +70,13 @@ func (c *selectedExitPacketConn) ProxyPath() string {
 		return p.ProxyPath()
 	}
 	return ""
+}
+
+func (c *selectedExitPacketConn) ConnectionPath() protocol.ConnectionPath {
+	if p, ok := c.PacketConn.(protocol.ConnectionPathProvider); ok {
+		return p.ConnectionPath()
+	}
+	return protocol.ConnectionPath{Path: c.ProxyPath(), Network: "unknown"}
 }
 
 func terminalGroupError(err error) bool {

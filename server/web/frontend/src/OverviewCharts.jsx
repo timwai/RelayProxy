@@ -18,6 +18,8 @@ const PATH_SERIES=[
   {key:'p2p',name:'P2P QUIC',color:'var(--rt-teal)'},
   {key:'publicDirect',name:'公网直连',color:'var(--rt-blue)'},
   {key:'relay',name:'Relay 路径',color:'var(--rt-violet)'},
+  {key:'mixed',name:'混合路径',color:'var(--rt-blue)'},
+  {key:'idle',name:'暂无代理连接',color:'var(--rt-muted)'},
   {key:'unknown',name:'未上报路径',color:'var(--rt-muted)'}
 ];
 
@@ -144,7 +146,7 @@ export function OverviewRealtime({ctx}){
   <ChartPanel title="实时上下行速率" desc="当前已上报会话的字节计数差值 ÷ 实际采样间隔；非全服历史流量" extra={<div className="rt-live-values"><span>↑ {formatRate(latest?.uploadBps)}</span><span>↓ {formatRate(latest?.downloadBps)}</span></div>} className="rt-wide">
    <TrendChart samples={visible} series={TRAFFIC_SERIES} format={formatRate} empty={rateIsReady?'正在累积曲线采样':'需要至少两次有效采样，约 10 秒'}/>
   </ChartPanel>
-  <div className="rt-two-col"><ChartPanel title="连接与设备趋势" desc="活跃连接数、在线设备及 P2P 会话随时间变化"><TrendChart samples={visible} series={SESSION_SERIES} format={n=>String(Math.round(n))} empty="等待第二次真实采样"/></ChartPanel><ChartPanel title="当前路径分布" desc="基于活跃会话实际报告；未上报的路径单独列出"><RoutesChart routes={latest?.routes} go={go}/></ChartPanel></div>
+  <div className="rt-two-col"><ChartPanel title="连接与设备趋势" desc="活跃连接数、在线设备及 P2P 会话随时间变化"><TrendChart samples={visible} series={SESSION_SERIES} format={n=>String(Math.round(n))} empty="等待第二次真实采样"/></ChartPanel><ChartPanel title="当前路径分布" desc="按当前出口的活动代理连接归类；混合、空闲及未上报单独列出"><RoutesChart routes={latest?.routes} go={go}/></ChartPanel></div>
   <div className="rt-two-col"><ChartPanel title="出口实时负载" desc="各在线出口的活跃流数量"><ExitLoadChart exits={latest?.exits||[]} go={go}/></ChartPanel><ChartPanel title="当前设备与今日流量" desc="在线率为实时值；今日累计量来自 Server 审计统计"><div className="rt-summary-grid"><div className="rt-summary-stat"><span>在线设备</span><strong>{online==null?'—':online+' / '+totalDevices}</strong><div className="rt-meter"><i style={{width:totalDevices?Math.min(100,online/totalDevices*100)+'%':'0%'}}/></div></div><div className="rt-summary-stat"><span>待审批设备</span><strong>{waiting}</strong><button type="button" className="rt-text-action" onClick={()=>go('devices')}>前往审批 →</button></div><div className="rt-summary-stat"><span>今日累计上传</span><strong>{latest?fmtBytes(latest.todayUpload):'—'}</strong></div><div className="rt-summary-stat"><span>今日累计下载</span><strong>{latest?fmtBytes(latest.todayDownload):'—'}</strong></div></div></ChartPanel></div>
   <ChartPanel title="最近设备" desc="最近活跃的已登记设备" extra={<button type="button" className="btn" onClick={()=>go('devices')}>全部设备 →</button>}><div className="rt-device-list">{data.devices.slice().sort((a,b)=>(Date.parse(b.lastSeenAt)||0)-(Date.parse(a.lastSeenAt)||0)).slice(0,5).map(device=><div className="rt-device-row" key={device.id}><span className={'rt-device-dot '+(device.status==='online'?'on':'')}/><span className="rt-device-name"><strong>{device.name||device.id}</strong>{device.name&&<small>{device.id}</small>}</span><span className="rt-device-platform">{device.platform||'—'} / {device.deviceMode||'—'}</span><span className="rt-device-last">{fmtDate(device.lastSeenAt)}</span></div>)}{data.devices.length===0&&<div className="rt-compact-empty">暂无已登记设备</div>}</div></ChartPanel>
   <p className="rt-source-note">数据来源：/api/v1/dashboard、/api/v1/sessions/active、/api/v1/p2p/sessions。刷新页面后折线重新积累；后台标签页暂停采样，返回时恢复。</p>

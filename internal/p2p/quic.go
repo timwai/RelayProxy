@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/apernet/quic-go"
+	"relayproxy/internal/netpath"
 	"relayproxy/internal/p2p/secure"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
@@ -68,6 +69,7 @@ func DialQUIC(ctx context.Context, conn *net.UDPConn, remote *net.UDPAddr, ident
 	}
 	session := tunnel.NewQUICSession(qconn)
 	tunnel.SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
+	session.SetConnectionPath(netpath.Describe("p2p_quic", qconn.LocalAddr(), qconn.RemoteAddr()))
 	return &QUICSession{QUICSession: session, conn: qconn, transport: transport}, nil
 }
 
@@ -96,6 +98,7 @@ func AcceptQUIC(ctx context.Context, conn *net.UDPConn, identity *secure.TLSIden
 	_ = listener.Close()
 	session := tunnel.NewQUICSession(qconn)
 	tunnel.SetPeerCapabilities(session, []string{protocol.UDPModeDatagram})
+	session.SetConnectionPath(netpath.Describe("p2p_quic", qconn.LocalAddr(), qconn.RemoteAddr()))
 	return &QUICSession{QUICSession: session, conn: qconn, transport: transport}, nil
 }
 

@@ -23,7 +23,7 @@ func testBrowserAdminRouter(t *testing.T) (*Router, *browsersync.Store) {
 	}
 	t.Cleanup(func() { _ = db.Close() })
 	db.SetMaxOpenConns(1)
-	if _, err := db.Exec(`CREATE TABLE identities(id TEXT PRIMARY KEY,status TEXT NOT NULL)`); err != nil {
+	if _, err := db.Exec(`CREATE TABLE identities(id TEXT PRIMARY KEY,short_id TEXT UNIQUE,status TEXT NOT NULL)`); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := db.Exec(`INSERT INTO identities(id,status) VALUES('id_1','active')`); err != nil {

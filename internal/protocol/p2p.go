@@ -46,21 +46,22 @@ type P2PControlMessage struct {
 	PeerFingerprint string         `json:"peerFingerprint,omitempty"`
 	// PeerCapabilities are injected by the authenticated Relay coordinator.
 	// Peers must never trust capabilities echoed from the remote P2P endpoint.
-	PeerCapabilities  []string    `json:"peerCapabilities,omitempty"`
-	RelayPolicy       *acl.Policy `json:"relayPolicy,omitempty"`
-	BrutalUploadBPS   uint64      `json:"brutalUploadBps,omitempty"`
-	BrutalDownloadBPS uint64      `json:"brutalDownloadBps,omitempty"`
-	LeaseExpiresAt    int64       `json:"leaseExpiresAt,omitempty"`
-	RendezvousAddress string      `json:"rendezvousAddress,omitempty"`
-	LeaseSec          int         `json:"leaseSec,omitempty"`
-	Path              string      `json:"path,omitempty"`
-	RTTMs             int64       `json:"rttMs,omitempty"`
-	CandidateSummary  string      `json:"candidateSummary,omitempty"`
-	FallbackCount     uint64      `json:"fallbackCount,omitempty"`
-	ActiveStreams     int         `json:"activeStreams,omitempty"`
-	BytesUp           uint64      `json:"bytesUp,omitempty"`
-	BytesDown         uint64      `json:"bytesDown,omitempty"`
-	Reason            string      `json:"reason,omitempty"`
-	ErrorCode         string      `json:"errorCode,omitempty"`
-	ErrorMessage      string      `json:"errorMessage,omitempty"`
+	PeerCapabilities  []string        `json:"peerCapabilities,omitempty"`
+	RelayPolicy       *acl.Policy     `json:"relayPolicy,omitempty"`
+	BrutalUploadBPS   uint64          `json:"brutalUploadBps,omitempty"`
+	BrutalDownloadBPS uint64          `json:"brutalDownloadBps,omitempty"`
+	LeaseExpiresAt    int64           `json:"leaseExpiresAt,omitempty"`
+	RendezvousAddress string          `json:"rendezvousAddress,omitempty"`
+	LeaseSec          int             `json:"leaseSec,omitempty"`
+	PathInfo          *ConnectionPath `json:"pathInfo,omitempty"`
+	Path              string          `json:"path,omitempty"`
+	RTTMs             int64           `json:"rttMs,omitempty"`
+	CandidateSummary  string          `json:"candidateSummary,omitempty"`
+	FallbackCount     uint64          `json:"fallbackCount,omitempty"`
+	ActiveStreams     int             `json:"activeStreams,omitempty"`
+	BytesUp           uint64          `json:"bytesUp,omitempty"`
+	BytesDown         uint64          `json:"bytesDown,omitempty"`
+	Reason            string          `json:"reason,omitempty"`
+	ErrorCode         string          `json:"errorCode,omitempty"`
+	ErrorMessage      string          `json:"errorMessage,omitempty"`
 }

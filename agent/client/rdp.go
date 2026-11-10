@@ -59,7 +59,7 @@ func (d *TunnelDialer) DialRDPTCP(ctx context.Context, targetDeviceID string) (n
 		return nil, err
 	}
 	_ = stream.SetDeadline(time.Time{})
-	return tunnel.NewNetConnAdapter(stream, sess.LocalAddr(), proxyAddr{net: "tcp", addr: targetDeviceID}), nil
+	return &tcpPathConn{NetConnAdapter: &tunnel.NetConnAdapter{Stream: stream, LocalAddrVal: sess.LocalAddr(), RemoteAddrVal: proxyAddr{net: "tcp", addr: targetDeviceID}}, path: relaySessionPath(sess), info: sessionPathInfo(sess, relaySessionPath(sess)), source: pathSource(sess)}, nil
 }
 
 // DialRDPUDP opens the unreliable RDP UDP path. It intentionally has no
@@ -130,5 +130,5 @@ func (d *TunnelDialer) DialRDPUDP(ctx context.Context, targetDeviceID string) (n
 	}
 	_ = stream.SetDeadline(time.Time{})
 	keepDatagrams = true
-	return tunnel.NewUDPDatagramConnWithIdleTimeout(datagrams, stream, proxyAddr{net: "udp", addr: targetDeviceID}, 0), nil
+	return &packetPathConn{PacketConn: tunnel.NewUDPDatagramConnWithIdleTimeout(datagrams, stream, proxyAddr{net: "udp", addr: targetDeviceID}, 0), info: sessionPathInfo(sess, relaySessionPath(sess)), source: pathSource(sess)}, nil
 }

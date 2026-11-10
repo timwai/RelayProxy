@@ -423,11 +423,11 @@ export async function executeSiteIndexedDB(tabId,args){
   throw new Error('IndexedDB 读取或预校验未返回结果；请保持网站标签页打开并刷新后重试');
 }
 
-export async function captureIndexedDB(policy){
+export async function captureIndexedDB(policy,{tabId=null}={}){
   const p=validatePolicy(policy);
   if(![3,4].includes(p.schemaVersion)||p.indexedDB!==true)throw new Error('配对未授权 IndexedDB 同步');
-  const tabId=await tabFor(p.siteOrigin);
-  return validateIndexedDBSnapshot(await executeSiteIndexedDB(tabId,[p.siteOrigin,'read']));
+  const id=tabId??await tabFor(p.siteOrigin);
+  return validateIndexedDBSnapshot(await executeSiteIndexedDB(id,[p.siteOrigin,'read']));
 }
 
 export async function prepareIndexedDBRestore(ruleId,data,policy,{allowOverwrite=false,tabId=null}={}){

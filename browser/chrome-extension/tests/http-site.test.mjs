@@ -20,7 +20,8 @@ test('site picker, popup and permission confirmation support HTTP origins',()=>{
   assert.match(opts,/HTTP.*window.confirm|window.confirm\([\s\S]*?HTTP/);
   assert.match(opts,/chrome.permissions.request/);
   assert.match(src('options.html'),/选择 HTTP \/ HTTPS 站点/);
-  assert.match(opts,/if\(rule.status==='active' && rule.valid && rule.policy.siteOrigin.startsWith\('https:\/\/'\)\)/);
+  assert.match(opts,/if\(rule.status==='active' && rule.valid\)/);
+  assert.doesNotMatch(opts,/网络绑定仅支持 HTTPS 443/);
 });
 
 test('HTTP snapshots cannot export secure cookies or HTTP data as legacy v1',()=>{

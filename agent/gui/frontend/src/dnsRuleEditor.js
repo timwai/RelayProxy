@@ -68,12 +68,17 @@ function parseIPAddress(value) {
   const ip=String(value??'').trim();
   if(!ip||ip!==value||ip.includes('%'))return null;
   if(/^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip)){
-    const octets=ip.split('.').map(Number);
+    const parts=ip.split('.');
+    if(!parts.every(part=>/^(0|[1-9][0-9]{0,2})$/.test(part)))return null;
+    const octets=parts.map(Number);
     if(!octets.every(part=>part>=0&&part<=255))return null;
     return {family:4,octets};
   }
   if(!ip.includes(':'))return null;
-  try { new URL('http://['+ip+']/'); return {family:6,text:ip.toLowerCase()}; } catch { return null; }
+  try {
+    const hostname=new URL('http://['+ip+']/').hostname;
+    return {family:6,text:hostname.slice(1,-1).toLowerCase()};
+  } catch { return null; }
 }
 
 function isUnicastIP(ip) {
@@ -104,9 +109,12 @@ function validDoHURL(value) {
     const u=new URL(value);
     const authorityAndPath=value.slice(8).split(/[?#]/,1)[0];
     const pathSeparator=authorityAndPath.indexOf('/');
+    const authority=authorityAndPath.slice(0,pathSeparator);
     const host=u.hostname;
     if(u.protocol!=='https:'||!host||!(pathSeparator>0)||u.port!==''||
-      u.username||u.password||u.search||u.hash||/^\d+(?:\.\d+){3}$/.test(host)||
+      u.username||u.password||u.search||u.hash||
+      !/^[a-z0-9.-]+(?::443)?$/i.test(authority)||
+      /^\d+(?:\.\d+){3}$/.test(host)||
       !host.includes('.')||host.length>253||!/^[a-z0-9.-]+$/i.test(host))return false;
     return host.split('.').every(label=>label.length>0&&label.length<=63&&
       label[0]!=='-'&&label[label.length-1]!=='-');

@@ -141,8 +141,10 @@ export function validateDNSSettings(r={},defaultExitId='') {
     const minimum=ip?.family===4?24:48,maximum=ip?.family===4?32:128;
     if(raw!==value||parts.length>2||!isPublicIP(ip)||(parts.length===2&&(!/^\d+$/.test(parts[1])||Number(parts[1])<minimum||Number(parts[1])>maximum)))return 'DoH 阻断地址格式无效：'+value;
   }
+  if(r.dns_mode&&r.dns_mode!=='proxy'&&r.dns_mode!=='local')return 'DNS 模式无效：请选择代理解析或本地解析';
   if(r.proxy_dns_enabled&&(r.dns_mode==='local'||r.auto_detect_dns))return '代理 DNS 需要选择“代理解析”，不能同时启用本地 DNS 自动检测';
   if(r.proxy_dns_enabled&&r.fake_ip_enabled)return '真实 IP 代理 DNS 与 FakeIP 不能同时启用';
+  if(r.auto_detect_dns&&r.fake_ip_enabled)return '本地 DNS 自动检测与 FakeIP 不能同时启用';
   if(r.fake_ip_enabled&&r.dns_mode==='local')return 'FakeIP 模式需要使用代理 DNS';
   if((r.block_doh_endpoints||r.forward_other_dns)&&!r.fake_ip_enabled)return 'DoH 阻断和 TXT/SRV 转发仅适用于 FakeIP 模式';
   return '';

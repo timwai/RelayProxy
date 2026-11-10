@@ -44,3 +44,17 @@ test('IP validation blocks loopback bootstrap and private or overly broad DoH bl
  assert.match(validateDNSSettings({...base,doh_blocked_ips:['8.8.8.0/16']}),/格式无效/);
  assert.equal(validateDNSSettings({...base,doh_blocked_ips:['8.8.8.8','1.1.1.0/24']}),'');
 });
+
+test('DNS rule system resolver follows the default exit and rejects a local custom proxy',()=>{
+ assert.equal(validateDNSRule({action:'REMOTE',resolver:'exit_system',domains:'example.com'},''),'');
+ assert.match(validateDNSRule({action:'REMOTE',resolver:'exit_system',domains:'example.com'},'local:custom'),/不支持本机自定义代理/);
+ assert.equal(validateDNSRule({action:'REMOTE',resolver:'exit_system',exit_id:'device-1',domains:'example.com'},'local:custom'),'');
+});
+
+test('DoH URL validation matches backend path and port rules',()=>{
+ const base={dns_mode:'proxy',proxy_dns_enabled:true,fake_ip_enabled:false,dns_rules:[],dns_direct_domains:[],doh_blocked_ips:[]};
+ assert.equal(validateDNSSettings({...base,dns_upstreams:[{url:'https://dns.example:443/',bootstrap_ip:'1.1.1.1'}]}),'');
+ assert.match(validateDNSSettings({...base,dns_upstreams:[{url:'https://dns.example',bootstrap_ip:'1.1.1.1'}]}),/HTTPS/);
+ assert.match(validateDNSSettings({...base,dns_exit_id:'bad exit'}),/出口 ID/);
+ assert.equal(validateDNSSettings({...base,dns_exit_id:'local:proxy'}),'');
+});

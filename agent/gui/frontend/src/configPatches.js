@@ -30,6 +30,6 @@ export function dnsPagePatch(r) {
     dns_upstreams:Array.isArray(r.dns_upstreams)?r.dns_upstreams:[],
     dns_direct_domains:splitRuleList(r.dns_direct_domains).map(domain=>domain.toLowerCase().replace(/[.]$/,'')),
     dns_rules:Array.isArray(r.dns_rules)?r.dns_rules.map(x=>{const action=x.action==='LOCAL'?'LOCAL':'REMOTE';return {...x,name:String(x.name||'').trim(),enabled:x.enabled!==false,action,resolver:action==='REMOTE'?(x.resolver==='exit_system'?'exit_system':'encrypted'):'encrypted',exit_id:action==='REMOTE'?String(x.exit_id||'').trim():'',domains:splitRuleList(x.domains).map(domain=>domain.toLowerCase().replace(/[.]$/,''))}}):[],
-    doh_blocked_ips:Array.isArray(r.doh_blocked_ips)?r.doh_blocked_ips:[],
+    doh_blocked_ips:splitRuleList(r.doh_blocked_ips),
   };
 }

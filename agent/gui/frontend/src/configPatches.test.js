@@ -62,3 +62,8 @@ test('DNS save normalizes rule actions and never sends stale local exit referenc
 test('DNS direct domains are normalized without trailing root dots',()=>{
  assert.deepEqual(dnsPagePatch({dns_direct_domains:['CORP.EXAMPLE.','intranet.example']}).dns_direct_domains,['corp.example','intranet.example']);
 });
+
+test('DoH blocklist textarea preserves raw input until save then splits lines',()=>{
+ assert.deepEqual(dnsPagePatch({doh_blocked_ips:'1.1.1.1\n\n8.8.8.8/32\n'}).doh_blocked_ips,['1.1.1.1','8.8.8.8/32']);
+ assert.deepEqual(dnsPagePatch({doh_blocked_ips:['1.1.1.1','8.8.8.8/32']}).doh_blocked_ips,['1.1.1.1','8.8.8.8/32']);
+});

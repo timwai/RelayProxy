@@ -58,3 +58,10 @@ test('DoH URL validation matches backend path and port rules',()=>{
  assert.match(validateDNSSettings({...base,dns_exit_id:'bad exit'}),/出口 ID/);
  assert.equal(validateDNSSettings({...base,dns_exit_id:'local:proxy'}),'');
 });
+
+test('DNS mode validation matches backend automatic-detection constraints',()=>{
+ const base={dns_mode:'proxy',proxy_dns_enabled:false,fake_ip_enabled:false,auto_detect_dns:false,dns_rules:[],dns_upstreams:[],dns_direct_domains:[],doh_blocked_ips:[]};
+ assert.match(validateDNSSettings({...base,dns_mode:'unknown'}),/DNS 模式无效/);
+ assert.match(validateDNSSettings({...base,auto_detect_dns:true,fake_ip_enabled:true}),/自动检测与 FakeIP/);
+ assert.equal(validateDNSSettings({...base,auto_detect_dns:true,dns_mode:'local'}),'');
+});

@@ -2,21 +2,34 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 
-// Smoke test for the desktop DNS page's advanced controls. The first draft
-// accidentally rendered an empty advanced fragment, hiding persisted settings.
-test('simplified DNS page retains advanced settings and diagnostics',()=>{
-  const source=readFileSync(new URL('./App.jsx',import.meta.url),'utf8');
-  const begin=source.indexOf('function DNSPage(');
-  const end=source.indexOf('function RDPPage(',begin);
-  assert.ok(begin>=0 && end>begin,'DNSPage must be present');
-  const dnsPage=source.slice(begin,end);
-  for(const field of ['routing.dns_association_enabled','routing.dns_exit_id','routing.dns_upstreams','routing.doh_blocked_ips','setDoHBlocking(r,v)','setOtherDNSForwarding(r,v)']){
-    assert.ok(dnsPage.includes(field),'missing DNS advanced option '+field);
-  }
-  assert.ok(dnsPage.includes('disabled={!r.fake_ip_enabled}'),'FakeIP-dependent protection needs explicit mode guard');
-  assert.ok(dnsPage.includes("call('goProbeDNS')"),'DNS diagnostics must remain available on the DNS page');
-  assert.ok(dnsPage.includes('updateDNSRule') && dnsPage.includes('添加 DNS 域名规则'),'DNS domain rules editor must be present');
-  assert.match(source,/\['diagnostics','terminal','诊断'/,'full diagnostics must remain available in navigation');
-  assert.doesNotMatch(dnsPage,/实际运行状态|dnsProtection/,'runtime DNS status belongs to the diagnostics page');
-  assert.doesNotMatch(dnsPage,/onGoto\(/,'DNS settings should not duplicate sidebar navigation');
+test('DNS page exposes a complete, always-visible configuration workflow',()=>{
+ const source=readFileSync(new URL('./App.jsx',import.meta.url),'utf8');
+ const begin=source.indexOf('function DNSPage(');
+ const end=source.indexOf('function RDPPage(',begin);
+ assert.ok(begin>=0&&end>begin,'DNSPage must be present');
+ const page=source.slice(begin,end);
+ for(const feature of [
+  'DNS 解析模式','按域名选择 DNS 出口','DNS 出口与域名关联',
+  '自定义 DoH 上游','本地 DNS 例外','FakeIP 与 DoH 防护','DNS 出口诊断',
+  'validateDNSSettings','moveRule(rules,i,i-1)','moveRule(rules,i,i+1)',
+  'normalizeDNSRuleDraft','validateDNSRule','保存 DNS 配置'
+ ])assert.ok(page.includes(feature),'missing DNS page feature '+feature);
+ assert.match(page,/role="radiogroup" aria-label="DNS 解析模式"/);
+ assert.match(page,/aria-label="规则上移"/);
+ assert.match(page,/aria-label="规则下移"/);
+ assert.match(page,/call\('goProbeDNS'\)/);
+ assert.match(page,/role="alert"/);
+ assert.match(page,/disabled=\{!dirty\|\|saving\}/);
+ assert.doesNotMatch(page,/advancedOpen/,'DNS settings must not hide primary controls behind an advanced toggle');
+});
+
+test('DNS upstream editor commits validated entries from an explicit dialog',()=>{
+ const source=readFileSync(new URL('./App.jsx',import.meta.url),'utf8');
+ const begin=source.indexOf('function DNSUpstreamsEditor(');
+ const end=source.indexOf('function DNSPage(',begin);
+ const editor=source.slice(begin,end);
+ assert.match(editor,/validateDNSSettings/);
+ assert.match(editor,/Bootstrap IP/);
+ assert.match(editor,/onChange\(next\)/);
+ assert.match(editor,/添加 DoH 上游/);
 });

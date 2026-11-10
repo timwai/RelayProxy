@@ -45,5 +45,25 @@ test('DNS page save includes independently persisted association and real DNS sw
 
 test('DNS rule save keeps domain lists and exit selection',()=>{
  const payload=dnsPagePatch({dns_rules:[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:['*.google.com','*.googleapis.com']}]});
- assert.deepEqual(payload.dns_rules,[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',domains:['*.google.com','*.googleapis.com']}]);
+ assert.deepEqual(payload.dns_rules,[{name:'Google',enabled:true,action:'REMOTE',exit_id:'us-exit',resolver:'encrypted',domains:['*.google.com','*.googleapis.com']}]);
+});
+
+test('DNS save normalizes rule actions and never sends stale local exit references',()=>{
+ const payload=dnsPagePatch({dns_mode:'proxy',dns_rules:[
+  {name:'local',enabled:true,action:'LOCAL',resolver:'exit_system',exit_id:'local:proxy',domains:'intranet.example'},
+  {name:'remote',enabled:false,action:'REMOTE',resolver:'exit_system',exit_id:'device-1',domains:'*.example.com'}
+ ]});
+ assert.deepEqual(payload.dns_rules,[
+  {name:'local',enabled:true,action:'LOCAL',resolver:'encrypted',exit_id:'',domains:['intranet.example']},
+  {name:'remote',enabled:false,action:'REMOTE',resolver:'exit_system',exit_id:'device-1',domains:['*.example.com']}
+ ]);
+});
+
+test('DNS direct domains are normalized without trailing root dots',()=>{
+ assert.deepEqual(dnsPagePatch({dns_direct_domains:['CORP.EXAMPLE.','intranet.example']}).dns_direct_domains,['corp.example','intranet.example']);
+});
+
+test('DoH blocklist textarea preserves raw input until save then splits lines',()=>{
+ assert.deepEqual(dnsPagePatch({doh_blocked_ips:'1.1.1.1\n\n8.8.8.8/32\n'}).doh_blocked_ips,['1.1.1.1','8.8.8.8/32']);
+ assert.deepEqual(dnsPagePatch({doh_blocked_ips:['1.1.1.1','8.8.8.8/32']}).doh_blocked_ips,['1.1.1.1','8.8.8.8/32']);
 });

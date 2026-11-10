@@ -15,11 +15,11 @@ import FileSharingPage from './FileSharingPage.jsx';
 import useDialogFocus from './useDialogFocus.js';
 import {setDoHBlocking,setOtherDNSForwarding} from './dnsSettings.js';
 import {currentDNSPreset,applyDNSPreset} from './dnsPresets.js';
-import {formatDNSUpstreamLines,parseDNSUpstreamLines} from './dnsUpstreams.js';
 import {routingPagePatch,dnsPagePatch,changedGatewayPatch} from './configPatches.js';
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 import {rdpPathLabel} from './pathStatus.js';
 import {DEVICE_SPEED_REVIEW_STEPS,deviceSpeedChecks} from './deviceSpeedChecks.js';
+import {buildDNSRule,normalizeDNSRuleDraft,validateDNSRule,validateDNSSettings} from './dnsRuleEditor.js';
 
 // One flat sidebar, grouped by what the user is trying to do:
 // which network to use (出口) → which traffic goes through it (分流 / DNS) →
@@ -567,132 +567,247 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
 // The three presets intentionally project to legacy backend fields. Advanced
 // settings are retained for existing deployments and specialised debugging.
 function DNSUpstreamsEditor({upstreams,onChange}){
- const[draft,setDraft]=useState(()=>formatDNSUpstreamLines(upstreams));
- useEffect(()=>setDraft(formatDNSUpstreamLines(upstreams)),[upstreams]);
- return <Textarea rows="4" placeholder={'https://resolver.example/dns-query | 10.0.0.53'}
-  value={draft} onChange={e=>setDraft(e.target.value)}
-  onBlur={()=>onChange(parseDNSUpstreamLines(draft))}/>;
+ const items=arr(upstreams);
+ const[editor,setEditor]=useState(null),[error,setError]=useState('');
+ const open=(index=-1)=>{
+  setError('');
+  const current=index>=0?items[index]:{url:'',bootstrap_ip:''};
+  setEditor({index,draft:{url:current?.url||'',bootstrap_ip:current?.bootstrap_ip||''}});
+ };
+ const update=(key,value)=>setEditor(old=>({...old,draft:{...old.draft,[key]:value}}));
+ const commit=()=>{
+  const item={url:String(editor?.draft.url||'').trim(),bootstrap_ip:String(editor?.draft.bootstrap_ip||'').trim()};
+  const message=validateDNSSettings({dns_upstreams:[item]});
+  if(message){setError(message.replace(/^第 1 个 DoH 上游地址无效：/,'').replace(/^第 1 个 DoH 上游缺少有效的 /,''));return}
+  const next=[...items];
+  if(editor.index<0)next.push(item);else next[editor.index]=item;
+  onChange(next);setEditor(null);setError('');
+ };
+ return <>
+  <div className="dns-upstream-list">
+   {items.length===0&&<div className="dns-empty-inline">未配置自定义上游，将使用内置 DoH 解析器。</div>}
+   {items.map((item,i)=><div className="dns-upstream-row" key={item.url+'-'+i}>
+    <div className="dns-upstream-index">{i+1}</div>
+    <div className="dns-upstream-order"><Button quiet disabled={i===0} onClick={()=>onChange(moveRule(items,i,i-1))}>↑</Button><Button quiet disabled={i===items.length-1} onClick={()=>onChange(moveRule(items,i,i+1))}>↓</Button></div>
+    <div className="grow dns-upstream-info"><strong>{item.url||'未填写 DoH 地址'}</strong><span>Bootstrap IP：<code>{item.bootstrap_ip||'未填写'}</code></span></div>
+    <Button quiet onClick={()=>open(i)}>编辑</Button>
+    <Button quiet danger onClick={()=>onChange(items.filter((_,j)=>j!==i))}>删除</Button>
+   </div>)}
+  </div>
+  <div className="actions end top-gap"><Button disabled={items.length>=8} onClick={()=>open(-1)}>添加 DoH 上游{items.length>=8?'（已达上限）':''}</Button></div>
+  <Modal open={!!editor} title={editor?.index>=0?'编辑 DoH 上游':'添加 DoH 上游'} wide onClose={()=>setEditor(null)} footer={<><Button onClick={()=>setEditor(null)}>取消</Button><Button primary onClick={commit}>保存上游</Button></>}>
+   <div className="form-grid">
+    <Field label="DoH URL" className="full" help="仅支持 HTTPS 域名和路径，端口使用 443；例如 https://dns.example/dns-query。">
+     <Input value={editor?.draft.url||''} onChange={e=>update('url',e.target.value)} placeholder="https://dns.example/dns-query" autoComplete="off"/>
+    </Field>
+    <Field label="Bootstrap IP" className="full" help="填写 DoH 域名对应的字面 IP，用于直接拨号，避免先通过本机 DNS 解析 DoH 域名。">
+     <Input value={editor?.draft.bootstrap_ip||''} onChange={e=>update('bootstrap_ip',e.target.value)} placeholder="1.1.1.1" autoComplete="off"/>
+    </Field>
+   </div>
+   {error&&<div className="notice danger top-gap" role="alert">{error}</div>}
+  </Modal>
+ </>;
 }
 
 function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
- const[advancedOpen,setAdvancedOpen]=useState(false);
- const[probing,setProbing]=useState(false);
- const[probe,setProbe]=useState(null);
+ const[ruleEditor,setRuleEditor]=useState(null),[ruleError,setRuleError]=useState('');
+ const[saveError,setSaveError]=useState(''),[saving,setSaving]=useState(false);
+ const[probing,setProbing]=useState(false),[probe,setProbe]=useState(null);
+ const r=config.routing||EMPTY.routing;
+ const rules=arr(r.dns_rules);
+ const inventory=[
+  ...withExitGroups(arr(exits),arr(r.device_groups)).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id,kind:x.kind||'device'})),
+  ...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id,kind:'custom'}))
+ ].filter(x=>x.id);
+ const deviceExits=inventory.filter(x=>x.kind!=='custom'&&!String(x.id).startsWith('local:'));
+ const defaultExitId=status.selectedExit||config.defaultExitId||'';
+ const dnsExitId=r.dns_exit_id||defaultExitId;
+ const defaultExit=inventory.find(x=>x.id===defaultExitId);
+ const preset=currentDNSPreset(r);
+ const change=next=>{setProbe(null);setSaveError('');setv('routing',next)};
+ const updateRule=(index,patch)=>change({...r,dns_rules:rules.map((item,i)=>i===index?{...item,...patch}:item)});
+ const openRuleEditor=(index=-1)=>{
+  setRuleError('');
+  const current=index>=0?rules[index]:{name:'',enabled:true,action:'REMOTE',resolver:'encrypted',exit_id:'',domains:[]};
+  setRuleEditor({index,draft:normalizeDNSRuleDraft(current)});
+ };
+ const updateRuleDraft=(key,value)=>setRuleEditor(old=>({...old,draft:{...old.draft,[key]:value}}));
+ const commitRuleEditor=()=>{
+  if(!ruleEditor)return;
+  const rule=buildDNSRule(ruleEditor.draft);
+  const error=validateDNSRule(rule,defaultExitId);
+  if(error){setRuleError(error);return}
+  const next=[...rules];
+  if(ruleEditor.index<0)next.push(rule);else next[ruleEditor.index]=rule;
+  change({...r,dns_rules:next});
+  setRuleEditor(null);setRuleError('');
+ };
+ const handleSave=async()=>{
+  const validation=validateDNSSettings(r,defaultExitId);
+  if(validation){setSaveError(validation);return}
+  setSaving(true);setSaveError('');
+  try{
+   const ok=await save({routing:dnsPagePatch(r)},message=>setSaveError(message));
+   if(ok){setSaveError('');setProbe(null)}
+  }finally{setSaving(false)}
+ };
  const runDNSProbe=async()=>{
-  if(probing||dirty)return;
+  if(probing||dirty||saving)return;
   setProbing(true);setProbe(null);
-  try {
+  try{
    const response=parseMutation(await call('goProbeDNS'));
    if(!response.ok)throw new Error(response.message||'DNS 出口诊断失败');
    setProbe({result:response.result||response});
   }catch(e){setProbe({error:e.message||'DNS 出口诊断失败'})}
   finally{setProbing(false)}
  };
- const r=config.routing||EMPTY.routing;
- const inventory=[...withExitGroups(arr(exits),arr(r.device_groups)).map(x=>({id:x.deviceId||x.id,name:x.name||x.deviceName||x.deviceId||x.id})),...arr(config.customExits).filter(x=>x.enabled).map(x=>({id:x.id,name:x.name||x.id}))];
- const change=next=>setv('routing',next);
- const updateDNSRule=(i,patch)=>change({...r,dns_rules:arr(r.dns_rules).map((x,j)=>j===i?{...x,...patch}:x)});
- const preset=currentDNSPreset(r);
- return <><PageHead title="DNS" desc="系统 DNS 的解析方式、加密 DNS 出口与防泄漏选项；实际接管状态请在「诊断」页查看。"/>
- <Card title="DNS 处理模式" eyebrow="DNS POLICY">
-  <Field label="解析模式" help="切换模式会统一更新内部 DNS 选项，旧版配置仍可使用。">
-   <Select value={preset} onChange={e=>change(applyDNSPreset(r,e.target.value))}>
-    <option value="auto">自动（推荐）· 经代理接管系统 DNS，返回真实 IP</option>
-    <option value="real_ip">真实 IP · 旁路关联域名，不接管系统 DNS</option>
-    <option value="fake_ip">FakeIP · 虚拟地址与域名映射</option>
-   </Select>
-  </Field>
-  <div className="notice top-gap">{preset==='auto'?'自动模式：接管可捕获的系统 DNS/53 查询，经代理出口解析真实 IP；连接中的已知域名交给出口解析。':preset==='real_ip'?'真实 IP 模式：保留系统 DNS，观察传统 DNS 响应以关联域名；DNS 查询可能从本机发出。':'FakeIP 模式：为接管的 DNS 查询分配虚拟地址，并在连接时恢复域名。'}</div>
-  <div className="mini top-gap">透明代理需处于运行状态才能接管系统 DNS。Chrome 私有 DoH、环回 DNS 与 Agent 退出后的防泄漏不保证由此模式覆盖；可在诊断页检查。</div>
-  <div className="actions end top-gap"><Button onClick={()=>setAdvancedOpen(!advancedOpen)}>{advancedOpen?'收起高级设置':'高级设置 ›'}</Button></div>
- </Card>
- <Card title="按域名选择 DNS 解析出口" eyebrow="DOMAIN DNS">
-  <div className="mini">{arr(r.dns_rules).length?'按顺序匹配 DNS/53 域名；未命中规则使用本地 DNS。指定远程解析的域名失败时不回退本地。':'尚未设置域名规则：保持原有 DNS 策略。添加规则后，未命中的域名使用本地 DNS。'}此功能在「自动」真实 IP 接管模式下生效，DNS 出口与后续流量分流互相独立。</div>
-  {arr(r.dns_rules).map((rule,i)=><div className="target-row top-gap" key={i}>
-   <div className="grow">
-    <div className="form-grid">
-     <Field label="名称"><Input value={rule.name||''} onChange={e=>updateDNSRule(i,{name:e.target.value})} placeholder="国外域名"/></Field>
-     <Field label="解析位置"><Select value={rule.action||'REMOTE'} onChange={e=>updateDNSRule(i,{action:e.target.value,exit_id:e.target.value==='REMOTE'?rule.exit_id||'':'',resolver:e.target.value==='REMOTE'?rule.resolver||'encrypted':'encrypted'})}><option value="REMOTE">指定出口远程解析</option><option value="LOCAL">本地系统 DNS</option></Select></Field>
-     <Field label="域名（每行一个）" className="full" help="使用 *.example.com 匹配该域名和全部子域名；example.com 只匹配根域名。">
-      <Textarea rows="2" placeholder="*.google.com" value={ruleListText(rule.domains)} onChange={e=>updateDNSRule(i,{domains:e.target.value})}/>
+ const modeCards=[
+  {id:'auto',title:'自动代理解析',tag:'推荐',desc:'接管可捕获的系统 DNS/53 查询，通过代理出口解析真实 IP；域名 DNS 规则在此模式生效。'},
+  {id:'real_ip',title:'真实 IP / 仅关联',tag:'不接管 DNS',desc:'保留系统 DNS，只观察可见的 DNS 应答建立域名关联；查询本身可能从本机网络发出。'},
+  {id:'fake_ip',title:'FakeIP',tag:'虚拟地址',desc:'为被接管的 DNS 查询分配虚拟 IP，再由连接映射还原域名；DoH 防护选项仅在此模式可用。'}
+ ];
+ const exitLabel=(id,fallbackId=defaultExitId)=>{const target=id||fallbackId;if(!target)return '跟随当前默认出口';return inventory.find(x=>x.id===target)?.name||target};
+ return <>
+  <PageHead title="DNS" desc="解析模式、按域名选择出口、加密上游与 FakeIP 防护。保存前自动校验；诊断只测试已保存配置。"/>
+  <div className="dns-page">
+   <Card title="DNS 解析模式" eyebrow="01 · RESOLUTION MODE" action={<Badge tone={preset==='auto'?'ok':preset==='fake_ip'?'blue':'neutral'}>{preset==='auto'?'代理解析':preset==='fake_ip'?'FakeIP':'仅关联'}</Badge>}>
+    <div className="dns-mode-grid" role="radiogroup" aria-label="DNS 解析模式">
+     {modeCards.map(item=><button type="button" key={item.id} role="radio" aria-checked={preset===item.id} className={'dns-mode-option'+(preset===item.id?' active':'')} onClick={()=>change(applyDNSPreset(r,item.id))}>
+      <span className="dns-mode-option-top"><strong>{item.title}</strong>{item.tag&&<span>{item.tag}</span>}</span>
+      <span className="dns-mode-option-desc">{item.desc}</span>
+      <span className="dns-mode-option-check">{preset===item.id?'当前使用':'选择此模式'}</span>
+     </button>)}
+    </div>
+    <div className="dns-mode-foot">
+     <div className="grow"><strong>{preset==='auto'?'域名规则已具备生效条件':preset==='fake_ip'?'当前使用 FakeIP 映射':'当前不接管系统 DNS'}</strong><div className="mini">{preset==='auto'?'必须启动系统接管/透明代理才能处理经过 Agent DNS/53 接管路径的请求；应用私有 DoH、环回 DNS 和系统缓存不在保证范围内。':preset==='fake_ip'?'FakeIP 与真实 IP 代理 DNS 不能同时启用。切换模式会自动清理不兼容开关。':'已配置的域名 DNS 规则会保留，但不会参与解析；切换到自动代理解析后才会生效。'}</div></div>
+    </div>
+   </Card>
+
+   <Card title="按域名选择 DNS 出口" eyebrow="02 · DOMAIN RULES" action={<Button primary onClick={()=>openRuleEditor(-1)}>添加规则</Button>}>
+    <div className="dns-section-intro">
+     <div className="mini">按列表顺序匹配，第一条命中规则优先。未命中的域名使用本地系统 DNS；远程解析失败时不会回退本地，避免意外泄漏。出口系统 DNS 只处理 A/AAAA；TXT、SRV、HTTPS 等额外查询仍经同一出口的加密 DNS。出口系统 DNS 需要较新版本的 Relay 与出口 Agent；旧版本或断线时返回 SERVFAIL，不回退本地。</div>
+     <div className="dns-rule-count"><strong>{rules.length}</strong><span>条规则</span><i>·</i><span>{rules.filter(x=>x.enabled!==false).length} 条启用</span></div>
+    </div>
+    {preset!=='auto'&&<div className="notice warn top-gap">当前模式下域名 DNS 规则不会执行。规则仍可编辑和保存，切换到「自动代理解析」后生效。</div>}
+    {rules.length===0?<div className="dns-empty-state"><div className="dns-empty-icon">DNS</div><strong>还没有域名 DNS 规则</strong><span>添加规则，为不同域名指定本地 DNS、加密 DNS 或出口设备的系统 DNS。</span><Button onClick={()=>openRuleEditor(-1)}>添加第一条规则</Button></div>:
+     <div className="dns-rule-list">
+      {rules.map((rule,i)=>{
+       const domains=splitRuleList(rule.domains);
+       const remote=rule.action!=='LOCAL';
+       const resolver=rule.resolver==='exit_system'?'出口设备系统 DNS（A / AAAA）':'加密 DoH / DoT';
+       return <div className={'dns-rule-item'+(rule.enabled===false?' disabled':'')} key={i}>
+        <div className="dns-rule-order"><strong>{i+1}</strong><span>优先级</span></div>
+        <div className="dns-rule-content">
+         <div className="dns-rule-heading"><strong>{rule.name||domains[0]||'未命名规则'}</strong><Badge tone={rule.enabled===false?'neutral':'ok'}>{rule.enabled===false?'已停用':'已启用'}</Badge><Badge tone={remote?'blue':'neutral'}>{remote?'远程解析':'本地解析'}</Badge></div>
+         <div className="dns-rule-domains">{domains.length?domains.slice(0,5).map((domain,j)=><code key={domain+'-'+j}>{domain}</code>):<span className="dns-rule-invalid">尚未填写域名</span>}{domains.length>5&&<span className="dns-rule-more">+{domains.length-5}</span>}</div>
+         <div className="dns-rule-meta">{domains.length} 个域名 · {remote?resolver+' · '+exitLabel(rule.exit_id,rule.resolver==='exit_system'?defaultExitId:dnsExitId):'使用本机系统 DNS'}</div>
+        </div>
+        <div className="dns-rule-controls">
+         <div className="dns-order-controls"><button type="button" aria-label="规则上移" title="上移" disabled={i===0} onClick={()=>change({...r,dns_rules:moveRule(rules,i,i-1)})}>↑</button><button type="button" aria-label="规则下移" title="下移" disabled={i===rules.length-1} onClick={()=>change({...r,dns_rules:moveRule(rules,i,i+1)})}>↓</button></div>
+         <Button quiet onClick={()=>openRuleEditor(i)}>编辑</Button>
+         <Button quiet onClick={()=>updateRule(i,{enabled:rule.enabled===false})}>{rule.enabled===false?'启用':'停用'}</Button>
+         <Button quiet danger onClick={()=>change({...r,dns_rules:rules.filter((_,j)=>j!==i)})}>删除</Button>
+        </div>
+       </div>
+      })}
+     </div>}
+    <div className="dns-rule-footer"><span className="mini">最多 128 条规则；每条规则支持 1–64 个域名。支持精确域名和 *.example.com 通配符。</span><Button onClick={()=>openRuleEditor(-1)}>添加 DNS 规则</Button></div>
+   </Card>
+
+   <Card title="DNS 出口与域名关联" eyebrow="03 · DNS EXIT">
+    <Setting title="DNS 域名关联" desc="记录可验证的 DNS A/AAAA 应答，为透明代理连接提供域名线索；共享 IP、系统缓存和应用私有 DoH 可能无法关联。">
+     <Switch checked={r.dns_association_enabled!==false} label="启用 DNS 域名关联" onChange={v=>change({...r,dns_association_enabled:v})}/>
+    </Setting>
+    <div className="form-grid top-gap">
+     <Field label="专用加密 DNS 出口" help="用于代理 DNS 与自定义 DoH 上游；留空时跟随当前默认代理出口。">
+      <Select value={r.dns_exit_id||''} onChange={e=>change({...r,dns_exit_id:e.target.value})}>
+       <option value="">跟随当前默认出口{defaultExit?'（'+defaultExit.name+'）':''}</option>
+       {inventory.map(x=><option value={x.id} key={x.id}>{x.name}{x.kind==='custom'?' · 本机代理':''}</option>)}
+       {r.dns_exit_id&&!inventory.some(x=>x.id===r.dns_exit_id)&&<option value={r.dns_exit_id}>{r.dns_exit_id}（当前不可用）</option>}
+      </Select>
      </Field>
-     <Field label="解析器类型" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.resolver||'encrypted'} onChange={e=>updateDNSRule(i,{resolver:e.target.value,exit_id:e.target.value==='exit_system'&&String(rule.exit_id||'').startsWith('local:')?'':rule.exit_id||''})}>
-      <option value="encrypted">出口访问加密 DoH / DoT（兼容旧版本）</option>
-      <option value="exit_system">使用出口设备的系统 DNS（A / AAAA）</option>
-     </Select></Field>
-     <Field label="远程 DNS 出口" className="full"><Select disabled={rule.action!=='REMOTE'} value={rule.exit_id||''} onChange={e=>updateDNSRule(i,{exit_id:e.target.value})}>
-      <option value="">跟随 DNS 专用出口 / 默认出口</option>
-      {inventory.filter(x=>x.id&&(rule.resolver!=='exit_system'||!String(x.id).startsWith('local:'))).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}
-      {rule.exit_id&&!inventory.some(x=>x.id===rule.exit_id)&&<option value={rule.exit_id}>{rule.exit_id}（不可用）</option>}
-     </Select></Field>
     </div>
-    <div className="actions end top-gap">
-     <label className="check-line"><input type="checkbox" checked={rule.enabled!==false} onChange={e=>updateDNSRule(i,{enabled:e.target.checked})}/><span>启用</span></label>
-     <Button danger onClick={()=>change({...r,dns_rules:arr(r.dns_rules).filter((_,j)=>i!==j)})}>删除</Button>
+    <div className="dns-subsection">
+     <div className="dns-subsection-head"><div><strong>自定义 DoH 上游</strong><div className="mini">配置后将替代内置上游，失败不会回退到公共 DNS。每个地址都需要 Bootstrap IP，Agent 不会通过本机 DNS 解析上游域名。</div></div><Badge>{arr(r.dns_upstreams).length}/8</Badge></div>
+     <DNSUpstreamsEditor upstreams={r.dns_upstreams} onChange={v=>change({...r,dns_upstreams:v})}/>
     </div>
-   </div>
-  </div>)}
-  <div className="actions end top-gap"><Button onClick={()=>change({...r,dns_rules:[...arr(r.dns_rules),{name:'',enabled:true,action:'REMOTE',domains:[],exit_id:''}]})}>添加 DNS 域名规则</Button></div>
-  {arr(r.dns_rules).length>0&&preset!=='auto'&&<div className="notice warn top-gap">域名 DNS 出口规则仅在「自动」模式中生效；当前规则会保存但不执行。</div>}
-  <div className="mini top-gap">可为每条 REMOTE 规则选择出口系统 DNS（A/AAAA）或原有加密 DoH/DoT；TXT、SRV、HTTPS 等查询仍经同一出口的加密 DNS。出口系统 DNS 需要新版本 Relay 与 Exit，旧版本或断线将返回 SERVFAIL，不会回退本地。应用自带 DoH、环回 DNS 与系统缓存不在接管范围内。</div>
- </Card>
- {advancedOpen&&<>
-  <Card title="域名关联与 DNS 出口" eyebrow="ADVANCED DNS">
-   <Setting title="真实 IP → 域名关联" desc="观察验证过的 DNS A/AAAA 应答，为透明代理提供域名线索。共享 IP、系统缓存和应用私有 DoH 仍可能导致无法识别。">
-    <Switch checked={r.dns_association_enabled!==false} label="DNS 域名关联" onChange={v=>setv('routing.dns_association_enabled',v)}/>
-   </Setting>
-   <div className="form-grid top-gap">
-    <Field label="加密 DNS 查询出口" help="代理真实 IP DNS 与 FakeIP 补充查询使用；留空跟随默认出口。">
-     <Select value={r.dns_exit_id||''} onChange={e=>setv('routing.dns_exit_id',e.target.value)}>
-      <option value="">跟随当前默认出口</option>
-      {inventory.filter(x=>x.id).map(x=><option value={x.id} key={x.id}>{x.name}</option>)}
-      {r.dns_exit_id&&!inventory.some(x=>x.id===r.dns_exit_id)&&<option value={r.dns_exit_id}>{r.dns_exit_id}（不可用）</option>}
-     </Select>
-    </Field>
-   </div>
-   <div className="form-grid top-gap">
-    <Field label="自定义 DoH 上游（每行 URL | 连接 IP）" className="full" help="留空使用内置 DNS。填写后只使用这些上游，不会回退到公共 DNS。连接经上方出口发送，证书按 URL 域名验证。支持指定出口节点内网 HTTPS DNS。">
-     <DNSUpstreamsEditor upstreams={r.dns_upstreams} onChange={v=>setv('routing.dns_upstreams',v)}/>
-    </Field>
-    <Field label="本地 DNS 域名例外" className="full" help="仅这些域名及其子域名使用系统原定的 DNS 服务器，适合企业内网域名；一行一个，例如 corp.example。留空继续全部经代理解析。对应连接仍按分流规则处理；独立 DNS 阻断规则可能阻止本地解析。">
-     <Textarea rows="3" placeholder="corp.example" value={ruleListText(r.dns_direct_domains)} onChange={e=>setv('routing.dns_direct_domains',e.target.value)}/>
-    </Field>
-   </div>
-  </Card>
-  <Card title="FakeIP 专用防护" eyebrow="ADVANCED PROTECTION">
-   <Setting title="阻断已知 DoH 解析器" desc="仅针对可识别的已知 DoH 端点，不能覆盖全部私有 DoH、ECH 或直连 IP。只有 FakeIP 模式可修改。">
-    <Switch checked={!!r.block_doh_endpoints} label="已知 DoH 解析器阻断" disabled={!r.fake_ip_enabled} onChange={v=>change(setDoHBlocking(r,v))}/>
-   </Setting>
-   <Setting title="通过代理补充 TXT / SRV 查询" desc="经指定出口的加密解析器查询额外 DNS 记录；只有 FakeIP 模式可修改。">
-    <Switch checked={!!r.forward_other_dns} label="FakeIP 补充 TXT 与 SRV" disabled={!r.fake_ip_enabled} onChange={v=>change(setOtherDNSForwarding(r,v))}/>
-   </Setting>
-   <div className="form-grid top-gap">
-    <Field label="额外阻断的 DoH IP / CIDR" className="full" help="按地址阻断 TCP/UDP 443，可能同时影响共享此 IP 的正常 HTTPS 服务；一行一个 IP 或 CIDR。">
-     <Textarea rows="3" placeholder={'9.9.9.9\\n1.1.1.1'} value={arr(r.doh_blocked_ips).join('\\n')} onChange={e=>setv('routing.doh_blocked_ips',e.target.value.split(/[\\n,;]+/).map(x=>x.trim()).filter(Boolean))}/>
-    </Field>
-   </div>
-   <div className="notice warn top-gap">这些开关不等于完整的 DNS 防泄漏保证。环回 DNS、应用私有 DoH 与 Agent/驱动退出后的网络保护，需要独立验证。</div>
-   
-  </Card>
- </>}
- <Card title="加密 DNS 出口连通性" eyebrow="DNS PROBE">
-  <div className="mini">使用当前已保存的 DNS 出口逐个测试加密上游的真实 DNS 查询，并显示延迟及错误原因。不会访问本机 DNS，也不代表已经验证应用私有 DoH 或独立 Kill Switch。</div>
-  <div className="actions end top-gap"><Button disabled={probing||dirty} onClick={runDNSProbe}>{probing?'检测中…':'检测 DNS 上游'}</Button></div>
-  {dirty&&<div className="notice warn top-gap">DNS 配置尚未保存，请保存后再检测，避免诊断结果与页面设置不一致。</div>}
-  {probe?.error&&<div className="notice danger top-gap">{probe.error}</div>}
-  {probe?.result&&<>
-   <div className="mini top-gap">DNS 出口：{probe.result.exitId||'跟随默认出口'} · {probe.result.custom?'自定义上游':'内置上游'}</div>
-   {arr(probe.result.results).map((item,i)=><div className="target-row" key={item.url+'-'+i}>
-    <div className="grow">
-     <div className="row"><strong>{item.name||'DNS 上游'}</strong><Badge tone={item.ok?'ok':'warn'}>{item.ok?'可用':'失败'}</Badge></div>
-     <div className="mono mini">{item.protocol} · {item.address} · {item.url}</div>
-     <div className="mini">{item.ok?'DNS 查询成功'+(item.rcode?' · '+item.rcode:''):(item.error||'无法获取应答')}</div>
+    <div className="dns-subsection">
+     <div className="dns-subsection-head"><div><strong>本地 DNS 例外</strong><div className="mini">仅列出的域名及其子域名使用系统原定 DNS，适合企业内网域名；对应连接仍由分流规则决定。</div></div></div>
+     <Field label="域名后缀（每行一个）" className="full">
+      <Textarea rows="3" value={ruleListText(r.dns_direct_domains)} onChange={e=>change({...r,dns_direct_domains:e.target.value})} placeholder={'corp.example\nintranet.example.com'}/>
+     </Field>
     </div>
-    <div className="mono">{item.latencyMs??'—'} ms</div>
-   </div>)}
-  </>}
- </Card>
- <SaveBar dirty={dirty} label="保存 DNS 设置" hint="切换模式自动配置兼容字段；保存后按现有热更新流程生效。" onSave={()=>save({routing:dnsPagePatch(r)})}><Button disabled={!dirty} onClick={onDiscard}>放弃修改</Button></SaveBar>
+   </Card>
+
+   <Card title="FakeIP 与 DoH 防护" eyebrow="04 · DNS PROTECTION">
+    <div className="dns-protection-state"><Badge tone={r.fake_ip_enabled?'ok':'neutral'}>{r.fake_ip_enabled?'FakeIP 已启用':'FakeIP 未启用'}</Badge><span className="mini">以下两项仅在 FakeIP 模式下生效。</span></div>
+    <Setting title="阻断已知 DoH 解析器" desc="阻断可识别的公共 DoH 端点；不能覆盖所有应用私有 DoH 或直连 IP。">
+     <Switch checked={!!r.block_doh_endpoints} label="阻断已知 DoH 解析器" disabled={!r.fake_ip_enabled} onChange={v=>change(setDoHBlocking(r,v))}/>
+    </Setting>
+    <Setting title="转发 TXT / SRV 等额外查询" desc="将 FakeIP 无法直接承载的 TXT、SRV 等查询经指定出口加密解析。">
+     <Switch checked={!!r.forward_other_dns} label="转发额外 DNS 查询" disabled={!r.fake_ip_enabled} onChange={v=>change(setOtherDNSForwarding(r,v))}/>
+    </Setting>
+    <div className="dns-subsection">
+     <div className="dns-subsection-head"><div><strong>额外阻断的 DoH IP / CIDR</strong><div className="mini">仅阻断指定公共地址的 TCP/UDP 443；可能同时影响共享该 IP 的正常 HTTPS 服务。</div></div></div>
+     <Field label="IP 或 CIDR（每行一个）" className="full">
+      <Textarea rows="3" value={ruleListText(r.doh_blocked_ips)} onChange={e=>change({...r,doh_blocked_ips:e.target.value})} placeholder={'1.1.1.1\n8.8.8.8'}/>
+     </Field>
+    </div>
+    {!r.fake_ip_enabled&&(r.block_doh_endpoints||r.forward_other_dns)&&<div className="notice warn top-gap">当前配置存在 FakeIP 依赖项；请切换到 FakeIP 模式或关闭相关防护选项。</div>}
+    <div className="notice warn top-gap">以上开关不代表完整 DNS 防泄漏。环回 DNS、应用私有 DoH、系统缓存以及 Agent/驱动退出后的保护仍需单独验证。</div>
+   </Card>
+
+   <Card title="DNS 出口诊断" eyebrow="05 · DIAGNOSTICS" action={<Button disabled={probing||dirty||saving} onClick={runDNSProbe}>{probing?'检测中…':'检测 DNS 上游（已保存配置）'}</Button>}>
+    <div className="mini">使用当前已保存的 DNS 出口执行真实 DNS 查询，显示上游连通性和延迟。未保存的草稿不会参与测试。</div>
+    {dirty&&<div className="notice warn top-gap">存在未保存的 DNS 修改。请先保存，再运行诊断。</div>}
+    {probe?.error&&<div className="notice danger top-gap" role="alert">{probe.error}</div>}
+    {probe?.result&&<>
+     <div className="dns-probe-summary">DNS 出口：<strong>{probe.result.exitId||'跟随默认出口'}</strong><span>·</span>{probe.result.custom?'自定义上游':'内置上游'}</div>
+     {arr(probe.result.results).map((item,i)=><div className="dns-probe-row" key={item.url+'-'+i}>
+      <div className="grow"><div className="row"><strong>{item.name||'DNS 上游'}</strong><Badge tone={item.ok?'ok':'warn'}>{item.ok?'可用':'失败'}</Badge></div><div className="mono mini">{item.protocol} · {item.address} · {item.url}</div><div className="mini">{item.ok?'DNS 查询成功'+(item.rcode?' · '+item.rcode:''):(item.error||'无法获取应答')}</div></div>
+      <strong className="dns-probe-latency">{item.latencyMs??'—'} ms</strong>
+     </div>)}
+    </>}
+   </Card>
+   {saveError&&<div className="notice danger dns-save-error" role="alert"><strong>DNS 配置未确认保存</strong><div>{saveError}</div><span>修改仍保留在当前页面；修正问题后可以再次保存。</span></div>}
+   <SaveBar dirty={dirty} label={saving?'保存中…':'保存 DNS 配置'} hint="保存前会检查规则、上游地址与模式依赖；成功后重新读取磁盘配置并刷新运行状态。" disabled={!dirty||saving} onSave={handleSave}>
+    <Button disabled={!dirty||saving} onClick={onDiscard}>放弃修改</Button>
+   </SaveBar>
+  </div>
+
+  <Modal open={!!ruleEditor} title={ruleEditor?.index>=0?'编辑 DNS 规则':'添加 DNS 规则'} wide onClose={()=>{setRuleEditor(null);setRuleError('')}} footer={<><Button onClick={()=>{setRuleEditor(null);setRuleError('')}}>取消</Button><Button primary onClick={commitRuleEditor}>保存规则</Button></>}>
+   {ruleEditor&&<>
+    <div className="dns-editor-intro">先确定哪些域名命中，再选择 DNS 的解析位置。规则顺序在列表中调整，排在前面的规则优先。</div>
+    <div className="form-grid">
+     <Field label="规则名称"><Input value={ruleEditor.draft.name} maxLength="80" onChange={e=>updateRuleDraft('name',e.target.value)} placeholder="例如：Google 服务"/></Field>
+     <Field label="规则状态"><Select value={ruleEditor.draft.enabled?'on':'off'} onChange={e=>updateRuleDraft('enabled',e.target.value==='on')}><option value="on">启用</option><option value="off">停用（保留规则）</option></Select></Field>
+     <Field label="匹配域名" className="full" help="每行一个。example.com 只匹配根域名；*.example.com 匹配根域名和所有子域名。最多 64 个。">
+      <Textarea rows="5" value={ruleEditor.draft.domains} onChange={e=>updateRuleDraft('domains',e.target.value)} placeholder={'google.com\n*.googleapis.com\n*.gstatic.com'}/>
+     </Field>
+     <Field label="解析位置" className="full">
+      <Select value={ruleEditor.draft.action} onChange={e=>setRuleEditor(old=>({...old,draft:{...old.draft,action:e.target.value,resolver:'encrypted',exit_id:''}}))}>
+       <option value="REMOTE">远程解析 · 通过指定出口 DNS</option><option value="LOCAL">本地解析 · 使用本机系统 DNS</option>
+      </Select>
+     </Field>
+     {ruleEditor.draft.action==='REMOTE'&&<>
+      <Field label="解析器类型">
+       <Select value={ruleEditor.draft.resolver} onChange={e=>setRuleEditor(old=>({...old,draft:{...old.draft,resolver:e.target.value,exit_id:e.target.value==='exit_system'&&String(old.draft.exit_id).startsWith('local:')?'':old.draft.exit_id}}))}>
+        <option value="encrypted">加密 DoH / DoT（兼容旧版）</option><option value="exit_system">出口设备系统 DNS（A / AAAA）</option>
+       </Select>
+      </Field>
+      <Field label="DNS 出口">
+       <Select value={ruleEditor.draft.exit_id} onChange={e=>updateRuleDraft('exit_id',e.target.value)}>
+        <option value="">跟随专用 DNS 出口 / 默认出口</option>
+        {(ruleEditor.draft.resolver==='exit_system'?deviceExits:inventory).map(x=><option value={x.id} key={x.id}>{x.name}</option>)}
+        {ruleEditor.draft.exit_id&&!inventory.some(x=>x.id===ruleEditor.draft.exit_id)&&<option value={ruleEditor.draft.exit_id}>{ruleEditor.draft.exit_id}（当前不可用）</option>}
+       </Select>
+      </Field>
+      {ruleEditor.draft.resolver==='exit_system'&&<div className="mini dns-editor-note full">系统 DNS 由远端设备的操作系统解析。必须使用远端设备出口，不能选择本机自定义代理；若不单独指定，将跟随当前默认设备出口。</div>}
+     </>}
+    </div>
+    {ruleError&&<div className="notice danger top-gap" role="alert">{ruleError}</div>}
+   </>}
+  </Modal>
  </>;
 }
 
@@ -935,7 +1050,7 @@ export default function App(){
  useEffect(()=>theme(config.theme||'system'),[config.theme,theme]);
 
  const setv=useCallback((path,value,markDirty=true)=>{setConfig(prev=>{const next=structuredClone(prev),keys=path.split('.');let o=next;for(let i=0;i<keys.length-1;i++){o[keys[i]]=o[keys[i]]&&typeof o[keys[i]]==='object'?o[keys[i]]:{};o=o[keys[i]]}o[keys[keys.length-1]]=value;return next});if(markDirty)setDirty(true)},[]);
- const save=useCallback(async payload=>{if(!loaded||!config.revision){toast('配置尚未就绪，暂不能保存','danger');return false}try{const r=await saveConfig(config.revision,payload);if(!r.ok)throw new Error(r.message||'保存失败');await refreshConfig();await refreshStatus();toast(r.restartRequired?(r.message||'已保存，部分设置需重启'):(r.message||'已保存'));return true}catch(e){toast(e.message,'danger');return false}},[loaded,config.revision,toast,refreshConfig,refreshStatus]);
+ const save=useCallback(async (payload,onFailure)=>{if(!loaded||!config.revision){const message='配置尚未就绪，暂不能保存';onFailure?.(message);toast(message,'danger');return false}try{const result=await saveConfig(config.revision,payload);if(!result.ok)throw new Error(result.message||'保存失败');const refreshed=await refreshConfig();if(!refreshed)throw new Error('配置已提交，但页面重新读取配置失败；请重载配置确认磁盘内容');await refreshStatus();toast(result.restartRequired?(result.message||'已保存，部分设置需重启'):(result.message||'已保存'));return true}catch(e){const message=e?.message||String(e);onFailure?.(message);toast(message,'danger');return false}},[loaded,config.revision,toast,refreshConfig,refreshStatus]);
  const select=useCallback(async id=>{if(dirty){toast('存在未保存的修改，请先保存或放弃后再切换出口','warn');return}try{const r=parseMutation(await call('goSelectExit',id));if(!r.ok&&r.message)throw new Error(r.message);await refreshConfig();await refreshStatus();toast(id?'已切换到 '+exitName([...withExitGroups(exits,arr(config.routing?.device_groups)),...arr(config.customExits)],id):'已切换为自动选择')}catch(e){toast(e.message,'danger')}},[dirty,exits,config.customExits,config.routing?.device_groups,refreshConfig,refreshStatus,toast]);
  const clearMessages=useCallback(async()=>{if(!messages.length||!confirm('清空本设备的消息历史？'))return;try{await call('goClearMessages');messageIDs.current.clear();setMessages([]);setUnreadMessages(0);toast('消息历史已清空')}catch(e){toast('清空消息失败：'+(e?.message||String(e)),'danger')}},[messages.length,toast]);
  const clearConnections=useCallback(async()=>{await call('goClearConnections');await refreshConnections();toast('已清理结束连接历史')},[refreshConnections,toast]);

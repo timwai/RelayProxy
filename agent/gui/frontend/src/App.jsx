@@ -622,7 +622,6 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
  const defaultExitId=status.selectedExit||config.defaultExitId||'';
  const dnsExitId=r.dns_exit_id||defaultExitId;
  const defaultExit=inventory.find(x=>x.id===defaultExitId);
- const dnsExit=inventory.find(x=>x.id===dnsExitId);
  const preset=currentDNSPreset(r);
  const change=next=>{setProbe(null);setSaveError('');setv('routing',next)};
  const updateRule=(index,patch)=>change({...r,dns_rules:rules.map((item,i)=>i===index?{...item,...patch}:item)});

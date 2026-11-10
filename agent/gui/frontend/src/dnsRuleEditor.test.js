@@ -64,7 +64,7 @@ test('DNS mode validation matches backend automatic-detection constraints',()=>{
 });
 
 test('DoH blocklist validation reads the same multiline draft as the textarea',()=>{
- const base={dns_mode:'proxy',proxy_dns_enabled:true,fake_ip_enabled:true,dns_rules:[],dns_direct_domains:[],doh_blocked_ips:[]};
+ const base={dns_mode:'proxy',proxy_dns_enabled:false,fake_ip_enabled:true,dns_rules:[],dns_direct_domains:[],doh_blocked_ips:[]};
  assert.match(validateDNSSettings({...base,doh_blocked_ips:'192.168.1.1\n'}),/格式无效/);
  assert.equal(validateDNSSettings({...base,doh_blocked_ips:'1.1.1.1\n8.8.8.0/24\n'}),'');
 });

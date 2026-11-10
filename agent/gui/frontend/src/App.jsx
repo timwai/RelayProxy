@@ -588,6 +588,7 @@ function DNSUpstreamsEditor({upstreams,onChange}){
    {items.length===0&&<div className="dns-empty-inline">未配置自定义上游，将使用内置 DoH 解析器。</div>}
    {items.map((item,i)=><div className="dns-upstream-row" key={item.url+'-'+i}>
     <div className="dns-upstream-index">{i+1}</div>
+    <div className="dns-upstream-order"><Button quiet disabled={i===0} onClick={()=>onChange(moveRule(items,i,i-1))}>↑</Button><Button quiet disabled={i===items.length-1} onClick={()=>onChange(moveRule(items,i,i+1))}>↓</Button></div>
     <div className="grow dns-upstream-info"><strong>{item.url||'未填写 DoH 地址'}</strong><span>Bootstrap IP：<code>{item.bootstrap_ip||'未填写'}</code></span></div>
     <Button quiet onClick={()=>open(i)}>编辑</Button>
     <Button quiet danger onClick={()=>onChange(items.filter((_,j)=>j!==i))}>删除</Button>
@@ -677,13 +678,13 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
      </button>)}
     </div>
     <div className="dns-mode-foot">
-     <div className="grow"><strong>{preset==='auto'?'域名规则已具备生效条件':preset==='fake_ip'?'当前使用 FakeIP 映射':'当前不接管系统 DNS'}</strong><div className="mini">{preset==='auto'?'仅处理经过 Agent DNS/53 接管路径的请求；应用私有 DoH、环回 DNS 和系统缓存不在保证范围内。':preset==='fake_ip'?'FakeIP 与真实 IP 代理 DNS 不能同时启用。切换模式会自动清理不兼容开关。':'已配置的域名 DNS 规则会保留，但不会参与解析；切换到自动代理解析后才会生效。'}</div></div>
+     <div className="grow"><strong>{preset==='auto'?'域名规则已具备生效条件':preset==='fake_ip'?'当前使用 FakeIP 映射':'当前不接管系统 DNS'}</strong><div className="mini">{preset==='auto'?'必须启动系统接管/透明代理才能处理经过 Agent DNS/53 接管路径的请求；应用私有 DoH、环回 DNS 和系统缓存不在保证范围内。':preset==='fake_ip'?'FakeIP 与真实 IP 代理 DNS 不能同时启用。切换模式会自动清理不兼容开关。':'已配置的域名 DNS 规则会保留，但不会参与解析；切换到自动代理解析后才会生效。'}</div></div>
     </div>
    </Card>
 
    <Card title="按域名选择 DNS 出口" eyebrow="02 · DOMAIN RULES" action={<Button primary onClick={()=>openRuleEditor(-1)}>添加规则</Button>}>
     <div className="dns-section-intro">
-     <div className="mini">按列表顺序匹配，第一条命中规则优先。未命中的域名使用本地系统 DNS；远程解析失败时不会回退本地，避免意外泄漏。</div>
+     <div className="mini">按列表顺序匹配，第一条命中规则优先。未命中的域名使用本地系统 DNS；远程解析失败时不会回退本地，避免意外泄漏。出口系统 DNS 只处理 A/AAAA；TXT、SRV、HTTPS 等额外查询仍经同一出口的加密 DNS。出口系统 DNS 需要较新版本的 Relay 与出口 Agent；旧版本或断线时返回 SERVFAIL，不回退本地。</div>
      <div className="dns-rule-count"><strong>{rules.length}</strong><span>条规则</span><i>·</i><span>{rules.filter(x=>x.enabled!==false).length} 条启用</span></div>
     </div>
     {preset!=='auto'&&<div className="notice warn top-gap">当前模式下域名 DNS 规则不会执行。规则仍可编辑和保存，切换到「自动代理解析」后生效。</div>}
@@ -726,7 +727,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
      </Field>
     </div>
     <div className="dns-subsection">
-     <div className="dns-subsection-head"><div><strong>自定义 DoH 上游</strong><div className="mini">配置后将替代内置上游。每个地址都需要 Bootstrap IP，Agent 不会通过本机 DNS 解析上游域名。</div></div><Badge>{arr(r.dns_upstreams).length}/8</Badge></div>
+     <div className="dns-subsection-head"><div><strong>自定义 DoH 上游</strong><div className="mini">配置后将替代内置上游，失败不会回退到公共 DNS。每个地址都需要 Bootstrap IP，Agent 不会通过本机 DNS 解析上游域名。</div></div><Badge>{arr(r.dns_upstreams).length}/8</Badge></div>
      <DNSUpstreamsEditor upstreams={r.dns_upstreams} onChange={v=>change({...r,dns_upstreams:v})}/>
     </div>
     <div className="dns-subsection">

@@ -668,6 +668,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
  ];
  const exitLabel=(id,fallbackId=defaultExitId)=>{const target=id||fallbackId;if(!target)return '跟随当前默认出口';return inventory.find(x=>x.id===target)?.name||target};
  return <>
+  <PageHead title="DNS" desc="解析模式、按域名选择出口、加密上游与 FakeIP 防护。保存前自动校验；诊断只测试已保存配置。"/>
   <div className="dns-page">
    <Card title="DNS 解析模式" eyebrow="01 · RESOLUTION MODE" action={<Badge tone={preset==='auto'?'ok':preset==='fake_ip'?'blue':'neutral'}>{preset==='auto'?'代理解析':preset==='fake_ip'?'FakeIP':'仅关联'}</Badge>}>
     <div className="dns-mode-grid" role="radiogroup" aria-label="DNS 解析模式">

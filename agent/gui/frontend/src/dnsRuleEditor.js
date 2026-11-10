@@ -127,7 +127,7 @@ export function validateDNSSettings(r={},defaultExitId='') {
   const rules=Array.isArray(r.dns_rules)?r.dns_rules:[];
   if(rules.length>128)return 'DNS 规则最多 128 条';
   for(let i=0;i<rules.length;i++){
-    const error=validateDNSRule(rules[i],r.dns_exit_id||defaultExitId);
+    const error=validateDNSRule(rules[i],defaultExitId);
     if(error)return '第 '+(i+1)+' 条 DNS 规则：'+error;
   }
   const upstreams=Array.isArray(r.dns_upstreams)?r.dns_upstreams:[];

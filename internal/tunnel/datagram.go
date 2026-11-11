@@ -61,6 +61,16 @@ func SupportsDatagrams(sess TunnelSession) bool {
 }
 
 func SetPeerCapabilities(sess TunnelSession, caps []string) {
+	systemDNS := false
+	for _, cap := range caps {
+		systemDNS = systemDNS || cap == protocol.CapabilityExitSystemDNS
+	}
+	switch s := sess.(type) {
+	case *QUICSession:
+		s.peerExitSystemDNS.Store(systemDNS)
+	case *TLSSession:
+		s.peerExitSystemDNS.Store(systemDNS)
+	}
 	if s, ok := sess.(*QUICSession); ok {
 		datagrams, streamResume := false, false
 		for _, cap := range caps {
@@ -73,6 +83,21 @@ func SetPeerCapabilities(sess TunnelSession, caps []string) {
 		}
 		s.peerDatagrams.Store(datagrams)
 		s.peerStreamResume.Store(streamResume)
+	}
+}
+
+// PeerSupportsExitSystemDNS is negotiated on the authenticated Relay session.
+// Old peers do not advertise the frame and must fail before sending it.
+func PeerSupportsExitSystemDNS(sess TunnelSession) bool {
+	switch s := sess.(type) {
+	case *QUICSession:
+		return s != nil && s.peerExitSystemDNS.Load()
+	case *TLSSession:
+		return s != nil && s.peerExitSystemDNS.Load()
+	case interface{ PeerSupportsExitSystemDNS() bool }:
+		return s.PeerSupportsExitSystemDNS()
+	default:
+		return false
 	}
 }
 

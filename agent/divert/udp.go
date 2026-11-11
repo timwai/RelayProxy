@@ -166,10 +166,18 @@ func (s *Server) runUDPAssociation(a *udpAssociation) {
 	dialCtx, cancel := context.WithTimeout(a.ctx, s.opts.DialTimeout)
 	var pc net.PacketConn
 	var err error
-	if a.route.decision.Action == ActionDirect {
+	proxyTarget := proxyDialTarget(a.route.flow)
+	if a.route.decision.DNSResolver != "" {
+		proxyTarget, err = s.resolveRouteTarget(dialCtx, a.route)
+	}
+	if err != nil {
+		// Publish resolution errors through the same lifecycle as dial errors.
+	} else if a.route.decision.Action == ActionDirect {
 		var conn net.Conn
 		target := a.route.flow.IP
-		if a.route.flow.DomainSource == "fakeip" && isFakeIP(a.route.key.Destination.Addr()) {
+		if a.route.decision.DNSResolver != "" {
+			target = proxyTarget
+		} else if a.route.flow.DomainSource == "fakeip" && isFakeIP(a.route.key.Destination.Addr()) {
 			target, err = s.resolveFakeDirectIP(dialCtx, a.route.decision.ExitID, a.route.flow.Host, a.route.key.Destination.Addr().Is6())
 			if err == nil {
 				err = s.validateFakeDirectTarget(a.route, target)
@@ -191,12 +199,12 @@ func (s *Server) runUDPAssociation(a *udpAssociation) {
 		}
 	} else if a.route.decision.DatagramRequired {
 		if dialer, ok := s.dialer.(proxy.UDPOptionsDialer); ok {
-			pc, err = dialer.DialUDPWithOptions(dialCtx, a.route.decision.ExitID, proxyDialTarget(a.route.flow), a.route.flow.Port, proxy.UDPDialOptions{DatagramRequired: true})
+			pc, err = dialer.DialUDPWithOptions(dialCtx, a.route.decision.ExitID, proxyTarget, a.route.flow.Port, proxy.UDPDialOptions{DatagramRequired: true})
 		} else {
 			err = protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "divert: native UDP datagrams are required but the dialer does not support required datagram options")
 		}
 	} else {
-		pc, err = s.dialer.DialUDP(dialCtx, a.route.decision.ExitID, proxyDialTarget(a.route.flow), a.route.flow.Port)
+		pc, err = s.dialer.DialUDP(dialCtx, a.route.decision.ExitID, proxyTarget, a.route.flow.Port)
 	}
 	cancel()
 	a.mu.Lock()

@@ -384,9 +384,14 @@ func (i *packetInterceptor) handlePacket(data []byte, meta packetMetadata) error
 	// FakeIP returns synthetic addresses; proxy DNS returns genuine ones
 	// from authenticated DoT. Pure DNS association observes without takeover.
 	fakeMode, realMode := i.server.fakeIPEnabled(), i.server.proxyDNSEnabled()
-	if (fakeMode || realMode) && packet.Destination.Port() == 53 {
+	staticMappingMode := i.server.dnsHostMappingsEnabled()
+	if (fakeMode || realMode || staticMappingMode) && packet.Destination.Port() == 53 {
 		if packet.Protocol == ProtoUDP {
 			if i.server.directDNSQuestion(packet.Payload) {
+				i.direct.Add(1)
+				return i.sendPacket(packet, meta)
+			}
+			if staticMappingMode && !fakeMode && !realMode && !i.server.hasDNSHostOverride(packet.Payload) {
 				i.direct.Add(1)
 				return i.sendPacket(packet, meta)
 			}
@@ -522,7 +527,8 @@ func localDNSDefaultRejectPassthrough(p ipPacket, decision Decision, fakeMode, p
 // network queries execute off the capture loop so a slow DNS exit cannot
 // freeze unrelated browser TCP/QUIC traffic.
 func (i *packetInterceptor) interceptDNSUDP(p ipPacket, meta packetMetadata, realMode bool) error {
-	if !realMode && !i.server.shouldForwardDNS(p.Payload) {
+	staticMode := i.server.hasDNSHostOverride(p.Payload)
+	if !realMode && !i.server.shouldForwardDNS(p.Payload) && !staticMode {
 		answer := i.server.interceptedDNSReply(i.ctx, p.Payload, true)
 		if len(answer) == 0 {
 			return nil
@@ -536,7 +542,8 @@ func (i *packetInterceptor) interceptDNSUDP(p ipPacket, meta packetMetadata, rea
 	}
 	source, destination := p.Source, p.Destination
 	payload := append([]byte(nil), p.Payload...)
-	if realMode && i.server.dnsAssociationEnabled() {
+	observeDNS := i.server.dnsAssociationEnabled() && (realMode || staticMode)
+	if observeDNS {
 		i.dns.query(source, destination, payload)
 	}
 	replyMeta := meta
@@ -550,7 +557,7 @@ func (i *packetInterceptor) interceptDNSUDP(p ipPacket, meta packetMetadata, rea
 		}
 		// Associate verified real DNS data *before* the browser receives the
 		// reply, preventing a race with its first TCP SYN or QUIC datagram.
-		if realMode && i.server.dnsAssociationEnabled() {
+		if observeDNS {
 			i.dns.response(destination, source, answer)
 		}
 		reply, err := makeUDPReply(FlowKey{Protocol: ProtoUDP, Source: source, Destination: destination}, answer)
@@ -643,7 +650,7 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 		if !syn {
 			// A pre-existing DNS/TCP session cannot be migrated to the local
 			// fake resolver. Never let its plaintext DNS payload escape.
-			if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()) && p.Destination.Port() == 53 {
+			if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled() || i.server.dnsHostMappingsEnabled()) && p.Destination.Port() == 53 {
 				return nil
 			}
 			// TCP sessions established before activation cannot be migrated.
@@ -676,7 +683,7 @@ func (i *packetInterceptor) outboundTCP(p ipPacket, meta packetMetadata) error {
 		}
 		var route *ClassifiedFlow
 		var err error
-		if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()) && p.Destination.Port() == 53 {
+		if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled() || i.server.dnsHostMappingsEnabled()) && p.Destination.Port() == 53 {
 			route = &ClassifiedFlow{owner: i.server, key: key, flow: metadata,
 				decision: Decision{Action: ActionProxy, Rule: "fakeip-dns"}, dnsOnly: true}
 		} else {
@@ -935,7 +942,7 @@ func (i *packetInterceptor) forwardDatagrams(queue <-chan interceptedUDP) {
 // permits domain attribution. The DNS association parser verifies that both
 // the question and its answer match before remembering A/AAAA addresses.
 func (i *packetInterceptor) observeInterceptedDNSTCP(key FlowKey, query, answer []byte) {
-	if !i.server.dnsAssociationEnabled() || !i.server.proxyDNSEnabled() {
+	if !i.server.dnsAssociationEnabled() || (!i.server.proxyDNSEnabled() && !i.server.hasDNSHostOverride(query)) {
 		return
 	}
 	i.dns.queryProtocol(ProtoTCP, key.Source, key.Destination, query)

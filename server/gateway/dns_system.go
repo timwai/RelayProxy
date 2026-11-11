@@ -3,6 +3,7 @@ package gateway
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"time"
 
@@ -66,6 +67,10 @@ func (r *StreamRouter) handleExitSystemDNS(ctx context.Context, header *protocol
 		_ = protocol.WriteJSON(clientStream, response)
 		return
 	}
+	if !hasCapability(exitSession, protocol.CapabilityExitSystemDNS) {
+		fail(protocol.ErrCodeDNSUnsupported, fmt.Sprintf("出口 %s 未声明支持系统 DNS，请升级该出口 Agent 并重新连接", exitSession.DeviceID))
+		return
+	}
 	if !hasCapability(exitSession, protocol.CapabilityTargetACL) {
 		fail(protocol.ErrCodeACLDenied, "selected exit does not enforce the Relay ACL")
 		return
@@ -90,7 +95,7 @@ func (r *StreamRouter) handleExitSystemDNS(ctx context.Context, header *protocol
 	defer stop()
 	_ = exitStream.SetDeadline(handshakeDeadline)
 	header.ExitDeviceID = exitSession.DeviceID
-	if err := protocol.WriteStreamHeader(exitStream, header); err == nil {
+	if err = protocol.WriteStreamHeader(exitStream, header); err == nil {
 		err = protocol.WriteJSON(exitStream, req)
 	}
 	if err != nil {

@@ -254,6 +254,7 @@ func (w *WebServer) registerRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /api/speed-test", w.runSpeedTest)
 	mux.HandleFunc("POST /api/proxy/custom-exits/test", w.testCustomExit)
 	mux.HandleFunc("POST /api/dns/probe", w.probeDNS)
+	mux.HandleFunc("POST /api/dns/rule/probe", w.probeDNSRule)
 	mux.HandleFunc("GET /api/routing/subscriptions", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRoutingSubscriptions()) })
 	mux.HandleFunc("GET /api/proxy/exits", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetProxyExits()) })
 	mux.HandleFunc("GET /api/rdp/targets", func(rw http.ResponseWriter, _ *http.Request) { writeWebJSON(rw, w.bridge.GetRDPTargets()) })
@@ -440,6 +441,22 @@ func (w *WebServer) disconnectRDPTarget(rw http.ResponseWriter, r *http.Request)
 
 func (w *WebServer) probeDNS(rw http.ResponseWriter, _ *http.Request) {
 	result, err := w.bridge.ProbeDNS()
+	if err != nil {
+		writeWebError(rw, err)
+		return
+	}
+	writeWebJSON(rw, map[string]any{"ok": true, "result": result})
+}
+
+func (w *WebServer) probeDNSRule(rw http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Index  int    `json:"index"`
+		Domain string `json:"domain"`
+	}
+	if err := decodeWebJSON(rw, r, &in); err != nil {
+		return
+	}
+	result, err := w.bridge.ProbeDNSRule(in.Index, in.Domain)
 	if err != nil {
 		writeWebError(rw, err)
 		return
@@ -679,6 +696,7 @@ const webBridgeJS = `(function () {
   window.goRunSpeedTest = function (exitId, durationSeconds) { return json('/api/speed-test', 'POST', {exitId:exitId, durationSeconds:durationSeconds}); };
   window.goTestCustomExit = function (exitId) { return json('/api/proxy/custom-exits/test', 'POST', {exitId:exitId}); };
   window.goProbeDNS = function () { return json('/api/dns/probe', 'POST', {}); };
+  window.goProbeDNSRule = function (index, domain) { return json('/api/dns/rule/probe', 'POST', {index:index, domain:domain}); };
   window.goGetProxyExits = function () { return request('/api/proxy/exits'); };
   window.goGetRoutingSubscriptions = function () { return request('/api/routing/subscriptions'); };
   window.goGetRDPTargets = function () { return request('/api/rdp/targets'); };

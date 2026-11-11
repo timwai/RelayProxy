@@ -64,6 +64,9 @@ type Flow struct {
 
 // Decision is the match result.
 type Decision struct {
+	DNSResolver      string
+	DNSIP            string
+	DNSExitID        string
 	Action           Action
 	ExitID           string
 	Rule             string // matched rule name, or "default" / "exclude"

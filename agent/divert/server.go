@@ -31,34 +31,38 @@ var tcpCopyBufferPool = sync.Pool{
 }
 
 type Options struct {
-	Config                Config
-	Dialer                Dialer
-	Guard                 LoopGuard
-	ListenHost            string // retained for configuration compatibility
-	PolicyMu              *sync.RWMutex
-	MaxTCPFlows           int
-	MaxUDPAssociations    int
-	UDPIdleTimeout        time.Duration
-	DialTimeout           time.Duration
-	UDPWriteTimeout       time.Duration
-	SharedPolicy          func(Flow) Decision
-	ProxyReady            func() bool
-	RelayIPs              func() []string // authenticated transport peers, sampled before capture starts
-	LocalExitReady        func(string) bool
-	Traffic               *traffic.Registry
-	DefaultExitID         func() string
-	FakeIPEnabled         func() bool                                           // dynamically consulted for new transparent DNS queries
-	ProxyDNSEnabled       func() bool                                           // real A/AAAA and other DNS via proxy DoH/443 or DoT/853; not FakeIP
-	DNSAssociationEnabled func() bool                                           // observed DNS->real IP attribution; defaults to enabled
-	BlockDoHEndpoints     func() bool                                           // opt-in domain-based DoH endpoint guard
-	ForwardOtherDNS       func() bool                                           // opt-in authenticated DoT via proxy for TXT/SRV
-	DNSExitID             func() string                                         // optional pinned exit for DNS, independent from app flows
-	DNSRoute              func(string) (bool, string)                           // per-domain LOCAL flag and REMOTE exit override; nil retains global DNS
-	DNSResolver           func(string) string                                   // per-domain resolver: encrypted or exit_system
-	ExchangeExitSystemDNS func(context.Context, string, []byte) ([]byte, error) // authorized per-exit OS resolver
-	DNSUpstreams          func() []DNSUpstream                                  // optional custom pinned HTTPS resolvers from active policy
-	DNSDirectDomains      func() []string                                       // explicit domain suffix exceptions to encrypted/FakeIP DNS
-	DoHBlockedIPs         func() []string                                       // opt-in fixed HTTPS/443 IP or CIDR denylist
+	Config                 Config
+	Dialer                 Dialer
+	Guard                  LoopGuard
+	ListenHost             string // retained for configuration compatibility
+	PolicyMu               *sync.RWMutex
+	MaxTCPFlows            int
+	MaxUDPAssociations     int
+	UDPIdleTimeout         time.Duration
+	DialTimeout            time.Duration
+	UDPWriteTimeout        time.Duration
+	SharedPolicy           func(Flow) Decision
+	ProxyReady             func() bool
+	RelayIPs               func() []string // authenticated transport peers, sampled before capture starts
+	LocalExitReady         func(string) bool
+	Traffic                *traffic.Registry
+	DefaultExitID          func() string
+	FakeIPEnabled          func() bool                 // dynamically consulted for new transparent DNS queries
+	ProxyDNSEnabled        func() bool                 // real A/AAAA and other DNS via proxy DoH/443 or DoT/853; not FakeIP
+	DNSAssociationEnabled  func() bool                 // observed DNS->real IP attribution; defaults to enabled
+	BlockDoHEndpoints      func() bool                 // opt-in domain-based DoH endpoint guard
+	ForwardOtherDNS        func() bool                 // opt-in authenticated DoT via proxy for TXT/SRV
+	DNSExitID              func() string               // optional pinned exit for DNS, independent from app flows
+	DNSRoute               func(string) (bool, string) // per-domain LOCAL flag and REMOTE exit override; nil retains global DNS
+	DNSResolver            func(string) string         // per-domain resolver: encrypted or exit_system
+	DNSBlocked             func(string) bool
+	ResolveTarget          func(context.Context, Flow, Decision) (string, error)
+	ExchangeExitSystemDNS  func(context.Context, string, []byte) ([]byte, error) // authorized per-exit OS resolver
+	DNSUpstreams           func() []DNSUpstream                                  // optional custom pinned HTTPS resolvers from active policy
+	DNSDirectDomains       func() []string                                       // explicit domain suffix exceptions to encrypted/FakeIP DNS
+	DNSHostIP              func(string) (string, bool)                           // exact-domain static DNS A/AAAA override
+	DNSHostMappingsEnabled func() bool                                           // captures DNS/53 when exact-domain overrides are configured
+	DoHBlockedIPs          func() []string                                       // opt-in fixed HTTPS/443 IP or CIDR denylist
 }
 
 // Server owns classified flows. OS interception is separately gated by a
@@ -73,6 +77,7 @@ type Server struct {
 	fakeDNS           *fakeIPDNS
 	dnsLimit          chan struct{} // bound concurrent encrypted resolver requests
 	lastDNSFailureLog atomic.Int64
+	dnsQueryID        atomic.Uint32
 
 	ctx             context.Context
 	cancel          context.CancelFunc
@@ -328,6 +333,21 @@ func (s *Server) SyncPlatformDNSCapture(enabled bool) error {
 	return nil
 }
 
+// RefreshDNSCache clears a platform resolver cache after static DNS mappings
+// change. Platforms without a managed system DNS cache do not need a hook.
+func (s *Server) RefreshDNSCache() error {
+	if s == nil {
+		return nil
+	}
+	s.mu.Lock()
+	interceptor := s.interceptor
+	s.mu.Unlock()
+	if refresher, ok := interceptor.(interface{ RefreshDNSCache() error }); ok {
+		return refresher.RefreshDNSCache()
+	}
+	return nil
+}
+
 // UDP is intercepted as datagrams; it does not expose a local proxy socket.
 func (s *Server) UDPListenAddr() string { return "" }
 
@@ -337,6 +357,10 @@ func (s *Server) fakeIPEnabled() bool {
 
 func (s *Server) proxyDNSEnabled() bool {
 	return s != nil && !s.fakeIPEnabled() && s.opts.ProxyDNSEnabled != nil && s.opts.ProxyDNSEnabled()
+}
+
+func (s *Server) dnsHostMappingsEnabled() bool {
+	return s != nil && s.opts.DNSHostMappingsEnabled != nil && s.opts.DNSHostMappingsEnabled()
 }
 
 func (s *Server) dnsAssociationEnabled() bool {
@@ -458,6 +482,10 @@ func (s *Server) ClassifyFlow(input Flow) (*ClassifiedFlow, error) {
 	if decision.Action == ActionProxy && decision.ExitID == "" && s.opts.DefaultExitID != nil {
 		decision.ExitID = s.opts.DefaultExitID()
 	}
+	if decision.Action == ActionDirect && decision.DNSResolver != "" {
+		decision.HandleDirect = true
+		decision.DatagramRequired = false
+	}
 	route := &ClassifiedFlow{owner: s, key: key, flow: flow, decision: decision}
 	if !guarded && (decision.Action != ActionDirect || decision.HandleDirect) {
 		exitID := decision.ExitID
@@ -533,7 +561,9 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 	var err error
 	if route.decision.Action == ActionDirect {
 		target := route.flow.IP
-		if route.flow.DomainSource == "fakeip" && isFakeIP(route.key.Destination.Addr()) {
+		if route.decision.DNSResolver != "" {
+			target, err = s.resolveRouteTarget(dialCtx, route)
+		} else if route.flow.DomainSource == "fakeip" && isFakeIP(route.key.Destination.Addr()) {
 			target, err = s.resolveFakeDirectIP(dialCtx, route.decision.ExitID, route.flow.Host, route.key.Destination.Addr().Is6())
 			if err == nil {
 				err = s.validateFakeDirectTarget(route, target)
@@ -546,7 +576,13 @@ func (s *Server) ForwardTCP(ctx context.Context, route *ClassifiedFlow, downstre
 			upstream, err = (&net.Dialer{}).DialContext(dialCtx, "tcp", net.JoinHostPort(target, strconv.Itoa(int(route.flow.Port))))
 		}
 	} else {
-		upstream, err = s.dialer.DialTCP(dialCtx, route.decision.ExitID, proxyDialTarget(route.flow), route.flow.Port)
+		target := proxyDialTarget(route.flow)
+		if route.decision.DNSResolver != "" {
+			target, err = s.resolveRouteTarget(dialCtx, route)
+		}
+		if err == nil {
+			upstream, err = s.dialer.DialTCP(dialCtx, route.decision.ExitID, target, route.flow.Port)
+		}
 	}
 	dialCancel()
 	if err != nil {

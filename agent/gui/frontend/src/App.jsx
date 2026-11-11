@@ -20,7 +20,7 @@ import {routingPagePatch,dnsPagePatch,changedGatewayPatch} from './configPatches
 import {BRUTAL_CALIBRATION_ROUNDS,proposeBrutalFromSpeedTests,validateBrutalCalibrationSample} from './brutalCalibration.js';
 import {rdpPathLabel} from './pathStatus.js';
 import {DEVICE_SPEED_REVIEW_STEPS,deviceSpeedChecks} from './deviceSpeedChecks.js';
-import {buildDNSRule,normalizeDNSRuleDraft,validateDNSRule,validateDNSSettings} from './dnsRuleEditor.js';
+import {buildDNSRule,dnsHostMappingsText,normalizeDNSRuleDraft,validateDNSRule,validateDNSSettings,validateRoutingDNS} from './dnsRuleEditor.js';
 
 // One flat sidebar, grouped by what the user is trying to do:
 // which network to use (出口) → which traffic goes through it (分流 / DNS) →
@@ -55,7 +55,7 @@ const EMPTY={
  rdp:{enabled:true,address:'127.0.0.1:3389'},
  p2p:{enabled:true,mode:'auto',punchTimeoutMs:1200,keepaliveSec:10,idleTimeoutSec:120,maxExitSessions:4,fallback:true,upnpAllowed:false},publicDirectAdvertise:'',
  networkMode:'',network:{mode:'',exclude_processes:[]},systemProxy:{mode:'',autoFollow:true,http:true,socks5:true,proxyIpLiterals:true},systemProxyStatus:{},platform:'',networkCapabilities:{},isAutostart:false,minimizeToTray:true,theme:'system',
- verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,device_groups:[],dns_exit_id:'',dns_upstreams:[],dns_rules:[],doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
+ verificationPopupTimeoutSec:15,routing:{mode:'global_proxy',dns_mode:'proxy',dns_follow_routing:false,auto_detect_dns:false,dns_association_enabled:true,proxy_dns_enabled:false,fake_ip_enabled:false,block_doh_endpoints:false,forward_other_dns:false,device_groups:[],dns_exit_id:'',dns_upstreams:[],dns_rules:[],dns_hosts:[],doh_blocked_ips:[],default_action:'PROXY',rules:[],subscriptions:[]},configPath:'',version:''
 };
 
 const cx=(...v)=>v.filter(Boolean).join(' ');
@@ -492,9 +492,9 @@ function ExitShare({status,config,setv,save,dirty}){
 
 function RuleEditor({value,exits,onChange}){
  const set=(k,v)=>onChange({...value,[k]:v});
- const setAction=action=>onChange({...value,action,exit_id:action==='PROXY'?(value.exit_id||''):'',handle_direct:action==='DIRECT'?!!value.handle_direct:false});
+ const setAction=action=>onChange({...value,action,exit_id:action==='PROXY'?(value.exit_id||''):'',handle_direct:action==='DIRECT'?!!value.handle_direct:false,dns_resolver:action==='REJECT'?'':(value.dns_resolver||''),dns_ip:action==='REJECT'?'':(value.dns_ip||'')});
  const sep='可用换行、逗号或分号分隔多个条目';
- return <div className="form-grid"><Field label="规则名称"><Input value={value.name||''} onChange={e=>set('name',e.target.value)}/></Field><Field label="动作"><Select value={value.action||'PROXY'} onChange={e=>setAction(e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field><Field label="指定出口"><Select value={value.exit_id||''} disabled={value.action!=='PROXY'} onChange={e=>set('exit_id',e.target.value)}><option value="">跟随默认出口</option>{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false&&x.kind!=='group'}>{x.name||x.deviceId}{x.online===false?' · 离线':''}</option>)}</Select></Field><Field label="协议"><Select value={protocolChoice(value.protocols)} onChange={e=>set('protocols',protocolsFromChoice(e.target.value))}>{PROTOCOL_CHOICES.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></Field><Field label="进程" help={sep+'，如 chrome.exe, steam.exe'} className="full"><Textarea rows="3" value={ruleListText(value.processes)} onChange={e=>set('processes',e.target.value)}/></Field><Field label="域名 / IP / CIDR" help={sep+'，支持通配符，如 *.example.com; 10.0.0.0/8'} className="full"><Textarea rows="3" value={ruleListText(value.targets)} onChange={e=>set('targets',e.target.value)}/></Field><Field label="入口" help="限定规则只对某类入口生效；来自局域网网关的流量没有本机进程信息"><Select value={arr(value.entries).includes('gateway')?'gateway':arr(value.entries).length?'__custom__':''} onChange={e=>{if(e.target.value!=='__custom__')set('entries',e.target.value?[e.target.value]:[])}}><option value="">所有入口</option><option value="gateway">局域网网关</option>{arr(value.entries).length>0&&!arr(value.entries).includes('gateway')&&<option value="__custom__">自定义：{arr(value.entries).join(', ')}</option>}</Select></Field><Field label="来源网段" help={sep+'；留空匹配所有来源，如 192.168.1.0/24'}><Textarea rows="2" value={ruleListText(value.source_cidrs)} onChange={e=>set('source_cidrs',e.target.value)}/></Field><Field label="端口" help={sep+'，留空表示任意端口'} className="full"><Textarea rows="2" value={ruleListText(value.ports)} onChange={e=>set('ports',e.target.value)}/></Field><label className="check-line"><input type="checkbox" checked={!!value.datagram_required} disabled={!!value.handle_direct} onChange={e=>set('datagram_required',e.target.checked)}/><span><strong>要求原生 UDP</strong><small>{value.handle_direct?'托管 DIRECT 与 Relay Datagram 互斥。':'仅在支持 datagram 的代理路径上使用。'}</small></span></label><label className="check-line"><input type="checkbox" checked={!!value.handle_direct} disabled={value.action!=='DIRECT'||!!value.datagram_required} onChange={e=>set('handle_direct',e.target.checked)}/><span><strong>RelayProxy 托管 DIRECT</strong><small>{value.datagram_required?'要求原生 UDP 时不能同时托管 DIRECT。':'由 RelayProxy 建立本地直连并纳入连接监控。'}</small></span></label></div>
+ return <div className="form-grid"><Field label="规则名称"><Input value={value.name||''} onChange={e=>set('name',e.target.value)}/></Field><Field label="动作"><Select value={value.action||'PROXY'} onChange={e=>setAction(e.target.value)}><option value="PROXY">PROXY</option><option value="DIRECT">DIRECT</option><option value="REJECT">REJECT</option></Select></Field><Field label="指定出口"><Select value={value.exit_id||''} disabled={value.action!=='PROXY'} onChange={e=>set('exit_id',e.target.value)}><option value="">跟随默认出口</option>{exits.map(x=><option key={x.deviceId||x.id} value={x.deviceId||x.id} disabled={x.online===false&&x.kind!=='group'}>{x.name||x.deviceId}{x.online===false?' · 离线':''}</option>)}</Select></Field><Field label="DNS 解析方式" help="继承 DNS 页策略，或为本条分流规则指定解析方式。进程、端口等条件在实际连接时匹配。"><Select disabled={value.action==='REJECT'} value={value.dns_resolver||''} onChange={e=>onChange({...value,dns_resolver:e.target.value,dns_ip:e.target.value==='static'?(value.dns_ip||''):''})}><option value="">继承 DNS 策略</option><option value="local">本机系统 DNS</option><option value="encrypted">同一出口的加密 DNS</option><option value="exit_system">同一出口的系统 DNS</option><option value="static">固定 IP</option></Select></Field>{value.dns_resolver==='static'&&<Field label="固定 IP" help="保留原域名参与分流匹配，连接使用此 IPv4 / IPv6 地址。"><Input value={value.dns_ip||''} onChange={e=>set('dns_ip',e.target.value)} placeholder="192.168.1.20"/></Field>}<Field label="协议"><Select value={protocolChoice(value.protocols)} onChange={e=>set('protocols',protocolsFromChoice(e.target.value))}>{PROTOCOL_CHOICES.map(([v,l])=><option key={v} value={v}>{l}</option>)}</Select></Field><Field label="进程" help={sep+'，如 chrome.exe, steam.exe'} className="full"><Textarea rows="3" value={ruleListText(value.processes)} onChange={e=>set('processes',e.target.value)}/></Field><Field label="域名 / IP / CIDR" help={sep+'，支持通配符，如 *.example.com; 10.0.0.0/8'} className="full"><Textarea rows="3" value={ruleListText(value.targets)} onChange={e=>set('targets',e.target.value)}/></Field><Field label="入口" help="限定规则只对某类入口生效；来自局域网网关的流量没有本机进程信息"><Select value={arr(value.entries).includes('gateway')?'gateway':arr(value.entries).length?'__custom__':''} onChange={e=>{if(e.target.value!=='__custom__')set('entries',e.target.value?[e.target.value]:[])}}><option value="">所有入口</option><option value="gateway">局域网网关</option>{arr(value.entries).length>0&&!arr(value.entries).includes('gateway')&&<option value="__custom__">自定义：{arr(value.entries).join(', ')}</option>}</Select></Field><Field label="来源网段" help={sep+'；留空匹配所有来源，如 192.168.1.0/24'}><Textarea rows="2" value={ruleListText(value.source_cidrs)} onChange={e=>set('source_cidrs',e.target.value)}/></Field><Field label="端口" help={sep+'，留空表示任意端口'} className="full"><Textarea rows="2" value={ruleListText(value.ports)} onChange={e=>set('ports',e.target.value)}/></Field><label className="check-line"><input type="checkbox" checked={!!value.datagram_required} disabled={!!value.handle_direct} onChange={e=>set('datagram_required',e.target.checked)}/><span><strong>要求原生 UDP</strong><small>{value.handle_direct?'托管 DIRECT 与 Relay Datagram 互斥。':'仅在支持 datagram 的代理路径上使用。'}</small></span></label><label className="check-line"><input type="checkbox" checked={!!value.handle_direct} disabled={value.action!=='DIRECT'||!!value.datagram_required} onChange={e=>set('handle_direct',e.target.checked)}/><span><strong>RelayProxy 托管 DIRECT</strong><small>{value.datagram_required?'要求原生 UDP 时不能同时托管 DIRECT。':'由 RelayProxy 建立本地直连并纳入连接监控。'}</small></span></label></div>
 }
 
 function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
@@ -529,7 +529,7 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
   onDrop:e=>{e.preventDefault();const from=dragFrom.current;if(from!==null){const b=e.currentTarget.getBoundingClientRect();commit(moveRule(rules,from,dropTargetIndex(from,i,e.clientY>b.top+b.height/2)))}endDrag()},
   onDragEnd:endDrag,onMouseUp:()=>{armed.current=false}});
  const edit=i=>setEditing({index:i,rule:JSON.parse(JSON.stringify(i>=0?rules[i]:{name:'新规则',enabled:true,action:'PROXY',exit_id:'',datagram_required:false,handle_direct:false,processes:[],targets:[],ports:[],protocols:['tcp','udp']}))});
- const saveEditor=()=>{const n=[...rules],rule=normalizeRuleLists(editing.rule);if(editing.index<0)n.push(rule);else n[editing.index]=rule;commit(n);setEditing(null)};
+ const saveEditor=()=>{const n=[...rules],rule=normalizeRuleLists(editing.rule);rule.dns_ip=String(rule.dns_ip||'').trim();const error=validateRoutingDNS(rule);if(error){window.alert(error);return}if(editing.index<0)n.push(rule);else n[editing.index]=rule;commit(n);setEditing(null)};
  const mode=r.mode||'global_proxy';
  return <><PageHead title="分流" actions={<Button primary onClick={()=>edit(-1)}>＋ 新建规则</Button>}/>
  <Card className="routing-policy">
@@ -540,7 +540,7 @@ function RoutingPage({config,exits,setv,save,dirty,onDiscard,onGoto}){
   </div>
   <div className="mini top-gap">{mode==='rule'?'按下方规则从上到下匹配：手动规则 → 订阅 → 未命中动作。':mode==='direct'?'全局直连：所有流量不经代理，下方规则不参与匹配。':'全局代理：所有流量经默认出口，下方规则不参与匹配。'}「默认出口」决定 PROXY 连接用哪台设备，在「出口」页一键切换；已授权出口撤销或离线时不会静默直连。</div>
  </Card>
- <Card title="规则列表" eyebrow={rules.length+' RULES'}><div className="rule-table"><div className="rule-row rule-head"><span>#</span><span>规则</span><span>匹配条件</span><span>动作</span><span>启用</span><span>操作</span></div>{rules.map((x,i)=><div className={cx('rule-row',!x.enabled&&'disabled',dragging===i&&'dragging',dropAt&&dropAt.i===i&&dragging!==i&&(dropAt.after?'drop-after':'drop-before'))} key={(x.name||'rule')+'-'+i} {...dragProps(i)}><span className="drag" role="button" tabIndex={-1} aria-label={'拖动调整顺序：'+(x.name||'规则 '+(i+1))} title="拖动调整顺序" onMouseDown={()=>{armed.current=true}}>⋮⋮</span><div><div className="row"><strong>{x.name||'规则 '+(i+1)}</strong></div><div className="mini">优先级 {i+1}</div></div><div className="chips">{arr(x.entries).includes('gateway')&&<span className="chip" key="e">局域网网关</span>}{arr(x.source_cidrs).slice(0,1).map(v=><span className="chip" key={'s'+v}>来源 {v}</span>)}{arr(x.processes).slice(0,2).map(v=><span className="chip" key={'p'+v}>{v}</span>)}{arr(x.targets).slice(0,2).map(v=><span className="chip" key={'t'+v}>{v}</span>)}{arr(x.ports).slice(0,1).map(v=><span className="chip" key={'o'+v}>{v}</span>)}{!arr(x.entries).length&&!arr(x.source_cidrs).length&&!arr(x.processes).length&&!arr(x.targets).length&&!arr(x.ports).length&&<span className="mini">任意流量</span>}</div><div><Badge tone={x.action==='REJECT'?'danger':x.action==='DIRECT'?'blue':'ok'}>{x.action||'PROXY'}</Badge>{x.exit_id&&<div className="mini">{exitName(exits,x.exit_id)}</div>}</div><div><Switch checked={!!x.enabled} label={(x.enabled?'停用':'启用')+' '+(x.name||'规则 '+(i+1))} onChange={v=>toggle(i,v)}/></div><div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>move(i,-1)}>↑</Button><Button quiet disabled={i===rules.length-1} onClick={()=>move(i,1)}>↓</Button><Button quiet onClick={()=>edit(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除这条分流规则？')&&commit(rules.filter((_,n)=>n!==i))}>删除</Button></div></div>)}{!rules.length&&<div className="empty">尚无规则。切换到规则模式前请先添加规则。</div>}</div></Card>
+ <Card title="规则列表" eyebrow={rules.length+' RULES'} action={<Button onClick={()=>onGoto('dns')}>DNS 联动与测试</Button>}><div className="rule-table"><div className="rule-row rule-head"><span>#</span><span>规则</span><span>匹配条件</span><span>动作</span><span>启用</span><span>操作</span></div>{rules.map((x,i)=><div className={cx('rule-row',!x.enabled&&'disabled',dragging===i&&'dragging',dropAt&&dropAt.i===i&&dragging!==i&&(dropAt.after?'drop-after':'drop-before'))} key={(x.name||'rule')+'-'+i} {...dragProps(i)}><span className="drag" role="button" tabIndex={-1} aria-label={'拖动调整顺序：'+(x.name||'规则 '+(i+1))} title="拖动调整顺序" onMouseDown={()=>{armed.current=true}}>⋮⋮</span><div><div className="row"><strong>{x.name||'规则 '+(i+1)}</strong></div><div className="mini">优先级 {i+1}</div></div><div className="chips">{arr(x.entries).includes('gateway')&&<span className="chip" key="e">局域网网关</span>}{arr(x.source_cidrs).slice(0,1).map(v=><span className="chip" key={'s'+v}>来源 {v}</span>)}{arr(x.processes).slice(0,2).map(v=><span className="chip" key={'p'+v}>{v}</span>)}{arr(x.targets).slice(0,2).map(v=><span className="chip" key={'t'+v}>{v}</span>)}{arr(x.ports).slice(0,1).map(v=><span className="chip" key={'o'+v}>{v}</span>)}{!arr(x.entries).length&&!arr(x.source_cidrs).length&&!arr(x.processes).length&&!arr(x.targets).length&&!arr(x.ports).length&&<span className="mini">任意流量</span>}</div><div><Badge tone={x.action==='REJECT'?'danger':x.action==='DIRECT'?'blue':'ok'}>{x.action||'PROXY'}</Badge>{x.exit_id&&<div className="mini">{exitName(exits,x.exit_id)}</div>}{x.dns_resolver&&<div className="mini">DNS · {({local:"本机",encrypted:"同出口加密",exit_system:"出口系统",static:x.dns_ip})[x.dns_resolver]}</div>}</div><div><Switch checked={!!x.enabled} label={(x.enabled?'停用':'启用')+' '+(x.name||'规则 '+(i+1))} onChange={v=>toggle(i,v)}/></div><div className="rule-ops"><Button quiet disabled={i===0} onClick={()=>move(i,-1)}>↑</Button><Button quiet disabled={i===rules.length-1} onClick={()=>move(i,1)}>↓</Button><Button quiet onClick={()=>edit(i)}>编辑</Button><Button quiet danger onClick={()=>window.confirm('删除这条分流规则？')&&commit(rules.filter((_,n)=>n!==i))}>删除</Button></div></div>)}{!rules.length&&<div className="empty">尚无规则。切换到规则模式前请先添加规则。</div>}</div></Card>
  <Card title="规则订阅" eyebrow={subs.length+' SUBSCRIPTIONS'} action={<Button onClick={()=>editSub(-1)}>＋ 添加订阅</Button>}>
   <div className="mini">支持 GFWList（Base64 / Adblock 主机规则）、域名和 IP/CIDR 文本列表。按上到下顺序匹配：手动规则优先 → 订阅 → 默认动作。仅在规则模式生效，每 6 小时自动更新；下载失败继续使用本地已缓存的最后成功版本。URL 路径、正则和 Adblock 修饰符不会被扩大为整个域名匹配。</div>
   {subs.map((sub,i)=><div className="setting" key={sub.url+'-'+i}>
@@ -614,6 +614,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
  const[ruleEditor,setRuleEditor]=useState(null),[ruleError,setRuleError]=useState('');
  const[saveError,setSaveError]=useState(''),[saving,setSaving]=useState(false);
  const[probing,setProbing]=useState(false),[probe,setProbe]=useState(null);
+ const[ruleTester,setRuleTester]=useState(null),[probingRule,setProbingRule]=useState(null);
  const r=config.routing||EMPTY.routing;
  const rules=arr(r.dns_rules);
  const inventory=[
@@ -625,7 +626,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
  const dnsExitId=r.dns_exit_id||defaultExitId;
  const defaultExit=inventory.find(x=>x.id===defaultExitId);
  const preset=currentDNSPreset(r);
- const change=next=>{setProbe(null);setSaveError('');setv('routing',next)};
+ const change=next=>{setProbe(null);setRuleTester(null);setSaveError('');setv('routing',next)};
  const updateRule=(index,patch)=>change({...r,dns_rules:rules.map((item,i)=>i===index?{...item,...patch}:item)});
  const openRuleEditor=(index=-1)=>{
   setRuleError('');
@@ -649,7 +650,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   setSaving(true);setSaveError('');
   try{
    const ok=await save({routing:dnsPagePatch(r)},message=>setSaveError(message));
-   if(ok){setSaveError('');setProbe(null)}
+   if(ok){setSaveError('');setProbe(null);setRuleTester(null)}
   }finally{setSaving(false)}
  };
  const runDNSProbe=async()=>{
@@ -662,6 +663,22 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
   }catch(e){setProbe({error:e.message||'DNS 出口诊断失败'})}
   finally{setProbing(false)}
  };
+ const openDNSRuleTester=(index,rule)=>{
+  const first=splitRuleList(rule?.domains)[0]||'';
+  const domain=first.startsWith('*.')?first.slice(2):first;
+  setRuleTester({index,domain,result:null,error:''});
+ };
+ const runDNSRuleProbe=async()=>{
+  if(!ruleTester||dirty||saving||probingRule!==null)return;
+  const index=ruleTester.index,testDomain=String(ruleTester.domain||'').trim();
+  setProbingRule(index);setRuleTester(old=>({...old,result:null,error:'',loading:true}));
+  try{
+   const response=parseMutation(await call('goProbeDNSRule',index,testDomain));
+   if(!response.ok)throw new Error(response.message||'DNS 规则测试失败');
+   setRuleTester(old=>({...old,result:response.result||response,loading:false}));
+  }catch(e){setRuleTester(old=>({...old,error:e.message||'DNS 规则测试失败',loading:false}))}
+  finally{setProbingRule(null)}
+ };
  const modeCards=[
   {id:'auto',title:'自动代理解析',tag:'推荐',desc:'接管可捕获的系统 DNS/53 查询，通过代理出口解析真实 IP；域名 DNS 规则在此模式生效。'},
   {id:'real_ip',title:'真实 IP / 仅关联',tag:'不接管 DNS',desc:'保留系统 DNS，只观察可见的 DNS 应答建立域名关联；查询本身可能从本机网络发出。'},
@@ -669,7 +686,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
  ];
  const exitLabel=(id,fallbackId=defaultExitId)=>{const target=id||fallbackId;if(!target)return '跟随当前默认出口';return inventory.find(x=>x.id===target)?.name||target};
  return <>
-  <PageHead title="DNS" desc="解析模式、按域名选择出口、加密上游与 FakeIP 防护。保存前自动校验；诊断只测试已保存配置。"/>
+  <PageHead title="DNS" desc="解析模式、域名出口规则、静态解析与 FakeIP 防护。保存前自动校验；诊断只测试已保存配置。"/>
   <div className="dns-page">
    <Card title="DNS 解析模式" eyebrow="01 · RESOLUTION MODE" action={<Badge tone={preset==='auto'?'ok':preset==='fake_ip'?'blue':'neutral'}>{preset==='auto'?'代理解析':preset==='fake_ip'?'FakeIP':'仅关联'}</Badge>}>
     <div className="dns-mode-grid" role="radiogroup" aria-label="DNS 解析模式">
@@ -682,14 +699,18 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     <div className="dns-mode-foot">
      <div className="grow"><strong>{preset==='auto'?'域名规则已具备生效条件':preset==='fake_ip'?'当前使用 FakeIP 映射':'当前不接管系统 DNS'}</strong><div className="mini">{preset==='auto'?'必须启动系统接管/透明代理才能处理经过 Agent DNS/53 接管路径的请求；应用私有 DoH、环回 DNS 和系统缓存不在保证范围内。':preset==='fake_ip'?'FakeIP 与真实 IP 代理 DNS 不能同时启用。切换模式会自动清理不兼容开关。':'已配置的域名 DNS 规则会保留，但不会参与解析；切换到自动代理解析后才会生效。'}</div></div>
     </div>
+    <Setting title="DNS 跟随分流规则" desc="PROXY 通过匹配的出口加密解析，DIRECT 使用本机 DNS，REJECT 拒绝解析。分流规则内的 DNS 设置优先；静态映射和域名 DNS 规则可进一步覆盖继承策略。">
+     <Switch checked={!!r.dns_follow_routing} label="DNS 跟随分流规则" onChange={v=>change({...r,dns_follow_routing:v})}/>
+    </Setting>
+    <div className="mini">系统 DNS 仅有域名，使用不依赖进程、入口、来源、端口或单一协议的规则。HTTP / SOCKS 和托管连接会按完整分流条件执行 DNS 设置；系统 DNS 联动需使用自动代理解析并启动系统接管。</div>
    </Card>
 
    <Card title="按域名选择 DNS 出口" eyebrow="02 · DOMAIN RULES" action={<Button primary onClick={()=>openRuleEditor(-1)}>添加规则</Button>}>
     <div className="dns-section-intro">
-     <div className="mini">按列表顺序匹配，第一条命中规则优先。未命中的域名使用本地系统 DNS；远程解析失败时不会回退本地，避免意外泄漏。出口系统 DNS 只处理 A/AAAA；TXT、SRV、HTTPS 等额外查询仍经同一出口的加密 DNS。出口系统 DNS 需要较新版本的 Relay 与出口 Agent；旧版本或断线时返回 SERVFAIL，不回退本地。</div>
+     <div className="mini">按列表顺序匹配，第一条命中规则优先。开启跟随分流后，未命中使用分流策略；关闭时，有规则列表则未命中使用本地 DNS，无规则列表则使用默认加密 DNS。未指定出口时，跟随分流或专用 DNS 出口；远程解析失败时不会回退本地，避免意外泄漏。出口系统 DNS 只处理 A/AAAA；TXT、SRV、HTTPS 等额外查询仍经同一出口的加密 DNS。出口系统 DNS 需要较新版本的 Relay 与出口 Agent；旧版本或断线时返回 SERVFAIL，不回退本地。</div>
      <div className="dns-rule-count"><strong>{rules.length}</strong><span>条规则</span><i>·</i><span>{rules.filter(x=>x.enabled!==false).length} 条启用</span></div>
     </div>
-    {preset!=='auto'&&<div className="notice warn top-gap">当前模式下域名 DNS 规则不会执行。规则仍可编辑和保存，切换到「自动代理解析」后生效。</div>}
+    {preset!=='auto'&&rules.length>0&&<div className="notice warn top-gap">当前模式下域名 DNS 规则不会执行。静态域名映射仍可处理命中的 DNS/53 查询；切换到「自动代理解析」后 DNS 规则生效。</div>}
     {rules.length===0?<div className="dns-empty-state"><div className="dns-empty-icon">DNS</div><strong>还没有域名 DNS 规则</strong><span>添加规则，为不同域名指定本地 DNS、加密 DNS 或出口设备的系统 DNS。</span><Button onClick={()=>openRuleEditor(-1)}>添加第一条规则</Button></div>:
      <div className="dns-rule-list">
       {rules.map((rule,i)=>{
@@ -701,11 +722,12 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
         <div className="dns-rule-content">
          <div className="dns-rule-heading"><strong>{rule.name||domains[0]||'未命名规则'}</strong><Badge tone={rule.enabled===false?'neutral':'ok'}>{rule.enabled===false?'已停用':'已启用'}</Badge><Badge tone={remote?'blue':'neutral'}>{remote?'远程解析':'本地解析'}</Badge></div>
          <div className="dns-rule-domains">{domains.length?domains.slice(0,5).map((domain,j)=><code key={domain+'-'+j}>{domain}</code>):<span className="dns-rule-invalid">尚未填写域名</span>}{domains.length>5&&<span className="dns-rule-more">+{domains.length-5}</span>}</div>
-         <div className="dns-rule-meta">{domains.length} 个域名 · {remote?resolver+' · '+exitLabel(rule.exit_id,rule.resolver==='exit_system'?defaultExitId:dnsExitId):'使用本机系统 DNS'}</div>
+         <div className="dns-rule-meta">{domains.length} 个域名 · {remote?resolver+' · '+(r.dns_follow_routing&&!rule.exit_id?'跟随分流出口':exitLabel(rule.exit_id,rule.resolver==='exit_system'?defaultExitId:dnsExitId)):'使用本机系统 DNS'}</div>
         </div>
         <div className="dns-rule-controls">
          <div className="dns-order-controls"><button type="button" aria-label="规则上移" title="上移" disabled={i===0} onClick={()=>change({...r,dns_rules:moveRule(rules,i,i-1)})}>↑</button><button type="button" aria-label="规则下移" title="下移" disabled={i===rules.length-1} onClick={()=>change({...r,dns_rules:moveRule(rules,i,i+1)})}>↓</button></div>
          <Button quiet onClick={()=>openRuleEditor(i)}>编辑</Button>
+         <Button quiet disabled={dirty||saving||rule.enabled===false||!domains.length} onClick={()=>openDNSRuleTester(i,rule)}>测试规则</Button>
          <Button quiet onClick={()=>updateRule(i,{enabled:rule.enabled===false})}>{rule.enabled===false?'启用':'停用'}</Button>
          <Button quiet danger onClick={()=>change({...r,dns_rules:rules.filter((_,j)=>j!==i)})}>删除</Button>
         </div>
@@ -715,7 +737,15 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     <div className="dns-rule-footer"><span className="mini">最多 128 条规则；每条规则支持 1–64 个域名。支持精确域名和 *.example.com 通配符。</span><Button onClick={()=>openRuleEditor(-1)}>添加 DNS 规则</Button></div>
    </Card>
 
-   <Card title="DNS 出口与域名关联" eyebrow="03 · DNS EXIT">
+   <Card title="DNS 静态解析" eyebrow="03 · HOST MAPPINGS">
+    <div className="mini dns-static-help">为精确域名固定返回一个 IPv4 或 IPv6 地址，并作为实际连接目标，仍使用原域名匹配分流出口。分流规则内的 DNS 设置优先于此表。启用映射后，Agent 会接管命中的标准 DNS/53 查询并优先返回映射；未命中的查询仍按当前 DNS 模式处理。应用私有 DoH 不适用；Relay Server 引导域名仍使用已验证的连接地址。</div>
+    <Field label="域名=IP（每行一条）" className="full">
+     <Textarea rows="5" value={dnsHostMappingsText(r.dns_hosts)} onChange={e=>change({...r,dns_hosts:e.target.value})} placeholder={'app.example.com=192.168.1.20\nprinter.example.com=fd00::20'}/>
+    </Field>
+    <div className="mini top-gap">支持 256 条精确域名映射；不支持通配符或 CIDR。A 与 AAAA 查询按映射地址族返回，另一地址族返回空记录。</div>
+   </Card>
+
+   <Card title="DNS 出口与域名关联" eyebrow="04 · DNS EXIT">
     <Setting title="DNS 域名关联" desc="记录可验证的 DNS A/AAAA 应答，为透明代理连接提供域名线索；共享 IP、系统缓存和应用私有 DoH 可能无法关联。">
      <Switch checked={r.dns_association_enabled!==false} label="启用 DNS 域名关联" onChange={v=>change({...r,dns_association_enabled:v})}/>
     </Setting>
@@ -740,7 +770,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     </div>
    </Card>
 
-   <Card title="FakeIP 与 DoH 防护" eyebrow="04 · DNS PROTECTION">
+   <Card title="FakeIP 与 DoH 防护" eyebrow="05 · DNS PROTECTION">
     <div className="dns-protection-state"><Badge tone={r.fake_ip_enabled?'ok':'neutral'}>{r.fake_ip_enabled?'FakeIP 已启用':'FakeIP 未启用'}</Badge><span className="mini">以下两项仅在 FakeIP 模式下生效。</span></div>
     <Setting title="阻断已知 DoH 解析器" desc="阻断可识别的公共 DoH 端点；不能覆盖所有应用私有 DoH 或直连 IP。">
      <Switch checked={!!r.block_doh_endpoints} label="阻断已知 DoH 解析器" disabled={!r.fake_ip_enabled} onChange={v=>change(setDoHBlocking(r,v))}/>
@@ -758,7 +788,7 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     <div className="notice warn top-gap">以上开关不代表完整 DNS 防泄漏。环回 DNS、应用私有 DoH、系统缓存以及 Agent/驱动退出后的保护仍需单独验证。</div>
    </Card>
 
-   <Card title="DNS 出口诊断" eyebrow="05 · DIAGNOSTICS" action={<Button disabled={probing||dirty||saving} onClick={runDNSProbe}>{probing?'检测中…':'检测 DNS 上游（已保存配置）'}</Button>}>
+   <Card title="DNS 出口诊断" eyebrow="06 · DIAGNOSTICS" action={<><Button disabled={dirty||saving} onClick={()=>openDNSRuleTester(-1,null)}>测试分流 DNS</Button><Button disabled={probing||dirty||saving} onClick={runDNSProbe}>{probing?'检测中…':'检测 DNS 上游（已保存配置）'}</Button></>}>
     <div className="mini">使用当前已保存的 DNS 出口执行真实 DNS 查询，显示上游连通性和延迟。未保存的草稿不会参与测试。</div>
     {dirty&&<div className="notice warn top-gap">存在未保存的 DNS 修改。请先保存，再运行诊断。</div>}
     {probe?.error&&<div className="notice danger top-gap" role="alert">{probe.error}</div>}
@@ -808,6 +838,27 @@ function DNSPage({status,config,exits,setv,save,dirty,onDiscard}){
     </div>
     {ruleError&&<div className="notice danger top-gap" role="alert">{ruleError}</div>}
    </>}
+  </Modal>
+  <Modal open={!!ruleTester} title="测试 DNS 规则" wide onClose={()=>{if(probingRule===null)setRuleTester(null)}} footer={<><Button disabled={probingRule!==null} onClick={()=>setRuleTester(null)}>关闭</Button><Button primary disabled={dirty||saving||probingRule!==null||!ruleTester?.domain} onClick={runDNSRuleProbe}>{probingRule!==null?'查询中…':'测试 A / AAAA'}</Button></>}>
+   {ruleTester&&<div className="stack">
+    <Field label="测试域名" help={ruleTester.index>=0?"域名需命中此已保存规则；结果显示实际优先命中的策略。":"输入域名，检查已保存的分流与 DNS 策略。"}>
+     <Input value={ruleTester.domain} disabled={probingRule!==null} onChange={e=>setRuleTester({...ruleTester,domain:e.target.value,result:null,error:''})} placeholder="example.com"/>
+    </Field>
+    <div className="mini">测试查询 A / AAAA，并显示已保存的策略。此操作不会开启系统 DNS 接管。系统 DNS 不含进程和业务端口，相关限定规则在实际连接时匹配。</div>
+    {ruleTester.error&&<div className="notice danger" role="alert">{ruleTester.error}</div>}
+    {ruleTester.loading&&<div className="notice">正在查询 {ruleTester.domain}…</div>}
+    {ruleTester.result&&<>
+     <div className="notice">
+      <div>域名：<code>{ruleTester.result.domain}</code> · {({static:'固定 IP',host_override:'固定 IP',local:'本机系统 DNS',reject:'拒绝解析',exit_system:'出口系统 DNS',encrypted:'加密 DNS'})[ruleTester.result.resolver]||ruleTester.result.resolver}{ruleTester.result.exitId&&<> · DNS 出口：<strong>{exitLabel(ruleTester.result.exitId)}</strong></>}</div>
+      <div>DNS 策略：{ruleTester.result.rule||({host_override:'静态域名映射',default:'默认 DNS 策略',local_exception:'本地 DNS 例外'})[ruleTester.result.source]||ruleTester.result.source}</div>
+      <div>分流：{ruleTester.result.routingRule||'默认'} · {ruleTester.result.routingAction}{ruleTester.result.routingAction==='PROXY'&&<> · 流量出口：<strong>{exitLabel(ruleTester.result.trafficExitId)}</strong></>}</div>
+     </div>
+     {arr(ruleTester.result.results).map((item,i)=><div className="dns-rule-test-row" key={item.type+'-'+i}>
+      <div className="dns-rule-test-heading"><strong>{item.type}</strong><Badge tone={item.ok?'ok':'warn'}>{item.ok?'已收到应答':'查询失败'}</Badge><span className="mini">{item.rcode||''}</span><span className="dns-probe-latency">{item.latencyMs??0} ms</span></div>
+      <div className="dns-rule-test-addresses">{arr(item.answers).length?arr(item.answers).map((address,j)=><code key={address+'-'+j}>{address}</code>):<span className="mini">{item.error||'没有对应地址记录'}</span>}</div>
+     </div>)}
+    </>}
+   </div>}
   </Modal>
  </>;
 }

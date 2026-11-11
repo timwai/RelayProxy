@@ -59,6 +59,43 @@ func (d *RoutingDialer) ResolveProxyTarget(ctx context.Context, host string) (st
 	return "", fmt.Errorf("local DNS for %q returned no IP addresses", host)
 }
 
+// ResolveRuleTarget keeps the matched process/port rule's DNS policy attached
+// to its chosen exit. It never reevaluates a process-specific route as a name.
+func (d *RoutingDialer) ResolveRuleTarget(ctx context.Context, host string, decision Decision) (string, error) {
+	if decision.DNSIP != "" {
+		ip, err := netip.ParseAddr(decision.DNSIP)
+		if err != nil || ip.Zone() != "" {
+			return "", fmt.Errorf("invalid static DNS target")
+		}
+		return ip.Unmap().String(), nil
+	}
+	if ip, err := netip.ParseAddr(host); err == nil {
+		return ip.Unmap().String(), nil
+	}
+	switch decision.DNSResolver {
+	case "local":
+		ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", host)
+		if err != nil {
+			return "", err
+		}
+		if target := firstResolvedIP(ips); target != "" {
+			return target, nil
+		}
+		return "", fmt.Errorf("local DNS returned no addresses for %s", host)
+	case "encrypted", "exit_system":
+		if d.ResolveDNS == nil {
+			return "", fmt.Errorf("rule DNS resolver unavailable")
+		}
+		exitID := decision.DNSExitID
+		if exitID == "" {
+			exitID = decision.ExitID
+		}
+		return d.ResolveDNS(ctx, exitID, host, decision.DNSResolver)
+	default:
+		return d.ResolveProxyTarget(ctx, host)
+	}
+}
+
 // Prefer IPv4 for the system resolver path, preserving the existing
 // local-resolution policy and leaving the DNS choice deterministic.
 func firstResolvedIP(ips []netip.Addr) string {

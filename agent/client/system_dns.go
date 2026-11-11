@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"time"
 
@@ -52,11 +53,14 @@ func (d *TunnelDialer) ExchangeExitSystemDNS(ctx context.Context, id string, que
 func (d *TunnelDialer) exchangeExitSystemDNS(parent context.Context, exitID string, query []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, exitSystemDNSRequestTimeout)
 	defer cancel()
-	_, stream, err := d.openProxyStream(ctx, exitID)
+	selected, stream, err := d.openProxyStream(ctx, exitID)
 	if err != nil {
 		return nil, err
 	}
 	defer stream.Close()
+	if !selected.IsDirect() && !tunnel.PeerSupportsExitSystemDNS(selected.Session) {
+		return nil, protocol.NewRelayError(protocol.ErrCodeDNSUnsupported, "Relay Server 未声明支持出口系统 DNS，请升级 Relay Server 并重新连接；目标出口 Agent 也需使用支持此功能的版本")
+	}
 	stop := tunnel.InterruptOnCancel(ctx, stream)
 	defer stop()
 	if deadline, ok := ctx.Deadline(); ok {
@@ -75,6 +79,12 @@ func (d *TunnelDialer) exchangeExitSystemDNS(parent context.Context, exitID stri
 	}
 	var response protocol.ExitDNSResponse
 	if err := protocol.ReadJSON(stream, &response); err != nil {
+		if ctx.Err() != nil {
+			return nil, fmt.Errorf("exit system DNS: %w", ctx.Err())
+		}
+		if errors.Is(err, io.EOF) || errors.Is(err, io.ErrUnexpectedEOF) {
+			return nil, fmt.Errorf("出口 %s（%s）在返回系统 DNS 应答前关闭连接；请确认出口 Agent 已升级并检查连接状态: %w", exitID, selected.Path, err)
+		}
 		return nil, fmt.Errorf("unable to read exit DNS result: %w", err)
 	}
 	if response.RequestID != requestID {

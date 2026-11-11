@@ -128,6 +128,16 @@ func (b *UIBridge) ProbeDNS() (divert.DNSProbeReport, error) {
 	return b.agent.ProbeDNS(ctx)
 }
 
+// ProbeDNSRule resolves a hostname with the effective saved DNS policy.
+func (b *UIBridge) ProbeDNSRule(index int, domain string) (divert.DNSRuleProbeReport, error) {
+	if b == nil || b.agent == nil {
+		return divert.DNSRuleProbeReport{}, errors.New("agent unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	return b.agent.ProbeDNSRule(ctx, index, domain)
+}
+
 // TestCustomExit makes a real TCP CONNECT to a stable public destination
 // through the selected local proxy. The upstream credentials never leave the
 // Agent process or enter the returned diagnostics.
@@ -526,23 +536,25 @@ type CustomExitUpdate struct {
 }
 
 type RoutingConfigUpdate struct {
-	DeviceGroups          *[]exitgroup.Group      `json:"device_groups"`
-	Mode                  *string                 `json:"mode"`
-	DNSMode               *string                 `json:"dns_mode"`
-	AutoDetectDNS         *bool                   `json:"auto_detect_dns"`
-	DNSAssociationEnabled *bool                   `json:"dns_association_enabled"`
-	ProxyDNSEnabled       *bool                   `json:"proxy_dns_enabled"`
-	FakeIPEnabled         *bool                   `json:"fake_ip_enabled"`
-	BlockDoHEndpoints     *bool                   `json:"block_doh_endpoints"`
-	ForwardOtherDNS       *bool                   `json:"forward_other_dns"`
-	DNSExitID             *string                 `json:"dns_exit_id"`
-	DNSUpstreams          *[]routing.DNSUpstream  `json:"dns_upstreams"`
-	DNSDirectDomains      *[]string               `json:"dns_direct_domains"`
-	DNSRules              *[]routing.DNSRule      `json:"dns_rules"`
-	DoHBlockedIPs         *[]string               `json:"doh_blocked_ips"`
-	DefaultAction         *string                 `json:"default_action"`
-	Rules                 []routing.Rule          `json:"rules"` // Full replacement
-	Subscriptions         *[]routing.Subscription `json:"subscriptions"`
+	DeviceGroups          *[]exitgroup.Group        `json:"device_groups"`
+	Mode                  *string                   `json:"mode"`
+	DNSMode               *string                   `json:"dns_mode"`
+	AutoDetectDNS         *bool                     `json:"auto_detect_dns"`
+	DNSAssociationEnabled *bool                     `json:"dns_association_enabled"`
+	ProxyDNSEnabled       *bool                     `json:"proxy_dns_enabled"`
+	FakeIPEnabled         *bool                     `json:"fake_ip_enabled"`
+	BlockDoHEndpoints     *bool                     `json:"block_doh_endpoints"`
+	ForwardOtherDNS       *bool                     `json:"forward_other_dns"`
+	DNSExitID             *string                   `json:"dns_exit_id"`
+	DNSUpstreams          *[]routing.DNSUpstream    `json:"dns_upstreams"`
+	DNSDirectDomains      *[]string                 `json:"dns_direct_domains"`
+	DNSRules              *[]routing.DNSRule        `json:"dns_rules"`
+	DNSFollowRouting      *bool                     `json:"dns_follow_routing"`
+	DNSHosts              *[]routing.DNSHostMapping `json:"dns_hosts"`
+	DoHBlockedIPs         *[]string                 `json:"doh_blocked_ips"`
+	DefaultAction         *string                   `json:"default_action"`
+	Rules                 []routing.Rule            `json:"rules"` // Full replacement
+	Subscriptions         *[]routing.Subscription   `json:"subscriptions"`
 }
 
 // SaveResult tells the UI whether the change took effect immediately.
@@ -831,6 +843,12 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		}
 		if in.Routing.DNSRules != nil {
 			cfg.Routing.DNSRules = routing.CloneConfig(routing.Config{DNSRules: *in.Routing.DNSRules}).DNSRules
+		}
+		if in.Routing.DNSFollowRouting != nil {
+			cfg.Routing.DNSFollowRouting = *in.Routing.DNSFollowRouting
+		}
+		if in.Routing.DNSHosts != nil {
+			cfg.Routing.DNSHosts = append([]routing.DNSHostMapping(nil), (*in.Routing.DNSHosts)...)
 		}
 		if in.Routing.DoHBlockedIPs != nil {
 			cfg.Routing.DoHBlockedIPs = append([]string(nil), (*in.Routing.DoHBlockedIPs)...)

@@ -325,11 +325,11 @@ func (i *darwinInterceptor) handleTCP(conn *net.UnixConn, open darwinOpenFlow) e
 	if err != nil {
 		return err
 	}
-	if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()) && destination.Port() == 53 {
+	if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled() || i.server.dnsHostMappingsEnabled()) && destination.Port() == 53 {
 		if err := writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: ActionProxy, Reason: "fakeip-dns"}); err != nil {
 			return err
 		}
-		return i.server.serveFakeDNSTCP(i.ctx, conn)
+		return i.server.serveDNSTCPAtResolver(i.ctx, conn, destination, nil)
 	}
 	if i.server.fakeIPEnabled() && isEncryptedDNSPort(destination.Port()) {
 		return writeDarwinJSON(conn, darwinFrameDecision, darwinFlowDecision{Action: ActionReject, Reason: "fakeip-dns-egress-blocked"})
@@ -368,7 +368,17 @@ func (i *darwinInterceptor) handleUDP(conn *net.UnixConn, open darwinOpenFlow) e
 		if err != nil {
 			return err
 		}
-		if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled()) && destination.Port() == 53 {
+		if (i.server.fakeIPEnabled() || i.server.proxyDNSEnabled() ||
+			(i.server.dnsHostMappingsEnabled() && i.server.hasDNSHostOverride(datagram))) && destination.Port() == 53 {
+			if i.server.directDNSQuestion(datagram) {
+				writeMu.Lock()
+				err = writeDarwinFrame(conn, darwinFrameUDPDirect, payload)
+				writeMu.Unlock()
+				if err != nil {
+					return err
+				}
+				continue
+			}
 			answer := i.server.interceptedDNSReply(i.ctx, datagram, true)
 			if answer != nil {
 				if err := respond(i.ctx, FlowKey{Protocol: ProtoUDP, Destination: destination}, answer); err != nil {

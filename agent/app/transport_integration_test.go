@@ -22,7 +22,7 @@ import (
 	"relayproxy/server/session"
 )
 
-func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Checker) (*Agent, *Agent, *session.Manager) {
+func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Checker, configureExit ...func(*Agent)) (*Agent, *Agent, *session.Manager) {
 	t.Helper()
 	certificate, err := cert.EnsureCertificate("", "", "localhost")
 	if err != nil {
@@ -81,6 +81,9 @@ func startRelayPair(t *testing.T, clientMode, exitMode string, checker *acl.Chec
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = exitAgent.Close() })
+	for _, configure := range configureExit {
+		configure(exitAgent)
+	}
 	if err := exitAgent.Start(); err != nil {
 		t.Fatal(err)
 	}

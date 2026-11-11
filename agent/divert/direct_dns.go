@@ -19,6 +19,9 @@ func (s *Server) directDNSQuestion(query []byte) bool {
 	if isRelayDNSQuestion(query, s.loopGuard().RelayHost) {
 		return false // Verified relay bootstrap must never query the system DNS.
 	}
+	if s.hasDNSHostOverride(query) {
+		return false // Exact static mappings take precedence over system DNS exceptions.
+	}
 	if s.opts.DNSDirectDomains == nil && (s.opts.DNSRoute == nil || !s.proxyDNSEnabled()) {
 		return false
 	}
@@ -28,6 +31,9 @@ func (s *Server) directDNSQuestion(query []byte) bool {
 		return false // Malformed/multiple questions must not escape locally.
 	}
 	host := dnsName(question.Questions[0].Name)
+	if s.opts.DNSBlocked != nil && s.opts.DNSBlocked(host) {
+		return false
+	}
 	if s.opts.DNSDirectDomains != nil {
 		for _, domain := range s.opts.DNSDirectDomains() {
 			suffix := strings.ToLower(strings.TrimSuffix(domain, "."))

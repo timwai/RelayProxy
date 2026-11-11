@@ -27,6 +27,20 @@ export function buildDNSRule(rule={}) {
   };
 }
 
+export function parseDNSHostMappings(value) {
+  if(Array.isArray(value))return value.map(item=>({domain:String(item?.domain??''),ip:String(item?.ip??'')}));
+  return splitRuleList(value).map(line=>{
+    const separator=line.indexOf('=');
+    if(separator<0)return {domain:line.trim(),ip:''};
+    return {domain:line.slice(0,separator).trim(),ip:line.slice(separator+1).trim()};
+  });
+}
+
+export function dnsHostMappingsText(value) {
+  if(!Array.isArray(value))return String(value??'');
+  return value.map(item=>String(item?.domain??'')+'='+String(item?.ip??'')).join('\n');
+}
+
 function validDomain(value,allowWildcard=false) {
   const raw=String(value??'');
   if(!raw||raw!==raw.trim()||raw.length>253)return false;
@@ -140,6 +154,17 @@ export function validateDNSSettings(r={},defaultExitId='') {
   const direct=splitRuleList(r.dns_direct_domains);
   if(direct.length>64)return '本地 DNS 例外最多 64 个域名';
   for(const domain of direct)if(!validDomain(domain,false))return '本地 DNS 例外域名无效：'+domain;
+  const hosts=parseDNSHostMappings(r.dns_hosts);
+  if(hosts.length>256)return 'DNS 静态解析最多 256 条';
+  const seenHosts=new Set();
+  for(let i=0;i<hosts.length;i++){
+    const mapping=hosts[i];
+    if(!validDomain(mapping.domain,false))return '第 '+(i+1)+' 条 DNS 静态解析域名无效：'+mapping.domain;
+    const key=mapping.domain.toLowerCase().replace(/\.$/,'');
+    if(seenHosts.has(key))return 'DNS 静态解析域名重复：'+mapping.domain;
+    seenHosts.add(key);
+    if(!parseIPAddress(mapping.ip))return '第 '+(i+1)+' 条 DNS 静态解析 IP 无效：'+mapping.ip;
+  }
   const blocked=splitRuleList(r.doh_blocked_ips);
   if(blocked.length>256)return '额外 DoH 阻断地址最多 256 条';
   for(const value of blocked){
@@ -156,4 +181,14 @@ export function validateDNSSettings(r={},defaultExitId='') {
   if(r.fake_ip_enabled&&r.dns_mode==='local')return 'FakeIP 模式需要使用代理 DNS';
   if((r.block_doh_endpoints||r.forward_other_dns)&&!r.fake_ip_enabled)return 'DoH 阻断和 TXT/SRV 转发仅适用于 FakeIP 模式';
   return '';
+}
+
+export function validateRoutingDNS(rule={}) {
+ const resolver=rule.dns_resolver||'';
+ if(!['','local','encrypted','exit_system','static'].includes(resolver))return 'DNS 解析方式无效';
+ if(rule.action==='REJECT'&&(resolver||rule.dns_ip))return 'REJECT 规则不能设置 DNS 解析';
+ if(resolver==='static'&&!parseIPAddress(rule.dns_ip))return '固定 IP 需要有效的 IPv4 或 IPv6 地址';
+ if(resolver!=='static'&&rule.dns_ip)return '仅固定 IP 解析方式允许设置 IP';
+ if(resolver==='exit_system'&&String(rule.exit_id||'').startsWith('local:'))return '出口系统 DNS 需要设备出口';
+ return '';
 }

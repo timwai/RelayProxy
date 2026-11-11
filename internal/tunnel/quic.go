@@ -113,16 +113,17 @@ func (s *QUICStreamAdapter) Abort() {
 
 // QUICSession implements TunnelSession using quic-go
 type QUICSession struct {
-	conn             *quic.Conn
-	pathInfo         atomic.Pointer[protocol.ConnectionPath]
-	datagrams        *datagramMux
-	peerDatagrams    atomic.Bool
-	peerStreamResume atomic.Bool
-	activeStreams    atomic.Int64
-	ownedPacketConn  net.PacketConn
-	dialTimings      *DialTimings
-	closeOnce        sync.Once
-	closeErr         error
+	conn              *quic.Conn
+	pathInfo          atomic.Pointer[protocol.ConnectionPath]
+	datagrams         *datagramMux
+	peerDatagrams     atomic.Bool
+	peerStreamResume  atomic.Bool
+	peerExitSystemDNS atomic.Bool
+	activeStreams     atomic.Int64
+	ownedPacketConn   net.PacketConn
+	dialTimings       *DialTimings
+	closeOnce         sync.Once
+	closeErr          error
 
 	diagnosticsMu            sync.Mutex
 	diagnosticsLastAt        time.Time

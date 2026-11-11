@@ -67,3 +67,14 @@ test('DoH blocklist textarea preserves raw input until save then splits lines',(
  assert.deepEqual(dnsPagePatch({doh_blocked_ips:'1.1.1.1\n\n8.8.8.8/32\n'}).doh_blocked_ips,['1.1.1.1','8.8.8.8/32']);
  assert.deepEqual(dnsPagePatch({doh_blocked_ips:['1.1.1.1','8.8.8.8/32']}).doh_blocked_ips,['1.1.1.1','8.8.8.8/32']);
 });
+
+
+test('DNS follow routing and static mappings survive page saves without losing per-rule DNS',()=>{
+ const routing={mode:'rule',dns_follow_routing:true,dns_hosts:'App.Example.=192.168.1.20',rules:[{name:'rule',dns_resolver:'static',dns_ip:'203.0.113.20'}]};
+ const dns=dnsPagePatch(routing);
+ assert.equal(dns.dns_follow_routing,true);
+ assert.deepEqual(dns.dns_hosts,[{domain:'app.example',ip:'192.168.1.20'}]);
+ assert.deepEqual(routingPagePatch(routing).rules,routing.rules);
+ assert.equal(dnsPagePatch({...routing,dns_follow_routing:false,dns_hosts:[]}).dns_follow_routing,false);
+ assert.deepEqual(dnsPagePatch({...routing,dns_hosts:[]}).dns_hosts,[]);
+});

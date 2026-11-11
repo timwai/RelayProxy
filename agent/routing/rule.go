@@ -32,12 +32,13 @@ const (
 )
 
 // DNSAction chooses how a captured DNS/53 question is resolved.
-// This is independent from the subsequent application connection's route.
+// It can follow the application routing policy or use a DNS-only override.
 type DNSAction string
 
 const (
 	DNSActionLocal  DNSAction = "LOCAL"
 	DNSActionRemote DNSAction = "REMOTE"
+	DNSActionReject DNSAction = "REJECT"
 )
 
 // DNSRule is matched before contacting any resolver. A wildcard suffix
@@ -49,6 +50,12 @@ type DNSRule struct {
 	Action   DNSAction `yaml:"action" json:"action"`
 	ExitID   string    `yaml:"exit_id,omitempty" json:"exit_id,omitempty"`
 	Resolver string    `yaml:"resolver,omitempty" json:"resolver,omitempty"` // encrypted (default) or exit_system
+}
+
+// DNSHostMapping overrides captured DNS A/AAAA answers for one exact domain.
+type DNSHostMapping struct {
+	Domain string `yaml:"domain" json:"domain"`
+	IP     string `yaml:"ip" json:"ip"`
 }
 
 // Rule is a single routing rule. Rules are evaluated in order (first match wins).
@@ -65,6 +72,8 @@ type Rule struct {
 	Targets          []string `yaml:"targets,omitempty" json:"targets,omitempty"` // domain/IP glob, exact IP or CIDR
 	Ports            []string `yaml:"ports,omitempty" json:"ports,omitempty"`
 	Protocols        []string `yaml:"protocols,omitempty" json:"protocols,omitempty"`
+	DNSResolver      string   `yaml:"dns_resolver,omitempty" json:"dns_resolver,omitempty"` // empty inherits DNS policy; local, encrypted, exit_system, static
+	DNSIP            string   `yaml:"dns_ip,omitempty" json:"dns_ip,omitempty"`
 }
 
 // Flow contains only observed metadata. An unknown process or hostname stays
@@ -89,6 +98,9 @@ type Decision struct {
 	HandleDirect     bool
 	Rule             string
 	Matched          bool
+	DNSResolver      string
+	DNSIP            string
+	DNSExitID        string
 }
 
 // Config holds all routing configuration.
@@ -96,21 +108,23 @@ type Config struct {
 	DeviceGroups  []exitgroup.Group `yaml:"device_groups,omitempty" json:"device_groups,omitempty"`
 	Subscriptions []Subscription    `yaml:"subscriptions,omitempty" json:"subscriptions,omitempty"` // External lists evaluated after hand-written rules
 
-	Mode                  Mode          `yaml:"mode"           json:"mode"`                   // Routing mode
-	DNSMode               DNSMode       `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"` // proxy (default) or local
-	AutoDetectDNS         bool          `yaml:"auto_detect_dns,omitempty" json:"auto_detect_dns,omitempty"`
-	DNSAssociationEnabled *bool         `yaml:"dns_association_enabled,omitempty" json:"dns_association_enabled,omitempty"` // nil = legacy enabled
-	ProxyDNSEnabled       bool          `yaml:"proxy_dns_enabled,omitempty" json:"proxy_dns_enabled,omitempty"`             // opt-in authenticated real-IP DNS/53 resolution
-	FakeIPEnabled         bool          `yaml:"fake_ip_enabled,omitempty" json:"fake_ip_enabled,omitempty"`                 // opt-in transparent DNS interception
-	BlockDoHEndpoints     bool          `yaml:"block_doh_endpoints,omitempty" json:"block_doh_endpoints,omitempty"`         // best-effort known-host DoH blocking
-	ForwardOtherDNS       bool          `yaml:"forward_other_dns,omitempty" json:"forward_other_dns,omitempty"`             // forward TXT/SRV through TLS resolver on selected proxy exit
-	DNSUpstreams          []DNSUpstream `yaml:"dns_upstreams,omitempty" json:"dns_upstreams,omitempty"`                     // custom DoH providers, replaces built-ins if nonempty
-	DNSExitID             string        `yaml:"dns_exit_id,omitempty" json:"dns_exit_id,omitempty"`                         // optional dedicated exit for upstream encrypted DNS
-	DNSDirectDomains      []string      `yaml:"dns_direct_domains,omitempty" json:"dns_direct_domains,omitempty"`
-	DNSRules              []DNSRule     `yaml:"dns_rules,omitempty" json:"dns_rules,omitempty"`             // if present, first matching rule wins; unmatched names use LOCAL           // explicit suffixes allowed to use the original DNS resolver
-	DoHBlockedIPs         []string      `yaml:"doh_blocked_ips,omitempty" json:"doh_blocked_ips,omitempty"` // explicit IP/CIDR addresses to deny on HTTPS/443 TCP or UDP
-	DefaultAction         Action        `yaml:"default_action" json:"default_action"`                       // When no rule matches in rule mode
-	Rules                 []Rule        `yaml:"rules"          json:"rules"`                                // Ordered rule list
+	Mode                  Mode             `yaml:"mode"           json:"mode"`                   // Routing mode
+	DNSMode               DNSMode          `yaml:"dns_mode,omitempty" json:"dns_mode,omitempty"` // proxy (default) or local
+	DNSFollowRouting      bool             `yaml:"dns_follow_routing,omitempty" json:"dns_follow_routing,omitempty"`
+	AutoDetectDNS         bool             `yaml:"auto_detect_dns,omitempty" json:"auto_detect_dns,omitempty"`
+	DNSAssociationEnabled *bool            `yaml:"dns_association_enabled,omitempty" json:"dns_association_enabled,omitempty"` // nil = legacy enabled
+	ProxyDNSEnabled       bool             `yaml:"proxy_dns_enabled,omitempty" json:"proxy_dns_enabled,omitempty"`             // opt-in authenticated real-IP DNS/53 resolution
+	FakeIPEnabled         bool             `yaml:"fake_ip_enabled,omitempty" json:"fake_ip_enabled,omitempty"`                 // opt-in transparent DNS interception
+	BlockDoHEndpoints     bool             `yaml:"block_doh_endpoints,omitempty" json:"block_doh_endpoints,omitempty"`         // best-effort known-host DoH blocking
+	ForwardOtherDNS       bool             `yaml:"forward_other_dns,omitempty" json:"forward_other_dns,omitempty"`             // forward TXT/SRV through TLS resolver on selected proxy exit
+	DNSUpstreams          []DNSUpstream    `yaml:"dns_upstreams,omitempty" json:"dns_upstreams,omitempty"`                     // custom DoH providers, replaces built-ins if nonempty
+	DNSExitID             string           `yaml:"dns_exit_id,omitempty" json:"dns_exit_id,omitempty"`                         // optional dedicated exit for upstream encrypted DNS
+	DNSDirectDomains      []string         `yaml:"dns_direct_domains,omitempty" json:"dns_direct_domains,omitempty"`
+	DNSRules              []DNSRule        `yaml:"dns_rules,omitempty" json:"dns_rules,omitempty"`             // ordered DNS overrides
+	DNSHosts              []DNSHostMapping `yaml:"dns_hosts,omitempty" json:"dns_hosts,omitempty"`             // exact-domain IP overrides for captured DNS
+	DoHBlockedIPs         []string         `yaml:"doh_blocked_ips,omitempty" json:"doh_blocked_ips,omitempty"` // explicit IP/CIDR addresses to deny on HTTPS/443 TCP or UDP
+	DefaultAction         Action           `yaml:"default_action" json:"default_action"`                       // When no rule matches in rule mode
+	Rules                 []Rule           `yaml:"rules"          json:"rules"`                                // Ordered rule list
 }
 
 // DefaultConfig returns a sensible default routing configuration.

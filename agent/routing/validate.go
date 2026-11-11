@@ -88,6 +88,24 @@ func ValidateConfig(cfg Config) error {
 			return fmt.Errorf("routing.dns_direct_domains[%d]: use a domain suffix without wildcards, whitespace or an IP address", index)
 		}
 	}
+	if len(cfg.DNSHosts) > 256 {
+		return fmt.Errorf("routing.dns_hosts: maximum 256 mappings")
+	}
+	seenDNSHosts := make(map[string]struct{}, len(cfg.DNSHosts))
+	for index, mapping := range cfg.DNSHosts {
+		if !validDNSDirectDomain(mapping.Domain) {
+			return fmt.Errorf("routing.dns_hosts[%d].domain: use an exact domain without wildcards or an IP address", index)
+		}
+		domain := strings.ToLower(strings.TrimSuffix(mapping.Domain, "."))
+		if _, duplicate := seenDNSHosts[domain]; duplicate {
+			return fmt.Errorf("routing.dns_hosts[%d].domain: duplicate domain %q", index, mapping.Domain)
+		}
+		seenDNSHosts[domain] = struct{}{}
+		ip, err := netip.ParseAddr(mapping.IP)
+		if err != nil || ip.Zone() != "" {
+			return fmt.Errorf("routing.dns_hosts[%d].ip: expected an IP address without a zone", index)
+		}
+	}
 	if len(cfg.DoHBlockedIPs) > 256 {
 		return fmt.Errorf("routing.doh_blocked_ips: maximum 256 IP/CIDR entries")
 	}
@@ -143,6 +161,25 @@ func ValidateConfig(cfg Config) error {
 		}
 	}
 	for i, rule := range cfg.Rules {
+		switch rule.DNSResolver {
+		case "", "local", "encrypted", "exit_system", "static":
+		default:
+			return fmt.Errorf("routing.rules[%d].dns_resolver: invalid resolver", i)
+		}
+		if rule.DNSResolver == "exit_system" && strings.HasPrefix(rule.ExitID, "local:") {
+			return fmt.Errorf("routing.rules[%d]: system DNS requires a device exit", i)
+		}
+		if rule.DNSResolver == "static" {
+			ip, err := netip.ParseAddr(rule.DNSIP)
+			if err != nil || ip.Zone() != "" {
+				return fmt.Errorf("routing.rules[%d].dns_ip: expected a literal IP without a zone", i)
+			}
+		} else if rule.DNSIP != "" {
+			return fmt.Errorf("routing.rules[%d].dns_ip requires dns_resolver=static", i)
+		}
+		if rule.Action == ActionReject && rule.DNSResolver != "" {
+			return fmt.Errorf("routing.rules[%d]: rejected connections cannot configure DNS", i)
+		}
 		if !validAction(rule.Action) {
 			return fmt.Errorf("routing.rules[%d] (%q): invalid action %q", i, rule.Name, rule.Action)
 		}

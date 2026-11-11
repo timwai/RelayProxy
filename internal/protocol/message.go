@@ -202,9 +202,10 @@ type RDPControlMessage struct {
 }
 
 const (
-	UDPModeStream       = "udp_stream_v1"
-	UDPModeDatagram     = "udp_datagram_v1"
-	CapabilityTargetACL = "target_acl_v1"
+	UDPModeStream           = "udp_stream_v1"
+	UDPModeDatagram         = "udp_datagram_v1"
+	CapabilityTargetACL     = "target_acl_v1"
+	CapabilityExitSystemDNS = "exit_system_dns_v1"
 )
 
 // PushMessage is a server-originated notification delivered to one Agent.

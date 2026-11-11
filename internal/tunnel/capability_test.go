@@ -42,3 +42,21 @@ func TestPeerStreamResumeSupportsTransportDoubles(t *testing.T) {
 		t.Fatal("disabled interface-based stream resume capability was reported")
 	}
 }
+
+func TestExitSystemDNSCapabilityIsNegotiatedForTLSAndQUIC(t *testing.T) {
+	for name, session := range map[string]TunnelSession{"TLS": &TLSSession{}, "QUIC": &QUICSession{}} {
+		t.Run(name, func(t *testing.T) {
+			if PeerSupportsExitSystemDNS(session) {
+				t.Fatal("old peer unexpectedly supports system DNS")
+			}
+			SetPeerCapabilities(session, []string{protocol.CapabilityExitSystemDNS})
+			if !PeerSupportsExitSystemDNS(session) {
+				t.Fatal("negotiated system DNS capability lost")
+			}
+			SetPeerCapabilities(session, []string{protocol.CapabilityTargetACL})
+			if PeerSupportsExitSystemDNS(session) {
+				t.Fatal("system DNS capability survived refresh without support")
+			}
+		})
+	}
+}

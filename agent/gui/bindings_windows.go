@@ -93,6 +93,19 @@ func (s *WailsService) ProbeDNS() (string, error) {
 	return string(data), nil
 }
 
+func (s *WailsService) ProbeDNSRule(index int, domain string) (string, error) {
+	if s == nil || s.owner == nil || s.owner.bridge == nil {
+		return `{"ok":false,"message":"GUI unavailable"}`, nil
+	}
+	result, err := s.owner.bridge.ProbeDNSRule(index, domain)
+	if err != nil {
+		data, _ := json.Marshal(map[string]any{"ok": false, "message": err.Error()})
+		return string(data), nil
+	}
+	data, _ := json.Marshal(map[string]any{"ok": true, "result": result})
+	return string(data), nil
+}
+
 func (s *WailsService) TestCustomExit(id string) (string, error) {
 	if s == nil || s.owner == nil || s.owner.bridge == nil {
 		return `{"ok":false,"message":"GUI unavailable"}`, nil

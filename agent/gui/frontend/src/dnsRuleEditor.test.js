@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {buildDNSRule,normalizeDNSRuleDraft,validateDNSRule,validateDNSSettings} from './dnsRuleEditor.js';
+import {buildDNSRule,normalizeDNSRuleDraft,validateDNSRule,validateDNSSettings,validateRoutingDNS} from './dnsRuleEditor.js';
 
 test('DNS rule editor normalizes and serializes rules without losing action or exit',()=>{
  const draft=normalizeDNSRuleDraft({name:'Google',enabled:true,action:'REMOTE',resolver:'exit_system',exit_id:'device-1',domains:['*.google.com','googleapis.com']});
@@ -73,4 +73,15 @@ test('system DNS rule fallback is independent from encrypted DNS exit',()=>{
  const base={dns_mode:'proxy',proxy_dns_enabled:true,fake_ip_enabled:false,dns_rules:[{action:'REMOTE',resolver:'exit_system',domains:'example.com'}],dns_upstreams:[],dns_direct_domains:[],doh_blocked_ips:[]};
  assert.equal(validateDNSSettings({...base,dns_exit_id:'local:custom'},'device-1'),'');
  assert.match(validateDNSSettings({...base,dns_exit_id:'device-1'},'local:custom'),/不支持本机自定义代理/);
+});
+
+
+test('static DNS and per-rule DNS validate literal IPs and device resolvers',()=>{
+ assert.equal(validateDNSSettings({dns_hosts:[{domain:'app.example',ip:'192.168.1.20'},{domain:'v6.example',ip:'fd00::20'}]}),'');
+ assert.match(validateDNSSettings({dns_hosts:[{domain:'app.example',ip:'example.com'}]}),/IP 无效/);
+ assert.match(validateDNSSettings({dns_hosts:[{domain:'app.example',ip:'192.168.1.20'},{domain:'APP.EXAMPLE.',ip:'192.168.1.21'}]}),/重复/);
+ assert.equal(validateRoutingDNS({action:'PROXY',dns_resolver:'static',dns_ip:'2001:db8::1'}),'');
+ assert.match(validateRoutingDNS({action:'PROXY',dns_resolver:'static',dns_ip:'fe80::1%en0'}),/固定 IP/);
+ assert.match(validateRoutingDNS({action:'PROXY',exit_id:'local:proxy',dns_resolver:'exit_system'}),/设备出口/);
+ assert.match(validateRoutingDNS({action:'REJECT',dns_resolver:'encrypted'}),/REJECT/);
 });

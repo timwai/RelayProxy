@@ -89,6 +89,19 @@ func (s *Server) dnsExitScope(routeExitID string) string {
 	return ""
 }
 
+// systemDNSExitScope follows the selected device exit when a rule has no
+// explicit exit. The dedicated encrypted-DNS exit does not apply to remote
+// device system resolvers.
+func (s *Server) systemDNSExitScope(routeExitID string) string {
+	if routeExitID != "" {
+		return routeExitID
+	}
+	if s.opts.DefaultExitID != nil {
+		return s.opts.DefaultExitID()
+	}
+	return ""
+}
+
 func (s *Server) exchangeProxyDoT(parent context.Context, routeExitID string, question []byte) ([]byte, error) {
 	ctx, cancel := context.WithTimeout(parent, proxyDNSTimeout)
 	defer cancel()

@@ -144,6 +144,10 @@ func startPlatformInterceptor(s *Server) (systemInterceptor, error) {
 	return i, nil
 }
 
+func (*packetInterceptor) RefreshDNSCache() error {
+	return refreshWindowsSystemDNSCache()
+}
+
 func windowsInterceptFilter(port4, port6 int, guard LoopGuard) string {
 	// Only take ownership of outbound traffic that requires a routing decision.
 	// Ordinary inbound traffic must remain in the Windows network stack; using a

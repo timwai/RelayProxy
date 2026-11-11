@@ -12,14 +12,24 @@ import (
 )
 
 func (a *Agent) buildGateway(cfg gateway.Config) (*gateway.Server, error) {
-	dns, err := divert.New(divert.Options{Dialer: routing.SelectedExitDialer{Routing: a.dialer}, DNSUpstreams: func() []divert.DNSUpstream {
-		c := a.routingEngine.Config()
-		result := make([]divert.DNSUpstream, len(c.DNSUpstreams))
-		for i, u := range c.DNSUpstreams {
-			result[i] = divert.DNSUpstream{URL: u.URL, BootstrapIP: u.BootstrapIP}
-		}
-		return result
-	}})
+	dns, err := divert.New(divert.Options{
+		Dialer: routing.SelectedExitDialer{Routing: a.dialer}, DNSHostIP: a.routingEngine.DNSHostIP,
+		DefaultExitID:         a.rawDialer.GetDefaultExitID,
+		ExchangeExitSystemDNS: a.rawDialer.ExchangeExitSystemDNS,
+		DNSRoute: func(host string) (bool, string) {
+			p := a.dnsPolicyForHost(host)
+			return p.Action == routing.DNSActionLocal, p.ExitID
+		},
+		DNSResolver: func(host string) string { return a.dnsPolicyForHost(host).Resolver },
+		DNSBlocked:  func(host string) bool { return a.dnsPolicyForHost(host).Action == routing.DNSActionReject },
+		DNSUpstreams: func() []divert.DNSUpstream {
+			c := a.routingEngine.Config()
+			result := make([]divert.DNSUpstream, len(c.DNSUpstreams))
+			for i, u := range c.DNSUpstreams {
+				result[i] = divert.DNSUpstream{URL: u.URL, BootstrapIP: u.BootstrapIP}
+			}
+			return result
+		}})
 	if err != nil {
 		return nil, err
 	}
@@ -29,7 +39,7 @@ func (a *Agent) buildGateway(cfg gateway.Config) (*gateway.Server, error) {
 		}
 		return ""
 	}, DNS: func(ctx context.Context, id string, q []byte, udp bool) []byte {
-		if pinned := a.routingEngine.Config().DNSExitID; pinned != "" {
+		if pinned := a.routingEngine.DNSExitID(); pinned != "" {
 			id = pinned
 		}
 		return dns.ExchangeGatewayDNS(ctx, id, q, udp)

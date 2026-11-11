@@ -89,6 +89,20 @@ Agent「诊断与日志」新增 DNS 安全状态：FakeIP 策略开关、内核
 
 [实际代理与 FakeIP DNS 防泄漏验收手册](proxy-dns-security-acceptance.md) 列出了可复现的 Dante / Tinyproxy 实际服务测试、Linux nftables 隔离网络内核抓包，以及 Windows、macOS、Linux、Android 必需的物理出口/驱动/VPN 验收条件。**协议和规则的 CI 成功不代表已完成跨平台零泄漏认证**。
 
+## DNS 与分流规则联动
+
+DNS 页的「DNS 跟随分流规则」对应 `routing.dns_follow_routing`，默认关闭以兼容已有配置。开启后，未被 DNS 覆盖策略命中的域名按分流动作解析：PROXY 经匹配出口的加密 DNS 返回真实 IP，DIRECT 使用本机 DNS，REJECT 返回 REFUSED。
+
+分流规则可单独设置 `dns_resolver`：空值继承 DNS 策略，`local` 使用本机 DNS，`encrypted` 使用同一出口的加密 DNS，`exit_system` 使用该设备出口的系统 DNS，`static` 配合 `dns_ip` 固定连接地址。固定 IP 仅替换实际连接目标，原域名继续用于规则匹配。HTTP、SOCKS、透明代理和 LAN 网关的连接均保留该设置；系统出口解析失败时不会回退到本地。
+
+系统 DNS 只有域名，没有可靠的应用进程、业务端口、入口或来源信息，因此域名 DNS 联动仅使用不带这些限制的分流规则（协议留空、`*` 或同时含 TCP/UDP）。实际连接按完整条件匹配，进程和端口规则的 DNS 设置在此阶段执行。系统 DNS 的真实 IP 联动需要「自动代理解析」和系统接管；FakeIP 继续分配虚拟地址，在连接阶段执行分流规则。静态域名映射可单独接管命中的标准 DNS/53 查询。
+
+解析优先级为：跟随分流时的 REJECT → 已命中分流规则内的 DNS 设置 → `dns_hosts` 精确域名映射 → 本地 DNS 后缀例外 → 按顺序匹配的 `dns_rules` → 分流继承策略或旧版默认策略。旧版默认策略在没有域名 DNS 规则时使用全局加密 DNS；有规则列表但未命中时使用本地 DNS。域名 DNS 规则显式指定的出口优先于继承出口，且不改变业务流量出口。Relay 引导域名仍受独立连接回环保护。
+
+`dns_hosts` 接受最多 256 条 `{domain, ip}`，仅支持精确域名与无 zone 的 IPv4/IPv6 地址；另一地址族返回 NODATA。保存后会回读 `dns_rules`、静态映射和联动开关；Windows 在运行时修改 DNS 策略后会尝试刷新系统 DNS 缓存。应用私有 DoH、不可见的 DNS 流及已有连接不在静态映射的接管范围内。
+
+「测试分流 DNS」或规则旁的「测试规则」使用已保存配置，显示实际优先命中的 DNS 策略、可按域名确定的分流规则、DNS/流量出口，以及 A/AAAA 地址、响应码、耗时和错误。低优先级规则的测试不会强制覆盖高优先级策略；测试不会开启系统接管。LAN 网关的本地 DNS 策略仅支持 A/AAAA，其他类型返回 SERVFAIL；出口系统 DNS 的其他类型继续走加密 DNS。
+
 ## 回归测试
 
 - `go test ./agent/divert ./agent/routing ./internal/config`

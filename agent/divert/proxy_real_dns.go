@@ -3,6 +3,7 @@ package divert
 import (
 	"context"
 	"fmt"
+	"net"
 
 	"golang.org/x/net/dns/dnsmessage"
 )
@@ -10,6 +11,11 @@ import (
 // interceptedDNSReply keeps the FakeIP and genuine-IP resolver paths separate.
 // DNS/53 response injection always happens on the original destination tuple.
 func (s *Server) interceptedDNSReply(ctx context.Context, query []byte, udp bool) []byte {
+	if !isRelayDNSQuestion(query, s.loopGuard().RelayHost) {
+		if reply := s.dnsHostOverrideReply(query); reply != nil {
+			return reply
+		}
+	}
 	if s.fakeIPEnabled() {
 		return s.replyFakeDNS(ctx, query)
 	}
@@ -20,10 +26,18 @@ func (s *Server) interceptedDNSReply(ctx context.Context, query []byte, udp bool
 		}
 		return nil
 	}
-	// Relay authentication must bootstrap without relying on its own proxy.
-	// For its configured hostname, use the already verified relay addresses.
 	if isRelayDNSQuestion(query, s.loopGuard().RelayHost) {
+		// Relay authentication bootstraps from verified transport addresses.
 		return s.fakeDNS.replyScoped(query, s.loopGuard().RelayHost, s.loopGuard().RelayIPs, "", false)
+	}
+	if s.opts.DNSBlocked != nil {
+		var q dnsmessage.Message
+		if q.Unpack(query) == nil && len(q.Questions) == 1 && s.opts.DNSBlocked(dnsName(q.Questions[0].Name)) {
+			return packDNSResponse(dnsmessage.Message{Header: dnsmessage.Header{ID: q.ID, Response: true, RecursionDesired: q.RecursionDesired, RecursionAvailable: true, RCode: dnsmessage.RCodeRefused}, Questions: q.Questions})
+		}
+	}
+	if reply := s.dnsHostOverrideReply(query); reply != nil {
+		return reply
 	}
 	// Packet interception and the DNS/TCP resolver normally bypass LOCAL
 	// questions first. Fail closed if a platform cannot reinject local DNS.
@@ -123,7 +137,55 @@ func realProxyDNSReply(ctx context.Context, raw []byte, udp bool, exchange func(
 
 // ExchangeGatewayDNS reuses authenticated encrypted DNS without enabling local capture.
 func (s *Server) ExchangeGatewayDNS(ctx context.Context, exitID string, query []byte, udp bool) []byte {
-	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, q []byte) ([]byte, error) { return s.exchangeLimitedProxyDNS(ctx, exitID, q) })
+	if reply := s.dnsHostOverrideReply(query); reply != nil {
+		return reply
+	}
+	var msg dnsmessage.Message
+	if msg.Unpack(query) != nil || len(msg.Questions) != 1 {
+		return nil
+	}
+	question := msg.Questions[0]
+	host := dnsName(question.Name)
+	if s.opts.DNSBlocked != nil && s.opts.DNSBlocked(host) {
+		return packDNSResponse(dnsmessage.Message{Header: dnsmessage.Header{ID: msg.ID, Response: true, RCode: dnsmessage.RCodeRefused}, Questions: msg.Questions})
+	}
+	local := false
+	if s.opts.DNSRoute != nil {
+		var selected string
+		local, selected = s.opts.DNSRoute(host)
+		if selected != "" {
+			exitID = selected
+		}
+	}
+	return realProxyDNSReply(ctx, query, udp, func(ctx context.Context, q []byte) ([]byte, error) {
+		if local {
+			network := "ip4"
+			if question.Type == dnsmessage.TypeAAAA {
+				network = "ip6"
+			} else if question.Type != dnsmessage.TypeA {
+				return nil, fmt.Errorf("gateway local DNS supports A/AAAA queries")
+			}
+			ips, err := net.DefaultResolver.LookupNetIP(ctx, network, host)
+			if err != nil {
+				return nil, err
+			}
+			reply := dnsmessage.Message{Header: dnsmessage.Header{ID: msg.ID, Response: true, RecursionDesired: msg.RecursionDesired, RecursionAvailable: true}, Questions: msg.Questions}
+			for _, ip := range ips {
+				header := dnsmessage.ResourceHeader{Name: question.Name, Class: dnsmessage.ClassINET, Type: question.Type, TTL: dnsHostOverrideTTL}
+				if question.Type == dnsmessage.TypeA && ip.Is4() {
+					reply.Answers = append(reply.Answers, dnsmessage.Resource{Header: header, Body: &dnsmessage.AResource{A: ip.As4()}})
+				}
+				if question.Type == dnsmessage.TypeAAAA && ip.Is6() {
+					reply.Answers = append(reply.Answers, dnsmessage.Resource{Header: header, Body: &dnsmessage.AAAAResource{AAAA: ip.As16()}})
+				}
+			}
+			return reply.Pack()
+		}
+		if s.opts.DNSResolver != nil && s.opts.DNSResolver(host) == "exit_system" && (question.Type == dnsmessage.TypeA || question.Type == dnsmessage.TypeAAAA) {
+			return s.exchangeLimitedSystemDNS(ctx, exitID, q)
+		}
+		return s.exchangeLimitedProxyDNS(ctx, exitID, q)
+	})
 }
 
 // exchangeLimitedSystemDNS shares the encrypted DNS concurrency budget while
@@ -137,7 +199,7 @@ func (s *Server) exchangeLimitedSystemDNS(parent context.Context, routeExitID st
 		if s.opts.ExchangeExitSystemDNS == nil {
 			return nil, fmt.Errorf("remote exit system DNS is unavailable")
 		}
-		return s.opts.ExchangeExitSystemDNS(ctx, s.dnsExitScope(routeExitID), query)
+		return s.opts.ExchangeExitSystemDNS(ctx, s.systemDNSExitScope(routeExitID), query)
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}

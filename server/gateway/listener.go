@@ -567,6 +567,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	tunnel.SetPeerCapabilities(sess, hello.TransportCapabilities)
 	capabilities := []string{
 		protocol.UDPModeStream, protocol.CapabilitySpeedTest,
+		protocol.CapabilityExitSystemDNS,
 		protocol.CapabilityResourceInventoryPush,
 	}
 	if tunnel.SupportsDatagrams(sess) {

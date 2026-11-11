@@ -51,6 +51,8 @@ REMOTE 查询出口失败时返回 SERVFAIL，不回退本地明文查询；未�
 ## 版本与权限边界
 
 - 新协议 `FrameTypeExitSystemDNS=0x1B`，一条流仅处理一条完整 DNS A/AAAA 查询，不暴露系统 DNS 地址、DNS 配置或任意 UDP 数据包。
+- 升级顺序：先更新 Relay Server，再更新选定的出口 Agent（例如接入企业 VPN 的设备），最后更新发起查询的 Agent，并让各端重新连接。仅更新客户端时，旧端可能因不识别请求而关闭流，表现为 `unable to read exit DNS result: EOF`；这不是域名不存在的 DNS 应答。
+- 新版 Relay 与出口在握手时声明 `exit_system_dns_v1`。客户端遇到未声明能力的 Relay，会直接提示升级 Relay Server；新版 Relay 遇到未声明能力的出口，会返回 `DNS_UNSUPPORTED` 并提示升级具体出口，不发送系统 DNS 查询。直连出口提前关闭流时保留出口与链路信息，并提示检查出口版本与连接状态。
 - Relay 校验 `proxy.client` 授权、设备间出口访问许可、目标出口 `CapabilityTargetACL` 以及中央域名与 IP ACL；出口 Agent 再校验本地出口 ACL 与由 Relay 绑定的 ACL。
 - 返回记录上限 16，DNS 问题与答案长度上限各 4096 字节，出口解析上限 7 秒；请求者总超时 8 秒，外层 DNS 限流池仍然生效。
 - 请求 ID、Question、RCode、A/AAAA 类型与 TTL 均验证；出口无响应、超时、验证失败、ACL 拒绝时返回 SERVFAIL，不访问入口系统 DNS。

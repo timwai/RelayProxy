@@ -30,7 +30,8 @@ func (s *Server) serveDNSTCPAtResolver(ctx context.Context, conn net.Conn, resol
 		// A hot policy update must apply to existing DNS/TCP keep-alive
 		// sessions, not only to newly intercepted SYN packets. Never keep
 		// handing out FakeIPs after the feature has been disabled.
-		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil) && !s.fakeIPEnabled() && !s.proxyDNSEnabled() {
+		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil || s.opts.DNSHostMappingsEnabled != nil) &&
+			!s.fakeIPEnabled() && !s.proxyDNSEnabled() && !s.dnsHostMappingsEnabled() {
 			return fmt.Errorf("DNS TCP capture disabled by active routing policy")
 		}
 		var prefix [2]byte
@@ -50,22 +51,33 @@ func (s *Server) serveDNSTCPAtResolver(ctx context.Context, conn net.Conn, resol
 		}
 		// Recheck after a blocking socket read: the policy may have been
 		// disabled while the connection was waiting for its next question.
-		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil) && !s.fakeIPEnabled() && !s.proxyDNSEnabled() {
+		if (s.opts.FakeIPEnabled != nil || s.opts.ProxyDNSEnabled != nil || s.opts.DNSHostMappingsEnabled != nil) &&
+			!s.fakeIPEnabled() && !s.proxyDNSEnabled() && !s.dnsHostMappingsEnabled() {
 			return fmt.Errorf("fake DNS TCP disabled by active routing policy")
 		}
 		direct := s.directDNSQuestion(payload)
 		var answer []byte
-		if direct {
+		switch {
+		case isRelayDNSQuestion(payload, s.loopGuard().RelayHost):
+			guard := s.loopGuard()
+			answer = s.fakeDNS.replyScoped(payload, guard.RelayHost, guard.RelayIPs, "", false)
+		case s.hasDNSHostOverride(payload):
+			answer = s.dnsHostOverrideReply(payload)
+		case direct:
 			answer = realProxyDNSReply(ctx, payload, false, func(ctx context.Context, query []byte) ([]byte, error) {
 				return exchangeDirectDNSTCP(ctx, resolver, query)
 			})
-		} else {
+		case s.dnsHostMappingsEnabled() && !s.fakeIPEnabled() && !s.proxyDNSEnabled():
+			answer = realProxyDNSReply(ctx, payload, false, func(ctx context.Context, query []byte) ([]byte, error) {
+				return exchangeDirectDNSTCP(ctx, resolver, query)
+			})
+		default:
 			answer = s.interceptedDNSReply(ctx, payload, false)
 		}
 		if len(answer) == 0 || len(answer) > 65535 {
 			return fmt.Errorf("fake DNS TCP question cannot be safely answered")
 		}
-		if observer != nil && (s.proxyDNSEnabled() || direct) {
+		if observer != nil && (s.proxyDNSEnabled() || direct || s.hasDNSHostOverride(payload)) {
 			observer(payload, answer)
 		}
 		binary.BigEndian.PutUint16(prefix[:], uint16(len(answer)))

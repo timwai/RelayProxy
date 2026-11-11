@@ -511,6 +511,7 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .dns-rule-invalid{font-size:11px;color:var(--danger,#dc2626)}
 .dns-rule-more{font-size:10px;color:var(--brand);font-weight:700}
 .dns-rule-meta{margin-top:7px;font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+.dns-static-help{margin-bottom:12px;line-height:1.7}
 .dns-rule-controls{display:flex;align-items:center;justify-content:flex-end;gap:4px;flex-wrap:nowrap}
 .dns-rule-controls>.btn{min-height:30px;padding:0 8px;font-size:11px;white-space:nowrap}
 .dns-order-controls{display:flex;flex-direction:column;gap:2px;margin-right:4px}
@@ -541,6 +542,13 @@ select:not([multiple]):not([size]) option{background:var(--surface2);color:var(-
 .dns-probe-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:11px 0;border-bottom:1px solid var(--line)}
 .dns-probe-row:last-child{border-bottom:0}
 .dns-probe-latency{flex:0 0 auto;font-size:12px;font-variant-numeric:tabular-nums}
+.dns-rule-test-row{padding:10px 0;border-bottom:1px solid var(--line)}
+.dns-rule-test-row:last-child{border-bottom:0}
+.dns-rule-test-heading{display:flex;align-items:center;gap:8px}
+.dns-rule-test-heading>strong{min-width:42px;font-size:12px}
+.dns-rule-test-heading>.dns-probe-latency{margin-left:auto}
+.dns-rule-test-addresses{display:flex;flex-wrap:wrap;gap:5px;margin-top:7px}
+.dns-rule-test-addresses code{padding:3px 6px;border:1px solid var(--line);border-radius:5px;background:var(--surface2);font-size:11px}
 .dns-save-error{display:flex;flex-direction:column;gap:5px;line-height:1.6}
 .dns-save-error strong{font-size:12px}
 .dns-save-error>span{font-size:10px;opacity:.8}

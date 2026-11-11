@@ -13,6 +13,13 @@ func matchDNSRuleDomain(host, pattern string) bool {
 	return host == pattern
 }
 
+// DNSRuleMatchesDomain reports whether one configured DNS pattern matches a
+// concrete hostname. It is shared by rule diagnostics and the active engine.
+func DNSRuleMatchesDomain(host, pattern string) bool {
+	host = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(host), "."))
+	return host != "" && matchDNSRuleDomain(host, pattern)
+}
+
 func validDNSRuleDomain(pattern string) bool {
 	if strings.HasPrefix(pattern, "*.") {
 		pattern = pattern[2:]

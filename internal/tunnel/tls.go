@@ -93,11 +93,12 @@ const (
 
 // TLSSession implements TunnelSession using TLS + yamux multiplexer
 type TLSSession struct {
-	dialTimings *DialTimings
-	conn        net.Conn
-	session     *yamux.Session
-	openGate    chan struct{}
-	closed      atomic.Bool
+	dialTimings       *DialTimings
+	conn              net.Conn
+	session           *yamux.Session
+	openGate          chan struct{}
+	closed            atomic.Bool
+	peerExitSystemDNS atomic.Bool
 }
 
 // DefaultYAMUXConfig keeps stream setup responsive and permits enough

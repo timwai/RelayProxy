@@ -11,6 +11,7 @@ const (
 	ErrCodeAccessDenied      = "ACCESS_DENIED"
 	ErrCodeACLDenied         = "ACL_DENIED"
 	ErrCodeDNSFailed         = "DNS_FAILED"
+	ErrCodeDNSUnsupported    = "DNS_UNSUPPORTED"
 	ErrCodeConnectTimeout    = "CONNECT_TIMEOUT"
 	ErrCodeConnectionRefused = "CONNECTION_REFUSED"
 	ErrCodeNetworkUnreach    = "NETWORK_UNREACHABLE"

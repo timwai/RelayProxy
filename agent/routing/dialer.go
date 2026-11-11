@@ -28,6 +28,7 @@ type RoutingDialer struct {
 	// Set before accepting connections.
 	Traffic       *traffic.Registry
 	LookupProcess func(string, netip.AddrPort, netip.AddrPort) (uint32, string, error)
+	ResolveDNS    func(context.Context, string, string, string) (string, error)
 }
 
 // NewRoutingDialer creates a RoutingDialer that wraps the given tunnel dialer.
@@ -83,6 +84,9 @@ func (d *RoutingDialer) begin(ctx context.Context, exitID, host string, port uin
 		flow.IP = ip.Unmap().String()
 	}
 	decision := d.decideFlow(flow)
+	if decision.DNSIP != "" {
+		flow.IP = decision.DNSIP
+	}
 	if decision.Action == ActionProxy {
 		if decision.ExitID != "" {
 			exitID = decision.ExitID
@@ -209,6 +213,13 @@ func (d *RoutingDialer) dialTCP(ctx context.Context, exitNodeID, host string, po
 		if info := proxy.ClientFromContext(ctx); info.Entry == "gateway" && info.DestinationIP != "" {
 			target = info.DestinationIP
 		}
+		if decision.DNSResolver != "" {
+			var err error
+			target, err = d.ResolveRuleTarget(ctx, host, decision)
+			if err != nil {
+				return nil, err
+			}
+		}
 		addr := net.JoinHostPort(target, strconv.Itoa(int(port)))
 		log.Printf("[Routing] DIRECT %s", addr)
 		return d.directDialer.DialContext(ctx, "tcp", addr)
@@ -222,7 +233,8 @@ func (d *RoutingDialer) dialTCP(ctx context.Context, exitNodeID, host string, po
 		if ruleExitID != "" {
 			eid = ruleExitID
 		}
-		target, err := d.ResolveProxyTarget(ctx, host)
+		decision.ExitID = eid
+		target, err := d.ResolveRuleTarget(ctx, host, decision)
 		if err != nil {
 			return nil, err
 		}
@@ -273,6 +285,13 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 		if info := proxy.ClientFromContext(ctx); info.Entry == "gateway" && info.DestinationIP != "" {
 			target = info.DestinationIP
 		}
+		if decision.DNSResolver != "" {
+			var err error
+			target, err = d.ResolveRuleTarget(ctx, host, decision)
+			if err != nil {
+				return nil, err
+			}
+		}
 		addr := net.JoinHostPort(target, strconv.Itoa(int(port)))
 		log.Printf("[Routing] DIRECT UDP %s", addr)
 		c, err := d.directDialer.DialContext(ctx, "udp", addr)
@@ -300,7 +319,8 @@ func (d *RoutingDialer) dialUDP(ctx context.Context, exitNodeID, host string, po
 		if ruleExitID != "" {
 			eid = ruleExitID
 		}
-		target, err := d.ResolveProxyTarget(ctx, host)
+		decision.ExitID = eid
+		target, err := d.ResolveRuleTarget(ctx, host, decision)
 		if err != nil {
 			return nil, err
 		}

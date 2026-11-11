@@ -18,6 +18,7 @@ func CloneConfig(cfg Config) Config {
 	cfg.DNSUpstreams = slices.Clone(cfg.DNSUpstreams)
 	cfg.DNSDirectDomains = slices.Clone(cfg.DNSDirectDomains)
 	cfg.DNSRules = slices.Clone(cfg.DNSRules)
+	cfg.DNSHosts = slices.Clone(cfg.DNSHosts)
 	for i := range cfg.DNSRules {
 		cfg.DNSRules[i].Domains = slices.Clone(cfg.DNSRules[i].Domains)
 	}

@@ -11,6 +11,7 @@ import (
 	"log"
 	"net"
 	"os"
+	"reflect"
 	p2presume "relayproxy/internal/p2p/resume"
 	"runtime"
 	"slices"
@@ -334,6 +335,7 @@ type Agent struct {
 	httpServer           *httpproxy.Server
 	browserLocalServer   *browserLocalProxy
 	divertSrv            *divert.Server
+	dnsSrv               *divert.Server
 	divertStage          atomic.Pointer[string]
 	divertError          atomic.Pointer[string]
 	divertMu             sync.Mutex
@@ -559,7 +561,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		TLSConfig: tunnelTLS, PlainTCP: cfg.PlainTCP,
 	}, a.onTunnelStateChange)
 
-	if (cfg.Mode == "CLIENT" || cfg.Mode == "BOTH") && cfg.NetworkMode == "divert" {
+	if cfg.Mode == "CLIENT" || cfg.Mode == "BOTH" {
 		guard := divert.LoopGuard{RelayHost: cfg.ServerAddress, RelayPorts: []int{cfg.QUICPort, cfg.TCPPort}}
 		if cfg.IsSOCKS5Enabled() {
 			guard.LocalProxy = append(guard.LocalProxy, cfg.SOCKS5Listen)
@@ -570,7 +572,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		for _, item := range cfg.CustomExits {
 			guard.LocalProxy = append(guard.LocalProxy, item.Address)
 		}
-		a.divertSrv, err = divert.New(divert.Options{
+		a.dnsSrv, err = divert.New(divert.Options{
 			Config: cfg.DivertConfig, Dialer: routing.SelectedExitDialer{Routing: a.dialer}, Guard: guard, PolicyMu: &a.policyMu,
 			Traffic: a.traffic, DefaultExitID: a.rawDialer.GetDefaultExitID,
 			FakeIPEnabled:         engine.FakeIPEnabled,
@@ -579,10 +581,33 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			BlockDoHEndpoints:     engine.BlockDoHEndpoints,
 			ForwardOtherDNS:       engine.ForwardOtherDNS,
 			DNSExitID:             engine.DNSExitID,
-			DNSRoute:              engine.DNSRoute,
-			DNSResolver:           engine.DNSResolver,
+			DNSRoute: func(host string) (bool, string) {
+				if !engine.ProxyDNSEnabled() {
+					return false, ""
+				}
+				p := a.dnsPolicyForHost(host)
+				return p.Action == routing.DNSActionLocal, p.ExitID
+			},
+			DNSResolver: engine.DNSResolver,
+			DNSBlocked:  engine.DNSBlocked,
+			ResolveTarget: func(ctx context.Context, flow divert.Flow, d divert.Decision) (string, error) {
+				host := flow.IP
+				if flow.Host != "" && (flow.DomainSource == "dns" || flow.DomainSource == "fakeip" || flow.DomainSource == "network-extension") {
+					host = flow.Host
+				}
+				return a.dialer.ResolveRuleTarget(ctx, host, routing.Decision{DNSResolver: d.DNSResolver, DNSIP: d.DNSIP, DNSExitID: d.DNSExitID, ExitID: d.ExitID})
+			},
 			ExchangeExitSystemDNS: a.rawDialer.ExchangeExitSystemDNS,
-			DNSDirectDomains:      engine.DNSDirectDomains,
+			DNSDirectDomains: func() []string {
+				// Real-IP DNS uses the engine's unified precedence. FakeIP keeps
+				// the legacy plaintext exceptions before synthetic allocation.
+				if engine.ProxyDNSEnabled() {
+					return nil
+				}
+				return engine.DNSDirectDomains()
+			},
+			DNSHostIP:              engine.DNSHostIP,
+			DNSHostMappingsEnabled: engine.DNSHostMappingsEnabled,
 			DNSUpstreams: func() []divert.DNSUpstream {
 				configured := engine.DNSUpstreams()
 				result := make([]divert.DNSUpstream, 0, len(configured))
@@ -609,7 +634,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			},
 			SharedPolicy: func(flow divert.Flow) divert.Decision {
 				d := engine.DecideFlow(routing.Flow{Entry: "divert", Process: flow.Process, ProcessAliases: flow.ProcessAliases, Host: flow.Host, IP: flow.IP, Port: flow.Port, Protocol: string(flow.Protocol)})
-				return divert.Decision{Action: divert.Action(d.Action), ExitID: d.ExitID, Rule: d.Rule, DatagramRequired: d.DatagramRequired, HandleDirect: d.HandleDirect}
+				return divert.Decision{Action: divert.Action(d.Action), ExitID: d.ExitID, Rule: d.Rule, DatagramRequired: d.DatagramRequired, HandleDirect: d.HandleDirect, DNSResolver: d.DNSResolver, DNSIP: d.DNSIP, DNSExitID: d.DNSExitID}
 			},
 		})
 		if err != nil {
@@ -617,7 +642,11 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			_ = a.tunnelMgr.Close()
 			return nil, fmt.Errorf("invalid divert configuration: %w", err)
 		}
-		a.setDivertStage("waiting_relay", nil)
+		a.dialer.ResolveDNS = a.dnsSrv.ResolveDNS
+		if cfg.NetworkMode == "divert" {
+			a.divertSrv = a.dnsSrv
+			a.setDivertStage("waiting_relay", nil)
+		}
 	}
 	return a, nil
 }
@@ -805,7 +834,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	if handler != nil {
 		requested = append(requested, protocol.CapabilityProxyExit)
-		transportCaps = append(transportCaps, protocol.CapabilityTargetACL)
+		transportCaps = append(transportCaps, protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS)
 		if cfg.BrowserNetworkShare {
 			transportCaps = append(transportCaps, protocol.CapabilityBrowserNetworkExit)
 		}
@@ -2225,6 +2254,9 @@ func (a *Agent) closeRuntime() error {
 		if divertSrv != nil {
 			errs = append(errs, divertSrv.Close())
 		}
+		if a.dnsSrv != nil && a.dnsSrv != divertSrv {
+			errs = append(errs, a.dnsSrv.Close())
+		}
 		if browserLocalSrv != nil {
 			errs = append(errs, browserLocalSrv.Close())
 		}
@@ -2326,6 +2358,7 @@ func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Conf
 		return ErrRestartRequired
 	}
 	previousDivert := a.cfg.DivertConfig
+	dnsPolicyChanged := !reflect.DeepEqual(a.cfg.Routing, routeCfg)
 	updatedDivert := false
 	rollbackDivert := func() {
 		if updatedDivert && a.divertSrv != nil {
@@ -2371,6 +2404,11 @@ func (a *Agent) applyPolicyBundle(routeCfg routing.Config, divertCfg divert.Conf
 		a.dialer.SetDefaultExitID(defaultID)
 	}
 	a.cfg.Routing = a.routingEngine.Config()
+	if dnsPolicyChanged && a.divertSrv != nil {
+		if err := a.divertSrv.RefreshDNSCache(); err != nil {
+			log.Printf("[dns] DNS 策略已更新，但刷新系统 DNS 缓存失败: %v", err)
+		}
+	}
 	a.rawDialer.ConfigureExitGroups(routeCfg.DeviceGroups, a.groupExitUsable)
 	a.cfg.DivertConfig = divertCfg
 	if a.divertSrv != nil && !newCapture && oldCapture {

@@ -16,6 +16,7 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 	for _, cfg := range []routing.Config{
 		{
 			Mode: routing.ModeRule, DNSMode: routing.DNSModeProxy,
+			DNSFollowRouting: true, DNSRules: []routing.DNSRule{{Name: "dns", Enabled: true, Action: routing.DNSActionRemote, Domains: []string{"example.com"}, ExitID: "device"}}, DNSHosts: []routing.DNSHostMapping{{Domain: "app.example", IP: "192.168.1.20"}},
 			FakeIPEnabled: true, BlockDoHEndpoints: true, ForwardOtherDNS: true,
 			DNSExitID: "custom:resolver", DoHBlockedIPs: []string{"1.1.1.1", "9.9.9.9"},
 			DNSDirectDomains: []string{"corp.example"},
@@ -42,7 +43,7 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 		for _, field := range []string{
 			"mode", "dns_mode", "auto_detect_dns", "dns_association_enabled", "proxy_dns_enabled", "fake_ip_enabled",
 			"block_doh_endpoints", "forward_other_dns", "dns_exit_id", "dns_upstreams", "dns_direct_domains",
-			"doh_blocked_ips", "default_action", "rules",
+			"doh_blocked_ips", "default_action", "rules", "dns_rules", "dns_hosts", "dns_follow_routing",
 		} {
 			if _, present := visible[field]; !present {
 				t.Fatalf("GetConfig omitted %q for %+v", field, cfg)
@@ -56,7 +57,10 @@ func TestRoutingConfigViewIncludesEveryPersistedDNSSetting(t *testing.T) {
 		if update.DNSMode == nil || *update.DNSMode != string(cfg.DNSMode) {
 			t.Fatalf("round trip changed DNS mode: %+v", update)
 		}
-		if update.DNSAssociationEnabled == nil || *update.DNSAssociationEnabled != (cfg.DNSAssociationEnabled == nil || *cfg.DNSAssociationEnabled) ||
+		if update.DNSRules == nil || !reflect.DeepEqual(*update.DNSRules, append([]routing.DNSRule{}, cfg.DNSRules...)) ||
+			update.DNSHosts == nil || !reflect.DeepEqual(*update.DNSHosts, append([]routing.DNSHostMapping{}, cfg.DNSHosts...)) ||
+			update.DNSFollowRouting == nil || *update.DNSFollowRouting != cfg.DNSFollowRouting ||
+			update.DNSAssociationEnabled == nil || *update.DNSAssociationEnabled != (cfg.DNSAssociationEnabled == nil || *cfg.DNSAssociationEnabled) ||
 			update.ProxyDNSEnabled == nil || *update.ProxyDNSEnabled != cfg.ProxyDNSEnabled ||
 			update.AutoDetectDNS == nil || *update.AutoDetectDNS != cfg.AutoDetectDNS ||
 			update.FakeIPEnabled == nil || *update.FakeIPEnabled != cfg.FakeIPEnabled ||

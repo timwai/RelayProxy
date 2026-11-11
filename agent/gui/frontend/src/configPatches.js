@@ -1,4 +1,5 @@
 import {splitRuleList} from './ruleLines.js';
+import {parseDNSHostMappings} from './dnsRuleEditor.js';
 
 function gatewayPatch(g={}) {
   return {enabled:!!g.enabled,interface:g.interface||'',source_cidrs:splitRuleList(g.source_cidrs),exit_id:g.exit_id||'',port:Number(g.port)||0,max_connections:Number(g.max_connections)||0};
@@ -30,6 +31,8 @@ export function dnsPagePatch(r) {
     dns_upstreams:Array.isArray(r.dns_upstreams)?r.dns_upstreams:[],
     dns_direct_domains:splitRuleList(r.dns_direct_domains).map(domain=>domain.toLowerCase().replace(/[.]$/,'')),
     dns_rules:Array.isArray(r.dns_rules)?r.dns_rules.map(x=>{const action=x.action==='LOCAL'?'LOCAL':'REMOTE';return {...x,name:String(x.name||'').trim(),enabled:x.enabled!==false,action,resolver:action==='REMOTE'?(x.resolver==='exit_system'?'exit_system':'encrypted'):'encrypted',exit_id:action==='REMOTE'?String(x.exit_id||'').trim():'',domains:splitRuleList(x.domains).map(domain=>domain.toLowerCase().replace(/[.]$/,''))}}):[],
+    ...(r.dns_follow_routing!==undefined?{dns_follow_routing:!!r.dns_follow_routing}:{}),
+    ...(r.dns_hosts!==undefined?{dns_hosts:parseDNSHostMappings(r.dns_hosts).map(item=>({domain:item.domain.toLowerCase().replace(/[.]$/,''),ip:item.ip.trim()}))}:{}),
     doh_blocked_ips:splitRuleList(r.doh_blocked_ips),
   };
 }

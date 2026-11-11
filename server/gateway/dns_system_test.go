@@ -2,7 +2,9 @@ package gateway
 
 import (
 	"context"
+	"io"
 	"net"
+	"strings"
 	"testing"
 	"time"
 
@@ -10,8 +12,13 @@ import (
 
 	"relayproxy/internal/acl"
 	"relayproxy/internal/protocol"
+	"relayproxy/internal/tunnel"
 	"relayproxy/server/session"
 )
+
+type dnsHeaderWriteFailureStream struct{ *policyTestStream }
+
+func (s *dnsHeaderWriteFailureStream) Write([]byte) (int, error) { return 0, io.ErrClosedPipe }
 
 func relayDNSQuery(t *testing.T) []byte {
 	t.Helper()
@@ -28,7 +35,7 @@ func relayDNSQuery(t *testing.T) []byte {
 }
 
 func TestRelayExitSystemDNSAuthorizesAndOverwritesForgedPolicy(t *testing.T) {
-	for _, scenario := range []string{"allowed", "no-client-grant", "legacy-exit", "no-access"} {
+	for _, scenario := range []string{"allowed", "no-client-grant", "legacy-exit", "no-dns-capability", "no-target-acl", "no-access", "header-write-failure"} {
 		t.Run(scenario, func(t *testing.T) {
 			checker, err := acl.NewChecker(acl.Policy{ID: "relay-dns", AllowInternet: true, AccessMode: acl.AccessModeAllow, AccessHosts: []string{"example.com"}})
 			if err != nil {
@@ -38,10 +45,20 @@ func TestRelayExitSystemDNSAuthorizesAndOverwritesForgedPolicy(t *testing.T) {
 			upstream, exitPeer := net.Pipe()
 			defer upstream.Close()
 			defer exitPeer.Close()
-			sess := &policyTestSession{stream: &policyTestStream{upstream}}
-			caps := []string{"exit", protocol.CapabilityTargetACL}
+			var stream tunnel.TunnelStream = &policyTestStream{upstream}
+			if scenario == "header-write-failure" {
+				stream = &dnsHeaderWriteFailureStream{stream.(*policyTestStream)}
+			}
+			sess := &policyTestSession{stream: stream}
+			caps := []string{"exit", protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS}
 			if scenario == "legacy-exit" {
 				caps = []string{"exit"}
+			}
+			if scenario == "no-dns-capability" {
+				caps = []string{"exit", protocol.CapabilityTargetACL}
+			}
+			if scenario == "no-target-acl" {
+				caps = []string{"exit", protocol.CapabilityExitSystemDNS}
 			}
 			manager.Register(&session.DeviceSession{DeviceID: "exit", Mode: "EXIT", Grants: []string{protocol.CapabilityProxyExit}, Capabilities: caps, Tunnel: sess})
 			router := NewStreamRouter(manager, checker, func(string, string) (bool, error) { return scenario != "no-access", nil }, nil)
@@ -101,8 +118,21 @@ func TestRelayExitSystemDNSAuthorizesAndOverwritesForgedPolicy(t *testing.T) {
 					t.Fatalf("forged Relay ACL reached exit: %+v", policy)
 				}
 			} else {
-				if resp.Success || sess.opens.Load() != 0 {
+				wantOpens := int64(0)
+				if scenario == "header-write-failure" {
+					wantOpens = 1
+				}
+				if resp.Success || sess.opens.Load() != wantOpens {
 					t.Fatalf("unauthorized DNS reached exit: %+v", resp)
+				}
+				if scenario == "header-write-failure" && resp.ErrorCode != protocol.ErrCodeStreamOpenFailed {
+					t.Fatalf("header write error hidden: %+v", resp)
+				}
+				if (scenario == "legacy-exit" || scenario == "no-dns-capability") && (resp.ErrorCode != protocol.ErrCodeDNSUnsupported || !strings.Contains(resp.ErrorMessage, "升级该出口 Agent")) {
+					t.Fatalf("old exit upgrade hint missing: %+v", resp)
+				}
+				if scenario == "no-target-acl" && resp.ErrorCode != protocol.ErrCodeACLDenied {
+					t.Fatalf("exit without Relay ACL accepted: %+v", resp)
 				}
 			}
 			select {

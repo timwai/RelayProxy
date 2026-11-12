@@ -61,6 +61,9 @@ func OpenPeerKeyPinStore(path string) (*PeerKeyPinStore, error) {
 	if runtime.GOOS != "windows" && info.Mode().Perm()&0077 != 0 {
 		return nil, errors.New("E2EE peer pin store permissions must be 0600 or stricter")
 	}
+	if info.Size() > 1<<20 {
+		return nil, ErrPeerPinInvalid
+	}
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("read E2EE peer pin store: %w", err)
@@ -69,7 +72,7 @@ func OpenPeerKeyPinStore(path string) (*PeerKeyPinStore, error) {
 	if err := json.Unmarshal(data, &disk); err != nil {
 		return nil, fmt.Errorf("%w: decode: %v", ErrPeerPinInvalid, err)
 	}
-	if disk.Version != peerPinStoreVersion || disk.Pins == nil {
+	if disk.Version != peerPinStoreVersion || disk.Pins == nil || len(disk.Pins) > 10000 {
 		return nil, ErrPeerPinInvalid
 	}
 	for key, encoded := range disk.Pins {
@@ -97,8 +100,8 @@ func (s *PeerKeyPinStore) VerifyOrPin(serverInstanceID, exitDeviceID string, pub
 	}
 	serverInstanceID = strings.TrimSpace(serverInstanceID)
 	exitDeviceID = strings.TrimSpace(exitDeviceID)
-	if serverInstanceID == "" || exitDeviceID == "" || strings.ContainsRune(serverInstanceID, '\x00') ||
-		strings.ContainsRune(exitDeviceID, '\x00') || len(publicKey) != ed25519.PublicKeySize {
+	if serverInstanceID == "" || len(serverInstanceID) > 256 || !validDeviceID(exitDeviceID) ||
+		strings.ContainsRune(serverInstanceID, '\x00') || len(publicKey) != ed25519.PublicKeySize {
 		return errors.New("E2EE peer pin requires Server instance ID, Exit Device ID and an Ed25519 public key")
 	}
 	scope := sha256.Sum256([]byte(serverInstanceID + "\x00" + exitDeviceID))

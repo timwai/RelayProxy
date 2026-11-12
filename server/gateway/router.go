@@ -678,7 +678,7 @@ func (r *StreamRouter) handleSecureRelay(ctx context.Context, header *protocol.S
 		return
 	}
 	authorized, authErr := r.authorizeExit(clientSession, exitSession)
-	if authErr != nil || !authorized ||
+	if authErr != nil || !authorized || len(exitSession.PublicKey) != 32 ||
 		!hasCapability(exitSession, protocol.CapabilityE2EEV1) ||
 		(r.aclChecker != nil && !hasCapability(exitSession, protocol.CapabilityTargetACL)) {
 		log.Printf("[StreamRouter] SecureRelay authorization/capability denied: %s -> %s", clientSession.DeviceID, exitSession.DeviceID)

@@ -63,6 +63,18 @@ func TestServerConfigLoadsCertificatePathsAndTLSMode(t *testing.T) {
 	}
 }
 
+func TestServerPlaintextRelayRequiresDevelopmentOptIn(t *testing.T) {
+	cfg := &ServerConfig{}
+	cfg.Server.TLSEnabled = BoolPtr(false)
+	if err := NormalizeServerConfig(cfg); err == nil {
+		t.Fatal("plaintext relay was accepted without server.security.allow_plain_tcp")
+	}
+	cfg.Server.Security.AllowPlainTCP = true
+	if err := NormalizeServerConfig(cfg); err != nil {
+		t.Fatalf("explicit development plaintext opt-in rejected: %v", err)
+	}
+}
+
 func TestServerConfigRejectsAdditionalYAMLDocument(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "server.yaml")
 	if err := os.WriteFile(path, []byte("server: {}\n---\nserver:\n  tls_enabled: false\n"), 0600); err != nil {

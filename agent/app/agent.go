@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
@@ -33,6 +34,7 @@ import (
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
+	"relayproxy/internal/e2ee"
 	"relayproxy/internal/exitgroup"
 	"relayproxy/internal/netpath"
 	"relayproxy/internal/netutil"
@@ -540,6 +542,18 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		defer a.mu.RUnlock()
 		return a.cfg.DeviceID
 	})
+	a.rawDialer.ConfigureE2EE(e2ee.Identity{
+		PublicKey: ed25519.PublicKey(cfg.Identity.PublicKey), PrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
+	}, func(exitDeviceID string) ([]byte, bool) {
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+		for _, peer := range a.proxyExits {
+			if peer.DeviceID == exitDeviceID && peer.SupportsE2EE {
+				return append([]byte(nil), peer.PublicKey...), true
+			}
+		}
+		return nil, false
+	})
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
 	a.rawDialer.ConfigureStreamResume(resumeClient, p2presume.DefaultReplayLimit)
@@ -919,6 +933,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
+	a.rawDialer.SetE2EEServerSupported(slices.Contains(accepted.TransportCapabilities, protocol.CapabilityE2EEV1))
 	publicDirect := a.proxyDirect
 	a.mu.Unlock()
 	if publicDirect != nil {

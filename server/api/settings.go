@@ -27,6 +27,7 @@ type TunnelSettings struct {
 	TCPListen                     string `json:"tcpListen"`
 	QUICListen                    string `json:"quicListen"`
 	TLSEnabled                    bool   `json:"tlsEnabled"`
+	AllowPlainTCP                 bool   `json:"allowPlainTCP"`
 	HeartbeatSec                  int    `json:"heartbeatSec"`
 	MaxConnections                int    `json:"maxConnections"`
 	MaxStreamsPerDevice           int    `json:"maxStreamsPerDevice"`
@@ -165,7 +166,8 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 		Admin: AdminSettings{c.Server.Admin.Listen, c.IsAdminTLSEnabled()},
 		Tunnel: TunnelSettings{
 			TCPListen: c.Server.TLS.Listen, QUICListen: c.Server.QUIC.Listen,
-			TLSEnabled: c.IsTLSEnabled(), HeartbeatSec: c.Tunnel.HeartbeatSec,
+			TLSEnabled: c.IsTLSEnabled(), AllowPlainTCP: c.Server.Security.AllowPlainTCP,
+			HeartbeatSec: c.Tunnel.HeartbeatSec,
 			MaxConnections: c.Tunnel.MaxConnections, MaxStreamsPerDevice: c.Tunnel.MaxConnectionsPerDevice,
 			BrutalUpMbps:                  c.Tunnel.Bandwidth.UpMbps,
 			BrutalDownMbps:                c.Tunnel.Bandwidth.DownMbps,
@@ -218,6 +220,7 @@ func (c ServerEditableConfig) apply(target *config.ServerConfig) error {
 	target.Server.Admin.TLSEnabled = config.BoolPtr(c.Admin.TLSEnabled)
 	target.Server.TLS.Listen, target.Server.QUIC.Listen = c.Tunnel.TCPListen, c.Tunnel.QUICListen
 	target.Server.TLSEnabled = config.BoolPtr(c.Tunnel.TLSEnabled)
+	target.Server.Security.AllowPlainTCP = c.Tunnel.AllowPlainTCP
 	target.Server.CertFile, target.Server.KeyFile = c.Certificate.CertFile, c.Certificate.KeyFile
 	target.Tunnel.HeartbeatSec = c.Tunnel.HeartbeatSec
 	target.Tunnel.MaxConnections = c.Tunnel.MaxConnections

@@ -26,6 +26,19 @@ import (
 
 const udpIdleTimeout = 60 * time.Second
 
+type relayOriginContextKey struct{}
+
+// WithRelayOrigin marks streams accepted from the authenticated Relay tunnel.
+// Direct P2P/Public Direct listeners must not be able to assert this marker.
+func WithRelayOrigin(ctx context.Context) context.Context {
+	return context.WithValue(ctx, relayOriginContextKey{}, true)
+}
+
+func isRelayOrigin(ctx context.Context) bool {
+	trusted, _ := ctx.Value(relayOriginContextKey{}).(bool)
+	return trusted
+}
+
 var udpPipeBufferPool = sync.Pool{
 	New: func() any { return make([]byte, protocol.MaxUDPDatagramPayload+1) },
 }
@@ -131,6 +144,10 @@ func (h *Handler) HandleStreamWithHeader(ctx context.Context, stream tunnel.Tunn
 
 
 func (h *Handler) handleSecureRelay(ctx context.Context, stream tunnel.TunnelStream, outer *protocol.StreamHeader) {
+	if !isRelayOrigin(ctx) {
+		log.Printf("[ExitHandler] Rejected SecureRelay from a non-Relay transport")
+		return
+	}
 	if outer == nil || outer.ClientDeviceID == "" || outer.ExitDeviceID == "" ||
 		len(h.cfg.E2EEPublicKey) != ed25519.PublicKeySize ||
 		len(h.cfg.E2EEPrivateKey) != ed25519.PrivateKeySize {

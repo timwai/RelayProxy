@@ -77,7 +77,7 @@ func TestAutoQUICRecoveryReauthenticatesAndRestoresRDPUDP(t *testing.T) {
 	disabled := false
 	base := AgentConfig{
 		IdentityID: "a1b2c3d4e5f6g7h8", Mode: "CLIENT", ServerAddress: "127.0.0.1",
-		TCPPort: relay.TCPAddr().(*net.TCPAddr).Port, InsecureTLS: true,
+		TCPPort: relay.TCPAddr().(*net.TCPAddr).Port, InsecureTLS: true, AllowInsecureTLS: true,
 		SOCKS5Enabled: &disabled, HTTPEnabled: &disabled, P2PEnabled: &disabled,
 		ConnectTimeout: 3 * time.Second,
 	}

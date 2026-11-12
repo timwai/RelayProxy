@@ -79,7 +79,7 @@ func TestFileSharingOverTwoAuthenticatedAgentSessions(t *testing.T) {
 				ServerAddress: "127.0.0.1",
 				TCPPort:       server.TCPAddr().(*net.TCPAddr).Port,
 				QUICPort:      server.QUICAddr().(*net.UDPAddr).Port,
-				InsecureTLS:   true, SOCKS5Enabled: &disabled, HTTPEnabled: &disabled,
+				InsecureTLS: true, AllowInsecureTLS: true, SOCKS5Enabled: &disabled, HTTPEnabled: &disabled,
 				IdentityID: "a1b2c3d4e5f6g7h8", ConnectTimeout: 3 * time.Second,
 			}
 			shareDir := t.TempDir()

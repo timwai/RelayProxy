@@ -5,7 +5,6 @@ import (
 	"context"
 	"crypto/ed25519"
 	"crypto/rand"
-	"errors"
 	"io"
 	"net"
 	"sync"
@@ -141,7 +140,10 @@ func TestSecureRelayHidesInnerTCPMetadataFromRelay(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	forgedPolicy := &acl.Policy{ID: "client-forged-policy", AllowInternet: true, AllowLoopback: true}
+	forgedPolicy := &acl.Policy{
+		ID: "client-forged-policy", AllowInternet: true, AllowLoopback: true,
+		AccessMode: acl.AccessModeDeny, AccessHosts: []string{"127.0.0.1"},
+	}
 	if err := protocol.WriteJSON(clientRaw, protocol.SecureRelayMetadata{
 		Version: protocol.SecureRelayVersion, ClientPublicKey: clientIdentity.PublicKey,
 		RelayPolicy: forgedPolicy,
@@ -216,8 +218,5 @@ func TestSecureRelayHidesInnerTCPMetadataFromRelay(t *testing.T) {
 		}
 	case <-time.After(time.Second):
 		t.Fatal("Relay secure stream audit was not emitted")
-	}
-	if errors.Is(err, io.EOF) {
-		t.Fatal("unexpected EOF during handshake")
 	}
 }

@@ -19,18 +19,18 @@ func TestShouldUseE2EERequiresPersistentPeerPinVerifier(t *testing.T) {
 	}
 	dialer.ConfigureE2EE(identity, getPeerKey, nil)
 	dialer.SetE2EEServerSupported(true)
-	if dialer.shouldUseE2EE("exit-device", protocol.ProxyPathRelayTCP) {
+	if dialer.shouldUseE2EE("exit-device", protocol.ProxyPathRelayTLS) {
 		t.Fatal("Relay E2EE enabled without a persistent peer pin verifier")
 	}
 
 	dialer.ConfigureE2EE(identity, getPeerKey, func(string, []byte) error { return nil })
-	if !dialer.shouldUseE2EE("exit-device", protocol.ProxyPathRelayTCP) {
+	if !dialer.shouldUseE2EE("exit-device", protocol.ProxyPathRelayTLS) {
 		t.Fatal("Relay E2EE was not enabled when both peer key and pin verifier are available")
 	}
 	if dialer.shouldUseE2EE("exit-device", protocol.ProxyPathP2PQUIC) {
 		t.Fatal("direct P2P path unexpectedly selected the Relay E2EE wrapper")
 	}
-	if dialer.shouldUseE2EE(protocol.ServerExitDeviceID, protocol.ProxyPathRelayTCP) {
+	if dialer.shouldUseE2EE(protocol.ServerExitDeviceID, protocol.ProxyPathRelayTLS) {
 		t.Fatal("Server-local Exit unexpectedly selected the Relay E2EE wrapper")
 	}
 }

@@ -156,7 +156,6 @@ func (d *TunnelDialer) ConfigureStreamResume(enabled bool, replayLimit int) {
 	d.directMu.Unlock()
 }
 
-
 func (d *TunnelDialer) ConfigureE2EE(identity e2ee.Identity, getPeerKey func(exitDeviceID string) ([]byte, bool)) {
 	d.directMu.Lock()
 	d.e2eeIdentity = identity

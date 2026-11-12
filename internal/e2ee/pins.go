@@ -73,7 +73,10 @@ func OpenPeerKeyPinStore(path string) (*PeerKeyPinStore, error) {
 		return nil, ErrPeerPinInvalid
 	}
 	for key, encoded := range disk.Pins {
-		if key == "" || len(key) > 512 || strings.ContainsRune(key, '\x00') {
+		if len(key) != sha256.Size*2 {
+			return nil, ErrPeerPinInvalid
+		}
+		if _, err := hex.DecodeString(key); err != nil {
 			return nil, ErrPeerPinInvalid
 		}
 		publicKey, err := base64.RawStdEncoding.DecodeString(encoded)
@@ -98,7 +101,8 @@ func (s *PeerKeyPinStore) VerifyOrPin(serverInstanceID, exitDeviceID string, pub
 		strings.ContainsRune(exitDeviceID, '\x00') || len(publicKey) != ed25519.PublicKeySize {
 		return errors.New("E2EE peer pin requires Server instance ID, Exit Device ID and an Ed25519 public key")
 	}
-	key := serverInstanceID + "\x00" + exitDeviceID
+	scope := sha256.Sum256([]byte(serverInstanceID + "\x00" + exitDeviceID))
+	key := hex.EncodeToString(scope[:])
 	encoded := base64.RawStdEncoding.EncodeToString(publicKey)
 
 	s.mu.Lock()

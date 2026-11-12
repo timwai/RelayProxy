@@ -15,6 +15,7 @@ type DeviceSession struct {
 	DeviceID       string
 	DeviceName     string
 	Fingerprint    string   // verified installation public-key fingerprint
+	PublicKey      []byte   // authenticated Ed25519 installation public key; public material
 	OwnerUserID    string   // legacy authenticated ownership snapshot
 	IdentityID     string   // server-resolved connection identity
 	IdentityName   string   // display-only identity name snapshot

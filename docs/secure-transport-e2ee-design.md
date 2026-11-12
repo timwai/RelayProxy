@@ -1,6 +1,6 @@
 # RelayProxy Secure Transport / E2EE Design
 
-> Status: P0 transport hardening in implementation; P1 E2EE design for staged implementation.
+> Status: transport hardening and Relay-routed TCP/stream-UDP E2EE are implemented in the feature branch; cross-platform CI and end-to-end acceptance remain in progress.
 > Target branch: `feat/secure-transport-e2ee-20261112`
 
 ## 1. Goals and boundaries
@@ -8,25 +8,29 @@
 Separate three properties:
 
 1. **Transport encryption**: TLS 1.3 protects each Agent-to-Relay or direct QUIC/TCP connection.
-2. **End-to-end encryption**: Client Agent and selected Exit Agent encrypt proxy payload so the Relay can route and account for it without reading the target request or response.
-3. **Metadata protection**: E2EE hides inner Host, Port, DNS payload, file names and application bytes. It does not hide Client/Exit device IDs, timing, byte counts, packet sizes, selected path or the destination IP contacted by the Exit.
+2. **End-to-end encryption**: for a remote device Exit reached through the Relay, the Client Agent and Exit Agent encrypt the inner proxy stream. The Relay routes and accounts for opaque bytes without parsing target requests or responses.
+3. **Metadata protection**: the Relay can still see Client/Exit Device IDs, selected Exit, stream timing, byte counts and packet sizes. The Exit and destination network necessarily know the target. Traffic analysis and DPI classification are not hidden.
 
-The Exit is an endpoint and necessarily sees the destination and plaintext it must process. When Relay Server itself is selected as Exit, the Server is the endpoint and cannot be blind to that traffic. This design does not promise resistance to traffic analysis or DPI classification.
+The Server itself cannot be blind when the Server-local Exit is selected: it is the egress endpoint. E2EE is currently used only for remote device Exits over Relay-routed streams. Direct P2P/Public Direct paths continue to use their TLS 1.3 transport with pinned ephemeral transport fingerprints; they do not yet add the application-level E2EE wrapper.
 
 ## 2. Current code facts
 
-- Agent installations already have a persistent Ed25519 identity in `device-identity.json`.
-- `DeviceHello.PublicKey` is sent during enrollment and persisted in `device_identities.public_key`.
-- The online Server session stores the verified fingerprint but not the public key as a session field.
-- `ProxyExit` inventory does not yet carry the peer's Ed25519 public key.
-- Relay TCP/QUIC uses TLS 1.3 by default, but explicit plaintext TCP and insecure certificate-verification switches existed.
-- P2P and Public Direct already use TLS 1.3 with ephemeral certificates and out-of-band fingerprint pinning. That transport authentication is independent of persistent device identity.
+- Agent installations have a persistent Ed25519 identity in `device-identity.json`.
+- `DeviceHello.PublicKey` is sent during enrollment, verified by the Server, and copied into the online `DeviceSession`.
+- Authorized online Exit inventory carries the Exit public key and an E2EE capability bit.
+- The Client stores a TOFU pin in `peer-key-pins.json`, scoped by authenticated Server Instance ID and Exit Device ID. A changed key fails closed.
+- The production CLI passes the pin-store path to the Agent. Embedders that construct `app.AgentConfig` without `E2EEPeerPinPath` do not enable Relay E2EE.
+- Relay TCP and reliable stream-UDP can be E2EE-wrapped when Client, Server and remote Exit advertise support. Native datagram-required UDP currently returns a clear error rather than silently downgrading.
+- Server-local Exit is intentionally excluded from E2EE because the Server is the endpoint.
+- Relay TCP/QUIC and direct QUIC/TCP retain TLS 1.3. Plaintext TCP and disabled certificate verification require explicit development-only opt-ins.
 
-## 3. Threat model
+## 3. Threat model and limitations
 
-E2EE protects payload confidentiality/integrity from passive network observers and a Relay process that can inspect forwarded stream bytes. It does not protect against compromised endpoints, process-memory/private-key theft, destination services, or traffic analysis.
+E2EE protects payload confidentiality/integrity from passive network observers and a Relay process that follows the forwarding protocol and inspects forwarded stream bytes. It does not protect against compromised endpoints, process-memory/private-key theft, destination services, traffic analysis, or a network operator that can observe the Exit's egress.
 
-The Server remains authoritative for device admission, capability grants, Client-to-Exit authorization, quotas and relay admission. The Exit enforces its local destination ACL and performs the actual dial.
+The Server remains authoritative for device admission, capability grants, Client-to-Exit authorization, quotas and Relay admission. The Exit enforces its local destination ACL and performs the actual dial. The Relay forwards the Server-owned ACL policy to the Exit; Client-supplied policy is never authoritative.
+
+**First-use trust limitation:** the Client discovers an Exit key from the authenticated Server inventory. TOFU detects subsequent key changes, but it cannot authenticate the first key against an actively malicious Server that can substitute the inventory key on first use. Resisting a malicious Server requires a separately trusted identity authority or out-of-band verification of the first fingerprint. This implementation must not be described as protecting against an active Server MITM on first use.
 
 ## 4. Peer identity and key trust
 
@@ -36,36 +40,39 @@ For each Client-to-Exit stream:
 
 1. Both endpoints generate fresh ephemeral X25519 key pairs and 32-byte nonces.
 2. Both sign a domain-separated, length-prefixed transcript binding protocol version, Client Device ID, Exit Device ID, both ephemeral public keys and both nonces.
-3. Client verifies the Exit signature against the authorized Exit public key from inventory. Exit verifies the Client signature and checks its signed Device ID against the outer admission header.
-4. Both derive a shared secret with X25519, then use HKDF-SHA256 and the transcript hash to derive independent directional traffic keys.
+3. Client verifies the Exit signature against the authorized Exit public key from inventory. Exit verifies the Client signature against the public key forwarded by the Relay from the authenticated online Client session.
+4. Both derive a shared secret with X25519, then use HKDF-SHA256 and the transcript hash to derive independent directional traffic keys and separate key-confirmation keys.
 5. Both exchange key-confirmation MACs before business data is accepted.
 
-Carry verified online public keys in `DeviceSession` and authorized `ProxyExit` inventory. Persist a local TOFU pin keyed by (Server Instance ID, peer Device ID). First use records the peer key; later key changes fail closed and require explicit re-enrollment. TOFU detects later substitution but cannot independently authenticate first use. A later phase can replace TOFU with identity-authority-signed device certificates.
+The Client pins the Exit key only after successful handshake/key confirmation. Pins are keyed by (Server Instance ID, Exit Device ID). Later key changes fail closed with the old and presented short fingerprints in the error. An operator must verify the new key out of band and explicitly remove the pin file before trusting a rotation.
 
 ## 5. Secure stream architecture
 
 Keep existing business request/response structures. Add a generic wrapper implementing `tunnel.TunnelStream`.
 
-Relay path:
+Relay-routed remote Exit path:
 
 ```text
 Client Agent
   | outer StreamHeader: SecureRelay, ClientDeviceID, ExitDeviceID
+  | clear metadata: Client public key
   | authenticated E2EE handshake
-  | encrypted inner StreamHeader + existing business request/data
+  | encrypted inner StreamHeader + existing TCP/UDP stream request and data
   v
 Relay Server
-  | validates Client session, capability, Exit authorization, quotas and limits
-  | forwards outer header and opaque encrypted bytes without parsing inner requests
+  | validates Client capability/session, Exit authorization and Exit capability
+  | verifies Client key against the authenticated online session
+  | replaces ACL metadata with its own authoritative policy
+  | forwards opaque encrypted bytes without parsing the inner request
   v
 Exit Agent
   | authenticates Client key and completes E2EE handshake
-  | decrypts inner StreamHeader and dispatches existing handler
+  | decrypts inner StreamHeader and dispatches existing TCP/UDP handler
   v
-Existing TCP / UDP / DNS / RDP / file handler
+Existing Exit ACL / resolver / dialer
 ```
 
-P2P QUIC and Public Direct QUIC use the same E2EE wrapper and handshake. Their existing TLS 1.3 fingerprint-pinned transport remains enabled as defense in depth. A path switch must not change payload confidentiality.
+P2P QUIC and Public Direct QUIC currently rely on their existing TLS 1.3 fingerprint-pinned transport. A future phase may add the same application-level E2EE wrapper to those paths if uniform cryptographic identity is required.
 
 ### Record framing
 
@@ -75,23 +82,20 @@ Handshake messages are length-prefixed and bounded to 4 KiB. No application data
 
 ## 6. Relay admission, ACL and audit
 
-The Relay continues enforcing authenticated Client session, current approval, `proxy.client`, Exit online/approved state, Client-to-Exit grants, stream limits, bandwidth quotas and connection accounting.
+The Relay enforces authenticated Client session, current approval, `proxy.client`, E2EE capability, Exit online/approved state, Client-to-Exit grants and stream admission. It checks that the clear Client public key matches the key in the authenticated online session. The Exit public key is selected from the authenticated authorized Exit inventory and then pinned by the Client.
 
-The Relay can no longer evaluate target-host rules from encrypted `OpenTCPRequest`. The Exit evaluates the decrypted host, port, DNS answers and final IP, including rebinding checks. For Relay-routed streams, the Server may attach its authoritative Relay ACL policy as trusted outer metadata on the Server-to-Exit leg; Exit intersects it with local policy. Client input must never override Relay policy.
+The Relay cannot evaluate target-host rules from encrypted `OpenTCPRequest`. It forwards its authoritative ACL policy to the Exit; the Exit evaluates decrypted host, port, DNS answers and final IP, including rebinding checks, and intersects Relay policy with local policy. Client input cannot override Relay policy.
 
 Audit split:
-- Relay: Client ID, Exit ID, protocol class, time, bytes, path and result. Target host/port/IP are unavailable.
+- Relay: Client ID, Exit ID, protocol class, time, bytes, path and result. Target host/port/IP are not available from the encrypted inner request.
 - Exit-local: target host/port, resolved IP, ACL and dial result.
 - Do not send Exit target details back to Relay if target metadata must remain private from Server.
 
 ## 7. Protocol rollout and downgrade
 
-Target policy values:
-- `off`: development/compatibility only.
-- `opportunistic`: attempt E2EE when peer supports it and explicitly record non-E2EE fallback.
-- `required`: refuse Client-to-Exit data streams unless E2EE completes.
+Current behavior is **opportunistic capability negotiation**: the Client uses E2EE when the authenticated Server advertises support and the selected remote Exit inventory advertises E2EE with a valid key. If either side is legacy or does not advertise support, the existing TLS-protected Relay stream remains available for compatibility. Once E2EE is selected, handshake, signature, key-confirmation or TOFU-pin failure closes the stream; it does not retry that same request in plaintext.
 
-Production default becomes `required` only after supported Agents, Server and Exit handlers ship. Missing peer key, unsupported version, failed signature/key confirmation or changed TOFU pin must fail closed in required mode. Never retry the same request over plaintext after an E2EE handshake failure. Capability negotiation is not authorization.
+There is not yet a user-configurable `required` mode. Consequently, a Server that actively suppresses E2EE capability or falsely marks an Exit as unsupported can cause compatibility fallback. Required-mode downgrade protection and identity-authority-signed Exit certificates remain follow-up security work.
 
 ## 8. Staged implementation
 
@@ -100,23 +104,29 @@ Production default becomes `required` only after supported Agents, Server and Ex
 - [x] Disabling Server tunnel TLS requires explicit development-only configuration.
 - [x] Skipping Agent certificate verification requires explicit development-only configuration.
 - [x] Programmatic Agent construction is guarded as well as YAML loading.
+- [x] Agent startup warns when development-only plaintext/insecure transport is enabled.
 - [ ] Verify Server settings UI preserves/surfaces security warnings.
 - [ ] Run Go tests, race tests, vet and cross-builds on CI.
 
 ### P1 — E2EE primitives and peer identity
-- [x] Bounded authenticated handshake (Ed25519 + ephemeral X25519 + HKDF) as a standalone primitive.
+- [x] Bounded authenticated handshake (Ed25519 + ephemeral X25519 + HKDF).
 - [x] ChaCha20-Poly1305 record framing and `TunnelStream` wrapper with independent directional and key-confirmation keys.
-- [x] Handshake, peer-key mismatch, tamper, oversized/truncated record and authenticated half-close tests. Replay/ordering property tests remain.
+- [x] Handshake, peer-key mismatch, tamper, oversized/truncated record and authenticated half-close tests.
 - [x] Carry authenticated public keys in online sessions and authorized online Exit inventory.
-- [ ] Local TOFU pin storage and explicit pin-change handling.
+- [x] Persistent TOFU pin store, Server/Exit scoping, key-change rejection and pin-store tests.
+- [ ] Add explicit operator workflow/UI for verified Exit key rotation.
+- [ ] Add replay/ordering property and fuzz tests.
 
 ### P2 — Relay-blind proxy TCP/UDP
-- [ ] Add `FrameTypeSecureRelay` and opaque Relay forwarding.
-- [ ] Wrap Client TCP/UDP streams on Relay, P2P and Public Direct paths.
-- [ ] Decrypt at Exit and dispatch existing TCP/UDP handlers.
-- [ ] Move target-host ACL to Exit; preserve authoritative Relay ACL metadata.
-- [ ] Redact target fields from Server connection audit.
-- [ ] Document Server-local Exit as a non-blind endpoint.
+- [x] Add `FrameTypeSecureRelay` and opaque Relay forwarding.
+- [x] Wrap Relay-routed Client TCP and reliable stream-UDP when both endpoints support E2EE.
+- [x] Decrypt at Exit and dispatch existing TCP/UDP handlers.
+- [x] Forward authoritative Relay ACL metadata to Exit.
+- [x] Keep target host/port/IP out of Relay secure-stream audit.
+- [ ] Add Server router + real Agent/Exit end-to-end acceptance proving the Relay cannot recover target metadata or payload.
+- [ ] Add explicit E2EE-required policy and downgrade tests.
+- [ ] Decide whether direct P2P/Public Direct should also use the application-level E2EE wrapper.
+- [ ] Add native datagram E2EE or a documented product-level stream fallback for UDP datagram-required callers.
 
 ### P3 — Remaining services
 - [ ] DNS/system DNS, RDP, file share/listing/transfer and Browser Network Proxy.
@@ -130,11 +140,11 @@ Production default becomes `required` only after supported Agents, Server and Ex
 
 ## 9. Acceptance tests
 
-- Relay-side capture cannot recover inner Host, Port, DNS query, file names or payload.
+- Relay-side capture cannot recover inner Host, Port, DNS query, file names or application payload.
 - Exit receives original requests and returns byte-identical application data.
 - Modified, truncated, reordered and replayed records are rejected.
 - Wrong peer signature, wrong Device ID/Exit ID, wrong key-confirmation MAC and changed TOFU pin fail closed.
-- No handshake failure falls back to plaintext in `required` mode.
+- No handshake failure falls back to plaintext after E2EE is selected.
 - Outer TLS certificate validation remains active.
-- Relay/P2P/Public Direct switching preserves E2EE identity and never leaks plaintext.
 - Authorization revocation, ACL, stream limits, cancellation, half-close and audit accounting remain correct.
+- First-use trust limitations and the absence of required-mode downgrade protection are explicitly tested/documented.

@@ -73,6 +73,7 @@ type ProxyExit struct {
 	AuthorizationSource string            `json:"authorizationSource,omitempty"`
 	Online              bool              `json:"online"`
 	PublicKey           []byte            `json:"publicKey,omitempty"` // authenticated Ed25519 installation key; public material
+	SupportsE2EE        bool              `json:"supportsE2ee,omitempty"`
 	Direct              *ProxyDirectPaths `json:"direct,omitempty"`
 }
 

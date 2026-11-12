@@ -23,30 +23,30 @@ import (
 )
 
 const (
-	ProtocolVersion       = 1
-	MaxHandshakeMessage   = 4 << 10
-	MaxRecordPlaintext    = 16 << 10
-	handshakeDomain       = "RelayProxy E2EE handshake v1\x00"
-	clientHelloDomain     = "RelayProxy E2EE client hello v1\x00"
-	serverHelloDomain     = "RelayProxy E2EE server hello v1\x00"
-	trafficKeyInfo        = "RelayProxy E2EE traffic keys v1"
-	clientFinishedDomain  = "RelayProxy E2EE client finished v1\x00"
-	serverFinishedDomain  = "RelayProxy E2EE server finished v1\x00"
+	ProtocolVersion      = 1
+	MaxHandshakeMessage  = 4 << 10
+	MaxRecordPlaintext   = 16 << 10
+	handshakeDomain      = "RelayProxy E2EE handshake v1\x00"
+	clientHelloDomain    = "RelayProxy E2EE client hello v1\x00"
+	serverHelloDomain    = "RelayProxy E2EE server hello v1\x00"
+	trafficKeyInfo       = "RelayProxy E2EE traffic keys v1"
+	clientFinishedDomain = "RelayProxy E2EE client finished v1\x00"
+	serverFinishedDomain = "RelayProxy E2EE server finished v1\x00"
 )
 
 var (
-	ErrHandshakeIdentity = errors.New("E2EE peer identity mismatch")
+	ErrHandshakeIdentity  = errors.New("E2EE peer identity mismatch")
 	ErrHandshakeSignature = errors.New("E2EE handshake signature verification failed")
-	ErrHandshakeFinished = errors.New("E2EE key confirmation failed")
-	ErrRecordSequence = errors.New("E2EE record sequence exhausted")
-	ErrRecordLength = errors.New("invalid E2EE record length")
+	ErrHandshakeFinished  = errors.New("E2EE key confirmation failed")
+	ErrRecordSequence     = errors.New("E2EE record sequence exhausted")
+	ErrRecordLength       = errors.New("invalid E2EE record length")
 )
 
 // Identity is the persistent Ed25519 identity of one RelayProxy installation.
 // The signing key is never reused as an X25519 encryption key.
 type Identity struct {
-	DeviceID  string
-	PublicKey ed25519.PublicKey
+	DeviceID   string
+	PublicKey  ed25519.PublicKey
 	PrivateKey ed25519.PrivateKey
 }
 
@@ -119,7 +119,7 @@ func ClientHandshake(stream tunnel.TunnelStream, cfg ClientConfig) (*SecureStrea
 
 	hello := clientHello{
 		Version: ProtocolVersion, ClientID: cfg.Local.DeviceID, ExitID: cfg.ExitDeviceID,
-		PublicKey: append([]byte(nil), cfg.Local.PublicKey...),
+		PublicKey:    append([]byte(nil), cfg.Local.PublicKey...),
 		EphemeralKey: ephemeral.PublicKey().Bytes(), Nonce: clientNonce,
 	}
 	hello.Signature = ed25519.Sign(cfg.Local.PrivateKey, clientHelloPayload(hello))
@@ -211,7 +211,7 @@ func ServerHandshake(stream tunnel.TunnelStream, cfg ServerConfig) (*SecureStrea
 	}
 	response := serverHello{
 		Version: ProtocolVersion, ClientID: hello.ClientID, ExitID: cfg.Local.DeviceID,
-		PublicKey: append([]byte(nil), cfg.Local.PublicKey...),
+		PublicKey:    append([]byte(nil), cfg.Local.PublicKey...),
 		EphemeralKey: ephemeral.PublicKey().Bytes(), Nonce: serverNonce,
 	}
 	response.Signature = ed25519.Sign(cfg.Local.PrivateKey, serverHelloPayload(hello, response))

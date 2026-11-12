@@ -16,6 +16,9 @@ import (
 // loadServerTLS prepares the one certificate used by the admin, TCP and QUIC
 // listeners. Relative paths retain their working-directory semantics.
 func loadServerTLS(cfg *config.ServerConfig) (*tls.Config, error) {
+	if !cfg.IsTLSEnabled() {
+		log.Println("[SECURITY] WARNING: plaintext Agent tunnel transport is explicitly enabled; development only, never expose this listener to untrusted networks.")
+	}
 	if !cfg.NeedsCertificate() {
 		log.Println("[Server] TLS is disabled for both the admin and tunnels; configured certificate paths are not loaded.")
 		return nil, nil

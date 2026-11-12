@@ -142,7 +142,6 @@ func (h *Handler) HandleStreamWithHeader(ctx context.Context, stream tunnel.Tunn
 	}
 }
 
-
 func (h *Handler) handleSecureRelay(ctx context.Context, stream tunnel.TunnelStream, outer *protocol.StreamHeader) {
 	if !isRelayOrigin(ctx) {
 		log.Printf("[ExitHandler] Rejected SecureRelay from a non-Relay transport")

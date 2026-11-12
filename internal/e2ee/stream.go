@@ -150,19 +150,19 @@ func ClientHandshake(stream tunnel.TunnelStream, cfg ClientConfig) (*SecureStrea
 		return nil, fmt.Errorf("derive E2EE shared secret: %w", err)
 	}
 	transcript := transcriptHash(hello, response)
-	clientToExit, exitToClient, err := deriveTrafficKeys(shared, transcript)
+	clientToExit, exitToClient, clientFinishKey, exitFinishKey, err := deriveTrafficKeys(shared, transcript)
 	if err != nil {
 		return nil, err
 	}
 
-	if err := writeHandshakeMessage(stream, finishedMessage{MAC: finishedMAC(clientToExit, clientFinishedDomain, transcript)}); err != nil {
+	if err := writeHandshakeMessage(stream, finishedMessage{MAC: finishedMAC(clientFinishKey, clientFinishedDomain, transcript)}); err != nil {
 		return nil, fmt.Errorf("send E2EE client key confirmation: %w", err)
 	}
 	var finish finishedMessage
 	if err := readHandshakeMessage(stream, &finish); err != nil {
 		return nil, fmt.Errorf("read E2EE Exit key confirmation: %w", err)
 	}
-	if !hmac.Equal(finish.MAC, finishedMAC(exitToClient, serverFinishedDomain, transcript)) {
+	if !hmac.Equal(finish.MAC, finishedMAC(exitFinishKey, serverFinishedDomain, transcript)) {
 		return nil, ErrHandshakeFinished
 	}
 	return NewSecureStream(stream, clientToExit, exitToClient)
@@ -228,7 +228,7 @@ func ServerHandshake(stream tunnel.TunnelStream, cfg ServerConfig) (*SecureStrea
 		return nil, fmt.Errorf("derive E2EE shared secret: %w", err)
 	}
 	transcript := transcriptHash(hello, response)
-	clientToExit, exitToClient, err := deriveTrafficKeys(shared, transcript)
+	clientToExit, exitToClient, clientFinishKey, exitFinishKey, err := deriveTrafficKeys(shared, transcript)
 	if err != nil {
 		return nil, err
 	}
@@ -237,10 +237,10 @@ func ServerHandshake(stream tunnel.TunnelStream, cfg ServerConfig) (*SecureStrea
 	if err := readHandshakeMessage(stream, &finish); err != nil {
 		return nil, fmt.Errorf("read E2EE Client key confirmation: %w", err)
 	}
-	if !hmac.Equal(finish.MAC, finishedMAC(clientToExit, clientFinishedDomain, transcript)) {
+	if !hmac.Equal(finish.MAC, finishedMAC(clientFinishKey, clientFinishedDomain, transcript)) {
 		return nil, ErrHandshakeFinished
 	}
-	if err := writeHandshakeMessage(stream, finishedMessage{MAC: finishedMAC(exitToClient, serverFinishedDomain, transcript)}); err != nil {
+	if err := writeHandshakeMessage(stream, finishedMessage{MAC: finishedMAC(exitFinishKey, serverFinishedDomain, transcript)}); err != nil {
 		return nil, fmt.Errorf("send E2EE Exit key confirmation: %w", err)
 	}
 	return NewSecureStream(stream, exitToClient, clientToExit)
@@ -459,13 +459,14 @@ func transcriptHash(client clientHello, server serverHello) []byte {
 	return sum[:]
 }
 
-func deriveTrafficKeys(shared, transcript []byte) ([]byte, []byte, error) {
+func deriveTrafficKeys(shared, transcript []byte) (clientToExit, exitToClient, clientFinish, exitFinish []byte, err error) {
 	reader := hkdf.New(sha256.New, shared, transcript, []byte(trafficKeyInfo))
-	material := make([]byte, chacha20poly1305.KeySize*2)
+	keySize := chacha20poly1305.KeySize
+	material := make([]byte, keySize*4)
 	if _, err := io.ReadFull(reader, material); err != nil {
-		return nil, nil, fmt.Errorf("derive E2EE traffic keys: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("derive E2EE traffic keys: %w", err)
 	}
-	return material[:chacha20poly1305.KeySize], material[chacha20poly1305.KeySize:], nil
+	return material[:keySize], material[keySize : 2*keySize], material[2*keySize : 3*keySize], material[3*keySize:], nil
 }
 
 func finishedMAC(key []byte, domain string, transcript []byte) []byte {

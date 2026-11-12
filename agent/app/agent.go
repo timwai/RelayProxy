@@ -571,7 +571,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			SystemDNSAllowed:    func() bool { return !engine.FakeIPEnabled() && !engine.ProxyDNSEnabled() },
 			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
 			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: p2presume.DefaultReplayLimit,
-			E2EEPublicKey:       ed25519.PublicKey(cfg.Identity.PublicKey), E2EEPrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
+			E2EEPublicKey: ed25519.PublicKey(cfg.Identity.PublicKey), E2EEPrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
 		})
 	}
 	var tunnelTLS *tls.Config

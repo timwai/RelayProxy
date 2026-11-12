@@ -167,7 +167,7 @@ func serverEditableConfig(c *config.ServerConfig) ServerEditableConfig {
 		Tunnel: TunnelSettings{
 			TCPListen: c.Server.TLS.Listen, QUICListen: c.Server.QUIC.Listen,
 			TLSEnabled: c.IsTLSEnabled(), AllowPlainTCP: c.Server.Security.AllowPlainTCP,
-			HeartbeatSec: c.Tunnel.HeartbeatSec,
+			HeartbeatSec:   c.Tunnel.HeartbeatSec,
 			MaxConnections: c.Tunnel.MaxConnections, MaxStreamsPerDevice: c.Tunnel.MaxConnectionsPerDevice,
 			BrutalUpMbps:                  c.Tunnel.Bandwidth.UpMbps,
 			BrutalDownMbps:                c.Tunnel.Bandwidth.DownMbps,

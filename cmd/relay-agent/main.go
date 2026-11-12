@@ -79,7 +79,8 @@ func main() {
 	exitFlag := flag.String("exit", "", "Default exit node ID (omit to auto-select when exactly one exit is online)")
 	socksFlag := flag.String("socks5", "", "Override SOCKS5 listen address")
 	httpFlag := flag.String("http", "", "Override HTTP proxy listen address")
-	insecureFlag := flag.Bool("insecure", false, "Allow self-signed or unverified TLS certificates")
+	insecureFlag := flag.Bool("insecure-tls", false, "DEV ONLY: skip Relay Server certificate verification")
+	flag.BoolVar(insecureFlag, "insecure", false, "Deprecated alias for --insecure-tls (DEV ONLY)")
 
 	guiFlag := flag.Bool("gui", false, "Launch the native desktop window (default when started without arguments)")
 	noGuiFlag := flag.Bool("no-gui", false, "Run headless without the desktop window")
@@ -369,6 +370,8 @@ func main() {
 		Gateway:               cfgFile.Gateway,
 		InsecureTLS:           *insecureFlag || cfgFile.Server.InsecureTLS,
 		PlainTCP:              !cfgFile.IsServerTLSEnabled(),
+		AllowPlainTCP:         cfgFile.Server.Security.AllowPlainTCP,
+		AllowInsecureTLS:      cfgFile.Server.Security.AllowInsecureTLS || *insecureFlag,
 		ConnectTimeout:        10 * time.Second,
 	}
 

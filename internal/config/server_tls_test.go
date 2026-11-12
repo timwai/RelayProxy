@@ -44,7 +44,11 @@ func TestServerConfigLoadsCertificatePathsAndTLSMode(t *testing.T) {
 	for _, enabled := range []string{"true", "false"} {
 		t.Run(enabled, func(t *testing.T) {
 			path := filepath.Join(t.TempDir(), "server.yaml")
-			yaml := "server:\n  tls_enabled: " + enabled + "\n  cert_file: cert/server.crt\n  key_file: cert/server.key\n"
+			yaml := "server:\n  tls_enabled: " + enabled + "\n"
+			if enabled == "false" {
+				yaml += "  security:\n    allow_plain_tcp: true\n"
+			}
+			yaml += "  cert_file: cert/server.crt\n  key_file: cert/server.key\n"
 			if err := os.WriteFile(path, []byte(yaml), 0600); err != nil {
 				t.Fatal(err)
 			}

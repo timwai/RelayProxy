@@ -227,6 +227,8 @@ proxy:
 func TestAgentPlaintextForcesTCPOnlyAndClearsInsecureTLS(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	cfg.Server.TLSEnabled = BoolPtr(false)
+	cfg.Server.Security.AllowPlainTCP = true
+	cfg.Server.Security.AllowInsecureTLS = true
 	cfg.Server.InsecureTLS = true
 	cfg.Transport.Mode = "quic_only"
 	if err := NormalizeAgentConfig(cfg); err != nil {
@@ -266,6 +268,7 @@ func TestAgentInsecureTLSPersistsOnlyWhenEnabled(t *testing.T) {
 		t.Fatalf("default secure TLS setting should stay omitted:\n%s", data)
 	}
 
+	cfg.Server.Security.AllowInsecureTLS = true
 	cfg.Server.InsecureTLS = true
 	if err := SaveAgentConfig(path, cfg); err != nil {
 		t.Fatal(err)

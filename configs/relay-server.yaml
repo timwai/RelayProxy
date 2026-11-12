@@ -1,5 +1,7 @@
 server:
-  tls_enabled: true   # Agent 隧道 TLS 开关；QUIC 需要开启
+  tls_enabled: true   # Agent 隧道 TLS；生产环境必须开启
+  # security:
+  #   allow_plain_tcp: true  # DEV ONLY：只有显式授权后才允许关闭隧道 TLS
   quic:
     listen: ":20000"
   tls:

@@ -275,7 +275,7 @@ func TestSecureStreamRejectsOversizedAndTruncatedRecords(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer exit.Close()
+		defer exitConn.Close()
 		go func() {
 			var header [4]byte
 			binary.BigEndian.PutUint32(header[:], uint32(chachaOverhead()+8))

@@ -224,6 +224,19 @@ proxy:
 	}
 }
 
+func TestAgentRejectsInsecureTransportWithoutDevelopmentOptIn(t *testing.T) {
+	plain := &AgentConfigFile{}
+	plain.Server.TLSEnabled = BoolPtr(false)
+	if err := NormalizeAgentConfig(plain); err == nil {
+		t.Fatal("plaintext TCP was accepted without security.allow_plain_tcp")
+	}
+	insecure := &AgentConfigFile{}
+	insecure.Server.InsecureTLS = true
+	if err := NormalizeAgentConfig(insecure); err == nil {
+		t.Fatal("insecure TLS was accepted without security.allow_insecure_tls")
+	}
+}
+
 func TestAgentPlaintextForcesTCPOnlyAndClearsInsecureTLS(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	cfg.Server.TLSEnabled = BoolPtr(false)

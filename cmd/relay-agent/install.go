@@ -124,6 +124,10 @@ func configureInstall(path string, input io.Reader, output io.Writer) (*config.A
 		return nil, err
 	}
 	cfg.Server.TLSEnabled = config.BoolPtr(strings.EqualFold(tls, "y"))
+	// Selecting "n" is the installer's explicit development-only opt-in to
+	// plaintext TCP. Persist the matching guard so validation cannot silently
+	// reject the user's choice later in the wizard.
+	cfg.Server.Security.AllowPlainTCP = !strings.EqualFold(tls, "y")
 	cfg.Device.IdentityID, err = prompt.ask("5. 身份 ID（Server 生成的 16 位字母数字组合）", cfg.Device.IdentityID, func(value string) error {
 		cfg.Device.IdentityID = value
 		return config.NormalizeAgentConfig(cfg)

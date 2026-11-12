@@ -134,6 +134,7 @@ func init() {
 
 type AgentConfig struct {
 	Identity                *deviceidentity.Identity
+	E2EEPeerPinPath         string
 	IdentityID              string
 	DeviceID                string
 	DeviceName              string
@@ -355,6 +356,8 @@ type Agent struct {
 	approvedMode         string
 	approvedCapabilities []string
 	identityName         string
+	serverInstanceID     string
+	e2eePeerPins         *e2ee.PeerKeyPinStore
 	policyRevision       int64
 	proxyExits           []protocol.ProxyExit
 	proxyExitRevision    uint64
@@ -401,6 +404,14 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	}
 	if cfg.InsecureTLS && !cfg.AllowInsecureTLS {
 		return nil, errors.New("insecure TLS verification requires explicit security.allow_insecure_tls=true or --insecure-tls (development only)")
+	}
+	var peerPinStore *e2ee.PeerKeyPinStore
+	if strings.TrimSpace(cfg.E2EEPeerPinPath) != "" {
+		var err error
+		peerPinStore, err = e2ee.OpenPeerKeyPinStore(cfg.E2EEPeerPinPath)
+		if err != nil {
+			return nil, fmt.Errorf("open E2EE peer key pin store: %w", err)
+		}
 	}
 	if cfg.Identity == nil {
 		var err error
@@ -542,6 +553,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		defer a.mu.RUnlock()
 		return a.cfg.DeviceID
 	})
+	a.e2eePeerPins = peerPinStore
 	a.rawDialer.ConfigureE2EE(e2ee.Identity{
 		PublicKey: ed25519.PublicKey(cfg.Identity.PublicKey), PrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
 	}, func(exitDeviceID string) ([]byte, bool) {
@@ -553,6 +565,15 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			}
 		}
 		return nil, false
+	}, func(exitDeviceID string, publicKey []byte) error {
+		a.mu.RLock()
+		serverID := a.serverInstanceID
+		pins := a.e2eePeerPins
+		a.mu.RUnlock()
+		if pins == nil {
+			return errors.New("E2EE peer key pin store is not configured")
+		}
+		return pins.VerifyOrPin(serverID, exitDeviceID, ed25519.PublicKey(publicKey))
 	})
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
@@ -920,6 +941,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		return errors.New("session superseded during authentication")
 	}
 	a.cfg.DeviceID = accepted.DeviceID
+	a.serverInstanceID = challenge.ServerInstanceID
 	a.identityName = accepted.IdentityName
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)

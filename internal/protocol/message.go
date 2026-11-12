@@ -58,9 +58,9 @@ const SecureRelayVersion = 1
 // StreamHeader. Relay replaces RelayPolicy with its authoritative policy and
 // verifies ClientPublicKey against the authenticated online Client session.
 type SecureRelayMetadata struct {
-	Version        int         `json:"version"`
+	Version         int         `json:"version"`
 	ClientPublicKey []byte      `json:"clientPublicKey"`
-	RelayPolicy    *acl.Policy `json:"relayPolicy,omitempty"`
+	RelayPolicy     *acl.Policy `json:"relayPolicy,omitempty"`
 }
 
 const (

@@ -257,6 +257,7 @@ type SecureStream struct {
 	readMu   sync.Mutex
 	writeMu  sync.Mutex
 	readBuf  []byte
+	readEnd  bool
 	sendSeq  uint64
 	recvSeq  uint64
 	writeEnd bool
@@ -286,12 +287,16 @@ func (s *SecureStream) Read(p []byte) (int, error) {
 	}
 	s.readMu.Lock()
 	defer s.readMu.Unlock()
+	if s.readEnd {
+		return 0, io.EOF
+	}
 	if len(s.readBuf) == 0 {
 		plain, err := s.readRecord()
 		if err != nil {
 			return 0, err
 		}
 		if len(plain) == 0 {
+			s.readEnd = true
 			return 0, io.EOF
 		}
 		s.readBuf = plain

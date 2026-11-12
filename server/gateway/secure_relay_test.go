@@ -141,7 +141,7 @@ func TestSecureRelayHidesInnerTCPMetadataFromRelay(t *testing.T) {
 	}
 	forgedPolicy := &acl.Policy{
 		ID: "client-forged-policy", AllowInternet: true, AllowLoopback: true,
-		AccessMode: acl.AccessModeDeny, AccessHosts: []string{"127.0.0.1"},
+		AccessMode: acl.AccessModeAllow,
 	}
 	if err := protocol.WriteJSON(clientRaw, protocol.SecureRelayMetadata{
 		Version: protocol.SecureRelayVersion, ClientPublicKey: clientIdentity.PublicKey,

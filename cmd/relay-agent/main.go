@@ -375,6 +375,12 @@ func main() {
 		ConnectTimeout:        10 * time.Second,
 	}
 
+	if agentCfg.PlainTCP {
+		log.Println("[SECURITY] WARNING: plaintext TCP tunnel transport is enabled; development only.")
+	}
+	if agentCfg.InsecureTLS {
+		log.Println("[SECURITY] WARNING: Relay Server certificate verification is disabled; development only.")
+	}
 	if agentCfg.PlainTCP && agentCfg.TransportMode != "tcp_only" {
 		agentCfg.TransportMode = "tcp_only"
 		log.Println("[Agent] TLS disabled: forcing transport mode to tcp_only (QUIC requires TLS)")

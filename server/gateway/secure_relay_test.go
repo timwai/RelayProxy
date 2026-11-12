@@ -94,9 +94,9 @@ func TestSecureRelayHidesInnerTCPMetadataFromRelay(t *testing.T) {
 	exitTunnel := &policyTestSession{stream: &policyTestStream{serverExitConn}}
 	exitSession := &session.DeviceSession{
 		DeviceID: "exit-device", IdentityID: "same-identity",
-		Grants: []string{protocol.CapabilityProxyExit},
+		Grants:       []string{protocol.CapabilityProxyExit},
 		Capabilities: []string{protocol.CapabilityE2EEV1, protocol.CapabilityTargetACL},
-		PublicKey: append([]byte(nil), exitIdentity.PublicKey...), Tunnel: exitTunnel,
+		PublicKey:    append([]byte(nil), exitIdentity.PublicKey...), Tunnel: exitTunnel,
 	}
 	manager := session.NewManager()
 	manager.Register(exitSession)
@@ -112,9 +112,9 @@ func TestSecureRelayHidesInnerTCPMetadataFromRelay(t *testing.T) {
 	clientRaw := &policyTestStream{clientConn}
 	clientSession := &session.DeviceSession{
 		DeviceID: "client-device", IdentityID: "same-identity",
-		Grants: []string{protocol.CapabilityProxyClient},
+		Grants:       []string{protocol.CapabilityProxyClient},
 		Capabilities: []string{protocol.CapabilityE2EEV1},
-		PublicKey: append([]byte(nil), clientIdentity.PublicKey...),
+		PublicKey:    append([]byte(nil), clientIdentity.PublicKey...),
 	}
 
 	exitDone := make(chan struct{})

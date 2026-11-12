@@ -656,6 +656,7 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 
 func (r *StreamRouter) handleSecureRelay(ctx context.Context, header *protocol.StreamHeader, clientStream tunnel.TunnelStream, clientSession *session.DeviceSession, handshakeDeadline time.Time) {
 	if clientSession == nil || !containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) ||
+		!hasCapability(clientSession, protocol.CapabilityE2EEV1) ||
 		header == nil || header.ExitDeviceID == "" {
 		return
 	}

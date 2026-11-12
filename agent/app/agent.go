@@ -554,6 +554,19 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		return a.cfg.DeviceID
 	})
 	a.e2eePeerPins = peerPinStore
+	var verifyE2EEPeerKey func(exitDeviceID string, publicKey []byte) error
+	if peerPinStore != nil {
+		verifyE2EEPeerKey = func(exitDeviceID string, publicKey []byte) error {
+			a.mu.RLock()
+			serverID := a.serverInstanceID
+			pins := a.e2eePeerPins
+			a.mu.RUnlock()
+			if pins == nil {
+				return errors.New("E2EE peer key pin store is not configured")
+			}
+			return pins.VerifyOrPin(serverID, exitDeviceID, ed25519.PublicKey(publicKey))
+		}
+	}
 	a.rawDialer.ConfigureE2EE(e2ee.Identity{
 		PublicKey: ed25519.PublicKey(cfg.Identity.PublicKey), PrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
 	}, func(exitDeviceID string) ([]byte, bool) {
@@ -565,16 +578,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			}
 		}
 		return nil, false
-	}, func(exitDeviceID string, publicKey []byte) error {
-		a.mu.RLock()
-		serverID := a.serverInstanceID
-		pins := a.e2eePeerPins
-		a.mu.RUnlock()
-		if pins == nil {
-			return errors.New("E2EE peer key pin store is not configured")
-		}
-		return pins.VerifyOrPin(serverID, exitDeviceID, ed25519.PublicKey(publicKey))
-	})
+	}, verifyE2EEPeerKey)
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
 	a.rawDialer.ConfigureStreamResume(resumeClient, p2presume.DefaultReplayLimit)

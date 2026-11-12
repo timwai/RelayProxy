@@ -840,7 +840,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	transportCaps := []string{
 		"tcp", "quic", "tls", protocol.UDPModeStream, protocol.CapabilitySpeedTest,
-		protocol.CapabilityResourceInventoryPush,
+		protocol.CapabilityResourceInventoryPush, protocol.CapabilityE2EEV1,
 	}
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
@@ -857,7 +857,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	if handler != nil {
 		requested = append(requested, protocol.CapabilityProxyExit)
-		transportCaps = append(transportCaps, protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS, protocol.CapabilityE2EEV1)
+		transportCaps = append(transportCaps, protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS)
 		if cfg.BrowserNetworkShare {
 			transportCaps = append(transportCaps, protocol.CapabilityBrowserNetworkExit)
 		}

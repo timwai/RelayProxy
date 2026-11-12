@@ -181,6 +181,8 @@ type AgentConfig struct {
 	Routing                 routing.Config
 	InsecureTLS             bool // Allow self-signed TLS certificates for development/testing
 	PlainTCP                bool // Disable TLS entirely; connect via plaintext TCP + yamux
+	AllowInsecureTLS        bool // Explicit development-only opt-in for InsecureTLS
+	AllowPlainTCP           bool // Explicit development-only opt-in for PlainTCP
 	ConnectTimeout          time.Duration
 }
 
@@ -392,6 +394,12 @@ func (a *Agent) setDivertStage(stage string, err error) {
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
 	cfg = cloneAgentConfig(cfg)
+	if cfg.PlainTCP && !cfg.AllowPlainTCP {
+		return nil, errors.New("plaintext TCP transport requires explicit security.allow_plain_tcp=true (development only)")
+	}
+	if cfg.InsecureTLS && !cfg.AllowInsecureTLS {
+		return nil, errors.New("insecure TLS verification requires explicit security.allow_insecure_tls=true or --insecure-tls (development only)")
+	}
 	if cfg.Identity == nil {
 		var err error
 		cfg.Identity, err = deviceidentity.Generate()

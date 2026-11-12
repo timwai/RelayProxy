@@ -25,6 +25,9 @@ func NormalizeServerConfig(c *ServerConfig) error {
 		return errors.New("server config cannot be nil")
 	}
 	applyServerDefaults(c)
+	if !c.IsTLSEnabled() && !c.Server.Security.AllowPlainTCP {
+		return errors.New("server.tls_enabled=false requires server.security.allow_plain_tcp=true (development only)")
+	}
 	c.Server.CertFile = strings.TrimSpace(c.Server.CertFile)
 	c.Server.KeyFile = strings.TrimSpace(c.Server.KeyFile)
 	for _, item := range []struct {
@@ -425,6 +428,7 @@ func serverRestartFields(desired, active *ServerConfig) []string {
 			"server.admin.listen": c.Server.Admin.Listen, "server.admin.tls_enabled": c.IsAdminTLSEnabled(),
 			"server.tls_enabled": c.IsTLSEnabled(), "server.tls.listen": c.Server.TLS.Listen, "server.quic.listen": c.Server.QUIC.Listen,
 			"server.cert_file": c.Server.CertFile, "server.key_file": c.Server.KeyFile,
+			"server.security": c.Server.Security,
 			"tunnel.heartbeat_sec": c.Tunnel.HeartbeatSec, "tunnel.max_connections": c.Tunnel.MaxConnections,
 			"tunnel.max_connections_per_device": c.Tunnel.MaxConnectionsPerDevice, "tunnel.bandwidth": c.Tunnel.Bandwidth, "relay_acl": policy,
 			"rdp":          c.RDP,

@@ -28,6 +28,9 @@ type ServerConfig struct {
 			Listen     string `yaml:"listen"`                // e.g. ":8443"
 			TLSEnabled *bool  `yaml:"tls_enabled,omitempty"` // nil inherits server.tls_enabled
 		} `yaml:"admin"`
+		Security struct {
+			AllowPlainTCP bool `yaml:"allow_plain_tcp"` // development only; required to disable tunnel TLS
+		} `yaml:"security"`
 		CertFile   string `yaml:"cert_file"`
 		KeyFile    string `yaml:"key_file"`
 		TLSEnabled *bool  `yaml:"tls_enabled"` // nil or true = TLS on; false = plaintext
@@ -130,6 +133,10 @@ type AgentConfigFile struct {
 		TCPPort     int    `yaml:"tcp_port"`
 		TLSEnabled  *bool  `yaml:"tls_enabled"`            // nil or true = TLS on; false = plaintext TCP
 		InsecureTLS bool   `yaml:"insecure_tls,omitempty"` // development only: skip server certificate verification
+		Security struct {
+			AllowPlainTCP    bool `yaml:"allow_plain_tcp"`    // development only; required when tls_enabled=false
+			AllowInsecureTLS bool `yaml:"allow_insecure_tls"` // development only; required when insecure_tls=true
+		} `yaml:"security"`
 	} `yaml:"server"`
 
 	Device struct {

@@ -128,6 +128,9 @@ func configureInstall(path string, input io.Reader, output io.Writer) (*config.A
 	// plaintext TCP. Persist the matching guard so validation cannot silently
 	// reject the user's choice later in the wizard.
 	cfg.Server.Security.AllowPlainTCP = !strings.EqualFold(tls, "y")
+	if cfg.Server.Security.AllowPlainTCP {
+		fmt.Fprintln(output, "警告：已选择开发模式明文 TCP，仅可用于受信任网络；生产环境请启用 TLS。")
+	}
 	cfg.Device.IdentityID, err = prompt.ask("5. 身份 ID（Server 生成的 16 位字母数字组合）", cfg.Device.IdentityID, func(value string) error {
 		cfg.Device.IdentityID = value
 		return config.NormalizeAgentConfig(cfg)

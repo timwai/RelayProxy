@@ -934,9 +934,9 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	a.ctrlStream, a.readySession = ctrl, sess
 	a.handshakeOK.Store(true)
-	a.rawDialer.SetE2EEServerSupported(slices.Contains(accepted.TransportCapabilities, protocol.CapabilityE2EEV1))
 	publicDirect := a.proxyDirect
 	a.mu.Unlock()
+	a.rawDialer.SetE2EEServerSupported(slices.Contains(accepted.TransportCapabilities, protocol.CapabilityE2EEV1))
 	if publicDirect != nil {
 		publicDirect.SetBrutalProfile(accepted.BrutalUploadBPS, accepted.BrutalDownloadBPS)
 	}

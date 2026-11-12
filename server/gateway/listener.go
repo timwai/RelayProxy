@@ -665,7 +665,7 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 		DeviceID:            authorization.DeviceID,
 		DeviceName:          hello.DeviceName,
 		Fingerprint:         fingerprint,
-		PublicKey:            append([]byte(nil), hello.PublicKey...),
+		PublicKey:           append([]byte(nil), hello.PublicKey...),
 		OwnerUserID:         authorization.OwnerUserID,
 		IdentityID:          authorization.IdentityID,
 		IdentityName:        authorization.IdentityName,

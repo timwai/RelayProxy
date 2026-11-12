@@ -316,7 +316,8 @@ func main() {
 	}
 
 	agentCfg := app.AgentConfig{
-		Identity:      deviceIdentity,
+		Identity:        deviceIdentity,
+		E2EEPeerPinPath: filepath.Join(filepath.Dir(*configPath), "peer-key-pins.json"),
 		IdentityID:    cfgFile.Device.IdentityID,
 		DeviceName:    cfgFile.Device.Name,
 		ServerAddress: cfgFile.Server.Address,

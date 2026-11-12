@@ -104,10 +104,10 @@ Production default becomes `required` only after supported Agents, Server and Ex
 - [ ] Run Go tests, race tests, vet and cross-builds on CI.
 
 ### P1 — E2EE primitives and peer identity
-- [ ] Bounded authenticated handshake (Ed25519 + ephemeral X25519 + HKDF).
-- [ ] ChaCha20-Poly1305 record framing and `TunnelStream` wrapper.
-- [ ] Replay, truncation, ordering, half-close and tamper tests.
-- [ ] Carry verified public keys in online session and authorized Exit inventory.
+- [x] Bounded authenticated handshake (Ed25519 + ephemeral X25519 + HKDF) as a standalone primitive.
+- [x] ChaCha20-Poly1305 record framing and `TunnelStream` wrapper with independent directional and key-confirmation keys.
+- [x] Handshake, peer-key mismatch, tamper, oversized/truncated record and authenticated half-close tests. Replay/ordering property tests remain.
+- [x] Carry authenticated public keys in online sessions and authorized online Exit inventory.
 - [ ] Local TOFU pin storage and explicit pin-change handling.
 
 ### P2 — Relay-blind proxy TCP/UDP

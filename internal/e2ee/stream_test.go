@@ -87,8 +87,8 @@ func TestHandshakeAndSecureStreamRoundTrip(t *testing.T) {
 	clientConn, exitConn := net.Pipe()
 	clientRaw, exitRaw := &testStream{Conn: clientConn}, &testStream{Conn: exitConn}
 	client, exit := completeHandshake(t, clientRaw, exitRaw, clientIdentity, exitIdentity)
-	defer client.Close()
-	defer exit.Close()
+	defer clientRaw.Close()
+	defer exitRaw.Close()
 
 	payload := bytes.Repeat([]byte("RelayProxy end-to-end encrypted payload/"), 1200)
 	writeDone := make(chan error, 1)
@@ -210,8 +210,8 @@ func TestSecureStreamRejectsTamperedRecord(t *testing.T) {
 	if err != nil || server.err != nil {
 		t.Fatalf("handshake failed: client=%v server=%v", err, server.err)
 	}
-	defer client.Close()
-	defer server.stream.Close()
+	defer clientRaw.Close()
+	defer exitRaw.Close()
 
 	clientRaw.enabled.Store(true)
 	writeDone := make(chan error, 1)
@@ -237,8 +237,8 @@ func TestSecureStreamAuthenticatedHalfCloseIsStickyEOF(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer client.Close()
-	defer exit.Close()
+	defer clientConn.Close()
+	defer exitConn.Close()
 
 	if err := client.CloseWrite(); err != nil {
 		t.Fatal(err)
@@ -258,7 +258,7 @@ func TestSecureStreamRejectsOversizedAndTruncatedRecords(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		defer exit.Close()
+		defer exitConn.Close()
 		go func() {
 			var header [4]byte
 			binary.BigEndian.PutUint32(header[:], uint32(MaxRecordPlaintext+chachaOverhead()+1))

@@ -168,19 +168,24 @@ func TestHandshakeRejectsWrongClientKeyAtExit(t *testing.T) {
 		})
 		serverDone <- err
 	}()
-	_, clientErr := ClientHandshake(clientRaw, ClientConfig{
-		Local: clientIdentity, ExitDeviceID: exitIdentity.DeviceID,
-		ExitPublicKey: exitIdentity.PublicKey,
-	})
+	clientDone := make(chan error, 1)
+	go func() {
+		_, err := ClientHandshake(clientRaw, ClientConfig{
+			Local: clientIdentity, ExitDeviceID: exitIdentity.DeviceID,
+			ExitPublicKey: exitIdentity.PublicKey,
+		})
+		clientDone <- err
+	}()
 	serverErr := <-serverDone
 	if !errors.Is(serverErr, ErrHandshakeIdentity) {
 		t.Fatalf("Exit error=%v, want ErrHandshakeIdentity", serverErr)
 	}
+	_ = exitRaw.Close()
+	clientErr := <-clientDone
 	if clientErr == nil {
 		t.Fatal("Client unexpectedly completed a handshake rejected by the Exit")
 	}
 	_ = clientRaw.Close()
-	_ = exitRaw.Close()
 }
 
 func TestSecureStreamRejectsTamperedRecord(t *testing.T) {

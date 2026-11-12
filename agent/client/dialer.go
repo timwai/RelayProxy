@@ -54,6 +54,7 @@ type TunnelDialer struct {
 	directAttemptTimeout time.Duration
 	e2eeIdentity         e2ee.Identity
 	getE2EEPeerKey       func(exitDeviceID string) ([]byte, bool)
+	verifyE2EEPeerKey    func(exitDeviceID string, publicKey []byte) error
 	e2eeServerSupported  bool
 }
 
@@ -156,12 +157,13 @@ func (d *TunnelDialer) ConfigureStreamResume(enabled bool, replayLimit int) {
 	d.directMu.Unlock()
 }
 
-func (d *TunnelDialer) ConfigureE2EE(identity e2ee.Identity, getPeerKey func(exitDeviceID string) ([]byte, bool)) {
+func (d *TunnelDialer) ConfigureE2EE(identity e2ee.Identity, getPeerKey func(exitDeviceID string) ([]byte, bool), verifyPeerKey func(exitDeviceID string, publicKey []byte) error) {
 	d.directMu.Lock()
 	d.e2eeIdentity = identity
 	d.e2eeIdentity.PublicKey = append(ed25519.PublicKey(nil), identity.PublicKey...)
 	d.e2eeIdentity.PrivateKey = append(ed25519.PrivateKey(nil), identity.PrivateKey...)
 	d.getE2EEPeerKey = getPeerKey
+	d.verifyE2EEPeerKey = verifyPeerKey
 	d.directMu.Unlock()
 }
 
@@ -176,7 +178,7 @@ func (d *TunnelDialer) shouldUseE2EE(exitDeviceID string, path protocol.ProxyPat
 		return false
 	}
 	d.directMu.RLock()
-	supported := d.e2eeServerSupported && d.getE2EEPeerKey != nil &&
+	supported := d.e2eeServerSupported && d.getE2EEPeerKey != nil && d.verifyE2EEPeerKey != nil &&
 		len(d.e2eeIdentity.PublicKey) == ed25519.PublicKeySize &&
 		len(d.e2eeIdentity.PrivateKey) == ed25519.PrivateKeySize
 	getPeerKey := d.getE2EEPeerKey
@@ -198,6 +200,7 @@ func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDev
 	d.directMu.RLock()
 	identity := d.e2eeIdentity
 	getPeerKey := d.getE2EEPeerKey
+	verifyPeerKey := d.verifyE2EEPeerKey
 	d.directMu.RUnlock()
 	if d.getClientID == nil {
 		return nil, false, errors.New("E2EE Client device ID provider is unavailable")
@@ -212,6 +215,9 @@ func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDev
 	}
 	if len(peerKey) != ed25519.PublicKeySize {
 		return nil, false, errors.New("E2EE Exit inventory is missing a valid Ed25519 public key")
+	}
+	if err := verifyPeerKey(exitDeviceID, peerKey); err != nil {
+		return nil, false, fmt.Errorf("verify E2EE Exit key pin: %w", err)
 	}
 	outerHeader := &protocol.StreamHeader{
 		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeSecureRelay,

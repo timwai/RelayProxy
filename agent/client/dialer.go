@@ -2,6 +2,7 @@ package client
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"net"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	p2presume "relayproxy/internal/p2p/resume"
+	"relayproxy/internal/e2ee"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
 	"relayproxy/internal/tunnel"
@@ -50,6 +52,9 @@ type TunnelDialer struct {
 	streamResume         bool
 	resumeReplayLimit    int
 	directAttemptTimeout time.Duration
+	e2eeIdentity         e2ee.Identity
+	getE2EEPeerKey       func(exitDeviceID string) ([]byte, bool)
+	e2eeServerSupported  bool
 }
 
 const defaultDirectAttemptTimeout = 2 * time.Second
@@ -149,6 +154,86 @@ func (d *TunnelDialer) ConfigureStreamResume(enabled bool, replayLimit int) {
 	d.streamResume = enabled
 	d.resumeReplayLimit = replayLimit
 	d.directMu.Unlock()
+}
+
+
+func (d *TunnelDialer) ConfigureE2EE(identity e2ee.Identity, getPeerKey func(exitDeviceID string) ([]byte, bool)) {
+	d.directMu.Lock()
+	d.e2eeIdentity = identity
+	d.e2eeIdentity.PublicKey = append(ed25519.PublicKey(nil), identity.PublicKey...)
+	d.e2eeIdentity.PrivateKey = append(ed25519.PrivateKey(nil), identity.PrivateKey...)
+	d.getE2EEPeerKey = getPeerKey
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) SetE2EEServerSupported(supported bool) {
+	d.directMu.Lock()
+	d.e2eeServerSupported = supported
+	d.directMu.Unlock()
+}
+
+func (d *TunnelDialer) shouldUseE2EE(exitDeviceID string, path protocol.ProxyPath) bool {
+	if exitDeviceID == protocol.ServerExitDeviceID || path.IsDirect() {
+		return false
+	}
+	d.directMu.RLock()
+	supported := d.e2eeServerSupported && d.getE2EEPeerKey != nil &&
+		len(d.e2eeIdentity.PublicKey) == ed25519.PublicKeySize &&
+		len(d.e2eeIdentity.PrivateKey) == ed25519.PrivateKeySize
+	getPeerKey := d.getE2EEPeerKey
+	d.directMu.RUnlock()
+	if !supported {
+		return false
+	}
+	_, peerSupports := getPeerKey(exitDeviceID)
+	return peerSupports
+}
+
+// wrapSecureRelayStream puts the existing business protocol inside an
+// authenticated Client-to-Exit stream. It is used only when data traverses the
+// Relay; direct P2P/Public Direct sessions already terminate TLS at the Exit.
+func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDeviceID string, path protocol.ProxyPath) (tunnel.TunnelStream, bool, error) {
+	if !d.shouldUseE2EE(exitDeviceID, path) {
+		return stream, false, nil
+	}
+	d.directMu.RLock()
+	identity := d.e2eeIdentity
+	getPeerKey := d.getE2EEPeerKey
+	d.directMu.RUnlock()
+	if d.getClientID == nil {
+		return nil, false, errors.New("E2EE Client device ID provider is unavailable")
+	}
+	identity.DeviceID = d.getClientID()
+	if identity.DeviceID == "" {
+		return nil, false, errors.New("E2EE Client device ID is not authenticated")
+	}
+	peerKey, supported := getPeerKey(exitDeviceID)
+	if !supported {
+		return stream, false, nil
+	}
+	if len(peerKey) != ed25519.PublicKeySize {
+		return nil, false, errors.New("E2EE Exit inventory is missing a valid Ed25519 public key")
+	}
+	outerHeader := &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeSecureRelay,
+		RequestID: d.nextRequestID(), ClientDeviceID: identity.DeviceID, ExitDeviceID: exitDeviceID,
+	}
+	if err := protocol.WriteStreamHeader(stream, outerHeader); err != nil {
+		return nil, false, fmt.Errorf("write SecureRelay outer header: %w", err)
+	}
+	metadata := protocol.SecureRelayMetadata{
+		Version: protocol.SecureRelayVersion, ClientPublicKey: append([]byte(nil), identity.PublicKey...),
+	}
+	if err := protocol.WriteJSON(stream, metadata); err != nil {
+		return nil, false, fmt.Errorf("write SecureRelay metadata: %w", err)
+	}
+	secureStream, err := e2ee.ClientHandshake(stream, e2ee.ClientConfig{
+		Local: identity, ExitDeviceID: exitDeviceID, ExitPublicKey: ed25519.PublicKey(peerKey),
+	})
+	if err != nil {
+		return nil, false, fmt.Errorf("E2EE handshake with Exit %s: %w", exitDeviceID, err)
+	}
+	return secureStream, true, nil
 }
 
 func (d *TunnelDialer) streamResumeConfig() (bool, int) {
@@ -424,6 +509,12 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 	} else {
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 	}
+	secureStream, _, secureErr := d.wrapSecureRelayStream(stream, exitNodeID, path)
+	if secureErr != nil {
+		_ = stream.Close()
+		return nil, secureErr
+	}
+	stream = secureStream
 
 	reqID := d.nextRequestID()
 	var resumeState *p2presume.StreamState
@@ -626,8 +717,13 @@ func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelS
 	stopCancel := tunnel.InterruptOnCancel(ctx, stream)
 	defer stopCancel()
 
+	secureRelay := d.shouldUseE2EE(exitNodeID, path)
+	if secureRelay && opts.DatagramRequired {
+		_ = stream.Close()
+		return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "E2EE Relay UDP currently uses reliable stream framing; native UDP datagrams are unavailable on this path")
+	}
 	var datagrams *tunnel.DatagramChannel
-	useNativeDatagrams := opts.DatagramRequired || !opts.PreferStream
+	useNativeDatagrams := !secureRelay && (opts.DatagramRequired || !opts.PreferStream)
 	if useNativeDatagrams && tunnel.PeerSupportsDatagrams(sess) {
 		datagrams, err = tunnel.OpenDatagramChannel(sess, 0)
 		if err != nil {

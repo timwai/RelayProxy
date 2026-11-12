@@ -865,9 +865,13 @@ func listAuthorizedProxyExitInventory(
 				identityName = live.IdentityName
 			}
 		}
+		var publicKey []byte
+		if live != nil {
+			publicKey = append([]byte(nil), live.PublicKey...)
+		}
 		result = append(result, protocol.ProxyExit{
 			DeviceID: device.ID, Name: name, IdentityName: identityName,
-			AuthorizationSource: source, Online: live != nil,
+			AuthorizationSource: source, Online: live != nil, PublicKey: publicKey,
 		})
 	}
 

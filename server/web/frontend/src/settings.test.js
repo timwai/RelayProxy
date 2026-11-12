@@ -3,7 +3,8 @@ import {groups,configFieldCount,normalizeForSave,configEqual} from './settings.j
 test('server config covers all existing groups and fields',()=>{
   assert.equal(groups.length,8);
   // Browser Sync is managed solely from its dedicated administration page.
-  assert.equal(configFieldCount(),50);
+  assert.equal(configFieldCount(),51);
+  assert.equal(groups.find(g=>g.id==='tunnel').fields.some(f=>f[0]==='allowPlainTCP'),true);
   assert.equal(groups.some(g=>g.id==='browserSync'),false);
   assert.deepEqual(groups.map(g=>g.key||g.id),['admin','tunnel','direct','p2p','serverExit','rdpIngress','certificate','relayACL']);
 });

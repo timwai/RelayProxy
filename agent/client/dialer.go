@@ -744,7 +744,7 @@ func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelS
 	} else {
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 	}
-	secureStream, _, secureErr := d.wrapSecureRelayStream(stream, exitNodeID, path)
+	secureStream, _, secureErr := d.wrapSecureRelayStream(stream, exitNodeID, secureRelay)
 	if secureErr != nil {
 		_ = stream.Close()
 		return nil, secureErr

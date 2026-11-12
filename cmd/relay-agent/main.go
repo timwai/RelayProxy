@@ -318,11 +318,11 @@ func main() {
 	agentCfg := app.AgentConfig{
 		Identity:        deviceIdentity,
 		E2EEPeerPinPath: filepath.Join(filepath.Dir(*configPath), "peer-key-pins.json"),
-		IdentityID:    cfgFile.Device.IdentityID,
-		DeviceName:    cfgFile.Device.Name,
-		ServerAddress: cfgFile.Server.Address,
-		QUICPort:      cfgFile.Server.QUICPort,
-		TCPPort:       cfgFile.Server.TCPPort,
+		IdentityID:      cfgFile.Device.IdentityID,
+		DeviceName:      cfgFile.Device.Name,
+		ServerAddress:   cfgFile.Server.Address,
+		QUICPort:        cfgFile.Server.QUICPort,
+		TCPPort:         cfgFile.Server.TCPPort,
 		// The binary advertises supported capabilities; the server decides which
 		// subset is granted. This is not a client-side authorization choice.
 		Mode:                    "BOTH",

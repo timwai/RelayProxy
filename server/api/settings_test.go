@@ -265,7 +265,7 @@ func TestServerSettingsRequiresExplicitPlaintextOptIn(t *testing.T) {
 		t.Fatalf("explicit plaintext development opt-in failed: %d %s", rec.Code, rec.Body.String())
 	}
 	if saved.Config.Tunnel.TLSEnabled || !saved.Config.Tunnel.AllowPlainTCP ||
-		!saved.RestartRequired || !containsSetting(saved.RestartFields, "server.security") {
+		!saved.RestartRequired || !hasServerRestartField(saved.RestartFields, "server.security") {
 		t.Fatalf("plaintext opt-in was not persisted/restart-gated: %+v", saved)
 	}
 	loaded, err := config.LoadServerConfig(saved.ConfigPath)
@@ -274,7 +274,7 @@ func TestServerSettingsRequiresExplicitPlaintextOptIn(t *testing.T) {
 	}
 }
 
-func containsSetting(values []string, want string) bool {
+func hasServerRestartField(values []string, want string) bool {
 	for _, value := range values {
 		if value == want {
 			return true

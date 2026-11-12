@@ -1,6 +1,7 @@
 package gateway
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"log"
@@ -284,6 +285,8 @@ func (r *StreamRouter) HandleClientStream(ctx context.Context, clientStream tunn
 		r.handleFileSharePeers(ctx, clientStream, clientSession)
 	case protocol.FrameTypeFileShare:
 		r.handleFileShare(ctx, header, clientStream, clientSession)
+	case protocol.FrameTypeSecureRelay:
+		r.handleSecureRelay(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeOpenTCP:
 		r.handleOpenTCP(ctx, header, clientStream, clientSession, handshakeDeadline)
 	case protocol.FrameTypeExitSystemDNS:
@@ -648,6 +651,86 @@ func (r *StreamRouter) handleOpenTCP(ctx context.Context, header *protocol.Strea
 		BytesUp:        bytesUp,
 		BytesDown:      bytesDown,
 		Result:         "SUCCESS",
+	})
+}
+
+
+func (r *StreamRouter) handleSecureRelay(ctx context.Context, header *protocol.StreamHeader, clientStream tunnel.TunnelStream, clientSession *session.DeviceSession, handshakeDeadline time.Time) {
+	if clientSession == nil || !containsCapability(clientSession.Grants, protocol.CapabilityProxyClient) ||
+		header == nil || header.ExitDeviceID == "" {
+		return
+	}
+	var metadata protocol.SecureRelayMetadata
+	if err := protocol.ReadJSON(clientStream, &metadata); err != nil {
+		log.Printf("[StreamRouter] Failed to read SecureRelay metadata from %s: %v", clientSession.DeviceID, err)
+		return
+	}
+	if metadata.Version != protocol.SecureRelayVersion ||
+		len(metadata.ClientPublicKey) != 32 || len(clientSession.PublicKey) != 32 ||
+		!bytes.Equal(metadata.ClientPublicKey, clientSession.PublicKey) {
+		log.Printf("[StreamRouter] Rejected SecureRelay identity metadata from %s", clientSession.DeviceID)
+		return
+	}
+
+	exitSession, localExit, err := r.resolveExitSession(clientSession, header.ExitDeviceID)
+	if err != nil || localExit || exitSession == nil {
+		log.Printf("[StreamRouter] SecureRelay Exit %s is unavailable or is the Server-local endpoint", header.ExitDeviceID)
+		return
+	}
+	authorized, authErr := r.authorizeExit(clientSession, exitSession)
+	if authErr != nil || !authorized ||
+		!hasCapability(exitSession, protocol.CapabilityE2EEV1) ||
+		(r.aclChecker != nil && !hasCapability(exitSession, protocol.CapabilityTargetACL)) {
+		log.Printf("[StreamRouter] SecureRelay authorization/capability denied: %s -> %s", clientSession.DeviceID, exitSession.DeviceID)
+		return
+	}
+
+	openCtx, openCancel := context.WithDeadline(ctx, handshakeDeadline)
+	defer openCancel()
+	exitStream, err := exitSession.Tunnel.OpenStream(openCtx)
+	if err != nil {
+		log.Printf("[StreamRouter] Failed to open SecureRelay stream to Exit %s: %v", exitSession.DeviceID, err)
+		return
+	}
+	defer exitStream.Close()
+	stopExitCancel := tunnel.InterruptOnCancel(ctx, exitStream)
+	defer stopExitCancel()
+	_ = exitStream.SetDeadline(handshakeDeadline)
+
+	header.ClientDeviceID = clientSession.DeviceID
+	header.ExitDeviceID = exitSession.DeviceID
+	if err := protocol.WriteStreamHeader(exitStream, header); err != nil {
+		log.Printf("[StreamRouter] Failed to forward SecureRelay header to Exit %s: %v", exitSession.DeviceID, err)
+		return
+	}
+	// The Client key is checked against the authenticated live session above.
+	// Relay policy is server-owned and always replaces any client-supplied value.
+	metadata.ClientPublicKey = append([]byte(nil), clientSession.PublicKey...)
+	metadata.RelayPolicy = r.relayPolicy
+	if err := protocol.WriteJSON(exitStream, metadata); err != nil {
+		log.Printf("[StreamRouter] Failed to forward SecureRelay metadata to Exit %s: %v", exitSession.DeviceID, err)
+		return
+	}
+
+	// The Exit and Client enforce their own bounded handshake deadlines. The
+	// Relay must clear its local deadlines before blind full-duplex forwarding.
+	_ = clientStream.SetDeadline(time.Time{})
+	_ = exitStream.SetDeadline(time.Time{})
+	startTime := time.Now()
+	clientSession.ActiveStreams.Add(1)
+	exitSession.ActiveStreams.Add(1)
+	activeExitID := &exitSession.DeviceID
+	clientSession.ActiveExitID.Store(activeExitID)
+	bytesUp, bytesDown := r.pipeStreams(ctx, clientStream, exitStream, clientSession, exitSession)
+	if clientSession.ActiveStreams.Add(-1) <= 0 {
+		clientSession.ActiveExitID.CompareAndSwap(activeExitID, nil)
+	}
+	exitSession.ActiveStreams.Add(-1)
+	r.emitAudit(&repository.ConnectionAudit{
+		UserID: clientSession.OwnerUserID, ClientDeviceID: clientSession.DeviceID,
+		ExitDeviceID: exitSession.DeviceID, Protocol: "secure_relay",
+		StartedAt: startTime, EndedAt: time.Now(), BytesUp: bytesUp, BytesDown: bytesDown,
+		Result: "SUCCESS",
 	})
 }
 

@@ -571,6 +571,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			SystemDNSAllowed:    func() bool { return !engine.FakeIPEnabled() && !engine.ProxyDNSEnabled() },
 			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
 			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: p2presume.DefaultReplayLimit,
+			E2EEPublicKey:       ed25519.PublicKey(cfg.Identity.PublicKey), E2EEPrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
 		})
 	}
 	var tunnelTLS *tls.Config
@@ -1274,6 +1275,7 @@ func (a *Agent) sendP2PControlRequest(ctx context.Context, sess tunnel.TunnelSes
 }
 
 func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, epoch uint64, handler *exit.Handler, allowRDP bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, proxyP2PManager *proxyp2p.Manager, workers *sync.WaitGroup) {
+	ctx = exit.WithRelayOrigin(ctx)
 	if maxStreams <= 0 {
 		maxStreams = 1024
 	}

@@ -842,7 +842,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	if handler != nil {
 		requested = append(requested, protocol.CapabilityProxyExit)
-		transportCaps = append(transportCaps, protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS)
+		transportCaps = append(transportCaps, protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS, protocol.CapabilityE2EEV1)
 		if cfg.BrowserNetworkShare {
 			transportCaps = append(transportCaps, protocol.CapabilityBrowserNetworkExit)
 		}
@@ -1480,7 +1480,7 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 		if err != nil || (header.Type != protocol.FrameTypeOpenTCP &&
 			header.Type != protocol.FrameTypeBrowserNetworkTCP &&
 			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest &&
-			header.Type != protocol.FrameTypeExitSystemDNS) {
+			header.Type != protocol.FrameTypeExitSystemDNS && header.Type != protocol.FrameTypeSecureRelay) {
 			<-sem
 			_ = stream.Close()
 			continue

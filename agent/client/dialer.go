@@ -11,8 +11,8 @@ import (
 	"sync/atomic"
 	"time"
 
-	p2presume "relayproxy/internal/p2p/resume"
 	"relayproxy/internal/e2ee"
+	p2presume "relayproxy/internal/p2p/resume"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
 	"relayproxy/internal/tunnel"

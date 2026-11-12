@@ -216,9 +216,6 @@ func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDev
 	if len(peerKey) != ed25519.PublicKeySize {
 		return nil, false, errors.New("E2EE Exit inventory is missing a valid Ed25519 public key")
 	}
-	if err := verifyPeerKey(exitDeviceID, peerKey); err != nil {
-		return nil, false, fmt.Errorf("verify E2EE Exit key pin: %w", err)
-	}
 	outerHeader := &protocol.StreamHeader{
 		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeSecureRelay,
 		RequestID: d.nextRequestID(), ClientDeviceID: identity.DeviceID, ExitDeviceID: exitDeviceID,
@@ -237,6 +234,12 @@ func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDev
 	})
 	if err != nil {
 		return nil, false, fmt.Errorf("E2EE handshake with Exit %s: %w", exitDeviceID, err)
+	}
+	// Pin only after the peer has proved possession of the private key. This
+	// avoids permanently trusting an unauthenticated or malformed inventory key.
+	if err := verifyPeerKey(exitDeviceID, peerKey); err != nil {
+		_ = secureStream.Close()
+		return nil, false, fmt.Errorf("verify E2EE Exit key pin: %w", err)
 	}
 	return secureStream, true, nil
 }

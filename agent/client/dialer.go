@@ -192,8 +192,8 @@ func (d *TunnelDialer) shouldUseE2EE(exitDeviceID string, path protocol.ProxyPat
 // wrapSecureRelayStream puts the existing business protocol inside an
 // authenticated Client-to-Exit stream. It is used only when data traverses the
 // Relay; direct P2P/Public Direct sessions already terminate TLS at the Exit.
-func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDeviceID string, path protocol.ProxyPath) (tunnel.TunnelStream, bool, error) {
-	if !d.shouldUseE2EE(exitDeviceID, path) {
+func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDeviceID string, enabled bool) (tunnel.TunnelStream, bool, error) {
+	if !enabled {
 		return stream, false, nil
 	}
 	d.directMu.RLock()
@@ -209,7 +209,7 @@ func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDev
 	}
 	peerKey, supported := getPeerKey(exitDeviceID)
 	if !supported {
-		return stream, false, nil
+		return nil, false, errors.New("E2EE Exit capability changed during stream setup")
 	}
 	if len(peerKey) != ed25519.PublicKeySize {
 		return nil, false, errors.New("E2EE Exit inventory is missing a valid Ed25519 public key")
@@ -509,7 +509,8 @@ func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelS
 	} else {
 		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 	}
-	secureStream, _, secureErr := d.wrapSecureRelayStream(stream, exitNodeID, path)
+	secureRelay := d.shouldUseE2EE(exitNodeID, path)
+	secureStream, _, secureErr := d.wrapSecureRelayStream(stream, exitNodeID, secureRelay)
 	if secureErr != nil {
 		_ = stream.Close()
 		return nil, secureErr

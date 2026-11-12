@@ -15,7 +15,6 @@ import (
 	"relayproxy/internal/acl"
 	"relayproxy/internal/e2ee"
 	"relayproxy/internal/protocol"
-	"relayproxy/internal/tunnel"
 	"relayproxy/server/repository"
 	"relayproxy/server/session"
 )

@@ -131,11 +131,11 @@ func TestSystemDNSRequiredE2EEUsesAuthenticatedDirectP2P(t *testing.T) {
 			return
 		}
 		answer, err := (&dnsmessage.Message{
-			Header: dnsmessage.Header{ID: question.ID, Response: true},
+			Header:    dnsmessage.Header{ID: question.ID, Response: true},
 			Questions: question.Questions,
 			Answers: []dnsmessage.Resource{{
 				Header: dnsmessage.ResourceHeader{Name: question.Questions[0].Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: 30},
-				Body: &dnsmessage.AResource{A: [4]byte{8, 8, 8, 8}},
+				Body:   &dnsmessage.AResource{A: [4]byte{8, 8, 8, 8}},
 			}},
 		}).Pack()
 		if err != nil {

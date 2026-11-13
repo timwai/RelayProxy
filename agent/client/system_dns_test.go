@@ -41,7 +41,7 @@ func clientDNSQuestion(t *testing.T) []byte {
 	return wire
 }
 
-func TestSystemDNSRequiredE2EEUsesAuthenticatedSecureRelay(t *testing.T) {
+func TestSystemDNSRequiredE2EEUsesAuthenticatedDirectP2P(t *testing.T) {
 	clientPublic, clientPrivate, err := ed25519.GenerateKey(rand.Reader)
 	if err != nil {
 		t.Fatal(err)
@@ -65,6 +65,12 @@ func TestSystemDNSRequiredE2EEUsesAuthenticatedSecureRelay(t *testing.T) {
 		supported:       true,
 	}
 	d := NewTunnelDialer(func() tunnel.TunnelSession { return sess }, func() string { return clientID })
+	d.ConfigurePathProvider(func(id string) (SelectedSession, bool) {
+		if id != exitID {
+			return SelectedSession{}, false
+		}
+		return SelectedSession{Session: sess, Path: protocol.ProxyPathP2PQUIC}, true
+	}, nil)
 	d.ConfigureE2EE(clientIdentity, func(id string) ([]byte, bool) {
 		return append([]byte(nil), exitPublic...), id == exitID
 	}, func(id string, key []byte) error {
@@ -73,7 +79,9 @@ func TestSystemDNSRequiredE2EEUsesAuthenticatedSecureRelay(t *testing.T) {
 		}
 		return nil
 	})
-	d.SetE2EEServerSupported(true)
+	// Direct P2P QUIC has its own authenticated TLS session; the Relay
+	// Server does not need to advertise SecureRelay support for this path.
+	d.SetE2EEServerSupported(false)
 	d.ConfigureE2EEMode("required")
 
 	serverDone := make(chan error, 1)

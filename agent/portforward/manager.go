@@ -56,16 +56,16 @@ const maxUDPPayload = 65535
 // listeners are never accepted. Target ACLs are enforced again by the target
 // Agent and are not delegated to this local configuration.
 type Mapping struct {
-	ID                string
-	Name              string
-	RemoteDeviceID    string
-	Protocol          MappingProtocol
-	ListenAddress     string
-	ListenPort        uint16
-	TargetAddress     string
-	TargetPort        uint16
-	Enabled           bool
-	AllowRemoteListen bool
+	ID                string          `json:"id"`
+	Name              string          `json:"name,omitempty"`
+	RemoteDeviceID    string          `json:"remoteDeviceId"`
+	Protocol          MappingProtocol `json:"protocol"`
+	ListenAddress     string          `json:"listenAddress,omitempty"`
+	ListenPort        uint16          `json:"listenPort,omitempty"`
+	TargetAddress     string          `json:"targetAddress"`
+	TargetPort        uint16          `json:"targetPort"`
+	Enabled           bool            `json:"enabled"`
+	AllowRemoteListen bool            `json:"allowRemoteListen,omitempty"`
 }
 
 // Transport is the data-plane boundary. Implementations should prefer an
@@ -94,17 +94,17 @@ type Options struct {
 
 type Snapshot struct {
 	Mapping
-	State           State
-	ListenAddr      string
-	TCPPath         Path
-	UDPPath         Path
-	ActiveTCP       int64
-	ActiveUDP       int64
-	UDPAssociations int64
-	UDPDrops        uint64
-	BytesUp         uint64
-	BytesDown       uint64
-	LastError       string
+	State           State  `json:"state"`
+	ListenAddr      string `json:"listenAddr"`
+	TCPPath         Path   `json:"tcpPath,omitempty"`
+	UDPPath         Path   `json:"udpPath,omitempty"`
+	ActiveTCP       int64  `json:"activeTcp"`
+	ActiveUDP       int64  `json:"activeUdp"`
+	UDPAssociations int64  `json:"udpAssociations"`
+	UDPDrops        uint64 `json:"udpDrops"`
+	BytesUp         uint64 `json:"bytesUp"`
+	BytesDown       uint64 `json:"bytesDown"`
+	LastError       string `json:"lastError,omitempty"`
 }
 
 type managerEntry struct {

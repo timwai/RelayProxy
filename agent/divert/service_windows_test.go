@@ -329,7 +329,7 @@ func TestNormalizeWindowsTransparentFirewallPorts(t *testing.T) {
 	}
 }
 
-func TestWindowsTransparentFirewallProgramArgQuotesNetshPath(t *testing.T) {
+func TestWindowsTransparentFirewallProgramArgPreservesPathAsSingleArgument(t *testing.T) {
 	dir := filepath.Join(t.TempDir(), "Relay Proxy")
 	if err := os.Mkdir(dir, 0700); err != nil {
 		t.Fatal(err)
@@ -347,7 +347,7 @@ func TestWindowsTransparentFirewallProgramArgQuotesNetshPath(t *testing.T) {
 	if err != nil {
 		t.Fatalf("program %q rejected: %v", program, err)
 	}
-	want := `program="` + longPath + `"`
+	want := "program=" + longPath
 	if got != want {
 		t.Fatalf("netsh program arg = %q, want %q", got, want)
 	}

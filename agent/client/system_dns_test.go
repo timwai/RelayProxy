@@ -30,6 +30,24 @@ func clientDNSQuestion(t *testing.T) []byte {
 	return wire
 }
 
+func TestSystemDNSRequiredE2EERejectsLegacyRelayBeforeOpeningStream(t *testing.T) {
+	stream := &scriptedStream{}
+	sess := &systemDNSTestSession{
+		scriptedSession: newScriptedSession(func() tunnel.TunnelStream { return stream }),
+		supported:       true,
+	}
+	d := NewTunnelDialer(func() tunnel.TunnelSession { return sess }, nil)
+	d.ConfigureE2EEMode("required")
+
+	_, err := d.ExchangeExitSystemDNS(context.Background(), "office-exit", clientDNSQuestion(t))
+	if err == nil || !strings.Contains(err.Error(), "E2EE is required") {
+		t.Fatalf("required E2EE allowed legacy Exit system DNS: %v", err)
+	}
+	if sess.opens.Load() != 0 || stream.writes.Load() != 0 {
+		t.Fatalf("legacy DNS stream was opened or written: opens=%d writes=%d", sess.opens.Load(), stream.writes.Load())
+	}
+}
+
 func TestSystemDNSRejectsOldRelayWithoutSendingQuery(t *testing.T) {
 	stream := &scriptedStream{}
 	sess := &systemDNSTestSession{scriptedSession: newScriptedSession(func() tunnel.TunnelStream { return stream })}

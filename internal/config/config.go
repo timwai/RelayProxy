@@ -134,9 +134,9 @@ type AgentConfigFile struct {
 		TLSEnabled  *bool  `yaml:"tls_enabled"`            // nil or true = TLS on; false = plaintext TCP
 		InsecureTLS bool   `yaml:"insecure_tls,omitempty"` // development only: skip server certificate verification
 		Security    struct {
-			AllowPlainTCP    bool `yaml:"allow_plain_tcp"`    // development only; required when tls_enabled=false
-			AllowInsecureTLS bool `yaml:"allow_insecure_tls"` // development only; required when insecure_tls=true
-		} `yaml:"security"`
+			AllowPlainTCP    bool `yaml:"allow_plain_tcp,omitempty"`    // development only; required when tls_enabled=false
+			AllowInsecureTLS bool `yaml:"allow_insecure_tls,omitempty"` // development only; required when insecure_tls=true
+		} `yaml:"security,omitempty"`
 	} `yaml:"server"`
 
 	Device struct {

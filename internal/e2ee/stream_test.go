@@ -331,8 +331,8 @@ func TestSecureStreamRejectsReplayedAndOutOfOrderRecords(t *testing.T) {
 	}
 
 	for _, tc := range []struct {
-		name string
-		wire []byte
+		name  string
+		wire  []byte
 		first []byte
 	}{
 		{name: "out-of-order", wire: makeRecord(1, []byte("sequence one"))},

@@ -170,3 +170,124 @@ func TestRDPSecurityClearLogsCannotResurrectOldSessions(t *testing.T) {
 		t.Fatalf("other IP unexpectedly cleared: %+v %v", otherPage, err)
 	}
 }
+
+func TestRDPSecurityLowFrequencyGlobalAndRestartRecovery(t *testing.T) {
+	db := openSecurityTestDB(t)
+	if err := db.UpdateRDPSecurityRule(repository.RDPSecurityRule{ID: "high_frequency", Enabled: false, Threshold: 30, WindowSeconds: 60, BanSeconds: 900}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateRDPSecurityRule(repository.RDPSecurityRule{ID: "persistent_scan", Enabled: false, Threshold: 100, WindowSeconds: 300, BanSeconds: 3600}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateRDPSecurityRule(repository.RDPSecurityRule{
+		ID: "low_frequency_scan", Enabled: true, Threshold: 3, WindowSeconds: 86400, BanSeconds: 0,
+		Scope: repository.RDPRuleScopeGlobal, ClearLogs: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	for i, ing := range []string{"rdping_a", "rdping_b", "rdping_c"} {
+		if err := db.InsertRDPSecurityLog(repository.RDPSecurityLog{
+			ID: "slow-" + ing, IngressID: ing, SourceIP: "198.51.100.42", Transport: "tcp",
+			Result: "FORWARDED", StartedAt: now.Add(-time.Duration(15-i*3) * time.Minute),
+			EndedAt: now.Add(-time.Duration(15-i*3) * time.Minute),
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	// Simulate a server restart: NewSecurityManager seeds the 24h counter from
+	// retained audit rows across all entrances.
+	security, err := NewSecurityManager(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The 4th attempt (on any entrance) exceeds threshold=3, triggers a
+	// permanent global ban and clears the historical audit rows.
+	if ok, reason := security.Admit("rdping_d", "198.51.100.42", true); ok || reason != "AUTO_BAN_low_frequency_scan" {
+		t.Fatalf("expected low_frequency_scan permanent ban, got ok=%v reason=%q", ok, reason)
+	}
+	// Subsequent attempts on any entrance are rejected, and suppressed audit
+	// records must not repopulate the table.
+	if ok, _ := security.Admit("rdping_a", "198.51.100.42", true); ok {
+		t.Fatal("global permanent ban did not block other entrance")
+	}
+	security.Record(repository.RDPSecurityLog{
+		ID: "suppressed-after-ban", IngressID: "rdping_a", SourceIP: "198.51.100.42",
+		Transport: "tcp", Result: "REJECTED", Reason: "AUTO_IP_BAN", StartedAt: time.Now().UTC(), EndedAt: time.Now().UTC(),
+	})
+	security.Close()
+
+	bans, err := db.ListActiveRDPSecurityBans()
+	if err != nil || len(bans) != 1 || bans[0].ExpiresAt != nil || bans[0].IngressID != "" || !bans[0].ClearLogs {
+		t.Fatalf("expected 1 global permanent ban with clearLogs, got %+v (%v)", bans, err)
+	}
+	page, err := db.ListRDPSecurityLogPage("198.51.100.42", 1, 20)
+	if err != nil || page.Total != 0 {
+		t.Fatalf("expected logs to be auto-cleared and suppressed, got %+v (%v)", page, err)
+	}
+}
+
+func TestRDPSecuritySubnetUDPAndRepeatOffenderEscalation(t *testing.T) {
+	db := openSecurityTestDB(t)
+	if err := db.UpdateRDPSecurityRule(repository.RDPSecurityRule{ID: "high_frequency", Enabled: true, Threshold: 1, WindowSeconds: 60, BanSeconds: 60}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateRDPSecurityRule(repository.RDPSecurityRule{ID: "persistent_scan", Enabled: false, Threshold: 100, WindowSeconds: 300, BanSeconds: 3600}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateRDPSecurityRule(repository.RDPSecurityRule{
+		ID: "subnet_scan", Enabled: true, Threshold: 2, WindowSeconds: 3600, BanSeconds: 3600,
+		Scope: repository.RDPRuleScopeGlobal, PrefixV4: 24, PrefixV6: 64, CountUDP: true,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.UpdateRDPSecurityRule(repository.RDPSecurityRule{
+		ID: "repeat_offender", Enabled: true, Threshold: 1, WindowSeconds: 7 * 86400, BanSeconds: 0,
+		Scope: repository.RDPRuleScopeGlobal, Metric: repository.RDPRuleMetricBans,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	security, err := NewSecurityManager(db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer security.Close()
+
+	// Rotate through 3 distinct IPs in 198.51.100.0/24 using UDP associations:
+	// subnet_scan (CountUDP=true, PrefixV4=24, Threshold=2) bans the whole /24.
+	if ok, _ := security.Admit("rdping_a", "198.51.100.1", false); !ok {
+		t.Fatal("1st subnet UDP attempt rejected early")
+	}
+	if ok, _ := security.Admit("rdping_b", "198.51.100.2", false); !ok {
+		t.Fatal("2nd subnet UDP attempt rejected early")
+	}
+	if ok, reason := security.Admit("rdping_c", "198.51.100.3", false); ok || reason != "AUTO_BAN_subnet_scan" {
+		t.Fatalf("3rd subnet UDP attempt did not trigger subnet ban: ok=%v reason=%q", ok, reason)
+	}
+	// A 4th unused IP in the same /24 is immediately blocked by the /24 ban.
+	if ok, _ := security.Admit("rdping_a", "198.51.100.250", true); ok {
+		t.Fatal("/24 subnet auto-ban did not block sibling address")
+	}
+
+	// Now disable subnet_scan and trigger high_frequency twice on different
+	// entrances for 203.0.113.7: the 2nd auto-ban exceeds repeat_offender
+	// (Threshold=1) and escalates to a permanent global ban.
+	if err := db.UpdateRDPSecurityRule(repository.RDPSecurityRule{ID: "subnet_scan", Enabled: false, Threshold: 2, WindowSeconds: 3600, BanSeconds: 3600}); err != nil {
+		t.Fatal(err)
+	}
+	if err := security.Reload(); err != nil {
+		t.Fatal(err)
+	}
+	_, _ = security.Admit("rdping_a", "203.0.113.7", true)
+	if ok, reason := security.Admit("rdping_a", "203.0.113.7", true); ok || reason != "AUTO_BAN_high_frequency" {
+		t.Fatalf("expected 1st high_frequency ban, got ok=%v reason=%q", ok, reason)
+	}
+	_, _ = security.Admit("rdping_b", "203.0.113.7", true)
+	if ok, reason := security.Admit("rdping_b", "203.0.113.7", true); ok || reason != "AUTO_BAN_repeat_offender" {
+		t.Fatalf("expected repeat_offender escalation to permanent ban, got ok=%v reason=%q", ok, reason)
+	}
+	// Because repeat_offender is global and permanent, a 3rd entrance is blocked too.
+	if ok, _ := security.Admit("rdping_c", "203.0.113.7", true); ok {
+		t.Fatal("escalated global permanent ban did not block 3rd entrance")
+	}
+}

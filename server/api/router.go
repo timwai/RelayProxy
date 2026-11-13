@@ -377,6 +377,9 @@ func (r *Router) registerRoutes() {
 	r.mux.HandleFunc("POST /api/v1/rdp/security/geoip/update", r.requireAuth(r.requireAdmin(r.handleRDPGeoIPUpdate)))
 	r.mux.HandleFunc("GET /api/v1/rdp/security/rules", r.requireAuth(r.requireAdmin(r.handleListRDPSecurityRules)))
 	r.mux.HandleFunc("PUT /api/v1/rdp/security/rules/{id}", r.requireAuth(r.requireAdmin(r.handleUpdateRDPSecurityRule)))
+	r.mux.HandleFunc("POST /api/v1/rdp/security/rules", r.requireAuth(r.requireAdmin(r.handleCreateRDPSecurityRule)))
+	r.mux.HandleFunc("DELETE /api/v1/rdp/security/rules/{id}", r.requireAuth(r.requireAdmin(r.handleDeleteRDPSecurityRule)))
+	r.mux.HandleFunc("POST /api/v1/rdp/security/bans/{id}/permanent", r.requireAuth(r.requireAdmin(r.handleMakeRDPSecurityBanPermanent)))
 
 	// Dashboard & Sessions
 	r.mux.HandleFunc("GET /api/v1/dashboard", r.requireAuth(r.handleDashboard))

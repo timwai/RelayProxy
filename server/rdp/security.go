@@ -5,7 +5,9 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"math"
 	"net/netip"
+	"sort"
 	"strings"
 	"sync"
 	"time"
@@ -13,13 +15,19 @@ import (
 	"relayproxy/server/repository"
 )
 
+// maxSecurityCounters bounds the total number of live rule counters across
+// all rules. Eviction removes expired windows first and single hits next, so
+// long-window (low-frequency) evidence survives address churn.
+const maxSecurityCounters = 65536
+
 // Audits and cleanup operations share a FIFO writer queue so that clearing
 // historical records is not reversed by audit events already queued.
 type rdpSecurityAuditTask struct {
-	entry    *repository.RDPSecurityLog
-	clearIP  string
-	clearAll bool
-	reply    chan rdpSecurityClearResult
+	entry     *repository.RDPSecurityLog
+	clearIP   string
+	clearCIDR string
+	clearAll  bool
+	reply     chan rdpSecurityClearResult
 }
 
 type rdpSecurityClearResult struct {
@@ -27,9 +35,51 @@ type rdpSecurityClearResult struct {
 	err     error
 }
 
+// securityWindow is a sliding-window counter: the previous fixed bucket is
+// weighted by how much of it still overlaps the sliding window. It needs
+// O(1) memory per key and has no boundary blind spot, so slow sources that
+// straddle two buckets are still counted.
 type securityWindow struct {
-	began time.Time
-	count int
+	start time.Time
+	cur   int
+	prev  int
+}
+
+func (w *securityWindow) roll(now time.Time, window time.Duration) {
+	if w.start.IsZero() {
+		w.start = now
+		return
+	}
+	elapsed := now.Sub(w.start)
+	if elapsed < 0 {
+		return
+	}
+	if elapsed >= 2*window {
+		w.start, w.cur, w.prev = now, 0, 0
+		return
+	}
+	if elapsed >= window {
+		w.prev, w.cur = w.cur, 0
+		w.start = w.start.Add(window)
+	}
+}
+
+func (w *securityWindow) estimate(now time.Time, window time.Duration) float64 {
+	weight := 1 - float64(now.Sub(w.start))/float64(window)
+	if weight < 0 {
+		weight = 0
+	} else if weight > 1 {
+		weight = 1
+	}
+	return float64(w.prev)*weight + float64(w.cur)
+}
+
+func (w *securityWindow) count(now time.Time, window time.Duration) int {
+	return int(math.Round(w.estimate(now, window)))
+}
+
+func (w *securityWindow) expired(now time.Time, window time.Duration) bool {
+	return w.start.IsZero() || now.Sub(w.start) >= 2*window
 }
 
 type compiledBan struct {
@@ -37,19 +87,53 @@ type compiledBan struct {
 	prefix netip.Prefix
 }
 
+// ruleState keeps counters per rule. A rule whose counting shape changes is
+// re-seeded from SQLite instead of reusing incompatible counters.
+type ruleState struct {
+	rule      repository.RDPSecurityRule
+	signature string
+	counters  map[string]*securityWindow
+}
+
+func (st *ruleState) window() time.Duration {
+	return time.Duration(st.rule.WindowSeconds) * time.Second
+}
+
+func ruleSignature(rule repository.RDPSecurityRule) string {
+	return fmt.Sprintf("%t|%d|%s|%s|%t|%d|%d", rule.Enabled, rule.WindowSeconds, rule.Scope, rule.Metric, rule.CountUDP, rule.PrefixV4, rule.PrefixV6)
+}
+
+// ruleKey maps a source to the rule's counting bucket: optionally aggregated
+// to a network prefix and optionally shared by all entrances.
+func ruleKey(rule repository.RDPSecurityRule, ingressID string, addr netip.Addr) (string, netip.Prefix) {
+	bits := rule.PrefixV4
+	if addr.Is6() {
+		bits = rule.PrefixV6
+	}
+	if bits <= 0 || bits > addr.BitLen() {
+		bits = addr.BitLen()
+	}
+	prefix := netip.PrefixFrom(addr, bits).Masked()
+	scope := ingressID
+	if rule.Scope == repository.RDPRuleScopeGlobal {
+		scope = ""
+	}
+	return scope + "|" + prefix.String(), prefix
+}
+
 // SecurityManager only protects public RDP ingress sockets. It deliberately
 // does not ban authenticated Agent tunnels or P2P traffic by source NAT IP.
 type SecurityManager struct {
-	db        *repository.DB
-	countryDB *CountryDB
-	mu        sync.Mutex
-	bans      []compiledBan
-	rules     []repository.RDPSecurityRule
-	counters  map[string]securityWindow
-	logs      chan rdpSecurityAuditTask
-	stopping  chan struct{}
-	done      chan struct{}
-	closeOnce sync.Once
+	db           *repository.DB
+	countryDB    *CountryDB
+	mu           sync.Mutex
+	bans         []compiledBan
+	rules        []*ruleState
+	counterTotal int
+	logs         chan rdpSecurityAuditTask
+	stopping     chan struct{}
+	done         chan struct{}
+	closeOnce    sync.Once
 }
 
 func NewSecurityManager(db *repository.DB) (*SecurityManager, error) {
@@ -68,7 +152,7 @@ func NewSecurityManagerWithGeoIP(db *repository.DB, countryCSVPath string) (*Sec
 			return nil, fmt.Errorf("RDP geo country policy unavailable: %w", err)
 		}
 	}
-	s := &SecurityManager{db: db, countryDB: countryDB, counters: make(map[string]securityWindow),
+	s := &SecurityManager{db: db, countryDB: countryDB,
 		logs: make(chan rdpSecurityAuditTask, 4096), stopping: make(chan struct{}), done: make(chan struct{})}
 	if err := s.Reload(); err != nil {
 		return nil, err
@@ -85,7 +169,9 @@ func (s *SecurityManager) SetCountryDB(db *CountryDB) {
 }
 
 // Reload is called on every administrative security mutation. Expiry is
-// checked on each decision even if no mutation happens.
+// checked on each decision even if no mutation happens. Counters of
+// unchanged rules are kept; new or reshaped rules are seeded from the
+// retained audit so restarts do not reset low-frequency evidence.
 func (s *SecurityManager) Reload() error {
 	entries, err := s.db.ListActiveRDPSecurityBans()
 	if err != nil {
@@ -104,16 +190,189 @@ func (s *SecurityManager) Reload() error {
 		bans = append(bans, compiledBan{record: entry, prefix: prefix})
 	}
 	s.mu.Lock()
-	s.bans = bans
-	s.rules = rules
+	previous := make(map[string]*ruleState, len(s.rules))
+	for _, st := range s.rules {
+		previous[st.rule.ID] = st
+	}
 	s.mu.Unlock()
+
+	now := time.Now()
+	escalationRules := make(map[string]bool)
+	for _, rule := range rules {
+		if rule.Metric == repository.RDPRuleMetricBans {
+			escalationRules[rule.ID] = true
+		}
+	}
+	seeds := make(map[string]map[string]*securityWindow)
+	for _, rule := range rules {
+		if old, ok := previous[rule.ID]; ok && old.signature == ruleSignature(rule) {
+			continue
+		}
+		if !rule.Enabled {
+			continue
+		}
+		seed, err := s.seedRule(rule, now, escalationRules)
+		if err != nil {
+			// A failed seed only loses history; enforcement continues.
+			log.Printf("[RDP Security] failed to restore counters for rule %s: %v", rule.ID, err)
+			seed = make(map[string]*securityWindow)
+		}
+		seeds[rule.ID] = seed
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	states := make([]*ruleState, 0, len(rules))
+	total := 0
+	for _, rule := range rules {
+		signature := ruleSignature(rule)
+		counters := seeds[rule.ID]
+		if old, ok := previous[rule.ID]; ok && old.signature == signature {
+			counters = old.counters
+		}
+		if counters == nil {
+			counters = make(map[string]*securityWindow)
+		}
+		total += len(counters)
+		states = append(states, &ruleState{rule: rule, signature: signature, counters: counters})
+	}
+	s.bans = bans
+	s.rules = states
+	s.counterTotal = total
 	return nil
 }
 
+// seedRule rebuilds a rule's counters from SQLite: connection rules from the
+// 30-day connection audit, escalation rules from automatic ban history.
+// Seeded counts populate the previous bucket and decay over one window.
+func (s *SecurityManager) seedRule(rule repository.RDPSecurityRule, now time.Time, escalationRules map[string]bool) (map[string]*securityWindow, error) {
+	since := now.Add(-time.Duration(rule.WindowSeconds) * time.Second)
+	counts := make(map[string]int)
+	switch rule.Metric {
+	case repository.RDPRuleMetricBans:
+		bans, err := s.db.ListRDPAutoBansSince(since)
+		if err != nil {
+			return nil, err
+		}
+		for _, ban := range bans {
+			if escalationRules[ban.Reason] {
+				continue
+			}
+			prefix, err := netip.ParsePrefix(ban.CIDR)
+			if err != nil {
+				continue
+			}
+			key, _ := ruleKey(rule, ban.IngressID, prefix.Addr().Unmap())
+			counts[key]++
+		}
+	default:
+		rows, err := s.db.CountRDPSecurityLogsSince(since, rule.CountUDP)
+		if err != nil {
+			return nil, err
+		}
+		for _, row := range rows {
+			addr, err := netip.ParseAddr(row.SourceIP)
+			if err != nil {
+				continue
+			}
+			key, _ := ruleKey(rule, row.IngressID, addr.Unmap())
+			counts[key] += row.Count
+		}
+	}
+	keys := make([]string, 0, len(counts))
+	for key := range counts {
+		keys = append(keys, key)
+	}
+	// Keep the strongest evidence when history exceeds the per-rule budget.
+	limit := maxSecurityCounters / 4
+	if len(keys) > limit {
+		sort.Slice(keys, func(i, j int) bool { return counts[keys[i]] > counts[keys[j]] })
+		keys = keys[:limit]
+	}
+	seed := make(map[string]*securityWindow, len(keys))
+	for _, key := range keys {
+		seed[key] = &securityWindow{start: now, prev: counts[key]}
+	}
+	return seed, nil
+}
+
+// counterLocked returns the live window for a key, evicting when the global
+// budget is reached.
+func (s *SecurityManager) counterLocked(st *ruleState, key string, now time.Time) *securityWindow {
+	if window, ok := st.counters[key]; ok {
+		return window
+	}
+	if s.counterTotal >= maxSecurityCounters {
+		s.evictLocked(now)
+	}
+	window := &securityWindow{}
+	st.counters[key] = window
+	s.counterTotal++
+	return window
+}
+
+func (s *SecurityManager) evictLocked(now time.Time) {
+	target := maxSecurityCounters * 3 / 4
+	passes := []func(*ruleState, *securityWindow) bool{
+		func(st *ruleState, w *securityWindow) bool { return w.expired(now, st.window()) },
+		func(st *ruleState, w *securityWindow) bool { return w.estimate(now, st.window()) < 2 },
+		func(*ruleState, *securityWindow) bool { return true },
+	}
+	for _, evict := range passes {
+		for _, st := range s.rules {
+			for key, window := range st.counters {
+				if s.counterTotal <= target {
+					return
+				}
+				if evict(st, window) {
+					delete(st.counters, key)
+					s.counterTotal--
+				}
+			}
+		}
+	}
+}
+
+func (s *SecurityManager) deleteCounterLocked(st *ruleState, key string) {
+	if _, ok := st.counters[key]; ok {
+		delete(st.counters, key)
+		s.counterTotal--
+	}
+}
+
+// moreSevere orders triggered rules for the returned rejection reason.
+func moreSevere(a, b repository.RDPSecurityRule) bool {
+	if a.Permanent() != b.Permanent() {
+		return a.Permanent()
+	}
+	if a.BanSeconds != b.BanSeconds {
+		return a.BanSeconds > b.BanSeconds
+	}
+	return a.Scope == repository.RDPRuleScopeGlobal && b.Scope != repository.RDPRuleScopeGlobal
+}
+
+// addAutoBanLocked records a rule ban in memory immediately so concurrent
+// attempts cannot slip through while SQLite persists it.
+func (s *SecurityManager) addAutoBanLocked(rule repository.RDPSecurityRule, ingressID string, prefix netip.Prefix, now time.Time) repository.RDPSecurityBan {
+	entry := repository.RDPSecurityBan{CIDR: prefix.String(), IngressID: ingressID, Kind: "auto", Reason: rule.ID,
+		Actor: "system", CreatedAt: now.UTC(), ClearLogs: rule.ClearLogs}
+	if rule.Scope == repository.RDPRuleScopeGlobal {
+		entry.IngressID = ""
+	}
+	if !rule.Permanent() {
+		expires := now.Add(time.Duration(rule.BanSeconds) * time.Second).UTC()
+		entry.ExpiresAt = &expires
+	}
+	s.bans = append(s.bans, compiledBan{record: entry, prefix: prefix})
+	return entry
+}
+
 // Admit evaluates operator bans and existing automatic bans first, then
-// counts new TCP connections against sliding fixed-window thresholds.
-// UDP packets never increase the TCP connection counter.
-func (s *SecurityManager) Admit(ingressID, sourceIP string, countTCP bool) (bool, string) {
+// counts the attempt against every enabled connection rule. isTCP=false is a
+// new UDP association, counted only by rules with CountUDP. Every rule that
+// exceeds its threshold creates its own ban; each automatic ban also feeds
+// escalation ("bans" metric) rules such as repeat-offender.
+func (s *SecurityManager) Admit(ingressID, sourceIP string, isTCP bool) (bool, string) {
 	addr, err := netip.ParseAddr(sourceIP)
 	if err != nil {
 		return false, "INVALID_SOURCE_IP"
@@ -170,76 +429,119 @@ func (s *SecurityManager) Admit(ingressID, sourceIP string, countTCP bool) (bool
 			return false, reason
 		}
 	}
-	if !allowAuto {
-		for _, ban := range s.bans {
-			// A disabled GeoIP feature also disables existing geo-generated
-			// automatic bans; operator bans still apply.
-			if s.countryDB == nil && strings.HasPrefix(ban.record.Reason, "GEO_NON_CN:") {
-				continue
-			}
-			if ban.record.Kind != "auto" || (ban.record.IngressID != "" && ban.record.IngressID != ingressID) {
-				continue
-			}
-			if ban.record.ExpiresAt != nil && !now.Before(*ban.record.ExpiresAt) {
-				continue
-			}
-			if ban.prefix.Contains(addr) {
-				s.mu.Unlock()
-				return false, "AUTO_IP_BAN"
-			}
-		}
-	}
-	if !countTCP || allowAuto {
+	if allowAuto {
 		s.mu.Unlock()
 		return true, ""
 	}
-	// Keep the counter map bounded even under large source-address churn.
-	// A hard cap is necessary: an attacker can otherwise keep creating new
-	// source keys faster than the configured windows expire.
-	if len(s.counters) >= 8192 {
-		for key, window := range s.counters {
-			if now.Sub(window.began) > 5*time.Minute {
-				delete(s.counters, key)
-			}
+	for _, ban := range s.bans {
+		// A disabled GeoIP feature also disables existing geo-generated
+		// automatic bans; operator bans still apply.
+		if s.countryDB == nil && strings.HasPrefix(ban.record.Reason, "GEO_NON_CN:") {
+			continue
 		}
-		if len(s.counters) >= 8192 {
-			for key := range s.counters {
-				delete(s.counters, key)
-				if len(s.counters) <= 4096 {
-					break
-				}
-			}
+		if ban.record.Kind != "auto" || (ban.record.IngressID != "" && ban.record.IngressID != ingressID) {
+			continue
+		}
+		if ban.record.ExpiresAt != nil && !now.Before(*ban.record.ExpiresAt) {
+			continue
+		}
+		if ban.prefix.Contains(addr) {
+			s.mu.Unlock()
+			return false, "AUTO_IP_BAN"
 		}
 	}
-	for _, rule := range s.rules {
-		if !rule.Enabled || rule.Threshold < 1 || rule.WindowSeconds < 1 {
+
+	var created []repository.RDPSecurityBan
+	var strongest *repository.RDPSecurityRule
+	for _, st := range s.rules {
+		rule := st.rule
+		if !rule.Enabled || rule.Metric != repository.RDPRuleMetricConnections || (!isTCP && !rule.CountUDP) {
 			continue
 		}
-		key := ingressID + "|" + addr.String() + "|" + rule.ID
-		window := s.counters[key]
-		if window.began.IsZero() || now.Sub(window.began) >= time.Duration(rule.WindowSeconds)*time.Second {
-			window = securityWindow{began: now}
-		}
-		window.count++
-		s.counters[key] = window
-		if window.count <= rule.Threshold {
+		key, prefix := ruleKey(rule, ingressID, addr)
+		window := s.counterLocked(st, key, now)
+		window.roll(now, st.window())
+		window.cur++
+		if window.count(now, st.window()) <= rule.Threshold {
 			continue
 		}
-		expires := now.Add(time.Duration(rule.BanSeconds) * time.Second).UTC()
-		entry := repository.RDPSecurityBan{CIDR: netip.PrefixFrom(addr, addr.BitLen()).String(),
-			IngressID: ingressID, Kind: "auto", Reason: rule.ID, Actor: "system", CreatedAt: now.UTC(), ExpiresAt: &expires}
-		// Prevent concurrent attempts from slipping through while SQLite
-		// persists the ban. Database work is done without the mutex held.
-		s.bans = append(s.bans, compiledBan{record: entry, prefix: netip.PrefixFrom(addr, addr.BitLen())})
-		delete(s.counters, key)
+		s.deleteCounterLocked(st, key)
+		created = append(created, s.addAutoBanLocked(rule, ingressID, prefix, now))
+		if strongest == nil || moreSevere(rule, *strongest) {
+			r := rule
+			strongest = &r
+		}
+	}
+	if strongest == nil {
 		s.mu.Unlock()
-		if _, err := s.db.CreateRDPSecurityBan(entry.CIDR, ingressID, "auto", rule.ID, "system", &expires); err != nil {
-			log.Printf("[RDP Security] Failed to persist automatic ban: %v", err)
+		return true, ""
+	}
+	// One admission event that produced automatic bans counts once towards
+	// each escalation rule.
+	for _, st := range s.rules {
+		rule := st.rule
+		if !rule.Enabled || rule.Metric != repository.RDPRuleMetricBans {
+			continue
 		}
-		return false, "AUTO_BAN_" + rule.ID
+		key, prefix := ruleKey(rule, ingressID, addr)
+		window := s.counterLocked(st, key, now)
+		window.roll(now, st.window())
+		window.cur++
+		if window.count(now, st.window()) <= rule.Threshold {
+			continue
+		}
+		s.deleteCounterLocked(st, key)
+		created = append(created, s.addAutoBanLocked(rule, ingressID, prefix, now))
+		if moreSevere(rule, *strongest) {
+			r := rule
+			strongest = &r
+		}
 	}
 	s.mu.Unlock()
-	return true, ""
+	// Database work is done without the mutex held.
+	for _, entry := range created {
+		if _, err := s.db.CreateRDPSecurityBanWithOptions(repository.RDPSecurityBanInput{CIDR: entry.CIDR, IngressID: entry.IngressID,
+			Kind: "auto", Reason: entry.Reason, Actor: "system", ExpiresAt: entry.ExpiresAt, ClearLogs: entry.ClearLogs}); err != nil {
+			log.Printf("[RDP Security] Failed to persist automatic ban: %v", err)
+		}
+		if entry.ClearLogs {
+			s.enqueueClear(entry.CIDR)
+		}
+	}
+	return false, "AUTO_BAN_" + strongest.ID
+}
+
+// suppressedLocked reports whether audit rows for a source must be dropped
+// because an active ban with ClearLogs covers it. Allowlisted sources are
+// never hidden behind an automatic ban.
+func (s *SecurityManager) suppressedLocked(ingressID string, addr netip.Addr, now time.Time) bool {
+	allowAuto, autoHit := false, false
+	for _, ban := range s.bans {
+		if !ban.record.ClearLogs && ban.record.Kind != "allow" {
+			continue
+		}
+		if ban.record.IngressID != "" && ingressID != "" && ban.record.IngressID != ingressID {
+			continue
+		}
+		if ban.record.ExpiresAt != nil && !now.Before(*ban.record.ExpiresAt) {
+			continue
+		}
+		if !ban.prefix.Contains(addr) {
+			continue
+		}
+		switch ban.record.Kind {
+		case "allow":
+			allowAuto = true
+		case "manual":
+			return true
+		case "auto":
+			if s.countryDB == nil && strings.HasPrefix(ban.record.Reason, "GEO_NON_CN:") {
+				continue
+			}
+			autoHit = true
+		}
+	}
+	return autoHit && !allowAuto
 }
 
 // Record never blocks the incoming RDP connection on a SQLite transaction.
@@ -249,13 +551,19 @@ func (s *SecurityManager) Record(entry repository.RDPSecurityLog) {
 	if s == nil {
 		return
 	}
-	if entry.SourceCountry == "" {
-		s.mu.Lock()
-		countryDB := s.countryDB
-		s.mu.Unlock()
-		if addr, err := netip.ParseAddr(entry.SourceIP); err == nil && isPublicGeoIP(addr) && countryDB != nil {
-			entry.SourceCountry = countryDB.Lookup(addr)
-		}
+	addr, addrErr := netip.ParseAddr(entry.SourceIP)
+	if addrErr == nil {
+		addr = addr.Unmap()
+	}
+	s.mu.Lock()
+	countryDB := s.countryDB
+	suppressed := addrErr == nil && s.suppressedLocked(entry.IngressID, addr, time.Now())
+	s.mu.Unlock()
+	if suppressed {
+		return
+	}
+	if entry.SourceCountry == "" && addrErr == nil && isPublicGeoIP(addr) && countryDB != nil {
+		entry.SourceCountry = countryDB.Lookup(addr)
 	}
 	select {
 	case s.logs <- rdpSecurityAuditTask{entry: &entry}:
@@ -264,14 +572,58 @@ func (s *SecurityManager) Record(entry repository.RDPSecurityLog) {
 	}
 }
 
+// enqueueClear schedules a purge behind already queued audit rows without
+// blocking an ingress goroutine (the UDP read loop calls Admit).
+func (s *SecurityManager) enqueueClear(cidr string) {
+	task, err := clearTask(cidr)
+	if err != nil {
+		log.Printf("[RDP Security] invalid clear target %q: %v", cidr, err)
+		return
+	}
+	select {
+	case s.logs <- task:
+	default:
+		go func() {
+			select {
+			case s.logs <- task:
+			case <-s.stopping:
+			}
+		}()
+	}
+}
+
+func clearTask(target string) (rdpSecurityAuditTask, error) {
+	target = strings.TrimSpace(target)
+	if target == "" {
+		return rdpSecurityAuditTask{clearAll: true}, nil
+	}
+	if addr, err := netip.ParseAddr(target); err == nil {
+		return rdpSecurityAuditTask{clearIP: addr.Unmap().String()}, nil
+	}
+	prefix, err := netip.ParsePrefix(target)
+	if err != nil {
+		return rdpSecurityAuditTask{}, errors.New("invalid IP or CIDR")
+	}
+	prefix = prefix.Masked()
+	if prefix.IsSingleIP() {
+		return rdpSecurityAuditTask{clearIP: prefix.Addr().Unmap().String()}, nil
+	}
+	return rdpSecurityAuditTask{clearCIDR: prefix.String()}, nil
+}
+
 // ClearLogs is serialized behind all previously queued audit writes. A
 // source-specific or global clear also suppresses late completion events for
 // connections which began before the clear (so old rows cannot reappear).
-func (s *SecurityManager) ClearLogs(ctx context.Context, sourceIP string) (int64, error) {
+// target may be empty (all), an IP address or a CIDR.
+func (s *SecurityManager) ClearLogs(ctx context.Context, target string) (int64, error) {
 	if s == nil {
 		return 0, errors.New("RDP security unavailable")
 	}
-	task := rdpSecurityAuditTask{clearIP: sourceIP, clearAll: sourceIP == "", reply: make(chan rdpSecurityClearResult, 1)}
+	task, err := clearTask(target)
+	if err != nil {
+		return 0, err
+	}
+	task.reply = make(chan rdpSecurityClearResult, 1)
 	select {
 	case s.logs <- task:
 	case <-ctx.Done():
@@ -287,18 +639,33 @@ func (s *SecurityManager) ClearLogs(ctx context.Context, sourceIP string) (int64
 	}
 }
 
+type prefixClear struct {
+	prefix netip.Prefix
+	at     time.Time
+}
+
 func (s *SecurityManager) writeLoop() {
 	defer close(s.done)
 	ticker := time.NewTicker(24 * time.Hour)
 	defer ticker.Stop()
 	var globalClearedAt time.Time
 	sourceClearedAt := make(map[string]time.Time)
+	prefixClearedAt := make([]prefixClear, 0)
 	handle := func(task rdpSecurityAuditTask) {
 		if task.entry != nil {
 			entry := *task.entry
 			cutoff := globalClearedAt
 			if at := sourceClearedAt[entry.SourceIP]; at.After(cutoff) {
 				cutoff = at
+			}
+			if len(prefixClearedAt) > 0 {
+				if addr, err := netip.ParseAddr(entry.SourceIP); err == nil {
+					for _, cleared := range prefixClearedAt {
+						if cleared.at.After(cutoff) && cleared.prefix.Contains(addr.Unmap()) {
+							cutoff = cleared.at
+						}
+					}
+				}
 			}
 			if !cutoff.IsZero() && !entry.StartedAt.After(cutoff) {
 				return
@@ -308,21 +675,41 @@ func (s *SecurityManager) writeLoop() {
 			}
 			return
 		}
-		if task.reply != nil {
-			deleted, err := s.db.DeleteRDPSecurityLogs(task.clearIP)
-			if err == nil {
-				clearedAt := time.Now().UTC()
-				if task.clearAll {
-					globalClearedAt = clearedAt
-					clear(sourceClearedAt)
-				} else {
-					sourceClearedAt[task.clearIP] = clearedAt
+		var deleted int64
+		var err error
+		switch {
+		case task.clearCIDR != "":
+			deleted, err = s.db.DeleteRDPSecurityLogsByCIDR(task.clearCIDR)
+		case task.clearAll:
+			deleted, err = s.db.DeleteRDPSecurityLogs("")
+		default:
+			deleted, err = s.db.DeleteRDPSecurityLogs(task.clearIP)
+		}
+		if err == nil {
+			clearedAt := time.Now().UTC()
+			switch {
+			case task.clearAll:
+				globalClearedAt = clearedAt
+				clear(sourceClearedAt)
+				prefixClearedAt = prefixClearedAt[:0]
+			case task.clearCIDR != "":
+				if prefix, parseErr := netip.ParsePrefix(task.clearCIDR); parseErr == nil {
+					prefixClearedAt = append(prefixClearedAt, prefixClear{prefix: prefix, at: clearedAt})
 				}
-				// Cleanup requests are administrative, but keep per-IP memory bounded.
-				if len(sourceClearedAt) > 8192 {
-					clear(sourceClearedAt)
-				}
+			default:
+				sourceClearedAt[task.clearIP] = clearedAt
 			}
+			// Cleanup requests are administrative, but keep per-IP memory bounded.
+			if len(sourceClearedAt) > 8192 {
+				clear(sourceClearedAt)
+			}
+			if len(prefixClearedAt) > 1024 {
+				prefixClearedAt = append(prefixClearedAt[:0], prefixClearedAt[len(prefixClearedAt)-512:]...)
+			}
+		} else if task.reply == nil {
+			log.Printf("[RDP Security] Failed to clear connection audit: %v", err)
+		}
+		if task.reply != nil {
 			task.reply <- rdpSecurityClearResult{deleted: deleted, err: err}
 		}
 	}

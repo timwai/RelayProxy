@@ -42,10 +42,56 @@ func (r *Router) handleListRDPSecurityGroups(w http.ResponseWriter, req *http.Re
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
-	groups, err := r.db.ListRDPSecuritySourceGroups(req.URL.Query().Get("search"), page, size)
+	query := req.URL.Query()
+	sortKey, order := query.Get("sort"), query.Get("order")
+	if !repository.ValidRDPSourceGroupSort(sortKey) || (order != "" && order != "asc" && order != "desc") {
+		writeError(w, http.StatusBadRequest, "invalid sort or order")
+		return
+	}
+	groups, err := r.db.ListRDPSecuritySourceGroupsSorted(query.Get("search"), sortKey, order, page, size)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list RDP source IP groups")
 		return
+	}
+	// Mark sources already covered by an active block so the console can
+	// hide redundant ban actions. Allowlist entries are not blocks.
+	if bans, err := r.db.ListActiveRDPSecurityBans(); err == nil && len(groups.Items) > 0 {
+		compiled := make([]struct {
+			ban    repository.RDPSecurityBan
+			prefix netip.Prefix
+		}, 0, len(bans))
+		for _, ban := range bans {
+			if ban.Kind == "allow" {
+				continue
+			}
+			if prefix, err := netip.ParsePrefix(ban.CIDR); err == nil {
+				compiled = append(compiled, struct {
+					ban    repository.RDPSecurityBan
+					prefix netip.Prefix
+				}{ban, prefix})
+			}
+		}
+		for i := range groups.Items {
+			address, err := netip.ParseAddr(groups.Items[i].SourceIP)
+			if err != nil {
+				continue
+			}
+			address = address.Unmap()
+			for _, entry := range compiled {
+				if !entry.prefix.Contains(address) {
+					continue
+				}
+				// Prefer a permanent and global decision when several apply.
+				current := groups.Items[i]
+				better := current.BanKind == "" ||
+					(entry.ban.ExpiresAt == nil && current.BanExpiresAt != nil) ||
+					(entry.ban.Kind == "manual" && current.BanKind != "manual" && (entry.ban.ExpiresAt == nil) == (current.BanExpiresAt == nil))
+				if better {
+					groups.Items[i].BanKind = entry.ban.Kind
+					groups.Items[i].BanExpiresAt = entry.ban.ExpiresAt
+				}
+			}
+		}
 	}
 	writeJSON(w, http.StatusOK, groups)
 }
@@ -99,7 +145,28 @@ func (r *Router) handleClearRDPSecurityLogs(w http.ResponseWriter, req *http.Req
 	writeJSON(w, http.StatusOK, map[string]any{"deleted": count, "sourceIp": ip})
 }
 
+// handleListRDPSecurityBans keeps the legacy full-array response unless the
+// caller asks for a page; the console always paginates (GeoIP can produce
+// thousands of permanent entries).
 func (r *Router) handleListRDPSecurityBans(w http.ResponseWriter, req *http.Request) {
+	query := req.URL.Query()
+	if query.Has("page") || query.Has("pageSize") {
+		page, size, err := rdpSecurityPagination(req)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		result, err := r.db.ListRDPSecurityBanPage(repository.RDPSecurityBanFilter{
+			Search: query.Get("search"), Kind: query.Get("kind"), Scope: query.Get("scope"), Expiry: query.Get("expiry"),
+			Page: page, Size: size,
+		})
+		if err != nil {
+			writeError(w, http.StatusBadRequest, err.Error())
+			return
+		}
+		writeJSON(w, http.StatusOK, result)
+		return
+	}
 	rows, err := r.db.ListActiveRDPSecurityBans()
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to list RDP bans")
@@ -115,6 +182,7 @@ func (r *Router) handleCreateRDPSecurityBan(w http.ResponseWriter, req *http.Req
 		Kind            string `json:"kind"`
 		Reason          string `json:"reason"`
 		DurationSeconds int    `json:"durationSeconds"`
+		ClearLogs       bool   `json:"clearLogs"`
 	}
 	if err := decodeJSON(w, req, &body); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -137,7 +205,8 @@ func (r *Router) handleCreateRDPSecurityBan(w http.ResponseWriter, req *http.Req
 		expiry = &t
 	}
 	actor, _ := req.Context().Value(userContextKey).(string)
-	item, err := r.db.CreateRDPSecurityBan(body.CIDR, strings.TrimSpace(body.IngressID), body.Kind, strings.TrimSpace(body.Reason), actor, expiry)
+	item, err := r.db.CreateRDPSecurityBanWithOptions(repository.RDPSecurityBanInput{CIDR: body.CIDR, IngressID: strings.TrimSpace(body.IngressID),
+		Kind: body.Kind, Reason: strings.TrimSpace(body.Reason), Actor: actor, ExpiresAt: expiry, ClearLogs: body.ClearLogs})
 	if err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
@@ -145,6 +214,20 @@ func (r *Router) handleCreateRDPSecurityBan(w http.ResponseWriter, req *http.Req
 	if r.onRDPSecurityReload != nil {
 		if err := r.onRDPSecurityReload(); err != nil {
 			writeError(w, http.StatusInternalServerError, "entry persisted but failed to refresh runtime security: "+err.Error())
+			return
+		}
+	}
+	// The runtime suppresses new rows as soon as it reloads; purge history
+	// after that so queued rows cannot be written back.
+	if item.ClearLogs {
+		var clearErr error
+		if r.onRDPSecurityLogsClear != nil {
+			_, clearErr = r.onRDPSecurityLogsClear(req.Context(), item.CIDR)
+		} else {
+			_, clearErr = r.db.DeleteRDPSecurityLogsByCIDR(item.CIDR)
+		}
+		if clearErr != nil {
+			writeError(w, http.StatusInternalServerError, "entry persisted but failed to clear connection audit: "+clearErr.Error())
 			return
 		}
 	}
@@ -179,13 +262,112 @@ func (r *Router) handleListRDPSecurityRules(w http.ResponseWriter, req *http.Req
 	writeJSON(w, http.StatusOK, rules)
 }
 
-func (r *Router) handleUpdateRDPSecurityRule(w http.ResponseWriter, req *http.Request) {
+func (r *Router) reloadRDPSecurity(w http.ResponseWriter) bool {
+	if r.onRDPSecurityReload != nil {
+		if err := r.onRDPSecurityReload(); err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return false
+		}
+	}
+	return true
+}
+
+// handleMakeRDPSecurityBanPermanent is the one-click "make permanent" action
+// for an existing temporary entry.
+func (r *Router) handleMakeRDPSecurityBanPermanent(w http.ResponseWriter, req *http.Request) {
+	clearLogs := req.URL.Query().Get("clearLogs") == "true" || req.URL.Query().Get("clearLogs") == "1"
+	if req.ContentLength > 0 {
+		var body struct {
+			ClearLogs bool `json:"clearLogs"`
+		}
+		if err := decodeJSON(w, req, &body); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid request body")
+			return
+		}
+		clearLogs = clearLogs || body.ClearLogs
+	}
+	actor, _ := req.Context().Value(userContextKey).(string)
+	item, err := r.db.MakeRDPSecurityBanPermanent(req.PathValue("id"), actor, clearLogs)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "ban not found")
+			return
+		}
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !r.reloadRDPSecurity(w) {
+		return
+	}
+	if item.ClearLogs {
+		var clearErr error
+		if r.onRDPSecurityLogsClear != nil {
+			_, clearErr = r.onRDPSecurityLogsClear(req.Context(), item.CIDR)
+		} else {
+			_, clearErr = r.db.DeleteRDPSecurityLogsByCIDR(item.CIDR)
+		}
+		if clearErr != nil {
+			writeError(w, http.StatusInternalServerError, "entry updated but failed to clear connection audit: "+clearErr.Error())
+			return
+		}
+	}
+	writeJSON(w, http.StatusOK, item)
+}
+
+func (r *Router) handleCreateRDPSecurityRule(w http.ResponseWriter, req *http.Request) {
 	var rule repository.RDPSecurityRule
 	if err := decodeJSON(w, req, &rule); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	rule.ID = req.PathValue("id")
+	created, err := r.db.CreateRDPSecurityRule(rule)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, err.Error())
+		return
+	}
+	if !r.reloadRDPSecurity(w) {
+		return
+	}
+	writeJSON(w, http.StatusCreated, created)
+}
+
+func (r *Router) handleDeleteRDPSecurityRule(w http.ResponseWriter, req *http.Request) {
+	if err := r.db.DeleteRDPSecurityRule(req.PathValue("id")); err != nil {
+		switch {
+		case errors.Is(err, sql.ErrNoRows):
+			writeError(w, http.StatusNotFound, "rule not found")
+		case errors.Is(err, repository.ErrRDPBuiltinRule):
+			writeError(w, http.StatusBadRequest, err.Error())
+		default:
+			writeError(w, http.StatusInternalServerError, err.Error())
+		}
+		return
+	}
+	if !r.reloadRDPSecurity(w) {
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
+}
+
+// handleUpdateRDPSecurityRule merges the request over the stored rule, so
+// older clients that only send enabled/threshold/window/ban keep the newer
+// fields (scope, aggregation, UDP counting, log clearing) unchanged.
+func (r *Router) handleUpdateRDPSecurityRule(w http.ResponseWriter, req *http.Request) {
+	current, err := r.db.GetRDPSecurityRule(req.PathValue("id"))
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "rule not found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	rule := *current
+	if err := decodeJSON(w, req, &rule); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	rule.ID = current.ID
 	if err := r.db.UpdateRDPSecurityRule(rule); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			writeError(w, http.StatusNotFound, "rule not found")

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"sort"
 	"strings"
 	"time"
 
@@ -38,8 +39,37 @@ type RDPSecurityBan struct {
 	Actor     string     `json:"actor"`
 	CreatedAt time.Time  `json:"createdAt"`
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+	// ClearLogs purges the source's retained connection audit when the ban is
+	// created and suppresses further audit rows while the ban stays active.
+	ClearLogs bool `json:"clearLogs"`
 }
 
+// RDPSecurityBanInput is the full set of options for a new policy entry.
+// A nil ExpiresAt means permanent.
+type RDPSecurityBanInput struct {
+	CIDR      string
+	IngressID string
+	Kind      string
+	Reason    string
+	Actor     string
+	ExpiresAt *time.Time
+	ClearLogs bool
+}
+
+const (
+	RDPRuleScopeIngress = "ingress" // count and ban per public entrance
+	RDPRuleScopeGlobal  = "global"  // aggregate all entrances, ban everywhere
+
+	RDPRuleMetricConnections = "connections" // new connection attempts
+	RDPRuleMetricBans        = "bans"        // automatic bans issued by other rules
+
+	// RDPRuleMaxWindowSeconds matches the 30-day audit retention so a rule can
+	// always be re-seeded from SQLite after a restart.
+	RDPRuleMaxWindowSeconds = 30 * 24 * 3600
+	RDPRuleMaxBanSeconds    = 365 * 24 * 3600
+)
+
+// RDPSecurityRule is an automatic ban rule. BanSeconds == 0 bans permanently.
 type RDPSecurityRule struct {
 	ID            string `json:"id"`
 	Name          string `json:"name"`
@@ -47,6 +77,46 @@ type RDPSecurityRule struct {
 	Threshold     int    `json:"threshold"`
 	WindowSeconds int    `json:"windowSeconds"`
 	BanSeconds    int    `json:"banSeconds"`
+	Scope         string `json:"scope"`
+	Metric        string `json:"metric"`
+	CountUDP      bool   `json:"countUdp"`
+	PrefixV4      int    `json:"prefixV4"`
+	PrefixV6      int    `json:"prefixV6"`
+	ClearLogs     bool   `json:"clearLogs"`
+	Builtin       bool   `json:"builtin"`
+	Description   string `json:"description"`
+}
+
+// Permanent reports whether a triggered rule creates a ban without expiry.
+func (r RDPSecurityRule) Permanent() bool { return r.BanSeconds == 0 }
+
+// Built-in presets cover the common attack shapes. Only the two historical
+// rules are enabled by default; the others are conservative presets an
+// administrator enables after adding their own addresses to the allowlist.
+var builtinRDPSecurityRules = []RDPSecurityRule{
+	{ID: "high_frequency", Name: "高频连接防护", Enabled: true, Threshold: 30, WindowSeconds: 60, BanSeconds: 900, Scope: RDPRuleScopeIngress,
+		Description: "短时间突发大量 TCP 连接（暴力破解、爆破工具）。"},
+	{ID: "persistent_scan", Name: "持续扫描防护", Enabled: true, Threshold: 100, WindowSeconds: 300, BanSeconds: 3600, Scope: RDPRuleScopeIngress,
+		Description: "数分钟内持续不断的连接尝试。"},
+	{ID: "low_frequency_scan", Name: "低频慢速扫描", Enabled: false, Threshold: 30, WindowSeconds: 86400, BanSeconds: 604800, Scope: RDPRuleScopeGlobal,
+		Description: "几分钟一次的慢速探测：按 24 小时、全部入口合并统计，重启后从审计记录恢复计数。"},
+	{ID: "subnet_scan", Name: "网段轮换扫描", Enabled: false, Threshold: 60, WindowSeconds: 3600, BanSeconds: 86400, Scope: RDPRuleScopeGlobal, PrefixV4: 24, PrefixV6: 64,
+		Description: "同一 IPv4 /24 或 IPv6 /64 内轮换地址探测，触发后封禁整个网段。"},
+	{ID: "udp_probe", Name: "TCP+UDP 混合探测", Enabled: false, Threshold: 120, WindowSeconds: 300, BanSeconds: 3600, Scope: RDPRuleScopeIngress, CountUDP: true,
+		Description: "同时统计新的 UDP 关联，覆盖只用 UDP 探测的扫描器（UDP 源地址可被伪造，请谨慎设置阈值）。"},
+	{ID: "long_term_scan", Name: "长期累计探测", Enabled: false, Threshold: 300, WindowSeconds: RDPRuleMaxWindowSeconds, BanSeconds: 0, Scope: RDPRuleScopeGlobal,
+		Description: "30 天内累计连接次数过多时永久封禁。"},
+	{ID: "repeat_offender", Name: "累犯升级永久封禁", Enabled: false, Threshold: 2, WindowSeconds: 7 * 86400, BanSeconds: 0, Scope: RDPRuleScopeGlobal, Metric: RDPRuleMetricBans,
+		Description: "统计其他规则产生的自动封禁次数，7 天内被自动封禁超过 2 次即永久封禁。"},
+}
+
+func builtinRDPSecurityRule(id string) (RDPSecurityRule, int, bool) {
+	for i, rule := range builtinRDPSecurityRules {
+		if rule.ID == id {
+			return rule, i, true
+		}
+	}
+	return RDPSecurityRule{}, -1, false
 }
 
 func (db *DB) ensureRDPSecuritySchema() error {
@@ -58,8 +128,6 @@ func (db *DB) ensureRDPSecuritySchema() error {
 		"CREATE INDEX IF NOT EXISTS idx_rdp_security_bans_active ON rdp_security_bans(revoked_at, expires_at)",
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_rdp_geo_bans_unique ON rdp_security_bans(cidr) WHERE kind='auto' AND ingress_id='' AND expires_at IS NULL AND revoked_at IS NULL AND reason LIKE 'GEO_NON_CN:%'",
 		"CREATE TABLE IF NOT EXISTS rdp_security_rules (id TEXT PRIMARY KEY, name TEXT NOT NULL, enabled BOOLEAN NOT NULL, threshold INTEGER NOT NULL, window_seconds INTEGER NOT NULL, ban_seconds INTEGER NOT NULL)",
-		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('high_frequency','高频连接防护',1,30,60,900)",
-		"INSERT OR IGNORE INTO rdp_security_rules (id,name,enabled,threshold,window_seconds,ban_seconds) VALUES ('persistent_scan','持续扫描防护',1,100,300,3600)",
 		"DELETE FROM rdp_security_rules WHERE id = 'login_failure'",
 		"DROP TABLE IF EXISTS rdp_auth_failures",
 	}
@@ -68,18 +136,56 @@ func (db *DB) ensureRDPSecuritySchema() error {
 			return fmt.Errorf("RDP security schema: %w", err)
 		}
 	}
-	// Existing deployments need the column too; CREATE TABLE IF NOT EXISTS
+	// Existing deployments need new columns too; CREATE TABLE IF NOT EXISTS
 	// does not migrate a pre-existing table.
-	var count int
-	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('rdp_security_logs') WHERE name = 'source_country'").Scan(&count); err != nil {
-		return err
+	columns := []struct{ table, column, ddl string }{
+		{"rdp_security_logs", "source_country", "TEXT NOT NULL DEFAULT ''"},
+		{"rdp_security_bans", "clear_logs", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"rdp_security_rules", "scope", "TEXT NOT NULL DEFAULT 'ingress'"},
+		{"rdp_security_rules", "metric", "TEXT NOT NULL DEFAULT 'connections'"},
+		{"rdp_security_rules", "count_udp", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"rdp_security_rules", "prefix_v4", "INTEGER NOT NULL DEFAULT 32"},
+		{"rdp_security_rules", "prefix_v6", "INTEGER NOT NULL DEFAULT 128"},
+		{"rdp_security_rules", "clear_logs", "BOOLEAN NOT NULL DEFAULT 0"},
+		{"rdp_security_rules", "builtin", "BOOLEAN NOT NULL DEFAULT 0"},
 	}
-	if count == 0 {
-		if _, err := db.Exec("ALTER TABLE rdp_security_logs ADD COLUMN source_country TEXT NOT NULL DEFAULT ''"); err != nil {
+	for _, c := range columns {
+		if err := db.ensureColumn(c.table, c.column, c.ddl); err != nil {
+			return fmt.Errorf("RDP security schema: %w", err)
+		}
+	}
+	if _, err := db.Exec("CREATE INDEX IF NOT EXISTS idx_rdp_security_bans_created ON rdp_security_bans(kind, created_at)"); err != nil {
+		return fmt.Errorf("RDP security schema: %w", err)
+	}
+	for _, rule := range builtinRDPSecurityRules {
+		normalized := rule
+		if err := normalizeRDPSecurityRule(&normalized); err != nil {
 			return err
+		}
+		if _, err := db.Exec(`INSERT OR IGNORE INTO rdp_security_rules
+			(id,name,enabled,threshold,window_seconds,ban_seconds,scope,metric,count_udp,prefix_v4,prefix_v6,clear_logs,builtin)
+			VALUES (?,?,?,?,?,?,?,?,?,?,?,?,1)`,
+			normalized.ID, normalized.Name, normalized.Enabled, normalized.Threshold, normalized.WindowSeconds, normalized.BanSeconds,
+			normalized.Scope, normalized.Metric, normalized.CountUDP, normalized.PrefixV4, normalized.PrefixV6, normalized.ClearLogs); err != nil {
+			return fmt.Errorf("RDP security schema: %w", err)
+		}
+		if _, err := db.Exec("UPDATE rdp_security_rules SET builtin = 1 WHERE id = ?", rule.ID); err != nil {
+			return fmt.Errorf("RDP security schema: %w", err)
 		}
 	}
 	return nil
+}
+
+func (db *DB) ensureColumn(table, column, ddl string) error {
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info(?) WHERE name = ?", table, column).Scan(&count); err != nil {
+		return err
+	}
+	if count > 0 {
+		return nil
+	}
+	_, err := db.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, ddl))
+	return err
 }
 
 func (db *DB) InsertRDPSecurityLog(item RDPSecurityLog) error {
@@ -148,58 +254,187 @@ func NormalizeRDPIPCIDR(raw string) (string, error) {
 	return cidr.Masked().String(), nil
 }
 
+const rdpBanColumns = "id,cidr,ingress_id,kind,reason,actor,created_at,expires_at,clear_logs"
+
+func scanRDPSecurityBan(scanner interface{ Scan(...any) error }) (RDPSecurityBan, error) {
+	var entry RDPSecurityBan
+	var expiry sql.NullTime
+	if err := scanner.Scan(&entry.ID, &entry.CIDR, &entry.IngressID, &entry.Kind, &entry.Reason, &entry.Actor, &entry.CreatedAt, &expiry, &entry.ClearLogs); err != nil {
+		return entry, err
+	}
+	if expiry.Valid {
+		t := expiry.Time
+		entry.ExpiresAt = &t
+	}
+	return entry, nil
+}
+
 // ListActiveRDPSecurityBans returns manual bans, automatic bans and allowlist
 // entries. Revoked or expired rows remain in SQLite as historical evidence.
 func (db *DB) ListActiveRDPSecurityBans() ([]RDPSecurityBan, error) {
-	rows, err := db.Query("SELECT id,cidr,ingress_id,kind,reason,actor,created_at,expires_at FROM rdp_security_bans WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC", time.Now().UTC())
+	rows, err := db.Query("SELECT "+rdpBanColumns+" FROM rdp_security_bans WHERE revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?) ORDER BY created_at DESC", time.Now().UTC())
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	result := make([]RDPSecurityBan, 0)
 	for rows.Next() {
-		var entry RDPSecurityBan
-		var expiry sql.NullTime
-		if err := rows.Scan(&entry.ID, &entry.CIDR, &entry.IngressID, &entry.Kind, &entry.Reason, &entry.Actor, &entry.CreatedAt, &expiry); err != nil {
+		entry, err := scanRDPSecurityBan(rows)
+		if err != nil {
 			return nil, err
-		}
-		if expiry.Valid {
-			t := expiry.Time
-			entry.ExpiresAt = &t
 		}
 		result = append(result, entry)
 	}
 	return result, rows.Err()
 }
 
-func (db *DB) CreateRDPSecurityBan(cidr, ingressID, kind, reason, actor string, expiresAt *time.Time) (*RDPSecurityBan, error) {
-	normalized, err := NormalizeRDPIPCIDR(cidr)
+// RDPSecurityBanFilter selects active policy entries for the admin list.
+type RDPSecurityBanFilter struct {
+	Search string // substring of CIDR or reason
+	Kind   string // manual | auto | allow | geo | ""
+	Scope  string // "" any, "global", or an ingress ID
+	Expiry string // "" any, "permanent", "temporary"
+	Page   int
+	Size   int
+}
+
+// ListRDPSecurityBanPage paginates active policy entries server-side; GeoIP
+// can produce thousands of permanent rows, so the console never loads all.
+func (db *DB) ListRDPSecurityBanPage(filter RDPSecurityBanFilter) (*RDPSecurityPage[RDPSecurityBan], error) {
+	if _, _, err := validateRDPLogPage(filter.Page, filter.Size); err != nil {
+		return nil, err
+	}
+	where := []string{"revoked_at IS NULL", "(expires_at IS NULL OR expires_at > ?)"}
+	args := []any{time.Now().UTC()}
+	if search := strings.TrimSpace(filter.Search); search != "" {
+		where = append(where, "(instr(cidr, ?) > 0 OR instr(reason, ?) > 0 OR instr(actor, ?) > 0)")
+		args = append(args, search, search, search)
+	}
+	switch filter.Kind {
+	case "":
+	case "manual", "allow":
+		where = append(where, "kind = ?")
+		args = append(args, filter.Kind)
+	case "auto":
+		where = append(where, "kind = 'auto' AND reason NOT LIKE 'GEO_%'")
+	case "geo":
+		where = append(where, "kind = 'auto' AND reason LIKE 'GEO_%'")
+	default:
+		return nil, errors.New("invalid kind filter")
+	}
+	switch scope := strings.TrimSpace(filter.Scope); scope {
+	case "":
+	case "global":
+		where = append(where, "ingress_id = ''")
+	default:
+		where = append(where, "ingress_id = ?")
+		args = append(args, scope)
+	}
+	switch filter.Expiry {
+	case "":
+	case "permanent":
+		where = append(where, "expires_at IS NULL")
+	case "temporary":
+		where = append(where, "expires_at IS NOT NULL")
+	default:
+		return nil, errors.New("invalid expiry filter")
+	}
+	clause := " WHERE " + strings.Join(where, " AND ")
+	output := &RDPSecurityPage[RDPSecurityBan]{Items: make([]RDPSecurityBan, 0), Page: filter.Page, PageSize: filter.Size}
+	if err := db.QueryRow("SELECT COUNT(*) FROM rdp_security_bans"+clause, args...).Scan(&output.Total); err != nil {
+		return nil, err
+	}
+	args = append(args, filter.Size, (filter.Page-1)*filter.Size)
+	rows, err := db.Query("SELECT "+rdpBanColumns+" FROM rdp_security_bans"+clause+" ORDER BY created_at DESC, id ASC LIMIT ? OFFSET ?", args...)
 	if err != nil {
 		return nil, err
 	}
-	switch kind {
+	defer rows.Close()
+	for rows.Next() {
+		entry, err := scanRDPSecurityBan(rows)
+		if err != nil {
+			return nil, err
+		}
+		output.Items = append(output.Items, entry)
+	}
+	return output, rows.Err()
+}
+
+func (db *DB) CreateRDPSecurityBan(cidr, ingressID, kind, reason, actor string, expiresAt *time.Time) (*RDPSecurityBan, error) {
+	return db.CreateRDPSecurityBanWithOptions(RDPSecurityBanInput{CIDR: cidr, IngressID: ingressID, Kind: kind, Reason: reason, Actor: actor, ExpiresAt: expiresAt})
+}
+
+func (db *DB) CreateRDPSecurityBanWithOptions(input RDPSecurityBanInput) (*RDPSecurityBan, error) {
+	normalized, err := NormalizeRDPIPCIDR(input.CIDR)
+	if err != nil {
+		return nil, err
+	}
+	switch input.Kind {
 	case "manual", "auto", "allow":
 	default:
 		return nil, errors.New("invalid RDP security entry kind")
 	}
-	if len(reason) > 512 || len(actor) > 128 {
+	if len(input.Reason) > 512 || len(input.Actor) > 128 {
 		return nil, errors.New("reason or actor is too long")
 	}
-	if expiresAt != nil && !expiresAt.After(time.Now()) {
+	if input.ExpiresAt != nil && !input.ExpiresAt.After(time.Now()) {
 		return nil, errors.New("expiry must be in the future")
 	}
-	if ingressID != "" && kind != "auto" {
-		if _, err := db.GetRDPIngress(ingressID); err != nil {
+	if input.IngressID != "" && input.Kind != "auto" {
+		if _, err := db.GetRDPIngress(input.IngressID); err != nil {
 			return nil, errors.New("RDP ingress not found")
 		}
 	}
-	entry := &RDPSecurityBan{ID: uuid.NewString(), CIDR: normalized, IngressID: ingressID, Kind: kind, Reason: reason, Actor: actor, CreatedAt: time.Now().UTC(), ExpiresAt: expiresAt}
-	_, err = db.Exec("INSERT INTO rdp_security_bans (id,cidr,ingress_id,kind,reason,actor,created_at,expires_at) VALUES (?,?,?,?,?,?,?,?)",
-		entry.ID, entry.CIDR, entry.IngressID, entry.Kind, entry.Reason, entry.Actor, entry.CreatedAt, entry.ExpiresAt)
+	// An allowlist entry never suppresses audit: it exists for trusted sources.
+	clearLogs := input.ClearLogs && input.Kind != "allow"
+	now := time.Now().UTC()
+	if input.Kind == "manual" && input.ExpiresAt == nil {
+		// Supersede temporary bans on the same address so a one-click
+		// permanent ban does not leave duplicate active rows behind.
+		_, _ = db.Exec(`UPDATE rdp_security_bans SET revoked_at = ?
+			WHERE cidr = ? AND kind != 'allow' AND revoked_at IS NULL AND expires_at IS NOT NULL
+			AND (ingress_id = ? OR ? = '')`, now, normalized, input.IngressID, input.IngressID)
+	}
+	entry := &RDPSecurityBan{ID: uuid.NewString(), CIDR: normalized, IngressID: input.IngressID, Kind: input.Kind, Reason: input.Reason,
+		Actor: input.Actor, CreatedAt: now, ExpiresAt: input.ExpiresAt, ClearLogs: clearLogs}
+	_, err = db.Exec("INSERT INTO rdp_security_bans (id,cidr,ingress_id,kind,reason,actor,created_at,expires_at,clear_logs) VALUES (?,?,?,?,?,?,?,?,?)",
+		entry.ID, entry.CIDR, entry.IngressID, entry.Kind, entry.Reason, entry.Actor, entry.CreatedAt, entry.ExpiresAt, entry.ClearLogs)
 	if err != nil {
 		return nil, err
 	}
 	return entry, nil
+}
+
+// MakeRDPSecurityBanPermanent removes the expiry from an active entry. A
+// temporary automatic ban becomes an operator (manual) ban so that a later
+// allowlist entry cannot silently lift a decision the administrator confirmed.
+func (db *DB) MakeRDPSecurityBanPermanent(id, actor string, clearLogs ...bool) (*RDPSecurityBan, error) {
+	if id == "" || actor == "" {
+		return nil, errors.New("ban ID and operator required")
+	}
+	forceClear := len(clearLogs) > 0 && clearLogs[0]
+	result, err := db.Exec(`UPDATE rdp_security_bans SET expires_at = NULL,
+		kind = CASE WHEN kind = 'auto' AND reason NOT LIKE 'GEO_%' THEN 'manual' ELSE kind END,
+		clear_logs = CASE WHEN ? AND kind != 'allow' THEN 1 ELSE clear_logs END,
+		actor = ?
+		WHERE id = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)`, forceClear, actor, id, time.Now().UTC())
+	if err != nil {
+		return nil, err
+	}
+	if n, err := result.RowsAffected(); err != nil {
+		return nil, err
+	} else if n == 0 {
+		return nil, sql.ErrNoRows
+	}
+	if _, err := db.Exec("INSERT INTO authorization_audit (id,action,actor_user_id,target_type,target_id,details,created_at) VALUES (?,?,?,?,?,?,?)",
+		uuid.NewString(), "rdp.security.permanent", actor, "rdp_security_ban", id, "{}", time.Now().UTC()); err != nil {
+		return nil, err
+	}
+	entry, err := scanRDPSecurityBan(db.QueryRow("SELECT "+rdpBanColumns+" FROM rdp_security_bans WHERE id = ?", id))
+	if err != nil {
+		return nil, err
+	}
+	return &entry, nil
 }
 
 func (db *DB) RevokeRDPSecurityBan(id, actor string) error {
@@ -223,29 +458,122 @@ func (db *DB) RevokeRDPSecurityBan(id, actor string) error {
 	return err
 }
 
+// ListRDPAutoBansSince feeds the "bans" metric (repeat offender) after a
+// restart. GeoIP bans are permanent already and never count.
+func (db *DB) ListRDPAutoBansSince(since time.Time) ([]RDPSecurityBan, error) {
+	rows, err := db.Query("SELECT "+rdpBanColumns+" FROM rdp_security_bans WHERE kind = 'auto' AND created_at >= ? AND reason NOT LIKE 'GEO_%' ORDER BY created_at ASC", since.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]RDPSecurityBan, 0)
+	for rows.Next() {
+		entry, err := scanRDPSecurityBan(rows)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, entry)
+	}
+	return result, rows.Err()
+}
+
+const rdpRuleColumns = "id,name,enabled,threshold,window_seconds,ban_seconds,scope,metric,count_udp,prefix_v4,prefix_v6,clear_logs,builtin"
+
+func scanRDPSecurityRule(scanner interface{ Scan(...any) error }) (RDPSecurityRule, error) {
+	var item RDPSecurityRule
+	err := scanner.Scan(&item.ID, &item.Name, &item.Enabled, &item.Threshold, &item.WindowSeconds, &item.BanSeconds,
+		&item.Scope, &item.Metric, &item.CountUDP, &item.PrefixV4, &item.PrefixV6, &item.ClearLogs, &item.Builtin)
+	if err != nil {
+		return item, err
+	}
+	if builtin, _, ok := builtinRDPSecurityRule(item.ID); ok {
+		item.Description = builtin.Description
+	}
+	return item, nil
+}
+
+// ListRDPSecurityRules returns built-in presets first (in preset order),
+// then custom rules sorted by ID.
 func (db *DB) ListRDPSecurityRules() ([]RDPSecurityRule, error) {
-	rows, err := db.Query("SELECT id,name,enabled,threshold,window_seconds,ban_seconds FROM rdp_security_rules ORDER BY id")
+	rows, err := db.Query("SELECT " + rdpRuleColumns + " FROM rdp_security_rules ORDER BY id")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	result := make([]RDPSecurityRule, 0)
 	for rows.Next() {
-		var item RDPSecurityRule
-		if err := rows.Scan(&item.ID, &item.Name, &item.Enabled, &item.Threshold, &item.WindowSeconds, &item.BanSeconds); err != nil {
+		item, err := scanRDPSecurityRule(rows)
+		if err != nil {
 			return nil, err
 		}
 		result = append(result, item)
 	}
-	return result, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	order := func(id string) int {
+		if _, index, ok := builtinRDPSecurityRule(id); ok {
+			return index
+		}
+		return len(builtinRDPSecurityRules)
+	}
+	sort.SliceStable(result, func(i, j int) bool { return order(result[i].ID) < order(result[j].ID) })
+	return result, nil
 }
 
-func (db *DB) UpdateRDPSecurityRule(rule RDPSecurityRule) error {
-	if rule.Threshold < 1 || rule.Threshold > 100000 || rule.WindowSeconds < 1 || rule.WindowSeconds > 86400 || rule.BanSeconds < 60 || rule.BanSeconds > 31536000 {
+func (db *DB) GetRDPSecurityRule(id string) (*RDPSecurityRule, error) {
+	item, err := scanRDPSecurityRule(db.QueryRow("SELECT "+rdpRuleColumns+" FROM rdp_security_rules WHERE id = ?", id))
+	if err != nil {
+		return nil, err
+	}
+	return &item, nil
+}
+
+// normalizeRDPSecurityRule fills defaults for fields older clients omit and
+// validates every bound used by the runtime counter.
+func normalizeRDPSecurityRule(rule *RDPSecurityRule) error {
+	rule.Name = strings.TrimSpace(rule.Name)
+	if rule.Scope == "" {
+		rule.Scope = RDPRuleScopeIngress
+	}
+	if rule.Metric == "" {
+		rule.Metric = RDPRuleMetricConnections
+	}
+	if rule.PrefixV4 == 0 {
+		rule.PrefixV4 = 32
+	}
+	if rule.PrefixV6 == 0 {
+		rule.PrefixV6 = 128
+	}
+	if rule.Threshold < 1 || rule.Threshold > 100000 || rule.WindowSeconds < 1 || rule.WindowSeconds > RDPRuleMaxWindowSeconds ||
+		(rule.BanSeconds != 0 && (rule.BanSeconds < 60 || rule.BanSeconds > RDPRuleMaxBanSeconds)) || rule.BanSeconds < 0 {
 		return errors.New("invalid rule threshold, window or ban duration")
 	}
-	result, err := db.Exec("UPDATE rdp_security_rules SET enabled=?,threshold=?,window_seconds=?,ban_seconds=? WHERE id=?",
-		rule.Enabled, rule.Threshold, rule.WindowSeconds, rule.BanSeconds, rule.ID)
+	if rule.Scope != RDPRuleScopeIngress && rule.Scope != RDPRuleScopeGlobal {
+		return errors.New("rule scope must be ingress or global")
+	}
+	if rule.Metric != RDPRuleMetricConnections && rule.Metric != RDPRuleMetricBans {
+		return errors.New("rule metric must be connections or bans")
+	}
+	if rule.PrefixV4 < 8 || rule.PrefixV4 > 32 || rule.PrefixV6 < 16 || rule.PrefixV6 > 128 {
+		return errors.New("aggregation prefix must be IPv4 /8-/32 and IPv6 /16-/128")
+	}
+	if len([]rune(rule.Name)) > 64 {
+		return errors.New("rule name is too long")
+	}
+	return nil
+}
+
+// UpdateRDPSecurityRule updates the tunable fields. An empty name keeps the
+// stored name; ID and builtin status are immutable.
+func (db *DB) UpdateRDPSecurityRule(rule RDPSecurityRule) error {
+	if err := normalizeRDPSecurityRule(&rule); err != nil {
+		return err
+	}
+	result, err := db.Exec(`UPDATE rdp_security_rules SET name=COALESCE(NULLIF(?,''),name),enabled=?,threshold=?,window_seconds=?,ban_seconds=?,
+		scope=?,metric=?,count_udp=?,prefix_v4=?,prefix_v6=?,clear_logs=? WHERE id=?`,
+		rule.Name, rule.Enabled, rule.Threshold, rule.WindowSeconds, rule.BanSeconds,
+		rule.Scope, rule.Metric, rule.CountUDP, rule.PrefixV4, rule.PrefixV6, rule.ClearLogs, rule.ID)
 	if err != nil {
 		return err
 	}
@@ -257,6 +585,48 @@ func (db *DB) UpdateRDPSecurityRule(rule RDPSecurityRule) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// CreateRDPSecurityRule adds a custom automatic ban rule.
+func (db *DB) CreateRDPSecurityRule(rule RDPSecurityRule) (*RDPSecurityRule, error) {
+	if err := normalizeRDPSecurityRule(&rule); err != nil {
+		return nil, err
+	}
+	if rule.Name == "" {
+		return nil, errors.New("rule name required")
+	}
+	var count int
+	if err := db.QueryRow("SELECT COUNT(*) FROM rdp_security_rules").Scan(&count); err != nil {
+		return nil, err
+	}
+	if count >= 64 {
+		return nil, errors.New("too many RDP security rules")
+	}
+	rule.ID = "custom_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:10]
+	rule.Builtin = false
+	rule.Description = ""
+	if _, err := db.Exec("INSERT INTO rdp_security_rules ("+rdpRuleColumns+") VALUES (?,?,?,?,?,?,?,?,?,?,?,?,0)",
+		rule.ID, rule.Name, rule.Enabled, rule.Threshold, rule.WindowSeconds, rule.BanSeconds,
+		rule.Scope, rule.Metric, rule.CountUDP, rule.PrefixV4, rule.PrefixV6, rule.ClearLogs); err != nil {
+		return nil, err
+	}
+	return &rule, nil
+}
+
+// ErrRDPBuiltinRule is returned when deleting a preset; presets are disabled
+// instead so that upgrades do not recreate them.
+var ErrRDPBuiltinRule = errors.New("built-in rules cannot be deleted; disable them instead")
+
+func (db *DB) DeleteRDPSecurityRule(id string) error {
+	rule, err := db.GetRDPSecurityRule(id)
+	if err != nil {
+		return err
+	}
+	if rule.Builtin {
+		return ErrRDPBuiltinRule
+	}
+	_, err = db.Exec("DELETE FROM rdp_security_rules WHERE id = ? AND builtin = 0", id)
+	return err
 }
 
 func (db *DB) PruneRDPSecurityLogs(cutoff time.Time) error {

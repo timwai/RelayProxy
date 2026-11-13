@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"net/netip"
 	"strings"
 	"time"
 )
@@ -29,6 +30,27 @@ type RDPSourceGroup struct {
 	BytesDown       int64     `json:"bytesDown"`
 	FirstSeen       time.Time `json:"firstSeen"`
 	LastSeen        time.Time `json:"lastSeen"`
+	// BanKind/BanExpiresAt are filled by the API from active policies so the
+	// console can show which sources are already blocked.
+	BanKind      string     `json:"banKind,omitempty"`
+	BanExpiresAt *time.Time `json:"banExpiresAt,omitempty"`
+}
+
+// rdpSourceGroupSorts maps public sort keys to fixed SQL expressions; the
+// user-supplied value is never interpolated.
+var rdpSourceGroupSorts = map[string]string{
+	"lastSeen":    "MAX(l.started_at)",
+	"firstSeen":   "MIN(l.started_at)",
+	"connections": "COUNT(*)",
+	"forwarded":   "SUM(CASE WHEN l.result = 'FORWARDED' THEN 1 ELSE 0 END)",
+	"rejected":    "SUM(CASE WHEN l.result = 'REJECTED' THEN 1 ELSE 0 END)",
+	"bytes":       "(COALESCE(SUM(l.bytes_up),0)+COALESCE(SUM(l.bytes_down),0))",
+}
+
+// ValidRDPSourceGroupSort reports whether a sort key is supported.
+func ValidRDPSourceGroupSort(key string) bool {
+	_, ok := rdpSourceGroupSorts[key]
+	return ok || key == ""
 }
 
 func validateRDPLogPage(page, size int) (int, int, error) {
@@ -42,8 +64,29 @@ func validateRDPLogPage(page, size int) (int, int, error) {
 // Uses a LEFT JOIN to display current device names; deleted devices fall
 // back to their stored device identifiers.
 func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSecurityPage[RDPSourceGroup], error) {
+	return db.ListRDPSecuritySourceGroupsSorted(search, "lastSeen", "desc", page, size)
+}
+
+// ListRDPSecuritySourceGroupsSorted supports ordering by connection count,
+// rejected count, traffic, first or latest connection.
+func (db *DB) ListRDPSecuritySourceGroupsSorted(search, sortKey, order string, page, size int) (*RDPSecurityPage[RDPSourceGroup], error) {
 	if _, _, err := validateRDPLogPage(page, size); err != nil {
 		return nil, err
+	}
+	if sortKey == "" {
+		sortKey = "lastSeen"
+	}
+	expression, ok := rdpSourceGroupSorts[sortKey]
+	if !ok {
+		return nil, errors.New("invalid sort")
+	}
+	direction := "DESC"
+	switch strings.ToLower(order) {
+	case "", "desc":
+	case "asc":
+		direction = "ASC"
+	default:
+		return nil, errors.New("invalid order")
 	}
 	pattern := strings.TrimSpace(search)
 	countQuery := "SELECT COUNT(DISTINCT source_ip) FROM rdp_security_logs WHERE instr(source_ip, ?) > 0"
@@ -61,7 +104,7 @@ func (db *DB) ListRDPSecuritySourceGroups(search string, page, size int) (*RDPSe
 		LEFT JOIN devices d ON d.id = l.target_device_id
 		WHERE instr(l.source_ip, ?) > 0
 		GROUP BY l.source_ip
-		ORDER BY MAX(l.started_at) DESC,l.source_ip ASC
+		ORDER BY `+expression+` `+direction+`,MAX(l.started_at) DESC,l.source_ip ASC
 		LIMIT ? OFFSET ?`, pattern, size, (page-1)*size)
 	if err != nil {
 		return nil, err
@@ -172,6 +215,88 @@ func (db *DB) ListRDPSecurityLogPage(sourceIP string, page, size int) (*RDPSecur
 		output.Items = append(output.Items, item)
 	}
 	return output, rows.Err()
+}
+
+// RDPLogCount is a per-source, per-entrance connection count used to
+// restore automatic ban counters after a restart or rule change.
+type RDPLogCount struct {
+	SourceIP  string
+	IngressID string
+	Count     int
+}
+
+// rdpBanRejectionReasons are rows written while a source was already
+// blocked; live counting stops at the ban, so seeding must skip them too.
+const rdpBanRejectionFilter = "reason NOT IN ('MANUAL_IP_BAN','AUTO_IP_BAN') AND reason NOT LIKE 'AUTO_BAN_%' AND reason NOT LIKE 'GEO_%'"
+
+// CountRDPSecurityLogsSince aggregates retained connection attempts since a
+// cutoff. includeUDP=false only counts TCP connections.
+func (db *DB) CountRDPSecurityLogsSince(since time.Time, includeUDP bool) ([]RDPLogCount, error) {
+	query := "SELECT source_ip, ingress_id, COUNT(*) FROM rdp_security_logs WHERE started_at >= ? AND " + rdpBanRejectionFilter
+	if !includeUDP {
+		query += " AND transport = 'tcp'"
+	}
+	query += " GROUP BY source_ip, ingress_id"
+	rows, err := db.Query(query, since.UTC())
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]RDPLogCount, 0)
+	for rows.Next() {
+		var item RDPLogCount
+		if err := rows.Scan(&item.SourceIP, &item.IngressID, &item.Count); err != nil {
+			return nil, err
+		}
+		result = append(result, item)
+	}
+	return result, rows.Err()
+}
+
+// DeleteRDPSecurityLogsByCIDR clears connection audit for one address or a
+// whole network. A single-host prefix uses the indexed exact match.
+func (db *DB) DeleteRDPSecurityLogsByCIDR(cidr string) (int64, error) {
+	prefix, err := netip.ParsePrefix(strings.TrimSpace(cidr))
+	if err != nil {
+		address, addrErr := netip.ParseAddr(strings.TrimSpace(cidr))
+		if addrErr != nil {
+			return 0, errors.New("invalid IP or CIDR")
+		}
+		prefix = netip.PrefixFrom(address.Unmap(), address.Unmap().BitLen())
+	}
+	prefix = prefix.Masked()
+	if prefix.IsSingleIP() {
+		return db.DeleteRDPSecurityLogs(prefix.Addr().String())
+	}
+	rows, err := db.Query("SELECT DISTINCT source_ip FROM rdp_security_logs")
+	if err != nil {
+		return 0, err
+	}
+	matches := make([]string, 0)
+	for rows.Next() {
+		var raw string
+		if err := rows.Scan(&raw); err != nil {
+			rows.Close()
+			return 0, err
+		}
+		if address, err := netip.ParseAddr(raw); err == nil && prefix.Contains(address.Unmap()) {
+			matches = append(matches, raw)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return 0, err
+	}
+	rows.Close()
+	var total int64
+	for _, ip := range matches {
+		n, err := db.DeleteRDPSecurityLogs(ip)
+		if err != nil {
+			return total, err
+		}
+		total += n
+	}
+	return total, nil
 }
 
 // DeleteRDPSecurityLogs clears connection audit only; IP bans, allowlists,

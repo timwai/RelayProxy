@@ -56,6 +56,7 @@ type TunnelDialer struct {
 	getE2EEPeerKey       func(exitDeviceID string) ([]byte, bool)
 	verifyE2EEPeerKey    func(exitDeviceID string, publicKey []byte) error
 	e2eeServerSupported  bool
+	e2eeMode             string // off, opportunistic, required
 }
 
 const defaultDirectAttemptTimeout = 2 * time.Second
@@ -167,6 +168,14 @@ func (d *TunnelDialer) ConfigureE2EE(identity e2ee.Identity, getPeerKey func(exi
 	d.directMu.Unlock()
 }
 
+// ConfigureE2EEMode controls whether proxy streams may use legacy Relay
+// forwarding. The owner validates the mode before configuring this dialer.
+func (d *TunnelDialer) ConfigureE2EEMode(mode string) {
+	d.directMu.Lock()
+	d.e2eeMode = mode
+	d.directMu.Unlock()
+}
+
 func (d *TunnelDialer) SetE2EEServerSupported(supported bool) {
 	d.directMu.Lock()
 	d.e2eeServerSupported = supported
@@ -178,7 +187,7 @@ func (d *TunnelDialer) shouldUseE2EE(exitDeviceID string, path protocol.ProxyPat
 		return false
 	}
 	d.directMu.RLock()
-	supported := d.e2eeServerSupported && d.getE2EEPeerKey != nil && d.verifyE2EEPeerKey != nil &&
+	supported := d.e2eeMode != "off" && d.e2eeServerSupported && d.getE2EEPeerKey != nil && d.verifyE2EEPeerKey != nil &&
 		len(d.e2eeIdentity.PublicKey) == ed25519.PublicKeySize &&
 		len(d.e2eeIdentity.PrivateKey) == ed25519.PrivateKeySize
 	getPeerKey := d.getE2EEPeerKey
@@ -188,6 +197,59 @@ func (d *TunnelDialer) shouldUseE2EE(exitDeviceID string, path protocol.ProxyPat
 	}
 	_, peerSupports := getPeerKey(exitDeviceID)
 	return peerSupports
+}
+
+// requireSecureProxyPath makes an explicit required policy fail closed when
+// the selected Exit cannot complete application-level E2EE. This is checked
+// before opening a business stream, and again at each individual session use.
+func (d *TunnelDialer) requireSecureProxyPath(exitDeviceID string, path protocol.ProxyPath) error {
+	d.directMu.RLock()
+	required := d.e2eeMode == "required"
+	d.directMu.RUnlock()
+	if !required {
+		return nil
+	}
+	if exitDeviceID == "" {
+		return errors.New("E2EE is required: select an explicit remote device Exit; automatic Server-side selection cannot be verified")
+	}
+	if exitDeviceID == protocol.ServerExitDeviceID {
+		return errors.New("E2EE is required: Server-local Exit is not Relay-blind")
+	}
+	if path.IsDirect() {
+		return errors.New("E2EE is required: direct P2P/Public Direct data paths do not yet support application-level E2EE")
+	}
+	if !d.shouldUseE2EE(exitDeviceID, path) {
+		return fmt.Errorf("E2EE is required: Server or Exit %s lacks authenticated E2EE capability or trusted peer key", exitDeviceID)
+	}
+	return nil
+}
+
+// In required mode, remote proxy data uses the Relay stream even when a
+// P2P/Public Direct path is ready, because direct application E2EE is not
+// implemented. Do not silently bypass the required policy on any path.
+func (d *TunnelDialer) selectProxyDataSession(exitDeviceID string) (SelectedSession, error) {
+	d.directMu.RLock()
+	required := d.e2eeMode == "required"
+	directMode := d.directMode
+	d.directMu.RUnlock()
+	if !required {
+		return d.selectedSessionForExit(exitDeviceID), nil
+	}
+	if directMode == "direct_only" || directMode == "p2p_only" {
+		return SelectedSession{}, errors.New("E2EE required mode is incompatible with direct_only/p2p_only until direct E2EE is supported")
+	}
+	if d.getTunnel == nil {
+		return SelectedSession{}, errors.New("E2EE required mode needs an authenticated Relay session")
+	}
+	sess := d.getTunnel()
+	if sess == nil {
+		return SelectedSession{}, errors.New("E2EE required mode needs an active Relay session")
+	}
+	path := relaySessionPath(sess)
+	if err := d.requireSecureProxyPath(exitDeviceID, path); err != nil {
+		return SelectedSession{}, err
+	}
+	return SelectedSession{Session: sess, Path: path}, nil
 }
 
 // wrapSecureRelayStream puts the existing business protocol inside an
@@ -457,7 +519,10 @@ func (d *TunnelDialer) dialTCP(ctx context.Context, exitNodeID string, host stri
 		exitNodeID = d.GetDefaultExitID()
 	}
 
-	selected := d.selectedSessionForExit(exitNodeID)
+	selected, selectErr := d.selectProxyDataSession(exitNodeID)
+	if selectErr != nil {
+		return nil, selectErr
+	}
 	sess := selected.Session
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")
@@ -505,6 +570,9 @@ func (d *TunnelDialer) dialTCP(ctx context.Context, exitNodeID string, host stri
 }
 
 func (d *TunnelDialer) dialTCPOnSession(ctx context.Context, sess tunnel.TunnelSession, exitNodeID, host string, port uint16, allowResume bool, path protocol.ProxyPath) (net.Conn, error) {
+	if err := d.requireSecureProxyPath(exitNodeID, path); err != nil {
+		return nil, err
+	}
 	stream, err := sess.OpenStream(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to open tunnel stream: %w", err)
@@ -638,7 +706,10 @@ func (d *TunnelDialer) dialUDPWithOptions(ctx context.Context, exitNodeID string
 		exitNodeID = d.GetDefaultExitID()
 	}
 
-	selected := d.selectedSessionForExit(exitNodeID)
+	selected, selectErr := d.selectProxyDataSession(exitNodeID)
+	if selectErr != nil {
+		return nil, selectErr
+	}
 	sess := selected.Session
 	if sess == nil {
 		return nil, fmt.Errorf("tunnel is not connected")
@@ -718,6 +789,9 @@ func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelS
 	path := relaySessionPath(sess)
 	if len(paths) > 0 {
 		path = paths[0]
+	}
+	if err := d.requireSecureProxyPath(exitNodeID, path); err != nil {
+		return nil, err
 	}
 	stream, err := sess.OpenStream(ctx)
 	if err != nil {

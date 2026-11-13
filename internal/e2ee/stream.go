@@ -385,14 +385,13 @@ func (s *SecureStream) CloseWrite() error {
 	return s.stream.CloseWrite()
 }
 
+// Close aborts the complete stream immediately. A graceful authenticated
+// half-close requires an explicit CloseWrite call by the caller. Calling
+// CloseWrite here could deadlock on a peer that is not reading (for example,
+// a full duplex stream still blocked on its own write).
 func (s *SecureStream) Close() error {
 	s.closeOnce.Do(func() {
-		if err := s.CloseWrite(); err != nil {
-			s.closeErr = err
-		}
-		if err := s.stream.Close(); s.closeErr == nil {
-			s.closeErr = err
-		}
+		s.closeErr = s.stream.Close()
 	})
 	return s.closeErr
 }

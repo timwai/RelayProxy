@@ -584,9 +584,11 @@ func windowsTransparentFirewallProgramArg(program string) (string, error) {
 	if !filepath.IsAbs(longPath) || strings.ContainsAny(longPath, "\r\n\"") {
 		return "", errors.New("透明代理 Windows Firewall 解析出的程序路径无效")
 	}
-	// netsh has its own command-line parser. Keep the path quoted as a single
-	// value, including when the long path contains spaces.
-	return `program="` + longPath + `"`, nil
+	// Pass the complete program= value as one CreateProcess argument. Go
+	// quotes the argv element when it contains spaces; embedding literal quote
+	// characters here makes netsh's application resolver treat them as part of
+	// the executable name on current Windows builds.
+	return "program=" + longPath, nil
 }
 
 func installWindowsTransparentFirewallRule(input []uint16, program string) error {

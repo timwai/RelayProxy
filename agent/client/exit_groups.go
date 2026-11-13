@@ -72,6 +72,13 @@ func (c *selectedExitPacketConn) ProxyPath() string {
 	return ""
 }
 
+func (c *selectedExitPacketConn) UDPMode() string {
+	if mode, ok := c.PacketConn.(interface{ UDPMode() string }); ok {
+		return mode.UDPMode()
+	}
+	return ""
+}
+
 func (c *selectedExitPacketConn) ConnectionPath() protocol.ConnectionPath {
 	if p, ok := c.PacketConn.(protocol.ConnectionPathProvider); ok {
 		return p.ConnectionPath()

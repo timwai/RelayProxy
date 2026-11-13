@@ -17,10 +17,10 @@ func TestReactConfigPayloadRoundTripsThroughBridge(t *testing.T) {
 	payload := map[string]any{
 		"revision": state.Revision,
 		"server": map[string]any{
-			"address":     "relay-next.example.test",
-			"quicPort":    4433,
-			"tcpPort":     8443,
-			"tlsEnabled":  true,
+			"address":          "relay-next.example.test",
+			"quicPort":         4433,
+			"tcpPort":          8443,
+			"tlsEnabled":       true,
 			"insecureTls":      true,
 			"allowInsecureTls": true,
 		},

@@ -144,7 +144,7 @@ func TestSecureRelayAcceptsAuthenticatedDirectP2POrigin(t *testing.T) {
 		t.Fatal(err)
 	}
 	handler := NewHandler(HandlerConfig{
-		ACLChecker: checker,
+		ACLChecker:       checker,
 		SystemDNSAllowed: func() bool { return true },
 		SystemDNSLookup: func(_ context.Context, network, host string) ([]net.IP, error) {
 			if network != "ip4" || host != "example.com" {

@@ -148,7 +148,7 @@ func TestSecureRelayAcceptsAuthenticatedDirectP2POrigin(t *testing.T) {
 		SystemDNSAllowed: func() bool { return true },
 		SystemDNSLookup: func(_ context.Context, network, host string) ([]net.IP, error) {
 			if network != "ip4" || host != "example.com" {
-				t.Fatalf("unexpected direct P2P DNS lookup: %s %s", network, host)
+				return nil, errors.New("unexpected direct P2P DNS lookup target")
 			}
 			return []net.IP{net.ParseIP("8.8.8.8")}, nil
 		},

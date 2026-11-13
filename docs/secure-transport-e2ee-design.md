@@ -97,9 +97,9 @@ The Client supports `proxy.e2ee_mode` in `relay-agent.yaml`, exposed as “代�
 
 - `off`: use the existing TLS-protected legacy proxy stream, without application-layer E2EE (explicit compatibility/development choice).
 - `opportunistic` (default when unset): encrypt Relay-routed TCP and reliable stream-UDP when the authenticated Server and selected remote device Exit advertise support. Legacy endpoints may use the old TLS-protected proxy stream. Once E2EE negotiation starts, handshake/key-confirmation/TOFU failure closes that stream; no plaintext retry.
-- `required`: fail closed for the covered proxy TCP and stream-UDP flows unless they use authenticated E2EE. An explicit remote Exit device ID is required; Server-local Exit is rejected. Ready P2P/Public Direct paths are bypassed in favor of Relay because application-layer direct E2EE has not yet shipped. `direct_only` and `p2p_only` configurations are rejected for this mode. Missing key/Server capability or suppressed E2EE advertising fails closed. Verified TLS remains mandatory.
+- `required`: fail closed for covered proxy TCP, stream-UDP and remote Exit system DNS A/AAAA queries unless they use authenticated E2EE. An explicit remote Exit device ID is required; Server-local Exit is rejected. Ready P2P/Public Direct paths are bypassed in favor of Relay because application-layer direct E2EE has not yet shipped. `direct_only` and `p2p_only` configurations are rejected for this mode. Missing key/Server capability or suppressed E2EE advertising fails closed. Verified TLS remains mandatory.
 
-Required mode protects against **capability-suppression downgrade** on these specific proxy flows, but does not authenticate an Exit's **first** TOFU key independently of the Server. Out-of-band fingerprint verification / identity-authority-signed Exit certificates remain follow-up security work. The mode does not yet protect DNS/system DNS, RDP, file sharing, Browser Network Proxy, native UDP datagrams or other independent service streams.
+Required mode protects against **capability-suppression downgrade** on these specific proxy flows, but does not authenticate an Exit's **first** TOFU key independently of the Server. Out-of-band fingerprint verification / identity-authority-signed Exit certificates remain follow-up security work. The mode now protects remote Exit system DNS A/AAAA questions on Relay paths. It does not yet protect other DNS resolver modes, RDP, file sharing, Browser Network Proxy, native UDP datagrams or other independent service streams.
 
 ## 8. Staged implementation
 
@@ -128,12 +128,12 @@ Required mode protects against **capability-suppression downgrade** on these spe
 - [x] Forward authoritative Relay ACL metadata to Exit.
 - [x] Keep target host/port/IP out of Relay secure-stream audit.
 - [x] Add in-process Server router + real Exit handler integration acceptance proving the Relay cannot recover target metadata or TCP payload.
-- [x] Add explicit TCP/stream-UDP E2EE-required policy, path-fail-closed and downgrade tests.
+- [x] Add explicit TCP/stream-UDP/Exit-system-DNS E2EE-required policy, path-fail-closed and downgrade tests.
 - [ ] Decide whether direct P2P/Public Direct should also use the application-level E2EE wrapper.
 - [ ] Add native datagram E2EE or a documented product-level stream fallback for UDP datagram-required callers.
 
 ### P3 — Remaining services
-- [ ] DNS/system DNS, RDP, file share/listing/transfer and Browser Network Proxy.
+- [ ] RDP, file share/listing/transfer and Browser Network Proxy.
 - [ ] Multi-hop Exit chain and upstream proxy behavior.
 
 ### P4 — Outer metadata and traffic characteristics
@@ -144,7 +144,7 @@ Required mode protects against **capability-suppression downgrade** on these spe
 
 ## 9. Acceptance tests
 
-- Relay-side capture cannot recover inner Host, Port, DNS query, file names or application payload.
+- Relay-side capture cannot recover inner Host, Port, covered Exit-system DNS questions, file names or application payload.
 - Exit receives original requests and returns byte-identical application data.
 - Modified, truncated, reordered and replayed records are rejected.
 - Wrong peer signature, wrong Device ID/Exit ID, wrong key-confirmation MAC and changed TOFU pin fail closed.

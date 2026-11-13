@@ -172,9 +172,3 @@ func (c *selectedExitConn) CloseRead() error {
 	}
 	return nil
 }
-func (c *selectedExitPacketConn) UDPMode() string {
-	if p, ok := c.PacketConn.(interface{ UDPMode() string }); ok {
-		return p.UDPMode()
-	}
-	return ""
-}

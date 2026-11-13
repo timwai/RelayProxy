@@ -1063,6 +1063,10 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		name = "Relay-Agent"
 	}
 	enabled := func(v *bool) bool { return v == nil || *v }
+	e2eeMode := c.Proxy.E2EEMode
+	if e2eeMode == "" {
+		e2eeMode = "opportunistic"
+	}
 	return map[string]any{
 		"中继地址": c.Server.Address, "QUIC 端口": c.Server.QUICPort, "TCP 端口": c.Server.TCPPort,
 		"设备名称": name, "身份 ID": c.Device.IdentityID, "传输模式": c.Transport.Mode, "TLS 开关": c.IsServerTLSEnabled(), "TLS 允许不受信任证书": c.Server.InsecureTLS,
@@ -1076,7 +1080,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"SOCKS5 开关":      enabled(c.Proxy.SOCKS5.Enabled), "SOCKS5 地址": c.Proxy.SOCKS5.Listen,
 		"SOCKS5 端口": c.Proxy.SOCKS5.Port, "HTTP 开关": enabled(c.Proxy.HTTP.Enabled),
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
-		"代理连接上限": c.Proxy.MaxConnections, "代理 TCP 空闲超时": c.Proxy.IdleTimeoutSec,
+		"代理 E2EE": e2eeMode, "代理连接上限": c.Proxy.MaxConnections, "代理 TCP 空闲超时": c.Proxy.IdleTimeoutSec,
 		"代理 UDP 关联空闲超时": c.Proxy.UDPIdleTimeoutSec,
 		"出口开关":          enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
 		"浏览器网络共享": c.Exit.BrowserNetworkShare,

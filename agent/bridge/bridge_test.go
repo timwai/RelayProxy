@@ -316,13 +316,14 @@ func TestE2EERequiredModeSurvivesAgentBridgeSave(t *testing.T) {
 	}
 
 	var incompatible ConfigUpdate
-	incompatible.P2P.Mode = ptr("direct_only")
+	incompatible.Server.TLSEnabled = ptr(false)
+	incompatible.Server.AllowPlainTCP = ptr(true)
 	if _, err := b.SaveConfig(incompatible); err == nil {
-		t.Fatal("direct_only route silently bypassed required E2EE")
+		t.Fatal("required E2EE allowed the Relay TLS transport to be disabled")
 	}
 	after, err := config.LoadAgentConfig(b.configPath)
-	if err != nil || after.Proxy.E2EEMode != "required" || after.P2P.Mode == "direct_only" {
-		t.Fatalf("failed incompatible edit changed E2EE mode: config=%+v err=%v", after, err)
+	if err != nil || after.Proxy.E2EEMode != "required" || !after.IsServerTLSEnabled() {
+		t.Fatalf("failed insecure transport edit changed required E2EE config: config=%+v err=%v", after, err)
 	}
 }
 

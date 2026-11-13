@@ -393,6 +393,7 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Device.IdentityID = c.IdentityID
 	res.Transport.Mode = c.TransportMode
 	res.Proxy.DefaultExitID = c.DefaultExitID
+	res.Proxy.E2EEMode = c.E2EEMode
 	res.Proxy.MaxConnections = c.ProxyMaxConnections
 	res.Proxy.IdleTimeoutSec = int(c.ProxyIdleTimeout / time.Second)
 	res.Proxy.UDPIdleTimeoutSec = int(c.ProxyUDPIdleTimeout / time.Second)
@@ -471,6 +472,7 @@ type ConfigUpdate struct {
 		} `json:"public"`
 	} `json:"direct"`
 	Proxy struct {
+		E2EEMode      *string             `json:"e2eeMode"`
 		SOCKS5Enabled *bool               `json:"socks5Enabled"`
 		SOCKS5Listen  *string             `json:"socks5Listen"`
 		SOCKS5Port    *int                `json:"socks5Port"`
@@ -693,6 +695,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		cfg.Direct.Public.Advertise = strings.TrimSpace(*in.Direct.Public.Advertise)
 	}
 
+	if in.Proxy.E2EEMode != nil {
+		cfg.Proxy.E2EEMode = strings.ToLower(strings.TrimSpace(*in.Proxy.E2EEMode))
+	}
 	if in.Proxy.SOCKS5Enabled != nil {
 		cfg.Proxy.SOCKS5.Enabled = config.BoolPtr(*in.Proxy.SOCKS5Enabled)
 	}

@@ -183,7 +183,8 @@ func (h *Handler) handleSecureRelay(ctx context.Context, stream tunnel.TunnelStr
 	}
 	if (inner.ClientDeviceID != "" && inner.ClientDeviceID != outer.ClientDeviceID) ||
 		(inner.ExitDeviceID != "" && inner.ExitDeviceID != outer.ExitDeviceID) ||
-		(inner.Type != protocol.FrameTypeOpenTCP && inner.Type != protocol.FrameTypeOpenUDP) {
+		(inner.Type != protocol.FrameTypeOpenTCP && inner.Type != protocol.FrameTypeOpenUDP &&
+			inner.Type != protocol.FrameTypeExitSystemDNS) {
 		log.Printf("[ExitHandler] Rejected invalid encrypted inner StreamHeader type=%d", inner.Type)
 		_ = secureStream.Close()
 		return

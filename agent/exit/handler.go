@@ -27,9 +27,15 @@ import (
 const udpIdleTimeout = 60 * time.Second
 
 type relayOriginContextKey struct{}
+type directP2POriginContextKey struct{}
+
+type directP2POrigin struct {
+	clientDeviceID string
+	exitDeviceID   string
+}
 
 // WithRelayOrigin marks streams accepted from the authenticated Relay tunnel.
-// Direct P2P/Public Direct listeners must not be able to assert this marker.
+// Direct P2P listeners must not be able to assert this marker.
 func WithRelayOrigin(ctx context.Context) context.Context {
 	return context.WithValue(ctx, relayOriginContextKey{}, true)
 }
@@ -37,6 +43,23 @@ func WithRelayOrigin(ctx context.Context) context.Context {
 func isRelayOrigin(ctx context.Context) bool {
 	trusted, _ := ctx.Value(relayOriginContextKey{}).(bool)
 	return trusted
+}
+
+// WithDirectP2POrigin marks streams accepted from a READY, Server-coordinated
+// and fingerprint-authenticated Client/Exit P2P QUIC session. The device pair
+// is bound here so a direct peer cannot choose another identity in its frame.
+func WithDirectP2POrigin(ctx context.Context, clientDeviceID, exitDeviceID string) context.Context {
+	return context.WithValue(ctx, directP2POriginContextKey{}, directP2POrigin{
+		clientDeviceID: clientDeviceID, exitDeviceID: exitDeviceID,
+	})
+}
+
+func directP2POriginIDs(ctx context.Context) (string, string, bool) {
+	origin, ok := ctx.Value(directP2POriginContextKey{}).(directP2POrigin)
+	if !ok || origin.clientDeviceID == "" || origin.exitDeviceID == "" {
+		return "", "", false
+	}
+	return origin.clientDeviceID, origin.exitDeviceID, true
 }
 
 var udpPipeBufferPool = sync.Pool{
@@ -144,8 +167,11 @@ func (h *Handler) HandleStreamWithHeader(ctx context.Context, stream tunnel.Tunn
 
 func (h *Handler) handleSecureRelay(ctx context.Context, stream tunnel.TunnelStream, outer *protocol.StreamHeader) {
 	if !isRelayOrigin(ctx) {
-		log.Printf("[ExitHandler] Rejected SecureRelay from a non-Relay transport")
-		return
+		clientID, exitID, direct := directP2POriginIDs(ctx)
+		if !direct || outer == nil || outer.ClientDeviceID != clientID || outer.ExitDeviceID != exitID {
+			log.Printf("[ExitHandler] Rejected SecureRelay from an unauthenticated direct transport")
+			return
+		}
 	}
 	if outer == nil || outer.ClientDeviceID == "" || outer.ExitDeviceID == "" ||
 		len(h.cfg.E2EEPublicKey) != ed25519.PublicKeySize ||

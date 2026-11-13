@@ -20,7 +20,7 @@ The Server itself cannot be blind when the Server-local Exit is selected: it is 
 - Authorized online Exit inventory carries the Exit public key and an E2EE capability bit.
 - The Client stores a TOFU pin in `peer-key-pins.json`, scoped by authenticated Server Instance ID and Exit Device ID. A changed key fails closed.
 - The production CLI passes the pin-store path to the Agent. Embedders that construct `app.AgentConfig` without `E2EEPeerPinPath` do not enable Relay E2EE.
-- Relay TCP and reliable stream-UDP can be E2EE-wrapped when Client, Server and remote Exit advertise support. Native datagram-required UDP currently returns a clear error rather than silently downgrading.
+- Relay TCP, reliable stream-UDP and remote Exit system DNS A/AAAA requests can be E2EE-wrapped when Client, Server and remote Exit advertise support. Native datagram-required UDP currently returns a clear error rather than silently downgrading.
 - Server-local Exit is intentionally excluded from E2EE because the Server is the endpoint.
 - Relay TCP/QUIC and direct QUIC/TCP retain TLS 1.3. Plaintext TCP and disabled certificate verification require explicit development-only opt-ins.
 
@@ -123,11 +123,11 @@ Required mode protects against **capability-suppression downgrade** on these spe
 
 ### P2 — Relay-blind proxy TCP/UDP
 - [x] Add `FrameTypeSecureRelay` and opaque Relay forwarding.
-- [x] Wrap Relay-routed Client TCP and reliable stream-UDP when both endpoints support E2EE.
+- [x] Wrap Relay-routed Client TCP, reliable stream-UDP and Exit system DNS A/AAAA requests when both endpoints support E2EE.
 - [x] Decrypt at Exit and dispatch existing TCP/UDP handlers.
 - [x] Forward authoritative Relay ACL metadata to Exit.
 - [x] Keep target host/port/IP out of Relay secure-stream audit.
-- [x] Add in-process Server router + real Exit handler integration acceptance proving the Relay cannot recover target metadata or TCP payload.
+- [x] Add in-process Server router + real Exit handler integration acceptance proving the Relay cannot recover TCP target metadata/payload or Exit system DNS questions.
 - [x] Add explicit TCP/stream-UDP/Exit-system-DNS E2EE-required policy, path-fail-closed and downgrade tests.
 - [ ] Decide whether direct P2P/Public Direct should also use the application-level E2EE wrapper.
 - [ ] Add native datagram E2EE or a documented product-level stream fallback for UDP datagram-required callers.

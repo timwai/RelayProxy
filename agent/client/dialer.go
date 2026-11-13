@@ -183,11 +183,19 @@ func (d *TunnelDialer) SetE2EEServerSupported(supported bool) {
 }
 
 func (d *TunnelDialer) shouldUseE2EE(exitDeviceID string, path protocol.ProxyPath) bool {
-	if exitDeviceID == protocol.ServerExitDeviceID || path.IsDirect() {
+	if exitDeviceID == protocol.ServerExitDeviceID {
+		return false
+	}
+	relayPath := path.IsRelay()
+	directP2PPath := path == protocol.ProxyPathP2PQUIC
+	if !relayPath && !directP2PPath {
+		// Public Direct and non-proxy transports do not yet expose the
+		// authenticated SecureRelay stream handler.
 		return false
 	}
 	d.directMu.RLock()
-	supported := d.e2eeMode != "off" && d.e2eeServerSupported && d.getE2EEPeerKey != nil && d.verifyE2EEPeerKey != nil &&
+	supported := d.e2eeMode != "off" && (directP2PPath || d.e2eeServerSupported) &&
+		d.getE2EEPeerKey != nil && d.verifyE2EEPeerKey != nil &&
 		len(d.e2eeIdentity.PublicKey) == ed25519.PublicKeySize &&
 		len(d.e2eeIdentity.PrivateKey) == ed25519.PrivateKeySize
 	getPeerKey := d.getE2EEPeerKey
@@ -215,8 +223,8 @@ func (d *TunnelDialer) requireSecureProxyPath(exitDeviceID string, path protocol
 	if exitDeviceID == protocol.ServerExitDeviceID {
 		return errors.New("E2EE is required: Server-local Exit is not Relay-blind")
 	}
-	if path.IsDirect() {
-		return errors.New("E2EE is required: direct P2P/Public Direct data paths do not yet support application-level E2EE")
+	if path == protocol.ProxyPathPublicDirectQUIC {
+		return errors.New("E2EE is required: Public Direct does not yet expose the authenticated E2EE stream handler")
 	}
 	if !d.shouldUseE2EE(exitDeviceID, path) {
 		return fmt.Errorf("E2EE is required: Server or Exit %s lacks authenticated E2EE capability or trusted peer key", exitDeviceID)
@@ -224,37 +232,45 @@ func (d *TunnelDialer) requireSecureProxyPath(exitDeviceID string, path protocol
 	return nil
 }
 
-// In required mode, remote proxy data and Exit system DNS use the Relay
-// stream even when a P2P/Public Direct path is ready, because direct
-// application E2EE is not implemented. Never silently bypass the policy.
+// In required mode, use an authenticated P2P QUIC stream when it is ready;
+// otherwise use the E2EE-capable Relay path. Public Direct is not accepted as
+// application E2EE until it exposes the same authenticated Exit handler.
 func (d *TunnelDialer) selectProxyDataSession(exitDeviceID string) (SelectedSession, error) {
 	d.directMu.RLock()
 	required := d.e2eeMode == "required"
 	directMode := d.directMode
+	getTunnel := d.getTunnel
 	d.directMu.RUnlock()
 	if !required {
 		return d.selectedSessionForExit(exitDeviceID), nil
 	}
+	selected := d.selectedSessionForExit(exitDeviceID)
+	if selected.Session != nil && d.shouldUseE2EE(exitDeviceID, selected.Path) {
+		return selected, nil
+	}
 	if directMode == "direct_only" || directMode == "p2p_only" {
-		return SelectedSession{}, errors.New("E2EE required mode is incompatible with direct_only/p2p_only until direct E2EE is supported")
+		if selected.Session == nil {
+			return SelectedSession{}, errors.New("E2EE required mode needs a READY authenticated P2P QUIC session")
+		}
+		return SelectedSession{}, d.requireSecureProxyPath(exitDeviceID, selected.Path)
 	}
-	if d.getTunnel == nil {
-		return SelectedSession{}, errors.New("E2EE required mode needs an authenticated Relay session")
+	if getTunnel == nil {
+		return SelectedSession{}, errors.New("E2EE required mode needs an authenticated Relay or P2P session")
 	}
-	sess := d.getTunnel()
-	if sess == nil {
+	relay := getTunnel()
+	if relay == nil {
 		return SelectedSession{}, errors.New("E2EE required mode needs an active Relay session")
 	}
-	path := relaySessionPath(sess)
+	path := relaySessionPath(relay)
 	if err := d.requireSecureProxyPath(exitDeviceID, path); err != nil {
 		return SelectedSession{}, err
 	}
-	return SelectedSession{Session: sess, Path: path}, nil
+	return SelectedSession{Session: relay, Path: path}, nil
 }
 
 // wrapSecureRelayStream puts the existing business protocol inside an
-// authenticated Client-to-Exit stream. It is used only when data traverses the
-// Relay; direct P2P/Public Direct sessions already terminate TLS at the Exit.
+// authenticated Client-to-Exit stream. It is used on Relay and authenticated
+// P2P QUIC paths; Public Direct keeps its existing fingerprint-pinned TLS.
 func (d *TunnelDialer) wrapSecureRelayStream(stream tunnel.TunnelStream, exitDeviceID string, enabled bool) (tunnel.TunnelStream, bool, error) {
 	if !enabled {
 		return stream, false, nil

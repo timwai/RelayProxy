@@ -143,7 +143,7 @@ type AgentConfig struct {
 	TCPPort                 int
 	Mode                    string // "CLIENT", "EXIT", "BOTH"
 	TransportMode           string // "auto", "quic_only", "tcp_only"
-	E2EEMode               string // "off", "opportunistic" (default), "required"
+	E2EEMode                string // "off", "opportunistic" (default), "required"
 	BrutalUploadBPS         uint64
 	BrutalDownloadBPS       uint64
 	DisableLossCompensation bool

@@ -59,13 +59,25 @@ func (d *TunnelDialer) exchangeExitSystemDNS(parent context.Context, exitID stri
 	}
 	defer stream.Close()
 	if !selected.IsDirect() && !tunnel.PeerSupportsExitSystemDNS(selected.Session) {
+		_ = stream.Close()
 		return nil, protocol.NewRelayError(protocol.ErrCodeDNSUnsupported, "Relay Server 未声明支持出口系统 DNS，请升级 Relay Server 并重新连接；目标出口 Agent 也需使用支持此功能的版本")
+	}
+	if err := d.requireSecureProxyPath(exitID, selected.Path); err != nil {
+		_ = stream.Close()
+		return nil, err
 	}
 	stop := tunnel.InterruptOnCancel(ctx, stream)
 	defer stop()
 	if deadline, ok := ctx.Deadline(); ok {
 		_ = stream.SetDeadline(deadline)
 	}
+	secureRelay := d.shouldUseE2EE(exitID, selected.Path)
+	secureStream, _, secureErr := d.wrapSecureRelayStream(stream, exitID, secureRelay)
+	if secureErr != nil {
+		_ = stream.Close()
+		return nil, secureErr
+	}
+	stream = secureStream
 	requestID := d.nextRequestIDWithPrefix("dns_")
 	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
 		Type: protocol.FrameTypeExitSystemDNS, ExitDeviceID: exitID, RequestID: requestID,

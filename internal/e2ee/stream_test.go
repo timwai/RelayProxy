@@ -10,6 +10,7 @@ import (
 	"net"
 	"sync/atomic"
 	"testing"
+	"time"
 )
 
 type testStream struct {
@@ -252,6 +253,27 @@ func TestSecureStreamAuthenticatedHalfCloseIsStickyEOF(t *testing.T) {
 	}
 	if err := <-closeDone; err != nil {
 		t.Fatalf("write authenticated close record: %v", err)
+	}
+}
+
+func TestSecureStreamFullCloseDoesNotWaitForPeerRead(t *testing.T) {
+	clientConn, exitConn := net.Pipe()
+	defer exitConn.Close()
+	client, err := NewSecureStream(&testStream{Conn: clientConn},
+		bytes.Repeat([]byte{0x11}, 32), bytes.Repeat([]byte{0x22}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	done := make(chan error, 1)
+	go func() { done <- client.Close() }()
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("close aborted E2EE stream: %v", err)
+		}
+	case <-time.After(2 * time.Second):
+		_ = exitConn.Close()
+		t.Fatal("full Close blocked waiting for unread authenticated close record")
 	}
 }
 

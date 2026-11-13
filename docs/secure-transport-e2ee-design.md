@@ -119,7 +119,7 @@ Required mode protects against **capability-suppression downgrade** on these spe
 - [x] Carry authenticated public keys in online sessions and authorized online Exit inventory.
 - [x] Persistent TOFU pin store, Server/Exit scoping, key-change rejection and pin-store tests.
 - [ ] Add explicit operator workflow/UI for verified Exit key rotation.
-- [ ] Add replay/ordering property and fuzz tests.
+- [x] Add replay/ordering rejection tests and a bounded handshake-parser fuzz target (extended fuzz campaigns remain part of release testing).
 
 ### P2 — Relay-blind proxy TCP/UDP
 - [x] Add `FrameTypeSecureRelay` and opaque Relay forwarding.

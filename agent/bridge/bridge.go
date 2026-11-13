@@ -438,13 +438,13 @@ type ConfigUpdate struct {
 	Gateway  *gateway.Config `json:"gateway"`
 	Revision *string         `json:"revision,omitempty"`
 	Server   struct {
-		Address     *string `json:"address"`
-		QUICPort    *int    `json:"quicPort"`
-		TCPPort     *int    `json:"tcpPort"`
-		TLSEnabled  *bool   `json:"tlsEnabled"`
-		InsecureTLS      *bool `json:"insecureTls"`
-		AllowPlainTCP    *bool `json:"allowPlainTcp"`
-		AllowInsecureTLS *bool `json:"allowInsecureTls"`
+		Address          *string `json:"address"`
+		QUICPort         *int    `json:"quicPort"`
+		TCPPort          *int    `json:"tcpPort"`
+		TLSEnabled       *bool   `json:"tlsEnabled"`
+		InsecureTLS      *bool   `json:"insecureTls"`
+		AllowPlainTCP    *bool   `json:"allowPlainTcp"`
+		AllowInsecureTLS *bool   `json:"allowInsecureTls"`
 	} `json:"server"`
 	Device struct {
 		Name       *string `json:"name"`

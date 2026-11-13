@@ -11,6 +11,55 @@ import (
 	"relayproxy/internal/proxy"
 )
 
+func TestProxyE2EEModeValidationAndPersistence(t *testing.T) {
+	defaults := &AgentConfigFile{}
+	if err := NormalizeAgentConfig(defaults); err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Proxy.E2EEMode != "" {
+		t.Fatalf("legacy default changed: %q", defaults.Proxy.E2EEMode)
+	}
+	for _, mode := range []string{"off", "opportunistic", "required"} {
+		cfg := CloneAgentConfig(defaults)
+		cfg.Proxy.E2EEMode = mode
+		if err := NormalizeAgentConfig(cfg); err != nil {
+			t.Fatalf("mode %q rejected: %v", mode, err)
+		}
+		path := filepath.Join(t.TempDir(), "agent.yaml")
+		if err := SaveAgentConfig(path, cfg); err != nil {
+			t.Fatal(err)
+		}
+		reloaded, err := LoadAgentConfig(path)
+		if err != nil || reloaded.Proxy.E2EEMode != mode {
+			t.Fatalf("mode %q did not survive YAML: actual=%+v err=%v", mode, reloaded, err)
+		}
+	}
+	for _, invalid := range []string{"invalid", "yes", "true"} {
+		cfg := CloneAgentConfig(defaults)
+		cfg.Proxy.E2EEMode = invalid
+		if err := NormalizeAgentConfig(cfg); err == nil {
+			t.Fatalf("invalid E2EE mode %q accepted", invalid)
+		}
+	}
+	for _, scenario := range []string{"insecure_tls", "plain_tcp", "direct_only"} {
+		cfg := CloneAgentConfig(defaults)
+		cfg.Proxy.E2EEMode = "required"
+		switch scenario {
+		case "insecure_tls":
+			cfg.Server.InsecureTLS = true
+			cfg.Server.Security.AllowInsecureTLS = true
+		case "plain_tcp":
+			cfg.Server.TLSEnabled = BoolPtr(false)
+			cfg.Server.Security.AllowPlainTCP = true
+		case "direct_only":
+			cfg.P2P.Mode = "direct_only"
+		}
+		if err := NormalizeAgentConfig(cfg); err == nil {
+			t.Fatalf("required E2EE accepted insecure/incompatible %s", scenario)
+		}
+	}
+}
+
 func TestProxyLimitsYAMLRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	if err := os.WriteFile(path, []byte("server:\n  address: relay.example.test\nproxy:\n  max_connections: 1024\n  idle_timeout_sec: 600\n  udp_idle_timeout_sec: 90\n"), 0600); err != nil {

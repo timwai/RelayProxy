@@ -299,6 +299,29 @@ func TestProxyYAMLLimitsSurviveUISaveAndRequireRestart(t *testing.T) {
 	}
 }
 
+func TestE2EERequiredModeSurvivesAgentBridgeSave(t *testing.T) {
+	b := newTestBridge(t)
+	var update ConfigUpdate
+	update.Proxy.E2EEMode = ptr("required")
+	if _, err := b.SaveConfig(update); err != nil {
+		t.Fatalf("save required E2EE mode: %v", err)
+	}
+	loaded, err := config.LoadAgentConfig(b.configPath)
+	if err != nil || loaded.Proxy.E2EEMode != "required" {
+		t.Fatalf("required E2EE mode not persisted: config=%+v err=%v", loaded, err)
+	}
+
+	var incompatible ConfigUpdate
+	incompatible.P2P.Mode = ptr("direct_only")
+	if _, err := b.SaveConfig(incompatible); err == nil {
+		t.Fatal("direct_only route silently bypassed required E2EE")
+	}
+	after, err := config.LoadAgentConfig(b.configPath)
+	if err != nil || after.Proxy.E2EEMode != "required" || after.P2P.Mode == "direct_only" {
+		t.Fatalf("failed incompatible edit changed E2EE mode: config=%+v err=%v", after, err)
+	}
+}
+
 func TestSecurityDowngradeRequiresExplicitBridgeConsent(t *testing.T) {
 	b := newTestBridge(t)
 	var insecure ConfigUpdate

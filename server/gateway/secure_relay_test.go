@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
+	"errors"
 	"crypto/rand"
 	"io"
 	"net"
@@ -243,7 +244,7 @@ func TestSecureRelayHidesExitSystemDNSQuestionFromRelay(t *testing.T) {
 		ACLChecker: exitChecker, ConnectTimeout: 2 * time.Second,
 		SystemDNSLookup: func(_ context.Context, network, host string) ([]net.IP, error) {
 			if network != "ip4" || host != "e2ee-secret-q-9f13.example" {
-				t.Fatalf("unexpected system DNS lookup: network=%q host=%q", network, host)
+				return nil, errors.New("unexpected system DNS lookup target")
 			}
 			return []net.IP{net.ParseIP("8.8.8.8")}, nil
 		},

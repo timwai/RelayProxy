@@ -560,13 +560,24 @@ func removeWindowsTransparentFirewallRule() error {
 	)
 }
 
+func windowsTransparentFirewallProgramArg(program string) (string, error) {
+	if !filepath.IsAbs(program) || strings.ContainsAny(program, "\r\n\"") {
+		return "", errors.New("透明代理 Windows Firewall 必须限定到客户端程序的绝对路径")
+	}
+	// netsh has its own command-line parser. exec.Command preserves this as
+	// one argv item, but netsh still requires quotes around program paths;
+	// without them it reports "The application name could not be resolved".
+	return `program="` + program + `"`, nil
+}
+
 func installWindowsTransparentFirewallRule(input []uint16, program string) error {
 	ports, err := normalizeWindowsTransparentFirewallPorts(input)
 	if err != nil {
 		return err
 	}
-	if !filepath.IsAbs(program) || strings.ContainsAny(program, "\r\n") {
-		return errors.New("透明代理 Windows Firewall 必须限定到客户端程序的绝对路径")
+	programArg, err := windowsTransparentFirewallProgramArg(program)
+	if err != nil {
+		return err
 	}
 	// A single broker session is supported. Delete a stale rule left by an
 	// unclean service termination before publishing the current random ports.
@@ -580,7 +591,7 @@ func installWindowsTransparentFirewallRule(input []uint16, program string) error
 		"name="+windowsTransparentFirewallRuleName,
 		"dir=in", "action=allow", "protocol=TCP",
 		"localport="+strings.Join(values, ","),
-		"program="+program,
+		programArg,
 		"profile=any", "edge=no",
 	)
 }

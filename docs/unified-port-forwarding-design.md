@@ -1,6 +1,6 @@
 # RelayProxy 通用端口转发与统一隧道设计
 
-> 状态：设计稿，尚未开始功能实现  
+> 状态：P0 开发中；当前实现进度见 `docs/unified-port-forwarding-progress.md`  
 > 设计日期：2026-11-13  
 > 目标分支：`feat/unified-port-forwarding-20261113`  
 > 基线分支：`main`（commit `5518c5a2c363d14678979ee27822f94fa75da076`）  

@@ -329,6 +329,31 @@ func TestNormalizeWindowsTransparentFirewallPorts(t *testing.T) {
 	}
 }
 
+func TestWindowsTransparentFirewallProgramArgQuotesNetshPath(t *testing.T) {
+	for _, program := range []string{
+		`C:\Program Files\RelayProxy\relay-agent.exe`,
+		`C:\RelayProxy\relay-agent.exe`,
+	} {
+		got, err := windowsTransparentFirewallProgramArg(program)
+		if err != nil {
+			t.Fatalf("program %q rejected: %v", program, err)
+		}
+		want := `program="` + program + `"`
+		if got != want {
+			t.Fatalf("netsh program arg = %q, want %q", got, want)
+		}
+	}
+	for _, invalid := range []string{
+		`relay-agent.exe`,
+		`C:\RelayProxy\bad"name.exe`,
+		"C:\\RelayProxy\\bad\nname.exe",
+	} {
+		if _, err := windowsTransparentFirewallProgramArg(invalid); err == nil {
+			t.Fatalf("invalid program path %q accepted", invalid)
+		}
+	}
+}
+
 func TestWindowsNetworkBrokerLiveNamedPipeRoundTrip(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skip("WinDivert broker live test requires Windows amd64")

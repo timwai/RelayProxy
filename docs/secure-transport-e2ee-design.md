@@ -19,14 +19,14 @@ The Server itself cannot be blind when the Server-local Exit is selected: it is 
 - `DeviceHello.PublicKey` is sent during enrollment, verified by the Server, and copied into the online `DeviceSession`.
 - Authorized online Exit inventory carries the Exit public key and an E2EE capability bit.
 - The Client stores a TOFU pin in `peer-key-pins.json`, scoped by authenticated Server Instance ID and Exit Device ID. A changed key fails closed.
-- The production CLI passes the pin-store path to the Agent. Embedders that construct `app.AgentConfig` without `E2EEPeerPinPath` do not enable Relay E2EE.
-- Relay TCP, reliable stream-UDP and remote Exit system DNS A/AAAA requests can be E2EE-wrapped when Client, Server and remote Exit advertise support. Native datagram-required UDP currently returns a clear error rather than silently downgrading.
+- The production CLI passes the pin-store path to the Agent. Opportunistic embedders without `E2EEPeerPinPath` retain TLS-only compatibility; required mode rejects startup unless persistent peer-key pin storage is configured.
+- Relay TCP, reliable stream-UDP and remote Exit system DNS A/AAAA requests can be E2EE-wrapped when Client, Server and remote Exit advertise support. Native datagram-required UDP is permitted only on authenticated P2P QUIC (mutual fingerprint-pinned TLS 1.3); Relay-routed native datagrams fail closed rather than downgrade.
 - Server-local Exit is intentionally excluded from E2EE because the Server is the endpoint.
 - Relay TCP/QUIC and direct QUIC/TCP retain TLS 1.3. Plaintext TCP and disabled certificate verification require explicit development-only opt-ins.
 
 ## 3. Threat model and limitations
 
-E2EE protects payload confidentiality/integrity from passive network observers and a Relay process that follows the forwarding protocol and inspects forwarded stream bytes. It does not protect against compromised endpoints, process-memory/private-key theft, destination services, traffic analysis, or a network operator that can observe the Exit's egress.
+E2EE protects payload confidentiality/integrity from passive observers of the Client-to-Relay link and a Relay process that follows the forwarding protocol and inspects forwarded stream bytes. For Relay-routed proxy TCP, the target hostname/port, inner TLS ClientHello and target SNI are inside the encrypted stream, so the Relay cannot read them. The Exit decrypts the request and necessarily knows the target; observers on the Exit's egress network may still see the target SNI unless the destination connection uses ECH. The outer Client-to-Relay TLS/QUIC handshake is not hidden: the network between Client and Relay can still observe the Relay endpoint and, where TLS exposes it, the Relay server name. E2EE does not protect against compromised endpoints, process-memory/private-key theft, destination services, traffic analysis, or a network operator that can observe the Exit's egress.
 
 The Server remains authoritative for device admission, capability grants, Client-to-Exit authorization, quotas and Relay admission. The Exit enforces its local destination ACL and performs the actual dial. The Relay forwards the Server-owned ACL policy to the Exit; Client-supplied policy is never authoritative.
 
@@ -72,7 +72,7 @@ Exit Agent
 Existing Exit ACL / resolver / dialer
 ```
 
-P2P QUIC uses the application-level E2EE wrapper when both peers advertise support. Public Direct QUIC still relies on its TLS 1.3 fingerprint-pinned transport because it does not yet expose the authenticated SecureRelay stream handler.
+P2P QUIC uses the application-level E2EE wrapper for proxy TCP, reliable stream-UDP and Exit system DNS when both peers advertise support. Native datagram-required UDP on P2P uses the mutually authenticated, fingerprint-pinned TLS 1.3 transport directly; the QUIC session bypasses Relay. Public Direct QUIC still relies on its TLS 1.3 fingerprint-pinned transport because it does not yet expose the authenticated SecureRelay stream handler.
 
 ### Record framing
 

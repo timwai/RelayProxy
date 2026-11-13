@@ -41,7 +41,7 @@ func TestProxyE2EEModeValidationAndPersistence(t *testing.T) {
 			t.Fatalf("invalid E2EE mode %q accepted", invalid)
 		}
 	}
-	for _, scenario := range []string{"insecure_tls", "plain_tcp", "direct_only"} {
+	for _, scenario := range []string{"insecure_tls", "plain_tcp"} {
 		cfg := CloneAgentConfig(defaults)
 		cfg.Proxy.E2EEMode = "required"
 		switch scenario {
@@ -51,12 +51,16 @@ func TestProxyE2EEModeValidationAndPersistence(t *testing.T) {
 		case "plain_tcp":
 			cfg.Server.TLSEnabled = BoolPtr(false)
 			cfg.Server.Security.AllowPlainTCP = true
-		case "direct_only":
-			cfg.P2P.Mode = "direct_only"
 		}
 		if err := NormalizeAgentConfig(cfg); err == nil {
 			t.Fatalf("required E2EE accepted insecure/incompatible %s", scenario)
 		}
+	}
+	p2pOnly := CloneAgentConfig(defaults)
+	p2pOnly.Proxy.E2EEMode = "required"
+	p2pOnly.P2P.Mode = "p2p_only"
+	if err := NormalizeAgentConfig(p2pOnly); err != nil {
+		t.Fatalf("required E2EE rejected authenticated P2P-only routing: %v", err)
 	}
 }
 

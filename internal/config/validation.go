@@ -105,6 +105,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Device.IdentityID = strings.ToLower(strings.TrimSpace(c.Device.IdentityID))
 	c.Mode = strings.ToUpper(strings.TrimSpace(c.Mode))
 	c.Transport.Mode = strings.ToLower(strings.TrimSpace(c.Transport.Mode))
+	c.Proxy.E2EEMode = strings.ToLower(strings.TrimSpace(c.Proxy.E2EEMode))
 	c.P2P.Mode = strings.ToLower(strings.TrimSpace(c.P2P.Mode))
 	c.Direct.Public.Advertise = strings.TrimSpace(c.Direct.Public.Advertise)
 	c.Network.Mode = strings.ToLower(strings.TrimSpace(c.Network.Mode))
@@ -166,6 +167,19 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 	}
 	if !c.IsServerTLSEnabled() && !c.Server.Security.AllowPlainTCP {
 		return fmt.Errorf("server.tls_enabled=false requires server.security.allow_plain_tcp=true (development only)")
+	}
+	switch c.Proxy.E2EEMode {
+	case "", "off", "opportunistic", "required":
+	default:
+		return fmt.Errorf("proxy.e2ee_mode must be off / opportunistic / required")
+	}
+	if c.Proxy.E2EEMode == "required" {
+		if !c.IsServerTLSEnabled() || c.Server.InsecureTLS {
+			return fmt.Errorf("proxy.e2ee_mode=required requires verified Relay TLS")
+		}
+		if c.P2P.Mode == "direct_only" || c.P2P.Mode == "p2p_only" {
+			return fmt.Errorf("proxy.e2ee_mode=required is incompatible with direct_only/p2p_only until direct E2EE is implemented")
+		}
 	}
 	if c.Proxy.MaxConnections < 1 || c.Proxy.MaxConnections > 65536 {
 		return fmt.Errorf("proxy.max_connections 必须在 1-65536 之间")

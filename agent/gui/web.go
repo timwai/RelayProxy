@@ -609,7 +609,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Routing: routingConfigView(cfg.Routing),
 		Runtime: map[string]any{"serverAddress": state.Runtime.Server.Address, "quicPort": state.Runtime.Server.QUICPort,
 			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(), "insecureTls": state.Runtime.Server.InsecureTLS,
-			"e2eeMode": state.Runtime.Proxy.E2EEMode,
+			"e2eeMode":      state.Runtime.Proxy.E2EEMode,
 			"allowPlainTcp": state.Runtime.Server.Security.AllowPlainTCP, "allowInsecureTls": state.Runtime.Server.Security.AllowInsecureTLS,
 			"transport": state.Runtime.Transport.Mode, "networkMode": state.Runtime.Network.Mode,
 			"rdp": map[string]any{

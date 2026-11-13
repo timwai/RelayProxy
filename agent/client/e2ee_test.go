@@ -63,7 +63,7 @@ func TestRequiredE2EEBypassesDirectPathsAndNeverDowngrades(t *testing.T) {
 		return SelectedSession{Session: direct, Path: protocol.ProxyPathPublicDirectQUIC}, true
 	}, nil)
 	dialer.ConfigureE2EE(e2ee.Identity{
-		PublicKey: make(ed25519.PublicKey, ed25519.PublicKeySize),
+		PublicKey:  make(ed25519.PublicKey, ed25519.PublicKeySize),
 		PrivateKey: make(ed25519.PrivateKey, ed25519.PrivateKeySize),
 	}, func(string) ([]byte, bool) {
 		return make([]byte, ed25519.PublicKeySize), true

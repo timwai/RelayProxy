@@ -93,9 +93,13 @@ Audit split:
 
 ## 7. Protocol rollout and downgrade
 
-Current behavior is **opportunistic capability negotiation**: the Client uses E2EE when the authenticated Server advertises support and the selected remote Exit inventory advertises E2EE with a valid key. If either side is legacy or does not advertise support, the existing TLS-protected Relay stream remains available for compatibility. Once E2EE is selected, handshake, signature, key-confirmation or TOFU-pin failure closes the stream; it does not retry that same request in plaintext.
+The Client supports `proxy.e2ee_mode` in `relay-agent.yaml`, exposed as “代理端到端加密（E2EE）” in the Agent desktop/Web settings:
 
-There is not yet a user-configurable `required` mode. Consequently, a Server that actively suppresses E2EE capability or falsely marks an Exit as unsupported can cause compatibility fallback. Required-mode downgrade protection and identity-authority-signed Exit certificates remain follow-up security work.
+- `off`: use the existing TLS-protected legacy proxy stream, without application-layer E2EE (explicit compatibility/development choice).
+- `opportunistic` (default when unset): encrypt Relay-routed TCP and reliable stream-UDP when the authenticated Server and selected remote device Exit advertise support. Legacy endpoints may use the old TLS-protected proxy stream. Once E2EE negotiation starts, handshake/key-confirmation/TOFU failure closes that stream; no plaintext retry.
+- `required`: fail closed for the covered proxy TCP and stream-UDP flows unless they use authenticated E2EE. An explicit remote Exit device ID is required; Server-local Exit is rejected. Ready P2P/Public Direct paths are bypassed in favor of Relay because application-layer direct E2EE has not yet shipped. `direct_only` and `p2p_only` configurations are rejected for this mode. Missing key/Server capability or suppressed E2EE advertising fails closed. Verified TLS remains mandatory.
+
+Required mode protects against **capability-suppression downgrade** on these specific proxy flows, but does not authenticate an Exit's **first** TOFU key independently of the Server. Out-of-band fingerprint verification / identity-authority-signed Exit certificates remain follow-up security work. The mode does not yet protect DNS/system DNS, RDP, file sharing, Browser Network Proxy, native UDP datagrams or other independent service streams.
 
 ## 8. Staged implementation
 
@@ -105,7 +109,7 @@ There is not yet a user-configurable `required` mode. Consequently, a Server tha
 - [x] Skipping Agent certificate verification requires explicit development-only configuration.
 - [x] Programmatic Agent construction is guarded as well as YAML loading.
 - [x] Agent startup warns when development-only plaintext/insecure transport is enabled.
-- [ ] Verify Server settings UI preserves/surfaces security warnings.
+- [x] Server settings UI exposes explicit plaintext TCP opt-in and warnings; Agent UI requires confirmation before saving unsafe transport changes.
 - [ ] Run Go tests, race tests, vet and cross-builds on CI.
 
 ### P1 — E2EE primitives and peer identity
@@ -123,8 +127,8 @@ There is not yet a user-configurable `required` mode. Consequently, a Server tha
 - [x] Decrypt at Exit and dispatch existing TCP/UDP handlers.
 - [x] Forward authoritative Relay ACL metadata to Exit.
 - [x] Keep target host/port/IP out of Relay secure-stream audit.
-- [ ] Add Server router + real Agent/Exit end-to-end acceptance proving the Relay cannot recover target metadata or payload.
-- [ ] Add explicit E2EE-required policy and downgrade tests.
+- [x] Add in-process Server router + real Exit handler integration acceptance proving the Relay cannot recover target metadata or TCP payload.
+- [x] Add explicit TCP/stream-UDP E2EE-required policy, path-fail-closed and downgrade tests.
 - [ ] Decide whether direct P2P/Public Direct should also use the application-level E2EE wrapper.
 - [ ] Add native datagram E2EE or a documented product-level stream fallback for UDP datagram-required callers.
 
@@ -147,4 +151,4 @@ There is not yet a user-configurable `required` mode. Consequently, a Server tha
 - No handshake failure falls back to plaintext after E2EE is selected.
 - Outer TLS certificate validation remains active.
 - Authorization revocation, ACL, stream limits, cancellation, half-close and audit accounting remain correct.
-- First-use trust limitations and the absence of required-mode downgrade protection are explicitly tested/documented.
+- First-use TOFU trust limitations remain documented even when required mode prevents capability suppression downgrade on the covered proxy flows.

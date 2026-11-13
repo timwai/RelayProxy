@@ -20,6 +20,7 @@
 ## 尚未实现
 
 - [ ] 专用 PortForward Server 授权、Lease、撤销和审计协议。
+- [ ] Relay UDP 的 E2EE 原生 Datagram AEAD。当前现有 E2EE Relay UDP 使用可靠 Stream 封装；本适配器强制原生 Datagram，因此在 E2EE Relay 路径上会失败关闭，不能算作 Relay UDP 已验收。
 - [ ] 目标 Agent 专用 Mapping Handler、目标范围 ACL 和 DNS Rebinding 防护。
 - [ ] 将专用端口转发映射与现有 Proxy Exit 权限解耦。当前客户端适配器临时复用已授权 Proxy Exit，不能视为最终授权模型。
 - [ ] Agent 配置持久化、运行时管理 API 和 UI。

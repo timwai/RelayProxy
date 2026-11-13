@@ -1505,17 +1505,18 @@ func (a *Agent) serveProxyP2PExit(ctx context.Context, manager *proxyp2p.Manager
 			if !ok || direct == nil {
 				continue
 			}
+			clientDeviceID, exitDeviceID := p2pSession.ClientDeviceID, p2pSession.ExitDeviceID
 			sessions.Add(1)
 			go func() {
 				defer sessions.Done()
-				a.acceptProxyP2PExitSession(ctx, direct, handler, policy, maxStreams)
+				a.acceptProxyP2PExitSession(ctx, direct, handler, policy, clientDeviceID, exitDeviceID, maxStreams)
 			}()
 		}
 	}
 }
 
-func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, relayPolicy *acl.Policy, maxStreams int) {
-	if sess == nil || handler == nil || relayPolicy == nil {
+func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, relayPolicy *acl.Policy, clientDeviceID, exitDeviceID string, maxStreams int) {
+	if sess == nil || handler == nil || relayPolicy == nil || clientDeviceID == "" || exitDeviceID == "" {
 		return
 	}
 	if maxStreams <= 0 {
@@ -1524,7 +1525,7 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 	sem := make(chan struct{}, maxStreams)
 	var workers sync.WaitGroup
 	defer workers.Wait()
-	boundCtx := exit.BindRelayPolicy(ctx, relayPolicy)
+	boundCtx := exit.WithDirectP2POrigin(exit.BindRelayPolicy(ctx, relayPolicy), clientDeviceID, exitDeviceID)
 	for {
 		stream, err := sess.AcceptStream(ctx)
 		if err != nil {

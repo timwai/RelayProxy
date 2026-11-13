@@ -327,6 +327,7 @@ func main() {
 		// subset is granted. This is not a client-side authorization choice.
 		Mode:                    "BOTH",
 		TransportMode:           cfgFile.Transport.Mode,
+		E2EEMode:               cfgFile.Proxy.E2EEMode,
 		BrutalUploadBPS:         congestion.MbpsToBytesPerSecond(cfgFile.Transport.Bandwidth.UpMbps),
 		BrutalDownloadBPS:       congestion.MbpsToBytesPerSecond(cfgFile.Transport.Bandwidth.DownMbps),
 		DisableLossCompensation: cfgFile.Transport.Bandwidth.DisableLossCompensation,

@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"relayproxy/agent/client"
+	"relayproxy/agent/portforward"
 	"relayproxy/agent/divert"
 	"relayproxy/agent/exit"
 	"relayproxy/agent/fileshare"
@@ -267,6 +268,7 @@ type AgentStatus struct {
 	ActiveStreams        int64                      `json:"activeStreams"`
 	ApprovalState        string                     `json:"approvalState"`
 	RDPSessions          []RDPSessionStatus         `json:"rdpSessions"`
+	PortForwardMappings  []portforward.Snapshot     `json:"portForwardMappings"`
 	RDPListenAddr        string                     `json:"rdpListenAddr,omitempty"`
 	RDPTargetID          string                     `json:"rdpTargetId,omitempty"`
 	RDPUDPEnabled        bool                       `json:"rdpUdpEnabled"`
@@ -333,6 +335,7 @@ type Agent struct {
 	tunnelMgr            *tunnel.TunnelManager
 	dialer               *routing.RoutingDialer
 	rawDialer            *client.TunnelDialer
+	portForwardMgr       *portforward.Manager
 	routingEngine        *routing.Engine
 	traffic              *traffic.Registry
 	messages             *MessageBuffer
@@ -603,6 +606,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.configureProxyPathProvider()
 	a.dialer = routing.NewRoutingDialer(engine, a.rawDialer, &a.policyMu)
 	a.rawDialer.ConfigureExitGroups(cfg.Routing.DeviceGroups, a.groupExitUsable)
+	a.portForwardMgr = portforward.NewManager(a.ctx, client.NewPortForwardTransport(a.rawDialer), portforward.Options{})
 	a.dialer.SetCustomExits(cfg.CustomExits)
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
@@ -1712,6 +1716,7 @@ func (a *Agent) Status() AgentStatus {
 	}
 	st.Connected = a.handshakeOK.Load() && sess != nil
 	a.mu.RUnlock()
+	st.PortForwardMappings = a.PortForwardMappings()
 	st.Gateway = a.GatewayStatus()
 	if ptr := a.selectedExit.Load(); ptr != nil {
 		st.SelectedExit = *ptr
@@ -2348,6 +2353,9 @@ func (a *Agent) closeRuntime() error {
 		errs = append(errs, a.closePublicDirectClient())
 		if exitHandler != nil {
 			errs = append(errs, exitHandler.Close())
+		}
+		if a.portForwardMgr != nil {
+			errs = append(errs, a.portForwardMgr.Close())
 		}
 		if a.tunnelMgr != nil {
 			errs = append(errs, a.tunnelMgr.Close())

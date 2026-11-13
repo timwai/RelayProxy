@@ -30,8 +30,18 @@ func TestShouldUseE2EERequiresPersistentPeerPinVerifier(t *testing.T) {
 	if !dialer.shouldUseE2EE("exit-device", protocol.ProxyPathRelayTLS) {
 		t.Fatal("Relay E2EE was not enabled when both peer key and pin verifier are available")
 	}
-	if dialer.shouldUseE2EE("exit-device", protocol.ProxyPathP2PQUIC) {
-		t.Fatal("direct P2P path unexpectedly selected the Relay E2EE wrapper")
+	if !dialer.shouldUseE2EE("exit-device", protocol.ProxyPathP2PQUIC) {
+		t.Fatal("authenticated P2P QUIC path did not select the E2EE wrapper")
+	}
+	if dialer.shouldUseE2EE("exit-device", protocol.ProxyPathPublicDirectQUIC) {
+		t.Fatal("Public Direct unexpectedly selected the unsupported E2EE wrapper")
+	}
+	dialer.SetE2EEServerSupported(false)
+	if dialer.shouldUseE2EE("exit-device", protocol.ProxyPathP2PQUIC) == false {
+		t.Fatal("direct P2P E2EE incorrectly depended on Relay Server SecureRelay support")
+	}
+	if dialer.shouldUseE2EE("exit-device", protocol.ProxyPathRelayTLS) {
+		t.Fatal("Relay E2EE activated without Relay Server SecureRelay support")
 	}
 	if dialer.shouldUseE2EE(protocol.ServerExitDeviceID, protocol.ProxyPathRelayTLS) {
 		t.Fatal("Server-local Exit unexpectedly selected the Relay E2EE wrapper")
@@ -54,13 +64,14 @@ func TestRequiredE2EEFailsClosedForLegacyAndServerLocalExits(t *testing.T) {
 	}
 }
 
-func TestRequiredE2EEBypassesDirectPathsAndNeverDowngrades(t *testing.T) {
+func TestRequiredE2EEUsesAuthenticatedP2PAndNeverDowngrades(t *testing.T) {
 	relay := &namedSession{name: "relay"}
 	direct := &namedSession{name: "direct"}
+	directPath := protocol.ProxyPathP2PQUIC
 	dialer := NewTunnelDialer(func() tunnel.TunnelSession { return relay }, func() string { return "client" })
 	dialer.ConfigureDirectPolicy("auto", true)
 	dialer.ConfigurePathProvider(func(string) (SelectedSession, bool) {
-		return SelectedSession{Session: direct, Path: protocol.ProxyPathPublicDirectQUIC}, true
+		return SelectedSession{Session: direct, Path: directPath}, true
 	}, nil)
 	dialer.ConfigureE2EE(e2ee.Identity{
 		PublicKey:  make(ed25519.PublicKey, ed25519.PublicKeySize),
@@ -72,28 +83,36 @@ func TestRequiredE2EEBypassesDirectPathsAndNeverDowngrades(t *testing.T) {
 	dialer.ConfigureE2EEMode("required")
 
 	selected, err := dialer.selectProxyDataSession("exit")
-	if err != nil || selected.Session != relay || !selected.Path.IsRelay() {
-		t.Fatalf("required E2EE did not force verified Relay path: selected=%+v err=%v", selected, err)
-	}
-	if err := dialer.requireSecureProxyPath("exit", protocol.ProxyPathPublicDirectQUIC); err == nil ||
-		!strings.Contains(err.Error(), "direct") {
-		t.Fatalf("required E2EE accepted direct path: %v", err)
+	if err != nil || selected.Session != direct || selected.Path != protocol.ProxyPathP2PQUIC {
+		t.Fatalf("required E2EE did not use authenticated P2P QUIC: selected=%+v err=%v", selected, err)
 	}
 	if err := dialer.requireSecureProxyPath("exit", selected.Path); err != nil {
-		t.Fatalf("required E2EE rejected fully capable Relay path: %v", err)
+		t.Fatalf("required E2EE rejected authenticated P2P QUIC: %v", err)
+	}
+	if err := dialer.requireSecureProxyPath("exit", protocol.ProxyPathPublicDirectQUIC); err == nil ||
+		!strings.Contains(err.Error(), "Public Direct") {
+		t.Fatalf("required E2EE accepted unsupported Public Direct path: %v", err)
+	}
+
+	// When Public Direct is the selected path, auto mode must fall back to an
+	// E2EE-capable Relay rather than use the unsupported direct handler.
+	directPath = protocol.ProxyPathPublicDirectQUIC
+	selected, err = dialer.selectProxyDataSession("exit")
+	if err != nil || selected.Session != relay || !selected.Path.IsRelay() {
+		t.Fatalf("required E2EE did not fall back from Public Direct to Relay: selected=%+v err=%v", selected, err)
 	}
 
 	dialer.SetE2EEServerSupported(false)
 	if _, err := dialer.selectProxyDataSession("exit"); err == nil {
-		t.Fatal("required E2EE silently fell back after Server capability was removed")
+		t.Fatal("required E2EE silently fell back after Relay capability was removed")
 	}
 	dialer.SetE2EEServerSupported(true)
 	dialer.ConfigureE2EEMode("off")
-	if dialer.shouldUseE2EE("exit", selected.Path) {
+	if dialer.shouldUseE2EE("exit", protocol.ProxyPathP2PQUIC) {
 		t.Fatal("explicit off mode unexpectedly initiated E2EE")
 	}
 	dialer.ConfigureE2EEMode("opportunistic")
-	if !dialer.shouldUseE2EE("exit", selected.Path) {
-		t.Fatal("opportunistic E2EE did not activate on a capable Relay and Exit")
+	if !dialer.shouldUseE2EE("exit", protocol.ProxyPathP2PQUIC) {
+		t.Fatal("opportunistic E2EE did not activate on a capable P2P peer")
 	}
 }

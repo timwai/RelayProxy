@@ -64,6 +64,32 @@ func TestRequiredE2EEFailsClosedForLegacyAndServerLocalExits(t *testing.T) {
 	}
 }
 
+func TestRequiredE2EEKeepsNativeDatagramsOnAuthenticatedP2P(t *testing.T) {
+	dialer := NewTunnelDialer(nil, func() string { return "client" })
+	dialer.ConfigureE2EE(e2ee.Identity{
+		PublicKey:  make(ed25519.PublicKey, ed25519.PublicKeySize),
+		PrivateKey: make(ed25519.PrivateKey, ed25519.PrivateKeySize),
+	}, func(string) ([]byte, bool) {
+		return make([]byte, ed25519.PublicKeySize), true
+	}, func(string, []byte) error { return nil })
+	dialer.SetE2EEServerSupported(true)
+	dialer.ConfigureE2EEMode("required")
+
+	if err := dialer.requireSecureProxyPath("exit", protocol.ProxyPathP2PQUIC); err != nil {
+		t.Fatalf("authenticated P2P path was not accepted in required mode: %v", err)
+	}
+	requiredDatagrams := UDPDialOptions{DatagramRequired: true}
+	if dialer.shouldUseE2EEForUDP("exit", protocol.ProxyPathP2PQUIC, requiredDatagrams) {
+		t.Fatal("native datagrams on mutually authenticated P2P QUIC were unnecessarily forced through stream framing")
+	}
+	if !dialer.shouldUseE2EEForUDP("exit", protocol.ProxyPathRelayTLS, requiredDatagrams) {
+		t.Fatal("Relay UDP datagrams must remain behind the application E2EE stream wrapper")
+	}
+	if !dialer.shouldUseE2EEForUDP("exit", protocol.ProxyPathP2PQUIC, UDPDialOptions{}) {
+		t.Fatal("ordinary P2P UDP stream lost the application E2EE wrapper")
+	}
+}
+
 func TestRequiredE2EEUsesAuthenticatedP2PAndNeverDowngrades(t *testing.T) {
 	relay := &namedSession{name: "relay"}
 	direct := &namedSession{name: "direct"}

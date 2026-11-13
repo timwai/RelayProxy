@@ -426,6 +426,9 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		if cfg.PlainTCP || cfg.InsecureTLS {
 			return nil, errors.New("E2EE required mode requires verified Relay TLS")
 		}
+		if peerPinStore == nil {
+			return nil, errors.New("E2EE required mode requires a persistent E2EE peer key pin store")
+		}
 	}
 	if cfg.Identity == nil {
 		var err error

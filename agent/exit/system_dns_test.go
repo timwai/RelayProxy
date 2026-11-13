@@ -137,7 +137,6 @@ func TestSecureRelayAcceptsAuthenticatedDirectP2POrigin(t *testing.T) {
 	}
 	const clientID, exitID = "client-device", "exit-device"
 	clientIdentity := e2ee.Identity{DeviceID: clientID, PublicKey: clientPublic, PrivateKey: clientPrivate}
-	exitIdentity := e2ee.Identity{DeviceID: exitID, PublicKey: exitPublic, PrivateKey: exitPrivate}
 
 	checker, err := acl.NewChecker(acl.Policy{ID: "exit-policy", AllowInternet: true, AllowLoopback: true})
 	if err != nil {

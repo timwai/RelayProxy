@@ -11,6 +11,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/chacha20poly1305"
 )
 
 type testStream struct {
@@ -312,6 +314,70 @@ func TestSecureStreamRejectsOversizedAndTruncatedRecords(t *testing.T) {
 		if _, err := exit.Read(make([]byte, 1)); err == nil {
 			t.Fatal("truncated record was accepted")
 		}
+	})
+}
+
+func TestSecureStreamRejectsReplayedAndOutOfOrderRecords(t *testing.T) {
+	key := bytes.Repeat([]byte{0x51}, chacha20poly1305.KeySize)
+	makeRecord := func(sequence uint64, plaintext []byte) []byte {
+		aead, err := chacha20poly1305.New(key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var header [4]byte
+		binary.BigEndian.PutUint32(header[:], uint32(len(plaintext)+aead.Overhead()))
+		ciphertext := aead.Seal(nil, recordNonce(sequence, aead.NonceSize()), plaintext, header[:])
+		return append(append([]byte(nil), header[:]...), ciphertext...)
+	}
+
+	for _, tc := range []struct {
+		name string
+		wire []byte
+		first []byte
+	}{
+		{name: "out-of-order", wire: makeRecord(1, []byte("sequence one"))},
+		{name: "replay", wire: append(makeRecord(0, []byte("first")), makeRecord(0, []byte("replayed"))...), first: []byte("first")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			clientConn, exitConn := net.Pipe()
+			defer clientConn.Close()
+			defer exitConn.Close()
+			secure, err := NewSecureStream(&testStream{Conn: exitConn}, key, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			writeDone := make(chan error, 1)
+			go func() { writeDone <- writeAll(clientConn, tc.wire) }()
+
+			if len(tc.first) > 0 {
+				got := make([]byte, len(tc.first))
+				if _, err := io.ReadFull(secure, got); err != nil {
+					t.Fatalf("read first valid record: %v", err)
+				}
+				if !bytes.Equal(got, tc.first) {
+					t.Fatalf("first record = %q, want %q", got, tc.first)
+				}
+			}
+			if _, err := secure.Read(make([]byte, 32)); err == nil {
+				t.Fatal("replayed or out-of-order E2EE record was accepted")
+			}
+			if err := <-writeDone; err != nil {
+				t.Fatalf("write crafted E2EE records: %v", err)
+			}
+		})
+	}
+}
+
+func FuzzReadHandshakeMessage(f *testing.F) {
+	f.Add([]byte{0, 0, 0, 0})
+	f.Add([]byte{0, 0, 0, 1, '{'})
+	f.Add([]byte{0, 0, 0, 2, '{', '}'})
+	f.Fuzz(func(t *testing.T, raw []byte) {
+		if len(raw) > MaxHandshakeMessage+4 {
+			return
+		}
+		var message clientHello
+		_ = readHandshakeMessage(bytes.NewReader(raw), &message)
 	})
 }
 

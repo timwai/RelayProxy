@@ -21,7 +21,8 @@ func TestReactConfigPayloadRoundTripsThroughBridge(t *testing.T) {
 			"quicPort":    4433,
 			"tcpPort":     8443,
 			"tlsEnabled":  true,
-			"insecureTls": true,
+			"insecureTls":      true,
+			"allowInsecureTls": true,
 		},
 		"device": map[string]any{
 			"name":       "react-agent",

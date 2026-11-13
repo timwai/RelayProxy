@@ -81,8 +81,38 @@ func TestPunchedSocketCarriesPinnedQUIC(t *testing.T) {
 	case exitSession = <-serverCh:
 	}
 	defer exitSession.Close()
-	if !tunnel.PeerSupportsDatagrams(clientSession.QUICSession) || !tunnel.PeerSupportsDatagrams(exitSession.QUICSession) {
-		t.Fatal("direct QUIC session did not advertise native UDP datagram support")
+	if !tunnel.PeerSupportsDatagrams(clientSession.QUICSession) || !tunnel.PeerSupportsDatagrams(exitSession.QUICSession) ||
+		!tunnel.PeerSupportsDatagrams(clientSession) || !tunnel.PeerSupportsDatagrams(exitSession) {
+		t.Fatal("authenticated P2P QUIC wrapper did not preserve native UDP datagram support")
+	}
+
+	clientDatagrams, err := tunnel.OpenDatagramChannel(clientSession, 0)
+	if err != nil {
+		t.Fatalf("open native UDP datagram channel through Client P2P wrapper: %v", err)
+	}
+	defer clientDatagrams.Close()
+	exitDatagrams, err := tunnel.OpenDatagramChannel(exitSession, clientDatagrams.ID)
+	if err != nil {
+		t.Fatalf("open native UDP datagram channel through Exit P2P wrapper: %v", err)
+	}
+	defer exitDatagrams.Close()
+	const udpPayload = "p2p-native-udp"
+	sendDone := make(chan error, 1)
+	go func() {
+		sendDone <- protocol.FragmentUDP(7, []byte(udpPayload), func(frame []byte) error {
+			return clientDatagrams.Send(ctx, frame)
+		})
+	}()
+	receivedFrame, err := exitDatagrams.Receive(ctx)
+	if err != nil {
+		t.Fatalf("receive native P2P UDP datagram: %v", err)
+	}
+	if err := <-sendDone; err != nil {
+		t.Fatalf("send native P2P UDP datagram: %v", err)
+	}
+	fragment, err := protocol.DecodeUDPFragment(receivedFrame)
+	if err != nil || fragment.PacketID != 7 || string(fragment.Payload) != udpPayload {
+		t.Fatalf("native P2P UDP payload mismatch: fragment=%+v err=%v", fragment, err)
 	}
 
 	stream, err := clientSession.OpenStream(ctx)

@@ -245,7 +245,7 @@ func TestSecureRelayHidesExitSystemDNSQuestionFromRelay(t *testing.T) {
 			if network != "ip4" || host != "e2ee-secret-q-9f13.example" {
 				t.Fatalf("unexpected system DNS lookup: network=%q host=%q", network, host)
 			}
-			return []net.IP{net.ParseIP("203.0.113.19")}, nil
+			return []net.IP{net.ParseIP("8.8.8.8")}, nil
 		},
 		SystemDNSAllowed: func() bool { return true },
 		E2EEPublicKey:    exitIdentity.PublicKey, E2EEPrivateKey: exitIdentity.PrivateKey,
@@ -348,7 +348,7 @@ func TestSecureRelayHidesExitSystemDNSQuestionFromRelay(t *testing.T) {
 		t.Fatalf("Exit system DNS failed: %+v", response)
 	}
 	ips, err := protocol.ValidateExitDNSAnswer(query, response.Answer)
-	if err != nil || len(ips) != 1 || !ips[0].Equal(net.ParseIP("203.0.113.19")) {
+	if err != nil || len(ips) != 1 || !ips[0].Equal(net.ParseIP("8.8.8.8")) {
 		t.Fatalf("invalid encrypted Exit DNS answer: ips=%v err=%v", ips, err)
 	}
 	_ = secureClient.Close()

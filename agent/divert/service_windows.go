@@ -441,7 +441,7 @@ func serveWindowsNetworkSession(file *os.File) error {
 		return err
 	}
 	if err := installWindowsTransparentFirewallRule(ports, program); err != nil {
-		message := "配置透明代理 Windows Firewall 入站规则失败: " + err.Error()
+		message := fmt.Sprintf("配置透明代理 Windows Firewall 入站规则失败 (program=%q): %v", program, err)
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(message)})
 		return errors.New(message)
 	}

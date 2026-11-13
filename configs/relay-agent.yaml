@@ -23,6 +23,8 @@ transport:
 # 两种代理各自的连接上限；SOCKS5 UDP association 计入 SOCKS5 上限。
 # 多标签浏览器可按设备资源提高到 1024。修改后重启 Agent 生效。
 proxy:
+  # e2ee_mode: required       # off | opportunistic (default) | required
+  # required: 仅远程设备 Exit 的 Relay TCP/可靠 UDP，禁止无加密回退；不支持 Server 出口/直连专用模式
   max_connections: 256
   idle_timeout_sec: 300        # TCP 双向空闲超时
   udp_idle_timeout_sec: 300    # UDP 关联双向有效报文空闲超时，独立于 TCP control

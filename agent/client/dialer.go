@@ -454,7 +454,10 @@ func (d *TunnelDialer) selectedSessionForExit(exitDeviceID string) SelectedSessi
 }
 
 func (d *TunnelDialer) openProxyStream(ctx context.Context, exitDeviceID string) (SelectedSession, tunnel.TunnelStream, error) {
-	selected := d.selectedSessionForExit(exitDeviceID)
+	selected, selectErr := d.selectProxyDataSession(exitDeviceID)
+	if selectErr != nil {
+		return SelectedSession{}, nil, selectErr
+	}
 	if selected.Session == nil {
 		return SelectedSession{}, nil, fmt.Errorf("tunnel is not connected")
 	}

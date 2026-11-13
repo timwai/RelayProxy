@@ -240,14 +240,18 @@ func TestSecureStreamAuthenticatedHalfCloseIsStickyEOF(t *testing.T) {
 	defer clientConn.Close()
 	defer exitConn.Close()
 
-	if err := client.CloseWrite(); err != nil {
-		t.Fatal(err)
-	}
+	// net.Pipe has no buffering: a synchronous CloseWrite cannot complete
+	// until the peer has read the authenticated close record.
+	closeDone := make(chan error, 1)
+	go func() { closeDone <- client.CloseWrite() }()
 	if _, err := exit.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 		t.Fatalf("first read after authenticated close=%v, want EOF", err)
 	}
 	if _, err := exit.Read(make([]byte, 1)); !errors.Is(err, io.EOF) {
 		t.Fatalf("subsequent read after authenticated close=%v, want sticky EOF", err)
+	}
+	if err := <-closeDone; err != nil {
+		t.Fatalf("write authenticated close record: %v", err)
 	}
 }
 

@@ -177,9 +177,6 @@ func ValidateAgentConfig(c *AgentConfigFile) error {
 		if !c.IsServerTLSEnabled() || c.Server.InsecureTLS {
 			return fmt.Errorf("proxy.e2ee_mode=required requires verified Relay TLS")
 		}
-		if c.P2P.Mode == "direct_only" || c.P2P.Mode == "p2p_only" {
-			return fmt.Errorf("proxy.e2ee_mode=required is incompatible with direct_only/p2p_only until direct E2EE is implemented")
-		}
 	}
 	if c.Proxy.MaxConnections < 1 || c.Proxy.MaxConnections > 65536 {
 		return fmt.Errorf("proxy.max_connections 必须在 1-65536 之间")

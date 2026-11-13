@@ -201,7 +201,7 @@ func (d *TunnelDialer) shouldUseE2EE(exitDeviceID string, path protocol.ProxyPat
 
 // requireSecureProxyPath makes an explicit required policy fail closed when
 // the selected Exit cannot complete application-level E2EE. This is checked
-// before opening a business stream, and again at each individual session use.
+// before opening proxy TCP/UDP and Exit system DNS streams, and again at use.
 func (d *TunnelDialer) requireSecureProxyPath(exitDeviceID string, path protocol.ProxyPath) error {
 	d.directMu.RLock()
 	required := d.e2eeMode == "required"
@@ -224,9 +224,9 @@ func (d *TunnelDialer) requireSecureProxyPath(exitDeviceID string, path protocol
 	return nil
 }
 
-// In required mode, remote proxy data uses the Relay stream even when a
-// P2P/Public Direct path is ready, because direct application E2EE is not
-// implemented. Do not silently bypass the required policy on any path.
+// In required mode, remote proxy data and Exit system DNS use the Relay
+// stream even when a P2P/Public Direct path is ready, because direct
+// application E2EE is not implemented. Never silently bypass the policy.
 func (d *TunnelDialer) selectProxyDataSession(exitDeviceID string) (SelectedSession, error) {
 	d.directMu.RLock()
 	required := d.e2eeMode == "required"

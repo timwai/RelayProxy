@@ -11,7 +11,7 @@ Separate three properties:
 2. **End-to-end encryption**: for a remote device Exit reached through the Relay, the Client Agent and Exit Agent encrypt the inner proxy stream. The Relay routes and accounts for opaque bytes without parsing target requests or responses.
 3. **Metadata protection**: the Relay can still see Client/Exit Device IDs, selected Exit, stream timing, byte counts and packet sizes. The Exit and destination network necessarily know the target. Traffic analysis and DPI classification are not hidden.
 
-The Server itself cannot be blind when the Server-local Exit is selected: it is the egress endpoint. E2EE is currently used only for remote device Exits over Relay-routed streams. Direct P2P/Public Direct paths continue to use their TLS 1.3 transport with pinned ephemeral transport fingerprints; they do not yet add the application-level E2EE wrapper.
+The Server itself cannot be blind when the Server-local Exit is selected: it is the egress endpoint. Remote device Exits use the application-level E2EE wrapper over Relay-routed streams and authenticated P2P QUIC. Public Direct continues to use TLS 1.3 with pinned ephemeral transport fingerprints and does not yet add the application-level E2EE wrapper.
 
 ## 2. Current code facts
 
@@ -72,7 +72,7 @@ Exit Agent
 Existing Exit ACL / resolver / dialer
 ```
 
-P2P QUIC and Public Direct QUIC currently rely on their existing TLS 1.3 fingerprint-pinned transport. A future phase may add the same application-level E2EE wrapper to those paths if uniform cryptographic identity is required.
+P2P QUIC uses the application-level E2EE wrapper when both peers advertise support. Public Direct QUIC still relies on its TLS 1.3 fingerprint-pinned transport because it does not yet expose the authenticated SecureRelay stream handler.
 
 ### Record framing
 
@@ -97,9 +97,9 @@ The Client supports `proxy.e2ee_mode` in `relay-agent.yaml`, exposed as “代�
 
 - `off`: use the existing TLS-protected legacy proxy stream, without application-layer E2EE (explicit compatibility/development choice).
 - `opportunistic` (default when unset): encrypt Relay-routed TCP and reliable stream-UDP when the authenticated Server and selected remote device Exit advertise support. Legacy endpoints may use the old TLS-protected proxy stream. Once E2EE negotiation starts, handshake/key-confirmation/TOFU failure closes that stream; no plaintext retry.
-- `required`: fail closed for covered proxy TCP, stream-UDP and remote Exit system DNS A/AAAA queries unless they use authenticated E2EE. An explicit remote Exit device ID is required; Server-local Exit is rejected. Ready P2P/Public Direct paths are bypassed in favor of Relay because application-layer direct E2EE has not yet shipped. `direct_only` and `p2p_only` configurations are rejected for this mode. Missing key/Server capability or suppressed E2EE advertising fails closed. Verified TLS remains mandatory.
+- `required`: fail closed for covered proxy TCP, stream-UDP and remote Exit system DNS A/AAAA queries unless they use authenticated E2EE. An explicit remote Exit device ID is required; Server-local Exit is rejected. Authenticated P2P QUIC can carry the same E2EE wrapper without Relay data-plane involvement. Public Direct does not yet expose the SecureRelay handler: auto mode falls back to Relay, while a direct-only route fails closed if it selects Public Direct. `p2p_only` is supported when the peer is E2EE-capable. Missing key/Server capability or suppressed E2EE advertising fails closed. Verified TLS remains mandatory.
 
-Required mode protects against **capability-suppression downgrade** on these specific proxy flows, but does not authenticate an Exit's **first** TOFU key independently of the Server. Out-of-band fingerprint verification / identity-authority-signed Exit certificates remain follow-up security work. The mode now protects remote Exit system DNS A/AAAA questions on Relay paths. It does not yet protect other DNS resolver modes, RDP, file sharing, Browser Network Proxy, native UDP datagrams or other independent service streams.
+Required mode protects against **capability-suppression downgrade** on these specific proxy flows, but does not authenticate an Exit's **first** TOFU key independently of the Server. Out-of-band fingerprint verification / identity-authority-signed Exit certificates remain follow-up security work. The mode now protects remote Exit system DNS A/AAAA questions on Relay and authenticated P2P QUIC paths. It does not yet protect other DNS resolver modes, RDP, file sharing, Browser Network Proxy, native UDP datagrams or other independent service streams.
 
 ## 8. Staged implementation
 
@@ -124,12 +124,13 @@ Required mode protects against **capability-suppression downgrade** on these spe
 ### P2 — Relay-blind proxy TCP/UDP
 - [x] Add `FrameTypeSecureRelay` and opaque Relay forwarding.
 - [x] Wrap Relay-routed Client TCP, reliable stream-UDP and Exit system DNS A/AAAA requests when both endpoints support E2EE.
+- [x] Wrap authenticated P2P QUIC Client TCP, reliable stream-UDP and Exit system DNS with the same E2EE identity handshake; bind the direct stream to the Server-coordinated Client/Exit device pair.
 - [x] Decrypt at Exit and dispatch existing TCP/UDP handlers.
 - [x] Forward authoritative Relay ACL metadata to Exit.
 - [x] Keep target host/port/IP out of Relay secure-stream audit.
 - [x] Add in-process Server router + real Exit handler integration acceptance proving the Relay cannot recover TCP target metadata/payload or Exit system DNS questions.
 - [x] Add explicit TCP/stream-UDP/Exit-system-DNS E2EE-required policy, path-fail-closed and downgrade tests.
-- [ ] Decide whether direct P2P/Public Direct should also use the application-level E2EE wrapper.
+- [ ] Add the application-level E2EE wrapper to Public Direct paths after they expose an authenticated Exit stream handler.
 - [ ] Add native datagram E2EE or a documented product-level stream fallback for UDP datagram-required callers.
 
 ### P3 — Remaining services

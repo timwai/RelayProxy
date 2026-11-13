@@ -716,6 +716,18 @@ func retryableDirectHandshakeError(ctx context.Context, err error) bool {
 
 type UDPDialOptions = proxy.UDPDialOptions
 
+// shouldUseE2EEForUDP keeps native UDP datagrams available when the selected
+// P2P QUIC session is already mutually authenticated with TLS 1.3 and pinned
+// peer certificates. That direct path bypasses Relay entirely. Relay-routed
+// UDP still needs the encrypted stream wrapper because Relay forwards its
+// datagram payloads in the clear at the application layer.
+func (d *TunnelDialer) shouldUseE2EEForUDP(exitDeviceID string, path protocol.ProxyPath, opts UDPDialOptions) bool {
+	if opts.DatagramRequired && path == protocol.ProxyPathP2PQUIC {
+		return false
+	}
+	return d.shouldUseE2EE(exitDeviceID, path)
+}
+
 func (d *TunnelDialer) DialUDP(ctx context.Context, exitNodeID string, host string, port uint16) (net.PacketConn, error) {
 	return d.DialUDPWithOptions(ctx, exitNodeID, host, port, UDPDialOptions{})
 }
@@ -819,7 +831,7 @@ func (d *TunnelDialer) dialUDPOnSession(ctx context.Context, sess tunnel.TunnelS
 	stopCancel := tunnel.InterruptOnCancel(ctx, stream)
 	defer stopCancel()
 
-	secureRelay := d.shouldUseE2EE(exitNodeID, path)
+	secureRelay := d.shouldUseE2EEForUDP(exitNodeID, path, opts)
 	if secureRelay && opts.DatagramRequired {
 		_ = stream.Close()
 		return nil, protocol.NewRelayError(protocol.ErrCodeDatagramRequired, "E2EE Relay UDP currently uses reliable stream framing; native UDP datagrams are unavailable on this path")

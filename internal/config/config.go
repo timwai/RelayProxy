@@ -156,10 +156,10 @@ type AgentConfigFile struct {
 	Mode string `yaml:"-"` // runtime-only capability view; grants come from the server
 
 	Proxy struct {
-		E2EEMode string `yaml:"e2ee_mode,omitempty"` // off | opportunistic (default) | required; remote Relay proxy TCP/stream-UDP
-		MaxConnections    int `yaml:"max_connections"` // per listener, including UDP associations
-		IdleTimeoutSec    int `yaml:"idle_timeout_sec"`
-		UDPIdleTimeoutSec int `yaml:"udp_idle_timeout_sec"`
+		E2EEMode          string `yaml:"e2ee_mode,omitempty"` // off | opportunistic (default) | required; remote Relay proxy TCP/stream-UDP
+		MaxConnections    int    `yaml:"max_connections"`     // per listener, including UDP associations
+		IdleTimeoutSec    int    `yaml:"idle_timeout_sec"`
+		UDPIdleTimeoutSec int    `yaml:"udp_idle_timeout_sec"`
 		SOCKS5            struct {
 			Enabled *bool  `yaml:"enabled"`
 			Listen  string `yaml:"listen"`

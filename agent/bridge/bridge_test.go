@@ -303,8 +303,12 @@ func TestE2EERequiredModeSurvivesAgentBridgeSave(t *testing.T) {
 	b := newTestBridge(t)
 	var update ConfigUpdate
 	update.Proxy.E2EEMode = ptr("required")
-	if _, err := b.SaveConfig(update); err != nil {
+	saved, err := b.SaveConfig(update)
+	if err != nil {
 		t.Fatalf("save required E2EE mode: %v", err)
+	}
+	if !saved.RestartRequired {
+		t.Fatal("required E2EE policy change was not marked restart-required")
 	}
 	loaded, err := config.LoadAgentConfig(b.configPath)
 	if err != nil || loaded.Proxy.E2EEMode != "required" {

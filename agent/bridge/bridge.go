@@ -387,6 +387,8 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Server.TCPPort = c.TCPPort
 	res.Server.TLSEnabled = config.BoolPtr(!c.PlainTCP)
 	res.Server.InsecureTLS = c.InsecureTLS
+	res.Server.Security.AllowPlainTCP = c.AllowPlainTCP
+	res.Server.Security.AllowInsecureTLS = c.AllowInsecureTLS
 	res.Device.Name = c.DeviceName
 	res.Device.IdentityID = c.IdentityID
 	res.Transport.Mode = c.TransportMode
@@ -440,7 +442,9 @@ type ConfigUpdate struct {
 		QUICPort    *int    `json:"quicPort"`
 		TCPPort     *int    `json:"tcpPort"`
 		TLSEnabled  *bool   `json:"tlsEnabled"`
-		InsecureTLS *bool   `json:"insecureTls"`
+		InsecureTLS      *bool `json:"insecureTls"`
+		AllowPlainTCP    *bool `json:"allowPlainTcp"`
+		AllowInsecureTLS *bool `json:"allowInsecureTls"`
 	} `json:"server"`
 	Device struct {
 		Name       *string `json:"name"`
@@ -618,6 +622,12 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	}
 	if in.Server.InsecureTLS != nil {
 		cfg.Server.InsecureTLS = *in.Server.InsecureTLS
+	}
+	if in.Server.AllowPlainTCP != nil {
+		cfg.Server.Security.AllowPlainTCP = *in.Server.AllowPlainTCP
+	}
+	if in.Server.AllowInsecureTLS != nil {
+		cfg.Server.Security.AllowInsecureTLS = *in.Server.AllowInsecureTLS
 	}
 	if in.Device.Name != nil {
 		cfg.Device.Name = strings.TrimSpace(*in.Device.Name)

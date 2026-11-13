@@ -248,6 +248,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		TCPPort                     int                 `json:"tcpPort"`
 		TLSEnabled                  bool                `json:"tlsEnabled"`
 		InsecureTLS                 bool                `json:"insecureTls"`
+		E2EEMode                   string              `json:"e2eeMode"`
 		AllowPlainTCP               bool                `json:"allowPlainTcp"`
 		AllowInsecureTLS            bool                `json:"allowInsecureTls"`
 		DeviceName                  string              `json:"deviceName"`
@@ -294,6 +295,7 @@ func (s *WailsService) GetConfig() (string, error) {
 		TCPPort:          cfg.Server.TCPPort,
 		TLSEnabled:       cfg.IsServerTLSEnabled(),
 		InsecureTLS:      cfg.Server.InsecureTLS,
+		E2EEMode:        cfg.Proxy.E2EEMode,
 		AllowPlainTCP:    cfg.Server.Security.AllowPlainTCP,
 		AllowInsecureTLS: cfg.Server.Security.AllowInsecureTLS,
 		DeviceName:       cfg.Device.Name,
@@ -347,6 +349,7 @@ func (s *WailsService) GetConfig() (string, error) {
 			"tcpPort":          state.Runtime.Server.TCPPort,
 			"tlsEnabled":       state.Runtime.IsServerTLSEnabled(),
 			"insecureTls":      state.Runtime.Server.InsecureTLS,
+			"e2eeMode":         state.Runtime.Proxy.E2EEMode,
 			"allowPlainTcp":    state.Runtime.Server.Security.AllowPlainTCP,
 			"allowInsecureTls": state.Runtime.Server.Security.AllowInsecureTLS,
 			"transport":        state.Runtime.Transport.Mode,

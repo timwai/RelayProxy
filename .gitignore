@@ -52,6 +52,12 @@ Thumbs.db
 /macos/*.xcodeproj/
 /macos/DerivedData/
 
+# Local agent identity and peer trust state
+/device-identity.json
+/peer-key-pins.json
+**/device-identity.json
+**/peer-key-pins.json
+
 # Local agent/task metadata
 .env
 .env.agent

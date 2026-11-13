@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
 	"encoding/json"
@@ -33,6 +34,7 @@ import (
 	"relayproxy/agent/routing"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
+	"relayproxy/internal/e2ee"
 	"relayproxy/internal/exitgroup"
 	"relayproxy/internal/netpath"
 	"relayproxy/internal/netutil"
@@ -132,6 +134,7 @@ func init() {
 
 type AgentConfig struct {
 	Identity                *deviceidentity.Identity
+	E2EEPeerPinPath         string
 	IdentityID              string
 	DeviceID                string
 	DeviceName              string
@@ -140,6 +143,7 @@ type AgentConfig struct {
 	TCPPort                 int
 	Mode                    string // "CLIENT", "EXIT", "BOTH"
 	TransportMode           string // "auto", "quic_only", "tcp_only"
+	E2EEMode                string // "off", "opportunistic" (default), "required"
 	BrutalUploadBPS         uint64
 	BrutalDownloadBPS       uint64
 	DisableLossCompensation bool
@@ -181,6 +185,8 @@ type AgentConfig struct {
 	Routing                 routing.Config
 	InsecureTLS             bool // Allow self-signed TLS certificates for development/testing
 	PlainTCP                bool // Disable TLS entirely; connect via plaintext TCP + yamux
+	AllowInsecureTLS        bool // Explicit development-only opt-in for InsecureTLS
+	AllowPlainTCP           bool // Explicit development-only opt-in for PlainTCP
 	ConnectTimeout          time.Duration
 }
 
@@ -351,6 +357,8 @@ type Agent struct {
 	approvedMode         string
 	approvedCapabilities []string
 	identityName         string
+	serverInstanceID     string
+	e2eePeerPins         *e2ee.PeerKeyPinStore
 	policyRevision       int64
 	proxyExits           []protocol.ProxyExit
 	proxyExitRevision    uint64
@@ -392,6 +400,36 @@ func (a *Agent) setDivertStage(stage string, err error) {
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
 	cfg = cloneAgentConfig(cfg)
+	if cfg.PlainTCP && !cfg.AllowPlainTCP {
+		return nil, errors.New("plaintext TCP transport requires explicit security.allow_plain_tcp=true (development only)")
+	}
+	if cfg.InsecureTLS && !cfg.AllowInsecureTLS {
+		return nil, errors.New("insecure TLS verification requires explicit security.allow_insecure_tls=true or --insecure-tls (development only)")
+	}
+	var peerPinStore *e2ee.PeerKeyPinStore
+	if strings.TrimSpace(cfg.E2EEPeerPinPath) != "" {
+		var err error
+		peerPinStore, err = e2ee.OpenPeerKeyPinStore(cfg.E2EEPeerPinPath)
+		if err != nil {
+			return nil, fmt.Errorf("open E2EE peer key pin store: %w", err)
+		}
+	}
+	cfg.E2EEMode = strings.ToLower(strings.TrimSpace(cfg.E2EEMode))
+	switch cfg.E2EEMode {
+	case "":
+		cfg.E2EEMode = "opportunistic"
+	case "off", "opportunistic", "required":
+	default:
+		return nil, fmt.Errorf("unsupported E2EE mode %q", cfg.E2EEMode)
+	}
+	if cfg.E2EEMode == "required" {
+		if cfg.PlainTCP || cfg.InsecureTLS {
+			return nil, errors.New("E2EE required mode requires verified Relay TLS")
+		}
+		if peerPinStore == nil {
+			return nil, errors.New("E2EE required mode requires a persistent E2EE peer key pin store")
+		}
+	}
 	if cfg.Identity == nil {
 		var err error
 		cfg.Identity, err = deviceidentity.Generate()
@@ -532,6 +570,33 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		defer a.mu.RUnlock()
 		return a.cfg.DeviceID
 	})
+	a.e2eePeerPins = peerPinStore
+	var verifyE2EEPeerKey func(exitDeviceID string, publicKey []byte) error
+	if peerPinStore != nil {
+		verifyE2EEPeerKey = func(exitDeviceID string, publicKey []byte) error {
+			a.mu.RLock()
+			serverID := a.serverInstanceID
+			pins := a.e2eePeerPins
+			a.mu.RUnlock()
+			if pins == nil {
+				return errors.New("E2EE peer key pin store is not configured")
+			}
+			return pins.VerifyOrPin(serverID, exitDeviceID, ed25519.PublicKey(publicKey))
+		}
+	}
+	a.rawDialer.ConfigureE2EE(e2ee.Identity{
+		PublicKey: ed25519.PublicKey(cfg.Identity.PublicKey), PrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
+	}, func(exitDeviceID string) ([]byte, bool) {
+		a.mu.RLock()
+		defer a.mu.RUnlock()
+		for _, peer := range a.proxyExits {
+			if peer.DeviceID == exitDeviceID && peer.SupportsE2EE {
+				return append([]byte(nil), peer.PublicKey...), true
+			}
+		}
+		return nil, false
+	}, verifyE2EEPeerKey)
+	a.rawDialer.ConfigureE2EEMode(cfg.E2EEMode)
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
 	a.rawDialer.ConfigureStreamResume(resumeClient, p2presume.DefaultReplayLimit)
@@ -549,6 +614,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			SystemDNSAllowed:    func() bool { return !engine.FakeIPEnabled() && !engine.ProxyDNSEnabled() },
 			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
 			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: p2presume.DefaultReplayLimit,
+			E2EEPublicKey: ed25519.PublicKey(cfg.Identity.PublicKey), E2EEPrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
 		})
 	}
 	var tunnelTLS *tls.Config
@@ -817,7 +883,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}
 	transportCaps := []string{
 		"tcp", "quic", "tls", protocol.UDPModeStream, protocol.CapabilitySpeedTest,
-		protocol.CapabilityResourceInventoryPush,
+		protocol.CapabilityResourceInventoryPush, protocol.CapabilityE2EEV1,
 	}
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
 		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
@@ -897,6 +963,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 		return errors.New("session superseded during authentication")
 	}
 	a.cfg.DeviceID = accepted.DeviceID
+	a.serverInstanceID = challenge.ServerInstanceID
 	a.identityName = accepted.IdentityName
 	a.policyRevision = accepted.PolicyRevision
 	a.approvedMode = modeForApprovedCapabilities(accepted.ApprovedCapabilities)
@@ -913,6 +980,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	a.handshakeOK.Store(true)
 	publicDirect := a.proxyDirect
 	a.mu.Unlock()
+	a.rawDialer.SetE2EEServerSupported(slices.Contains(accepted.TransportCapabilities, protocol.CapabilityE2EEV1))
 	if publicDirect != nil {
 		publicDirect.SetBrutalProfile(accepted.BrutalUploadBPS, accepted.BrutalDownloadBPS)
 	}
@@ -1251,6 +1319,7 @@ func (a *Agent) sendP2PControlRequest(ctx context.Context, sess tunnel.TunnelSes
 }
 
 func (a *Agent) acceptIncomingStreams(ctx context.Context, sess tunnel.TunnelSession, epoch uint64, handler *exit.Handler, allowRDP bool, rdpAddress string, maxStreams int, p2pManager *rdpp2p.Manager, proxyP2PManager *proxyp2p.Manager, workers *sync.WaitGroup) {
+	ctx = exit.WithRelayOrigin(ctx)
 	if maxStreams <= 0 {
 		maxStreams = 1024
 	}
@@ -1436,17 +1505,18 @@ func (a *Agent) serveProxyP2PExit(ctx context.Context, manager *proxyp2p.Manager
 			if !ok || direct == nil {
 				continue
 			}
+			clientDeviceID, exitDeviceID := p2pSession.ClientDeviceID, p2pSession.ExitDeviceID
 			sessions.Add(1)
 			go func() {
 				defer sessions.Done()
-				a.acceptProxyP2PExitSession(ctx, direct, handler, policy, maxStreams)
+				a.acceptProxyP2PExitSession(ctx, direct, handler, policy, clientDeviceID, exitDeviceID, maxStreams)
 			}()
 		}
 	}
 }
 
-func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, relayPolicy *acl.Policy, maxStreams int) {
-	if sess == nil || handler == nil || relayPolicy == nil {
+func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.TunnelSession, handler *exit.Handler, relayPolicy *acl.Policy, clientDeviceID, exitDeviceID string, maxStreams int) {
+	if sess == nil || handler == nil || relayPolicy == nil || clientDeviceID == "" || exitDeviceID == "" {
 		return
 	}
 	if maxStreams <= 0 {
@@ -1455,7 +1525,7 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 	sem := make(chan struct{}, maxStreams)
 	var workers sync.WaitGroup
 	defer workers.Wait()
-	boundCtx := exit.BindRelayPolicy(ctx, relayPolicy)
+	boundCtx := exit.WithDirectP2POrigin(exit.BindRelayPolicy(ctx, relayPolicy), clientDeviceID, exitDeviceID)
 	for {
 		stream, err := sess.AcceptStream(ctx)
 		if err != nil {
@@ -1472,7 +1542,7 @@ func (a *Agent) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.Tunne
 		if err != nil || (header.Type != protocol.FrameTypeOpenTCP &&
 			header.Type != protocol.FrameTypeBrowserNetworkTCP &&
 			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeSpeedTest &&
-			header.Type != protocol.FrameTypeExitSystemDNS) {
+			header.Type != protocol.FrameTypeExitSystemDNS && header.Type != protocol.FrameTypeSecureRelay) {
 			<-sem
 			_ = stream.Close()
 			continue

@@ -52,8 +52,15 @@ func releaseDatagramPacket(packet []byte) {
 // SupportsDatagrams is a negotiated QUIC transport capability. Application
 // support is checked separately so old peers always keep stream compatibility.
 func SupportsDatagrams(sess TunnelSession) bool {
-	s, ok := sess.(*QUICSession)
-	if !ok || s == nil || s.conn == nil {
+	s, ok := sess.(interface{ SupportsDatagrams() bool })
+	return ok && s.SupportsDatagrams()
+}
+
+// SupportsDatagrams reports whether this QUIC connection negotiated native
+// datagrams with its peer. It is promoted by authenticated transport wrappers
+// such as the fingerprint-pinned P2P QUIC session.
+func (s *QUICSession) SupportsDatagrams() bool {
+	if s == nil || s.conn == nil {
 		return false
 	}
 	state := s.conn.ConnectionState()
@@ -102,8 +109,14 @@ func PeerSupportsExitSystemDNS(sess TunnelSession) bool {
 }
 
 func PeerSupportsDatagrams(sess TunnelSession) bool {
-	s, ok := sess.(*QUICSession)
-	return ok && SupportsDatagrams(sess) && s.peerDatagrams.Load()
+	s, ok := sess.(interface{ PeerSupportsDatagrams() bool })
+	return ok && s.PeerSupportsDatagrams()
+}
+
+// PeerSupportsDatagrams reports whether the peer advertised native UDP
+// datagrams and the underlying QUIC connection negotiated their transport use.
+func (s *QUICSession) PeerSupportsDatagrams() bool {
+	return s != nil && s.SupportsDatagrams() && s.peerDatagrams.Load()
 }
 
 // PeerSupportsStreamResume is intentionally interface-aware so transport test
@@ -196,7 +209,23 @@ func OpenDatagramChannel(sess TunnelSession, id uint64) (*DatagramChannel, error
 	if !PeerSupportsDatagrams(sess) {
 		return nil, ErrDatagramsUnsupported
 	}
-	return sess.(*QUICSession).datagrams.openChannel(id)
+	opener, ok := sess.(interface {
+		OpenDatagramChannel(uint64) (*DatagramChannel, error)
+	})
+	if !ok {
+		return nil, ErrDatagramsUnsupported
+	}
+	return opener.OpenDatagramChannel(id)
+}
+
+// OpenDatagramChannel opens one bounded UDP association on this QUIC session.
+// The method is promoted by wrappers so transport metadata is not lost merely
+// because a direct session adds its own authentication and lifecycle.
+func (s *QUICSession) OpenDatagramChannel(id uint64) (*DatagramChannel, error) {
+	if !s.PeerSupportsDatagrams() || s.datagrams == nil {
+		return nil, ErrDatagramsUnsupported
+	}
+	return s.datagrams.openChannel(id)
 }
 
 func (m *datagramMux) openChannel(id uint64) (*DatagramChannel, error) {

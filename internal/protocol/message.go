@@ -39,6 +39,7 @@ const (
 	FrameTypeFileDirectPunchPrepare FrameType = 0x19
 	FrameTypeFileShareVisibility    FrameType = 0x1A // Relay asks a host whether a named client has any active folder ACL
 	FrameTypeExitSystemDNS          FrameType = 0x1B // one authorized A/AAAA lookup via the exit OS resolver
+	FrameTypeSecureRelay            FrameType = 0x1C // opaque Relay forwarding for E2EE-protected Exit streams
 )
 
 // StreamHeader is sent at the beginning of each multiplexed stream
@@ -49,6 +50,17 @@ type StreamHeader struct {
 	RequestID      string    `json:"requestId"`
 	ClientDeviceID string    `json:"clientDeviceId"`
 	ExitDeviceID   string    `json:"exitDeviceId"`
+}
+
+const SecureRelayVersion = 1
+
+// SecureRelayMetadata is the only cleartext preamble after a SecureRelay
+// StreamHeader. Relay replaces RelayPolicy with its authoritative policy and
+// verifies ClientPublicKey against the authenticated online Client session.
+type SecureRelayMetadata struct {
+	Version         int         `json:"version"`
+	ClientPublicKey []byte      `json:"clientPublicKey"`
+	RelayPolicy     *acl.Policy `json:"relayPolicy,omitempty"`
 }
 
 const (
@@ -206,6 +218,7 @@ const (
 	UDPModeDatagram         = "udp_datagram_v1"
 	CapabilityTargetACL     = "target_acl_v1"
 	CapabilityExitSystemDNS = "exit_system_dns_v1"
+	CapabilityE2EEV1        = "e2ee_v1"
 )
 
 // PushMessage is a server-originated notification delivered to one Agent.

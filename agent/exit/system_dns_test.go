@@ -2,15 +2,25 @@ package exit
 
 import (
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"net"
 	"testing"
+	"time"
 
 	"golang.org/x/net/dns/dnsmessage"
 
 	"relayproxy/internal/acl"
+	"relayproxy/internal/e2ee"
 	"relayproxy/internal/protocol"
 )
+
+type exitDNSPipeStream struct {
+	net.Conn
+}
+
+func (s *exitDNSPipeStream) CloseWrite() error { return nil }
 
 func systemDNSQuestion(t *testing.T, kind dnsmessage.Type) []byte {
 	t.Helper()
@@ -113,5 +123,109 @@ func TestExitSystemDNSBlocksRecursiveDNSCapture(t *testing.T) {
 	})
 	if err == nil || resp.Success || called {
 		t.Fatalf("recursive DNS capture guard failed: resp=%+v err=%v called=%t", resp, err, called)
+	}
+}
+
+func TestSecureRelayAcceptsAuthenticatedDirectP2POrigin(t *testing.T) {
+	clientPublic, clientPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitPublic, exitPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const clientID, exitID = "client-device", "exit-device"
+	clientIdentity := e2ee.Identity{DeviceID: clientID, PublicKey: clientPublic, PrivateKey: clientPrivate}
+
+	checker, err := acl.NewChecker(acl.Policy{ID: "exit-policy", AllowInternet: true, AllowLoopback: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	handler := NewHandler(HandlerConfig{
+		ACLChecker:       checker,
+		SystemDNSAllowed: func() bool { return true },
+		SystemDNSLookup: func(_ context.Context, network, host string) ([]net.IP, error) {
+			if network != "ip4" || host != "example.com" {
+				return nil, errors.New("unexpected direct P2P DNS lookup target")
+			}
+			return []net.IP{net.ParseIP("8.8.8.8")}, nil
+		},
+		E2EEPublicKey: exitPublic, E2EEPrivateKey: exitPrivate,
+	})
+	defer handler.Close()
+
+	clientConn, exitConn := net.Pipe()
+	clientStream, exitStream := &exitDNSPipeStream{clientConn}, &exitDNSPipeStream{exitConn}
+	defer clientConn.Close()
+	defer exitConn.Close()
+	_ = clientStream.SetDeadline(time.Now().Add(5 * time.Second))
+	_ = exitStream.SetDeadline(time.Now().Add(5 * time.Second))
+
+	policy := &acl.Policy{ID: "server-bound-p2p-policy", AllowInternet: true, AllowLoopback: true}
+	exitCtx := WithDirectP2POrigin(BindRelayPolicy(context.Background(), policy), clientID, exitID)
+	handlerDone := make(chan error, 1)
+	go func() {
+		outer, err := protocol.ReadStreamHeader(exitStream)
+		if err != nil {
+			handlerDone <- err
+			return
+		}
+		handler.HandleStreamWithHeader(exitCtx, exitStream, outer)
+		handlerDone <- nil
+	}()
+
+	if err := protocol.WriteStreamHeader(clientStream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeSecureRelay,
+		RequestID: "p2p-e2ee-dns", ClientDeviceID: clientID, ExitDeviceID: exitID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteJSON(clientStream, protocol.SecureRelayMetadata{
+		Version: protocol.SecureRelayVersion, ClientPublicKey: clientPublic,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	secureClient, err := e2ee.ClientHandshake(clientStream, e2ee.ClientConfig{
+		Local: clientIdentity, ExitDeviceID: exitID, ExitPublicKey: exitPublic,
+	})
+	if err != nil {
+		t.Fatalf("direct P2P E2EE handshake: %v", err)
+	}
+	query := systemDNSQuestion(t, dnsmessage.TypeA)
+	if err := protocol.WriteStreamHeader(secureClient, &protocol.StreamHeader{
+		Type: protocol.FrameTypeExitSystemDNS, RequestID: "dns-p2p", ExitDeviceID: exitID,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if err := protocol.WriteJSON(secureClient, protocol.ExitDNSRequest{RequestID: "dns-p2p", Question: query}); err != nil {
+		t.Fatal(err)
+	}
+	var response protocol.ExitDNSResponse
+	if err := protocol.ReadJSON(secureClient, &response); err != nil {
+		t.Fatalf("read direct P2P encrypted DNS response: %v", err)
+	}
+	if !response.Success || response.RequestID != "dns-p2p" {
+		t.Fatalf("direct P2P encrypted DNS failed: %+v", response)
+	}
+	ips, err := protocol.ValidateExitDNSAnswer(query, response.Answer)
+	if err != nil || len(ips) != 1 || !ips[0].Equal(net.ParseIP("8.8.8.8")) {
+		t.Fatalf("invalid direct P2P DNS answer: ips=%v err=%v", ips, err)
+	}
+	_ = secureClient.Close()
+	if err := <-handlerDone; err != nil {
+		t.Fatalf("direct P2P Exit handler: %v", err)
+	}
+}
+
+func TestDirectP2POriginBindsAuthenticatedDevicePair(t *testing.T) {
+	ctx := WithDirectP2POrigin(context.Background(), "client-a", "exit-b")
+	clientID, exitID, ok := directP2POriginIDs(ctx)
+	if !ok || clientID != "client-a" || exitID != "exit-b" {
+		t.Fatalf("direct P2P origin identity = %q -> %q (%v)", clientID, exitID, ok)
+	}
+	ctx = WithDirectP2POrigin(context.Background(), "", "exit-b")
+	if _, _, ok := directP2POriginIDs(ctx); ok {
+		t.Fatal("direct P2P origin accepted an empty authenticated Client ID")
 	}
 }

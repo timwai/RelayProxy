@@ -1,17 +1,28 @@
 package client
 
 import (
+	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"errors"
 	"io"
+	"net"
 	"strings"
 	"testing"
 
 	"golang.org/x/net/dns/dnsmessage"
 
+	"relayproxy/internal/e2ee"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
+
+type systemDNSConn struct {
+	net.Conn
+}
+
+func (c *systemDNSConn) CloseWrite() error { return nil }
 
 type systemDNSTestSession struct {
 	*scriptedSession
@@ -28,6 +39,146 @@ func clientDNSQuestion(t *testing.T) []byte {
 		t.Fatal(err)
 	}
 	return wire
+}
+
+func TestSystemDNSRequiredE2EEUsesAuthenticatedDirectP2P(t *testing.T) {
+	clientPublic, clientPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	exitPublic, exitPrivate, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const clientID, exitID = "client-device", "office-exit"
+	clientIdentity := e2ee.Identity{DeviceID: clientID, PublicKey: clientPublic, PrivateKey: clientPrivate}
+	exitIdentity := e2ee.Identity{DeviceID: exitID, PublicKey: exitPublic, PrivateKey: exitPrivate}
+
+	clientConn, exitConn := net.Pipe()
+	clientStream := &systemDNSConn{Conn: clientConn}
+	exitStream := &systemDNSConn{Conn: exitConn}
+	defer clientConn.Close()
+	defer exitConn.Close()
+
+	sess := &systemDNSTestSession{
+		scriptedSession: newScriptedSession(func() tunnel.TunnelStream { return clientStream }),
+		supported:       true,
+	}
+	d := NewTunnelDialer(func() tunnel.TunnelSession { return sess }, func() string { return clientID })
+	d.ConfigurePathProvider(func(id string) (SelectedSession, bool) {
+		if id != exitID {
+			return SelectedSession{}, false
+		}
+		return SelectedSession{Session: sess, Path: protocol.ProxyPathP2PQUIC}, true
+	}, nil)
+	d.ConfigureE2EE(clientIdentity, func(id string) ([]byte, bool) {
+		return append([]byte(nil), exitPublic...), id == exitID
+	}, func(id string, key []byte) error {
+		if id != exitID || !bytes.Equal(key, exitPublic) {
+			return errors.New("unexpected E2EE Exit key")
+		}
+		return nil
+	})
+	// Direct P2P QUIC has its own authenticated TLS session; the Relay
+	// Server does not need to advertise SecureRelay support for this path.
+	d.SetE2EEServerSupported(false)
+	d.ConfigureE2EEMode("required")
+
+	serverDone := make(chan error, 1)
+	go func() {
+		outer, err := protocol.ReadStreamHeader(exitStream)
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		if outer.Type != protocol.FrameTypeSecureRelay || outer.ClientDeviceID != clientID || outer.ExitDeviceID != exitID {
+			serverDone <- errors.New("Client did not open an authenticated SecureRelay stream")
+			return
+		}
+		var metadata protocol.SecureRelayMetadata
+		if err := protocol.ReadJSON(exitStream, &metadata); err != nil {
+			serverDone <- err
+			return
+		}
+		if metadata.Version != protocol.SecureRelayVersion || !bytes.Equal(metadata.ClientPublicKey, clientPublic) {
+			serverDone <- errors.New("SecureRelay metadata did not bind the authenticated Client key")
+			return
+		}
+		secure, err := e2ee.ServerHandshake(exitStream, e2ee.ServerConfig{
+			Local: exitIdentity, ClientDeviceID: clientID, ClientPublicKey: clientPublic,
+		})
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		inner, err := protocol.ReadStreamHeader(secure)
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		if inner.Type != protocol.FrameTypeExitSystemDNS || inner.ExitDeviceID != exitID {
+			serverDone <- errors.New("Exit system DNS request was not inside E2EE")
+			return
+		}
+		var request protocol.ExitDNSRequest
+		if err := protocol.ReadJSON(secure, &request); err != nil {
+			serverDone <- err
+			return
+		}
+		question, _, err := protocol.ValidateExitDNSQuestion(request.Question)
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		answer, err := (&dnsmessage.Message{
+			Header:    dnsmessage.Header{ID: question.ID, Response: true},
+			Questions: question.Questions,
+			Answers: []dnsmessage.Resource{{
+				Header: dnsmessage.ResourceHeader{Name: question.Questions[0].Name, Type: dnsmessage.TypeA, Class: dnsmessage.ClassINET, TTL: 30},
+				Body:   &dnsmessage.AResource{A: [4]byte{8, 8, 8, 8}},
+			}},
+		}).Pack()
+		if err != nil {
+			serverDone <- err
+			return
+		}
+		serverDone <- protocol.WriteJSON(secure, protocol.ExitDNSResponse{
+			RequestID: request.RequestID, Success: true, Answer: answer,
+		})
+	}()
+
+	query := clientDNSQuestion(t)
+	got, err := d.ExchangeExitSystemDNS(context.Background(), exitID, query)
+	if err != nil {
+		t.Fatalf("required E2EE Exit system DNS exchange failed: %v", err)
+	}
+	if _, err := protocol.ValidateExitDNSAnswer(query, got); err != nil {
+		t.Fatalf("received invalid E2EE DNS answer: %v", err)
+	}
+	if err := <-serverDone; err != nil {
+		t.Fatalf("Exit-side E2EE DNS handler: %v", err)
+	}
+	if sess.opens.Load() != 1 {
+		t.Fatalf("required E2EE opened %d Relay streams, want 1", sess.opens.Load())
+	}
+}
+
+func TestSystemDNSRequiredE2EERejectsLegacyRelayBeforeOpeningStream(t *testing.T) {
+	stream := &scriptedStream{}
+	sess := &systemDNSTestSession{
+		scriptedSession: newScriptedSession(func() tunnel.TunnelStream { return stream }),
+		supported:       true,
+	}
+	d := NewTunnelDialer(func() tunnel.TunnelSession { return sess }, nil)
+	d.ConfigureE2EEMode("required")
+
+	_, err := d.ExchangeExitSystemDNS(context.Background(), "office-exit", clientDNSQuestion(t))
+	if err == nil || !strings.Contains(err.Error(), "E2EE is required") {
+		t.Fatalf("required E2EE allowed legacy Exit system DNS: %v", err)
+	}
+	if sess.opens.Load() != 0 || stream.writes.Load() != 0 {
+		t.Fatalf("legacy DNS stream was opened or written: opens=%d writes=%d", sess.opens.Load(), stream.writes.Load())
+	}
 }
 
 func TestSystemDNSRejectsOldRelayWithoutSendingQuery(t *testing.T) {

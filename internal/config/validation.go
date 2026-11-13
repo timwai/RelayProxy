@@ -105,6 +105,7 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Device.IdentityID = strings.ToLower(strings.TrimSpace(c.Device.IdentityID))
 	c.Mode = strings.ToUpper(strings.TrimSpace(c.Mode))
 	c.Transport.Mode = strings.ToLower(strings.TrimSpace(c.Transport.Mode))
+	c.Proxy.E2EEMode = strings.ToLower(strings.TrimSpace(c.Proxy.E2EEMode))
 	c.P2P.Mode = strings.ToLower(strings.TrimSpace(c.P2P.Mode))
 	c.Direct.Public.Advertise = strings.TrimSpace(c.Direct.Public.Advertise)
 	c.Network.Mode = strings.ToLower(strings.TrimSpace(c.Network.Mode))
@@ -138,6 +139,12 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 	c.Web.Listen = strings.TrimSpace(c.Web.Listen)
 	c.BrowserSync.LocalProxy.Listen = strings.TrimSpace(c.BrowserSync.LocalProxy.Listen)
 	applyAgentDefaults(c)
+	if c.Server.InsecureTLS && !c.Server.Security.AllowInsecureTLS {
+		return fmt.Errorf("server.insecure_tls requires server.security.allow_insecure_tls=true (development only)")
+	}
+	if !c.IsServerTLSEnabled() && !c.Server.Security.AllowPlainTCP {
+		return fmt.Errorf("server.tls_enabled=false requires server.security.allow_plain_tcp=true (development only)")
+	}
 	// QUIC requires TLS. Keep the persisted/desired transport aligned with what
 	// relay-agent can actually run, otherwise tls_enabled=false + auto/quic_only
 	// becomes tcp_only only at runtime and leaves the UI permanently reporting a
@@ -154,6 +161,22 @@ func NormalizeAgentConfig(c *AgentConfigFile) error {
 func ValidateAgentConfig(c *AgentConfigFile) error {
 	if c == nil {
 		return fmt.Errorf("config cannot be nil")
+	}
+	if c.Server.InsecureTLS && !c.Server.Security.AllowInsecureTLS {
+		return fmt.Errorf("server.insecure_tls requires server.security.allow_insecure_tls=true (development only)")
+	}
+	if !c.IsServerTLSEnabled() && !c.Server.Security.AllowPlainTCP {
+		return fmt.Errorf("server.tls_enabled=false requires server.security.allow_plain_tcp=true (development only)")
+	}
+	switch c.Proxy.E2EEMode {
+	case "", "off", "opportunistic", "required":
+	default:
+		return fmt.Errorf("proxy.e2ee_mode must be off / opportunistic / required")
+	}
+	if c.Proxy.E2EEMode == "required" {
+		if !c.IsServerTLSEnabled() || c.Server.InsecureTLS {
+			return fmt.Errorf("proxy.e2ee_mode=required requires verified Relay TLS")
+		}
 	}
 	if c.Proxy.MaxConnections < 1 || c.Proxy.MaxConnections > 65536 {
 		return fmt.Errorf("proxy.max_connections 必须在 1-65536 之间")

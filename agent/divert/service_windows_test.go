@@ -329,6 +329,76 @@ func TestNormalizeWindowsTransparentFirewallPorts(t *testing.T) {
 	}
 }
 
+func TestWindowsTransparentFirewallProgramArgPreservesPathAsSingleArgument(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "Relay Proxy")
+	if err := os.Mkdir(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	program := filepath.Join(dir, "relay-agent.exe")
+	if err := os.WriteFile(program, []byte("test executable path"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	longPath, err := windowsLongPathForTest(t, program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := windowsTransparentFirewallProgramArg(program)
+	if err != nil {
+		t.Fatalf("program %q rejected: %v", program, err)
+	}
+	want := "program=" + longPath
+	if got != want {
+		t.Fatalf("netsh program arg = %q, want %q", got, want)
+	}
+
+	shortBuffer := make([]uint16, 32768)
+	programPtr, err := windows.UTF16PtrFromString(program)
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, shortErr := windows.GetShortPathName(programPtr, &shortBuffer[0], uint32(len(shortBuffer)))
+	if shortErr == nil && n > 0 && n < uint32(len(shortBuffer)) {
+		shortPath := windows.UTF16ToString(shortBuffer[:n])
+		if shortPath != program {
+			shortArg, err := windowsTransparentFirewallProgramArg(shortPath)
+			if err != nil {
+				t.Fatalf("short program path %q rejected: %v", shortPath, err)
+			}
+			if shortArg != want {
+				t.Fatalf("short path was not expanded: got %q want %q", shortArg, want)
+			}
+		}
+	}
+
+	for _, invalid := range []string{
+		`relay-agent.exe`,
+		`C:\RelayProxy\bad"name.exe`,
+		"C:\\RelayProxy\\bad\nname.exe",
+	} {
+		if _, err := windowsTransparentFirewallProgramArg(invalid); err == nil {
+			t.Fatalf("invalid program path %q accepted", invalid)
+		}
+	}
+}
+
+func windowsLongPathForTest(t *testing.T, path string) (string, error) {
+	t.Helper()
+	ptr, err := windows.UTF16PtrFromString(path)
+	if err != nil {
+		return "", err
+	}
+	buffer := make([]uint16, 32768)
+	n, err := windows.GetLongPathName(ptr, &buffer[0], uint32(len(buffer)))
+	if err != nil {
+		return "", err
+	}
+	if n == 0 || n >= uint32(len(buffer)) {
+		return "", fmt.Errorf("invalid long path length %d", n)
+	}
+	return windows.UTF16ToString(buffer[:n]), nil
+}
+
 func TestWindowsNetworkBrokerLiveNamedPipeRoundTrip(t *testing.T) {
 	if runtime.GOARCH != "amd64" {
 		t.Skip("WinDivert broker live test requires Windows amd64")

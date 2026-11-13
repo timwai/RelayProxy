@@ -865,9 +865,15 @@ func listAuthorizedProxyExitInventory(
 				identityName = live.IdentityName
 			}
 		}
+		var publicKey []byte
+		supportsE2EE := false
+		if live != nil {
+			publicKey = append([]byte(nil), live.PublicKey...)
+			supportsE2EE = containsString(live.Capabilities, protocol.CapabilityE2EEV1)
+		}
 		result = append(result, protocol.ProxyExit{
 			DeviceID: device.ID, Name: name, IdentityName: identityName,
-			AuthorizationSource: source, Online: live != nil,
+			AuthorizationSource: source, Online: live != nil, PublicKey: publicKey, SupportsE2EE: supportsE2EE,
 		})
 	}
 

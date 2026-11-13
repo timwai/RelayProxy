@@ -609,6 +609,8 @@ func webConfigJSON(b *bridge.UIBridge) string {
 		Routing: routingConfigView(cfg.Routing),
 		Runtime: map[string]any{"serverAddress": state.Runtime.Server.Address, "quicPort": state.Runtime.Server.QUICPort,
 			"tcpPort": state.Runtime.Server.TCPPort, "tlsEnabled": state.Runtime.IsServerTLSEnabled(), "insecureTls": state.Runtime.Server.InsecureTLS,
+			"e2eeMode":      state.Runtime.Proxy.E2EEMode,
+			"allowPlainTcp": state.Runtime.Server.Security.AllowPlainTCP, "allowInsecureTls": state.Runtime.Server.Security.AllowInsecureTLS,
 			"transport": state.Runtime.Transport.Mode, "networkMode": state.Runtime.Network.Mode,
 			"rdp": map[string]any{
 				"enabled": state.Runtime.RDP.Enabled == nil || *state.Runtime.RDP.Enabled,
@@ -630,6 +632,7 @@ func webConfigJSON(b *bridge.UIBridge) string {
 	data, _ := json.Marshal(map[string]any{
 		"configPath": payload.ConfigPath, "serverAddress": payload.ServerAddress, "quicPort": payload.QUICPort,
 		"tcpPort": payload.TCPPort, "tlsEnabled": payload.TLSEnabled,
+		"e2eeMode": cfg.Proxy.E2EEMode, "allowPlainTcp": cfg.Server.Security.AllowPlainTCP, "allowInsecureTls": cfg.Server.Security.AllowInsecureTLS,
 		"deviceName": payload.DeviceName, "identityId": payload.IdentityID, "transport": payload.Transport,
 		"socks5": payload.SOCKS5, "http": payload.HTTP, "defaultExitId": payload.DefaultExitID,
 		"customExits": payload.CustomExits, "upstreamExitId": payload.UpstreamExitID,

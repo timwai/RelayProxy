@@ -28,6 +28,9 @@ type ServerConfig struct {
 			Listen     string `yaml:"listen"`                // e.g. ":8443"
 			TLSEnabled *bool  `yaml:"tls_enabled,omitempty"` // nil inherits server.tls_enabled
 		} `yaml:"admin"`
+		Security struct {
+			AllowPlainTCP bool `yaml:"allow_plain_tcp"` // development only; required to disable tunnel TLS
+		} `yaml:"security"`
 		CertFile   string `yaml:"cert_file"`
 		KeyFile    string `yaml:"key_file"`
 		TLSEnabled *bool  `yaml:"tls_enabled"` // nil or true = TLS on; false = plaintext
@@ -130,6 +133,10 @@ type AgentConfigFile struct {
 		TCPPort     int    `yaml:"tcp_port"`
 		TLSEnabled  *bool  `yaml:"tls_enabled"`            // nil or true = TLS on; false = plaintext TCP
 		InsecureTLS bool   `yaml:"insecure_tls,omitempty"` // development only: skip server certificate verification
+		Security    struct {
+			AllowPlainTCP    bool `yaml:"allow_plain_tcp,omitempty"`    // development only; required when tls_enabled=false
+			AllowInsecureTLS bool `yaml:"allow_insecure_tls,omitempty"` // development only; required when insecure_tls=true
+		} `yaml:"security,omitempty"`
 	} `yaml:"server"`
 
 	Device struct {
@@ -149,9 +156,10 @@ type AgentConfigFile struct {
 	Mode string `yaml:"-"` // runtime-only capability view; grants come from the server
 
 	Proxy struct {
-		MaxConnections    int `yaml:"max_connections"` // per listener, including UDP associations
-		IdleTimeoutSec    int `yaml:"idle_timeout_sec"`
-		UDPIdleTimeoutSec int `yaml:"udp_idle_timeout_sec"`
+		E2EEMode          string `yaml:"e2ee_mode,omitempty"` // off | opportunistic (default) | required; remote Relay proxy TCP/stream-UDP/Exit DNS
+		MaxConnections    int    `yaml:"max_connections"`     // per listener, including UDP associations
+		IdleTimeoutSec    int    `yaml:"idle_timeout_sec"`
+		UDPIdleTimeoutSec int    `yaml:"udp_idle_timeout_sec"`
 		SOCKS5            struct {
 			Enabled *bool  `yaml:"enabled"`
 			Listen  string `yaml:"listen"`

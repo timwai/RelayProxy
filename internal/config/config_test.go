@@ -11,6 +11,59 @@ import (
 	"relayproxy/internal/proxy"
 )
 
+func TestProxyE2EEModeValidationAndPersistence(t *testing.T) {
+	defaults := &AgentConfigFile{}
+	if err := NormalizeAgentConfig(defaults); err != nil {
+		t.Fatal(err)
+	}
+	if defaults.Proxy.E2EEMode != "" {
+		t.Fatalf("legacy default changed: %q", defaults.Proxy.E2EEMode)
+	}
+	for _, mode := range []string{"off", "opportunistic", "required"} {
+		cfg := CloneAgentConfig(defaults)
+		cfg.Proxy.E2EEMode = mode
+		if err := NormalizeAgentConfig(cfg); err != nil {
+			t.Fatalf("mode %q rejected: %v", mode, err)
+		}
+		path := filepath.Join(t.TempDir(), "agent.yaml")
+		if err := SaveAgentConfig(path, cfg); err != nil {
+			t.Fatal(err)
+		}
+		reloaded, err := LoadAgentConfig(path)
+		if err != nil || reloaded.Proxy.E2EEMode != mode {
+			t.Fatalf("mode %q did not survive YAML: actual=%+v err=%v", mode, reloaded, err)
+		}
+	}
+	for _, invalid := range []string{"invalid", "yes", "true"} {
+		cfg := CloneAgentConfig(defaults)
+		cfg.Proxy.E2EEMode = invalid
+		if err := NormalizeAgentConfig(cfg); err == nil {
+			t.Fatalf("invalid E2EE mode %q accepted", invalid)
+		}
+	}
+	for _, scenario := range []string{"insecure_tls", "plain_tcp"} {
+		cfg := CloneAgentConfig(defaults)
+		cfg.Proxy.E2EEMode = "required"
+		switch scenario {
+		case "insecure_tls":
+			cfg.Server.InsecureTLS = true
+			cfg.Server.Security.AllowInsecureTLS = true
+		case "plain_tcp":
+			cfg.Server.TLSEnabled = BoolPtr(false)
+			cfg.Server.Security.AllowPlainTCP = true
+		}
+		if err := NormalizeAgentConfig(cfg); err == nil {
+			t.Fatalf("required E2EE accepted insecure/incompatible %s", scenario)
+		}
+	}
+	p2pOnly := CloneAgentConfig(defaults)
+	p2pOnly.Proxy.E2EEMode = "required"
+	p2pOnly.P2P.Mode = "p2p_only"
+	if err := NormalizeAgentConfig(p2pOnly); err != nil {
+		t.Fatalf("required E2EE rejected authenticated P2P-only routing: %v", err)
+	}
+}
+
 func TestProxyLimitsYAMLRoundTrip(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "agent.yaml")
 	if err := os.WriteFile(path, []byte("server:\n  address: relay.example.test\nproxy:\n  max_connections: 1024\n  idle_timeout_sec: 600\n  udp_idle_timeout_sec: 90\n"), 0600); err != nil {
@@ -224,9 +277,24 @@ proxy:
 	}
 }
 
+func TestAgentRejectsInsecureTransportWithoutDevelopmentOptIn(t *testing.T) {
+	plain := &AgentConfigFile{}
+	plain.Server.TLSEnabled = BoolPtr(false)
+	if err := NormalizeAgentConfig(plain); err == nil {
+		t.Fatal("plaintext TCP was accepted without security.allow_plain_tcp")
+	}
+	insecure := &AgentConfigFile{}
+	insecure.Server.InsecureTLS = true
+	if err := NormalizeAgentConfig(insecure); err == nil {
+		t.Fatal("insecure TLS was accepted without security.allow_insecure_tls")
+	}
+}
+
 func TestAgentPlaintextForcesTCPOnlyAndClearsInsecureTLS(t *testing.T) {
 	cfg := &AgentConfigFile{}
 	cfg.Server.TLSEnabled = BoolPtr(false)
+	cfg.Server.Security.AllowPlainTCP = true
+	cfg.Server.Security.AllowInsecureTLS = true
 	cfg.Server.InsecureTLS = true
 	cfg.Transport.Mode = "quic_only"
 	if err := NormalizeAgentConfig(cfg); err != nil {
@@ -266,6 +334,7 @@ func TestAgentInsecureTLSPersistsOnlyWhenEnabled(t *testing.T) {
 		t.Fatalf("default secure TLS setting should stay omitted:\n%s", data)
 	}
 
+	cfg.Server.Security.AllowInsecureTLS = true
 	cfg.Server.InsecureTLS = true
 	if err := SaveAgentConfig(path, cfg); err != nil {
 		t.Fatal(err)

@@ -232,6 +232,57 @@ func TestServerSettingsAuthorizationValidationAndConflict(t *testing.T) {
 	}
 }
 
+func TestServerSettingsRequiresExplicitPlaintextOptIn(t *testing.T) {
+	r, admin := settingsRouter(t)
+	rec := apiRequest(r, admin, http.MethodGet, "/api/v1/server/config")
+	var initial ServerSettingsResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &initial) != nil {
+		t.Fatalf("read settings failed: %d %s", rec.Code, rec.Body.String())
+	}
+	submit := func(cfg ServerEditableConfig) *httptest.ResponseRecorder {
+		body, err := json.Marshal(map[string]any{"revision": initial.Revision, "config": cfg})
+		if err != nil {
+			t.Fatal(err)
+		}
+		req := httptest.NewRequest(http.MethodPut, "/api/v1/server/config", bytes.NewReader(body))
+		req.AddCookie(admin)
+		rec := httptest.NewRecorder()
+		r.ServeHTTP(rec, req)
+		return rec
+	}
+
+	draft := initial.Config
+	draft.Tunnel.TLSEnabled = false
+	draft.Tunnel.AllowPlainTCP = false
+	if rec := submit(draft); rec.Code != http.StatusBadRequest {
+		t.Fatalf("plaintext TCP without explicit opt-in was accepted: %d %s", rec.Code, rec.Body.String())
+	}
+
+	draft.Tunnel.AllowPlainTCP = true
+	rec = submit(draft)
+	var saved ServerSettingsResponse
+	if rec.Code != http.StatusOK || json.Unmarshal(rec.Body.Bytes(), &saved) != nil {
+		t.Fatalf("explicit plaintext development opt-in failed: %d %s", rec.Code, rec.Body.String())
+	}
+	if saved.Config.Tunnel.TLSEnabled || !saved.Config.Tunnel.AllowPlainTCP ||
+		!saved.RestartRequired || !hasServerRestartField(saved.RestartFields, "server.security") {
+		t.Fatalf("plaintext opt-in was not persisted/restart-gated: %+v", saved)
+	}
+	loaded, err := config.LoadServerConfig(saved.ConfigPath)
+	if err != nil || loaded.IsTLSEnabled() || !loaded.Server.Security.AllowPlainTCP {
+		t.Fatalf("plaintext opt-in did not round-trip to YAML: %+v err=%v", loaded, err)
+	}
+}
+
+func hasServerRestartField(values []string, want string) bool {
+	for _, value := range values {
+		if value == want {
+			return true
+		}
+	}
+	return false
+}
+
 func TestRemovedPairEndpointAndStaticAssets(t *testing.T) {
 	r, admin := settingsRouter(t)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/devices/pair-code", nil)

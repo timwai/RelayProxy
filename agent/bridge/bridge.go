@@ -387,10 +387,13 @@ func (b *UIBridge) runtimeConfig() config.AgentConfigFile {
 	res.Server.TCPPort = c.TCPPort
 	res.Server.TLSEnabled = config.BoolPtr(!c.PlainTCP)
 	res.Server.InsecureTLS = c.InsecureTLS
+	res.Server.Security.AllowPlainTCP = c.AllowPlainTCP
+	res.Server.Security.AllowInsecureTLS = c.AllowInsecureTLS
 	res.Device.Name = c.DeviceName
 	res.Device.IdentityID = c.IdentityID
 	res.Transport.Mode = c.TransportMode
 	res.Proxy.DefaultExitID = c.DefaultExitID
+	res.Proxy.E2EEMode = c.E2EEMode
 	res.Proxy.MaxConnections = c.ProxyMaxConnections
 	res.Proxy.IdleTimeoutSec = int(c.ProxyIdleTimeout / time.Second)
 	res.Proxy.UDPIdleTimeoutSec = int(c.ProxyUDPIdleTimeout / time.Second)
@@ -436,11 +439,13 @@ type ConfigUpdate struct {
 	Gateway  *gateway.Config `json:"gateway"`
 	Revision *string         `json:"revision,omitempty"`
 	Server   struct {
-		Address     *string `json:"address"`
-		QUICPort    *int    `json:"quicPort"`
-		TCPPort     *int    `json:"tcpPort"`
-		TLSEnabled  *bool   `json:"tlsEnabled"`
-		InsecureTLS *bool   `json:"insecureTls"`
+		Address          *string `json:"address"`
+		QUICPort         *int    `json:"quicPort"`
+		TCPPort          *int    `json:"tcpPort"`
+		TLSEnabled       *bool   `json:"tlsEnabled"`
+		InsecureTLS      *bool   `json:"insecureTls"`
+		AllowPlainTCP    *bool   `json:"allowPlainTcp"`
+		AllowInsecureTLS *bool   `json:"allowInsecureTls"`
 	} `json:"server"`
 	Device struct {
 		Name       *string `json:"name"`
@@ -467,6 +472,7 @@ type ConfigUpdate struct {
 		} `json:"public"`
 	} `json:"direct"`
 	Proxy struct {
+		E2EEMode      *string             `json:"e2eeMode"`
 		SOCKS5Enabled *bool               `json:"socks5Enabled"`
 		SOCKS5Listen  *string             `json:"socks5Listen"`
 		SOCKS5Port    *int                `json:"socks5Port"`
@@ -619,6 +625,12 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 	if in.Server.InsecureTLS != nil {
 		cfg.Server.InsecureTLS = *in.Server.InsecureTLS
 	}
+	if in.Server.AllowPlainTCP != nil {
+		cfg.Server.Security.AllowPlainTCP = *in.Server.AllowPlainTCP
+	}
+	if in.Server.AllowInsecureTLS != nil {
+		cfg.Server.Security.AllowInsecureTLS = *in.Server.AllowInsecureTLS
+	}
 	if in.Device.Name != nil {
 		cfg.Device.Name = strings.TrimSpace(*in.Device.Name)
 	}
@@ -683,6 +695,9 @@ func (b *UIBridge) saveConfig(in ConfigUpdate, reload bool) (*SaveResult, error)
 		cfg.Direct.Public.Advertise = strings.TrimSpace(*in.Direct.Public.Advertise)
 	}
 
+	if in.Proxy.E2EEMode != nil {
+		cfg.Proxy.E2EEMode = strings.ToLower(strings.TrimSpace(*in.Proxy.E2EEMode))
+	}
 	if in.Proxy.SOCKS5Enabled != nil {
 		cfg.Proxy.SOCKS5.Enabled = config.BoolPtr(*in.Proxy.SOCKS5Enabled)
 	}
@@ -1048,6 +1063,10 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		name = "Relay-Agent"
 	}
 	enabled := func(v *bool) bool { return v == nil || *v }
+	e2eeMode := c.Proxy.E2EEMode
+	if e2eeMode == "" {
+		e2eeMode = "opportunistic"
+	}
 	return map[string]any{
 		"中继地址": c.Server.Address, "QUIC 端口": c.Server.QUICPort, "TCP 端口": c.Server.TCPPort,
 		"设备名称": name, "身份 ID": c.Device.IdentityID, "传输模式": c.Transport.Mode, "TLS 开关": c.IsServerTLSEnabled(), "TLS 允许不受信任证书": c.Server.InsecureTLS,
@@ -1061,7 +1080,7 @@ func startupSettings(c *config.AgentConfigFile) map[string]any {
 		"SOCKS5 开关":      enabled(c.Proxy.SOCKS5.Enabled), "SOCKS5 地址": c.Proxy.SOCKS5.Listen,
 		"SOCKS5 端口": c.Proxy.SOCKS5.Port, "HTTP 开关": enabled(c.Proxy.HTTP.Enabled),
 		"HTTP 地址": c.Proxy.HTTP.Listen, "HTTP 端口": c.Proxy.HTTP.Port,
-		"代理连接上限": c.Proxy.MaxConnections, "代理 TCP 空闲超时": c.Proxy.IdleTimeoutSec,
+		"代理 E2EE": e2eeMode, "代理连接上限": c.Proxy.MaxConnections, "代理 TCP 空闲超时": c.Proxy.IdleTimeoutSec,
 		"代理 UDP 关联空闲超时": c.Proxy.UDPIdleTimeoutSec,
 		"出口开关":          enabled(c.Exit.Enabled), "互联网访问": c.Exit.AllowInternet,
 		"浏览器网络共享": c.Exit.BrowserNetworkShare,

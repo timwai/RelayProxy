@@ -412,6 +412,8 @@ function Settings({ctx}){
           </div>
           {group.id==='admin'&&<p className="settings-inline-warning">更改管理端口或协议后，需要使用新地址访问。</p>}
           {group.id==='tunnel'&&<p className="settings-inline-warning">拥塞控制可选择 BBR Aggressive 或 Brutal。BBR 会拒绝客户端 Brutal 请求；Brutal 只对已获授权、明确申报非零带宽的 QUIC 设备生效，其余继续 BBR。Server 预算考虑最高 125% 丢包补偿；更改需重启 Server。</p>}
+          {group.id==='tunnel'&&!draft.tunnel?.tlsEnabled&&!draft.tunnel?.allowPlainTCP&&<p className="settings-inline-warning">关闭 TLS 前，必须明确勾选“开发模式：允许明文 TCP”。未勾选时保存会被安全校验拒绝。</p>}
+          {group.id==='tunnel'&&draft.tunnel?.allowPlainTCP&&<p className="settings-inline-warning">安全警告：已授权开发模式明文 TCP。只有同时关闭隧道 TLS 时，数据才会不再经过 TLS 加密；仅限隔离的开发/测试网络，绝不可暴露到公网。生产环境请关闭此选项并启用 TLS。</p>}
           {group.id==='rdp'&&<p className="settings-inline-warning">GeoIP 默认关闭。开启后仅允许中国大陆公网 IP，其他明确识别的国家和地区来源会自动永久封禁。保存开关、规则源、更新周期后需要重启 Server；后续规则下载成功即可实时生效。</p>}
           {group.id==='rdp'&&draft.rdpIngress?.enabled&&<p className="settings-inline-warning">开启服务后还需在 RDP 公网入口页面授权目标设备。</p>}
           {group.id==='acl'&&draft.relayACL?.accessMode==='allow'&&

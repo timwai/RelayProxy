@@ -79,7 +79,8 @@ func main() {
 	exitFlag := flag.String("exit", "", "Default exit node ID (omit to auto-select when exactly one exit is online)")
 	socksFlag := flag.String("socks5", "", "Override SOCKS5 listen address")
 	httpFlag := flag.String("http", "", "Override HTTP proxy listen address")
-	insecureFlag := flag.Bool("insecure", false, "Allow self-signed or unverified TLS certificates")
+	insecureFlag := flag.Bool("insecure-tls", false, "DEV ONLY: skip Relay Server certificate verification")
+	flag.BoolVar(insecureFlag, "insecure", false, "Deprecated alias for --insecure-tls (DEV ONLY)")
 
 	guiFlag := flag.Bool("gui", false, "Launch the native desktop window (default when started without arguments)")
 	noGuiFlag := flag.Bool("no-gui", false, "Run headless without the desktop window")
@@ -315,16 +316,18 @@ func main() {
 	}
 
 	agentCfg := app.AgentConfig{
-		Identity:      deviceIdentity,
-		IdentityID:    cfgFile.Device.IdentityID,
-		DeviceName:    cfgFile.Device.Name,
-		ServerAddress: cfgFile.Server.Address,
-		QUICPort:      cfgFile.Server.QUICPort,
-		TCPPort:       cfgFile.Server.TCPPort,
+		Identity:        deviceIdentity,
+		E2EEPeerPinPath: filepath.Join(filepath.Dir(*configPath), "peer-key-pins.json"),
+		IdentityID:      cfgFile.Device.IdentityID,
+		DeviceName:      cfgFile.Device.Name,
+		ServerAddress:   cfgFile.Server.Address,
+		QUICPort:        cfgFile.Server.QUICPort,
+		TCPPort:         cfgFile.Server.TCPPort,
 		// The binary advertises supported capabilities; the server decides which
 		// subset is granted. This is not a client-side authorization choice.
 		Mode:                    "BOTH",
 		TransportMode:           cfgFile.Transport.Mode,
+		E2EEMode:                cfgFile.Proxy.E2EEMode,
 		BrutalUploadBPS:         congestion.MbpsToBytesPerSecond(cfgFile.Transport.Bandwidth.UpMbps),
 		BrutalDownloadBPS:       congestion.MbpsToBytesPerSecond(cfgFile.Transport.Bandwidth.DownMbps),
 		DisableLossCompensation: cfgFile.Transport.Bandwidth.DisableLossCompensation,
@@ -369,9 +372,17 @@ func main() {
 		Gateway:               cfgFile.Gateway,
 		InsecureTLS:           *insecureFlag || cfgFile.Server.InsecureTLS,
 		PlainTCP:              !cfgFile.IsServerTLSEnabled(),
+		AllowPlainTCP:         cfgFile.Server.Security.AllowPlainTCP,
+		AllowInsecureTLS:      cfgFile.Server.Security.AllowInsecureTLS || *insecureFlag,
 		ConnectTimeout:        10 * time.Second,
 	}
 
+	if agentCfg.PlainTCP {
+		log.Println("[SECURITY] WARNING: plaintext TCP tunnel transport is enabled; development only.")
+	}
+	if agentCfg.InsecureTLS {
+		log.Println("[SECURITY] WARNING: Relay Server certificate verification is disabled; development only.")
+	}
 	if agentCfg.PlainTCP && agentCfg.TransportMode != "tcp_only" {
 		agentCfg.TransportMode = "tcp_only"
 		log.Println("[Agent] TLS disabled: forcing transport mode to tcp_only (QUIC requires TLS)")

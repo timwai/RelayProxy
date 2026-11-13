@@ -441,7 +441,7 @@ func serveWindowsNetworkSession(file *os.File) error {
 		return err
 	}
 	if err := installWindowsTransparentFirewallRule(ports, program); err != nil {
-		message := "配置透明代理 Windows Firewall 入站规则失败: " + err.Error()
+		message := fmt.Sprintf("配置透明代理 Windows Firewall 入站规则失败 (program=%q): %v", program, err)
 		_ = writeNetworkFrame(file, nil, networkFrame{kind: networkFrameError, payload: []byte(message)})
 		return errors.New(message)
 	}
@@ -560,13 +560,45 @@ func removeWindowsTransparentFirewallRule() error {
 	)
 }
 
+func windowsTransparentFirewallProgramArg(program string) (string, error) {
+	if !filepath.IsAbs(program) || strings.ContainsAny(program, "\r\n\"") {
+		return "", errors.New("透明代理 Windows Firewall 必须限定到客户端程序的绝对路径")
+	}
+	// QueryFullProcessImageName may return an 8.3 short path (for example,
+	// C:\\Users\\RUNNER~1\\...). Windows Firewall's netsh resolver does not
+	// reliably resolve those aliases. Expand every component to its long
+	// Win32 path before registering the executable.
+	pathPtr, err := windows.UTF16PtrFromString(program)
+	if err != nil {
+		return "", fmt.Errorf("encode firewall executable path: %w", err)
+	}
+	buffer := make([]uint16, 32768)
+	n, err := windows.GetLongPathName(pathPtr, &buffer[0], uint32(len(buffer)))
+	if err != nil {
+		return "", fmt.Errorf("resolve long firewall executable path: %w", err)
+	}
+	if n == 0 || n >= uint32(len(buffer)) {
+		return "", errors.New("resolve long firewall executable path: invalid path length")
+	}
+	longPath := windows.UTF16ToString(buffer[:n])
+	if !filepath.IsAbs(longPath) || strings.ContainsAny(longPath, "\r\n\"") {
+		return "", errors.New("透明代理 Windows Firewall 解析出的程序路径无效")
+	}
+	// Pass the complete program= value as one CreateProcess argument. Go
+	// quotes the argv element when it contains spaces; embedding literal quote
+	// characters here makes netsh's application resolver treat them as part of
+	// the executable name on current Windows builds.
+	return "program=" + longPath, nil
+}
+
 func installWindowsTransparentFirewallRule(input []uint16, program string) error {
 	ports, err := normalizeWindowsTransparentFirewallPorts(input)
 	if err != nil {
 		return err
 	}
-	if !filepath.IsAbs(program) || strings.ContainsAny(program, "\r\n") {
-		return errors.New("透明代理 Windows Firewall 必须限定到客户端程序的绝对路径")
+	programArg, err := windowsTransparentFirewallProgramArg(program)
+	if err != nil {
+		return err
 	}
 	// A single broker session is supported. Delete a stale rule left by an
 	// unclean service termination before publishing the current random ports.
@@ -580,7 +612,7 @@ func installWindowsTransparentFirewallRule(input []uint16, program string) error
 		"name="+windowsTransparentFirewallRuleName,
 		"dir=in", "action=allow", "protocol=TCP",
 		"localport="+strings.Join(values, ","),
-		"program="+program,
+		programArg,
 		"profile=any", "edge=no",
 	)
 }

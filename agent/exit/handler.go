@@ -2,6 +2,7 @@ package exit
 
 import (
 	"context"
+	"crypto/ed25519"
 	"errors"
 	"fmt"
 	"log"
@@ -15,6 +16,7 @@ import (
 	"time"
 
 	"relayproxy/internal/acl"
+	"relayproxy/internal/e2ee"
 	p2presume "relayproxy/internal/p2p/resume"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/proxy"
@@ -23,6 +25,42 @@ import (
 )
 
 const udpIdleTimeout = 60 * time.Second
+
+type relayOriginContextKey struct{}
+type directP2POriginContextKey struct{}
+
+type directP2POrigin struct {
+	clientDeviceID string
+	exitDeviceID   string
+}
+
+// WithRelayOrigin marks streams accepted from the authenticated Relay tunnel.
+// Direct P2P listeners must not be able to assert this marker.
+func WithRelayOrigin(ctx context.Context) context.Context {
+	return context.WithValue(ctx, relayOriginContextKey{}, true)
+}
+
+func isRelayOrigin(ctx context.Context) bool {
+	trusted, _ := ctx.Value(relayOriginContextKey{}).(bool)
+	return trusted
+}
+
+// WithDirectP2POrigin marks streams accepted from a READY, Server-coordinated
+// and fingerprint-authenticated Client/Exit P2P QUIC session. The device pair
+// is bound here so a direct peer cannot choose another identity in its frame.
+func WithDirectP2POrigin(ctx context.Context, clientDeviceID, exitDeviceID string) context.Context {
+	return context.WithValue(ctx, directP2POriginContextKey{}, directP2POrigin{
+		clientDeviceID: clientDeviceID, exitDeviceID: exitDeviceID,
+	})
+}
+
+func directP2POriginIDs(ctx context.Context) (string, string, bool) {
+	origin, ok := ctx.Value(directP2POriginContextKey{}).(directP2POrigin)
+	if !ok || origin.clientDeviceID == "" || origin.exitDeviceID == "" {
+		return "", "", false
+	}
+	return origin.clientDeviceID, origin.exitDeviceID, true
+}
 
 var udpPipeBufferPool = sync.Pool{
 	New: func() any { return make([]byte, protocol.MaxUDPDatagramPayload+1) },
@@ -41,6 +79,8 @@ type HandlerConfig struct {
 	ResumeGrace         time.Duration
 	ResumeMaxSessions   int
 	ResumeReplayLimit   int
+	E2EEPublicKey       ed25519.PublicKey
+	E2EEPrivateKey      ed25519.PrivateKey
 }
 
 type Handler struct {
@@ -104,6 +144,8 @@ func (h *Handler) HandleStreamWithHeader(ctx context.Context, stream tunnel.Tunn
 	_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
 
 	switch header.Type {
+	case protocol.FrameTypeSecureRelay:
+		h.handleSecureRelay(ctx, stream, header)
 	case protocol.FrameTypeOpenTCP:
 		h.handleOpenTCP(ctx, stream)
 	case protocol.FrameTypeBrowserNetworkTCP:
@@ -121,6 +163,59 @@ func (h *Handler) HandleStreamWithHeader(ctx context.Context, stream tunnel.Tunn
 	default:
 		log.Printf("[ExitHandler] Unsupported frame type: %d", header.Type)
 	}
+}
+
+func (h *Handler) handleSecureRelay(ctx context.Context, stream tunnel.TunnelStream, outer *protocol.StreamHeader) {
+	if !isRelayOrigin(ctx) {
+		clientID, exitID, direct := directP2POriginIDs(ctx)
+		if !direct || outer == nil || outer.ClientDeviceID != clientID || outer.ExitDeviceID != exitID {
+			log.Printf("[ExitHandler] Rejected SecureRelay from an unauthenticated direct transport")
+			return
+		}
+	}
+	if outer == nil || outer.ClientDeviceID == "" || outer.ExitDeviceID == "" ||
+		len(h.cfg.E2EEPublicKey) != ed25519.PublicKeySize ||
+		len(h.cfg.E2EEPrivateKey) != ed25519.PrivateKeySize {
+		log.Printf("[ExitHandler] SecureRelay is missing an authenticated peer or local E2EE identity")
+		return
+	}
+	var metadata protocol.SecureRelayMetadata
+	if err := protocol.ReadJSON(stream, &metadata); err != nil {
+		log.Printf("[ExitHandler] Failed to read SecureRelay metadata: %v", err)
+		return
+	}
+	if metadata.Version != protocol.SecureRelayVersion || len(metadata.ClientPublicKey) != ed25519.PublicKeySize {
+		log.Printf("[ExitHandler] Rejected invalid SecureRelay metadata")
+		return
+	}
+	secureStream, err := e2ee.ServerHandshake(stream, e2ee.ServerConfig{
+		Local: e2ee.Identity{
+			DeviceID: outer.ExitDeviceID, PublicKey: h.cfg.E2EEPublicKey, PrivateKey: h.cfg.E2EEPrivateKey,
+		},
+		ClientDeviceID: outer.ClientDeviceID, ClientPublicKey: ed25519.PublicKey(metadata.ClientPublicKey),
+	})
+	if err != nil {
+		log.Printf("[ExitHandler] SecureRelay E2EE handshake failed for Client %s: %v", outer.ClientDeviceID, err)
+		return
+	}
+	if metadata.RelayPolicy != nil && boundRelayPolicy(ctx) == nil {
+		ctx = BindRelayPolicy(ctx, metadata.RelayPolicy)
+	}
+	inner, err := protocol.ReadStreamHeader(secureStream)
+	if err != nil {
+		log.Printf("[ExitHandler] Failed to read encrypted inner StreamHeader: %v", err)
+		_ = secureStream.Close()
+		return
+	}
+	if (inner.ClientDeviceID != "" && inner.ClientDeviceID != outer.ClientDeviceID) ||
+		(inner.ExitDeviceID != "" && inner.ExitDeviceID != outer.ExitDeviceID) ||
+		(inner.Type != protocol.FrameTypeOpenTCP && inner.Type != protocol.FrameTypeOpenUDP &&
+			inner.Type != protocol.FrameTypeExitSystemDNS) {
+		log.Printf("[ExitHandler] Rejected invalid encrypted inner StreamHeader type=%d", inner.Type)
+		_ = secureStream.Close()
+		return
+	}
+	h.HandleStreamWithHeader(ctx, secureStream, inner)
 }
 
 func (h *Handler) handleSpeedTest(stream tunnel.TunnelStream) {

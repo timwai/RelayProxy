@@ -4,6 +4,7 @@ export const groups = [
     ['listen','监听地址','text',':21080'],['tlsEnabled','访问协议','bool-select',null,['HTTP','HTTPS']]]},
   {id:'tunnel',title:'隧道连接',subtitle:'TCP、QUIC 与设备连接容量',section:'基础服务',fields:[
     ['tcpListen','TCP 监听地址','text',':443'],['quicListen','QUIC / UDP 监听地址','text',':443'],['tlsEnabled','启用隧道 TLS','checkbox'],
+    ['allowPlainTCP','开发模式：允许明文 TCP','checkbox'],
     ['heartbeatSec','心跳间隔（秒）','number'],['maxConnections','全局设备连接上限','number'],['maxStreamsPerDevice','每设备并发流上限','number'],
     ['brutalUpMbps','Brutal Server → Agent 单设备上限（Mbps）','number'],
     ['brutalDownMbps','Brutal Agent → Server 单设备上限（Mbps）','number'],

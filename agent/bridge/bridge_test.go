@@ -299,10 +299,68 @@ func TestProxyYAMLLimitsSurviveUISaveAndRequireRestart(t *testing.T) {
 	}
 }
 
+func TestE2EERequiredModeSurvivesAgentBridgeSave(t *testing.T) {
+	b := newTestBridge(t)
+	var update ConfigUpdate
+	update.Proxy.E2EEMode = ptr("required")
+	saved, err := b.SaveConfig(update)
+	if err != nil {
+		t.Fatalf("save required E2EE mode: %v", err)
+	}
+	if !saved.RestartRequired {
+		t.Fatal("required E2EE policy change was not marked restart-required")
+	}
+	loaded, err := config.LoadAgentConfig(b.configPath)
+	if err != nil || loaded.Proxy.E2EEMode != "required" {
+		t.Fatalf("required E2EE mode not persisted: config=%+v err=%v", loaded, err)
+	}
+
+	var incompatible ConfigUpdate
+	incompatible.Server.TLSEnabled = ptr(false)
+	incompatible.Server.AllowPlainTCP = ptr(true)
+	if _, err := b.SaveConfig(incompatible); err == nil {
+		t.Fatal("required E2EE allowed the Relay TLS transport to be disabled")
+	}
+	after, err := config.LoadAgentConfig(b.configPath)
+	if err != nil || after.Proxy.E2EEMode != "required" || !after.IsServerTLSEnabled() {
+		t.Fatalf("failed insecure transport edit changed required E2EE config: config=%+v err=%v", after, err)
+	}
+}
+
+func TestSecurityDowngradeRequiresExplicitBridgeConsent(t *testing.T) {
+	b := newTestBridge(t)
+	var insecure ConfigUpdate
+	insecure.Server.InsecureTLS = ptr(true)
+	if _, err := b.SaveConfig(insecure); err == nil {
+		t.Fatal("Bridge enabled insecure TLS without explicit security consent")
+	}
+	cfg, err := config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.InsecureTLS || cfg.Server.Security.AllowInsecureTLS {
+		t.Fatal("failed insecure TLS request modified saved config")
+	}
+
+	var plain ConfigUpdate
+	plain.Server.TLSEnabled = ptr(false)
+	if _, err := b.SaveConfig(plain); err == nil {
+		t.Fatal("Bridge enabled plaintext TCP without explicit security consent")
+	}
+	cfg, err = config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.IsServerTLSEnabled() || cfg.Server.Security.AllowPlainTCP {
+		t.Fatal("failed plaintext TCP request modified saved config")
+	}
+}
+
 func TestInsecureTLSSaveRequiresRestart(t *testing.T) {
 	b := newTestBridge(t)
 	var in ConfigUpdate
 	in.Server.InsecureTLS = ptr(true)
+	in.Server.AllowInsecureTLS = ptr(true)
 
 	result, err := b.SaveConfig(in)
 	if err != nil {

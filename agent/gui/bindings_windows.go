@@ -248,6 +248,9 @@ func (s *WailsService) GetConfig() (string, error) {
 		TCPPort                     int                 `json:"tcpPort"`
 		TLSEnabled                  bool                `json:"tlsEnabled"`
 		InsecureTLS                 bool                `json:"insecureTls"`
+		E2EEMode                    string              `json:"e2eeMode"`
+		AllowPlainTCP               bool                `json:"allowPlainTcp"`
+		AllowInsecureTLS            bool                `json:"allowInsecureTls"`
 		DeviceName                  string              `json:"deviceName"`
 		IdentityID                  string              `json:"identityId"`
 		Transport                   string              `json:"transport"`
@@ -285,26 +288,29 @@ func (s *WailsService) GetConfig() (string, error) {
 		RestartFields               []string            `json:"restartFields"`
 		ReloadPending               bool                `json:"reloadPending"`
 	}{
-		Platform:       "windows",
-		ConfigPath:     a.bridge.ConfigPath(),
-		ServerAddress:  cfg.Server.Address,
-		QUICPort:       cfg.Server.QUICPort,
-		TCPPort:        cfg.Server.TCPPort,
-		TLSEnabled:     cfg.IsServerTLSEnabled(),
-		InsecureTLS:    cfg.Server.InsecureTLS,
-		DeviceName:     cfg.Device.Name,
-		IdentityID:     cfg.Device.IdentityID,
-		Transport:      cfg.Transport.Mode,
-		DefaultExitID:  cfg.Proxy.DefaultExitID,
-		CustomExits:    nonNilSlice(cfg.Proxy.CustomExits),
-		UpstreamExitID: cfg.Exit.UpstreamExitID,
-		ExitEnabled:    cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
-		AllowInternet:  cfg.Exit.AllowInternet,
-		AllowPrivate:   cfg.Exit.AllowPrivateNetwork,
-		AllowLoopback:  cfg.Exit.AllowLoopback,
-		AccessMode:     cfg.Exit.Access.Mode,
-		AccessDomains:  cfg.Exit.Access.Domains,
-		AccessCIDRs:    cfg.Exit.Access.CIDRs,
+		Platform:         "windows",
+		ConfigPath:       a.bridge.ConfigPath(),
+		ServerAddress:    cfg.Server.Address,
+		QUICPort:         cfg.Server.QUICPort,
+		TCPPort:          cfg.Server.TCPPort,
+		TLSEnabled:       cfg.IsServerTLSEnabled(),
+		InsecureTLS:      cfg.Server.InsecureTLS,
+		E2EEMode:         cfg.Proxy.E2EEMode,
+		AllowPlainTCP:    cfg.Server.Security.AllowPlainTCP,
+		AllowInsecureTLS: cfg.Server.Security.AllowInsecureTLS,
+		DeviceName:       cfg.Device.Name,
+		IdentityID:       cfg.Device.IdentityID,
+		Transport:        cfg.Transport.Mode,
+		DefaultExitID:    cfg.Proxy.DefaultExitID,
+		CustomExits:      nonNilSlice(cfg.Proxy.CustomExits),
+		UpstreamExitID:   cfg.Exit.UpstreamExitID,
+		ExitEnabled:      cfg.Exit.Enabled == nil || *cfg.Exit.Enabled,
+		AllowInternet:    cfg.Exit.AllowInternet,
+		AllowPrivate:     cfg.Exit.AllowPrivateNetwork,
+		AllowLoopback:    cfg.Exit.AllowLoopback,
+		AccessMode:       cfg.Exit.Access.Mode,
+		AccessDomains:    cfg.Exit.Access.Domains,
+		AccessCIDRs:      cfg.Exit.Access.CIDRs,
 		ExitUpstream: map[string]any{
 			"mode": cfg.Exit.Upstream.Mode, "address": cfg.Exit.Upstream.Address,
 			"username": cfg.Exit.Upstream.Username, "hasPassword": cfg.Exit.Upstream.Password != "",
@@ -338,13 +344,16 @@ func (s *WailsService) GetConfig() (string, error) {
 		RestartFields:       state.RestartFields,
 		ReloadPending:       state.ReloadPending,
 		Runtime: map[string]any{
-			"serverAddress": state.Runtime.Server.Address,
-			"quicPort":      state.Runtime.Server.QUICPort,
-			"tcpPort":       state.Runtime.Server.TCPPort,
-			"tlsEnabled":    state.Runtime.IsServerTLSEnabled(),
-			"insecureTls":   state.Runtime.Server.InsecureTLS,
-			"transport":     state.Runtime.Transport.Mode,
-			"networkMode":   state.Runtime.Network.Mode,
+			"serverAddress":    state.Runtime.Server.Address,
+			"quicPort":         state.Runtime.Server.QUICPort,
+			"tcpPort":          state.Runtime.Server.TCPPort,
+			"tlsEnabled":       state.Runtime.IsServerTLSEnabled(),
+			"insecureTls":      state.Runtime.Server.InsecureTLS,
+			"e2eeMode":         state.Runtime.Proxy.E2EEMode,
+			"allowPlainTcp":    state.Runtime.Server.Security.AllowPlainTCP,
+			"allowInsecureTls": state.Runtime.Server.Security.AllowInsecureTLS,
+			"transport":        state.Runtime.Transport.Mode,
+			"networkMode":      state.Runtime.Network.Mode,
 			"rdp": map[string]any{
 				"enabled": state.Runtime.RDP.Enabled == nil || *state.Runtime.RDP.Enabled,
 				"address": state.Runtime.RDP.Address,

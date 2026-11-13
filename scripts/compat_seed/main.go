@@ -94,7 +94,7 @@ func run(dbPath, dir string, quicPort, tcpPort, socksPort, brutalMbps int, mode 
 		"compat-ci-admin", []string{repository.GrantFeatureProxyUse}, nil); err != nil {
 		return fmt.Errorf("grant isolated Server Exit proxy capability: %w", err)
 	}
-	config := fmt.Sprintf("server:\n  address: 127.0.0.1\n  quic_port: %d\n  tcp_port: %d\n  insecure_tls: true\n"+
+	config := fmt.Sprintf("server:\n  address: 127.0.0.1\n  quic_port: %d\n  tcp_port: %d\n  insecure_tls: true\n  security:\n    allow_insecure_tls: true\n"+
 		"device:\n  name: compat-full-agent\n  identity_id: %s\n"+
 		"transport:\n  mode: %s\n  bandwidth:\n    up_mbps: %d\n    down_mbps: %d\n"+
 		"p2p:\n  enabled: false\n  mode: relay_only\n"+

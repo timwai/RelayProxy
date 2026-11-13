@@ -299,6 +299,35 @@ func TestProxyYAMLLimitsSurviveUISaveAndRequireRestart(t *testing.T) {
 	}
 }
 
+func TestSecurityDowngradeRequiresExplicitBridgeConsent(t *testing.T) {
+	b := newTestBridge(t)
+	var insecure ConfigUpdate
+	insecure.Server.InsecureTLS = ptr(true)
+	if _, err := b.SaveConfig(insecure); err == nil {
+		t.Fatal("Bridge enabled insecure TLS without explicit security consent")
+	}
+	cfg, err := config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cfg.Server.InsecureTLS || cfg.Server.Security.AllowInsecureTLS {
+		t.Fatal("failed insecure TLS request modified saved config")
+	}
+
+	var plain ConfigUpdate
+	plain.Server.TLSEnabled = ptr(false)
+	if _, err := b.SaveConfig(plain); err == nil {
+		t.Fatal("Bridge enabled plaintext TCP without explicit security consent")
+	}
+	cfg, err = config.LoadAgentConfig(b.configPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.IsServerTLSEnabled() || cfg.Server.Security.AllowPlainTCP {
+		t.Fatal("failed plaintext TCP request modified saved config")
+	}
+}
+
 func TestInsecureTLSSaveRequiresRestart(t *testing.T) {
 	b := newTestBridge(t)
 	var in ConfigUpdate

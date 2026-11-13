@@ -564,10 +564,29 @@ func windowsTransparentFirewallProgramArg(program string) (string, error) {
 	if !filepath.IsAbs(program) || strings.ContainsAny(program, "\r\n\"") {
 		return "", errors.New("透明代理 Windows Firewall 必须限定到客户端程序的绝对路径")
 	}
-	// netsh has its own command-line parser. exec.Command preserves this as
-	// one argv item, but netsh still requires quotes around program paths;
-	// without them it reports "The application name could not be resolved".
-	return `program="` + program + `"`, nil
+	// QueryFullProcessImageName may return an 8.3 short path (for example,
+	// C:\\Users\\RUNNER~1\\...). Windows Firewall's netsh resolver does not
+	// reliably resolve those aliases. Expand every component to its long
+	// Win32 path before registering the executable.
+	pathPtr, err := windows.UTF16PtrFromString(program)
+	if err != nil {
+		return "", fmt.Errorf("encode firewall executable path: %w", err)
+	}
+	buffer := make([]uint16, 32768)
+	n, err := windows.GetLongPathName(pathPtr, &buffer[0], uint32(len(buffer)))
+	if err != nil {
+		return "", fmt.Errorf("resolve long firewall executable path: %w", err)
+	}
+	if n == 0 || n >= uint32(len(buffer)) {
+		return "", errors.New("resolve long firewall executable path: invalid path length")
+	}
+	longPath := windows.UTF16ToString(buffer[:n])
+	if !filepath.IsAbs(longPath) || strings.ContainsAny(longPath, "\r\n\"") {
+		return "", errors.New("透明代理 Windows Firewall 解析出的程序路径无效")
+	}
+	// netsh has its own command-line parser. Keep the path quoted as a single
+	// value, including when the long path contains spaces.
+	return `program="` + longPath + `"`, nil
 }
 
 func installWindowsTransparentFirewallRule(input []uint16, program string) error {

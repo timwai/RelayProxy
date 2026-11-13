@@ -303,6 +303,7 @@ func TestInsecureTLSSaveRequiresRestart(t *testing.T) {
 	b := newTestBridge(t)
 	var in ConfigUpdate
 	in.Server.InsecureTLS = ptr(true)
+	in.Server.AllowInsecureTLS = ptr(true)
 
 	result, err := b.SaveConfig(in)
 	if err != nil {

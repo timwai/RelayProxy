@@ -426,9 +426,6 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		if cfg.PlainTCP || cfg.InsecureTLS {
 			return nil, errors.New("E2EE required mode requires verified Relay TLS")
 		}
-		if cfg.P2PMode == "direct_only" || cfg.P2PMode == "p2p_only" {
-			return nil, errors.New("E2EE required mode is incompatible with direct-only routes")
-		}
 	}
 	if cfg.Identity == nil {
 		var err error
@@ -490,6 +487,9 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	case "auto", "direct_only", "relay_only", "p2p_only":
 	default:
 		return nil, fmt.Errorf("invalid P2P mode %q", cfg.P2PMode)
+	}
+	if cfg.E2EEMode == "required" && (cfg.P2PMode == "direct_only" || cfg.P2PMode == "p2p_only") {
+		return nil, errors.New("E2EE required mode is incompatible with direct-only routes")
 	}
 	if cfg.P2PPunchTimeout <= 0 {
 		cfg.P2PPunchTimeout = 5 * time.Second

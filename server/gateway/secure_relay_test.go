@@ -178,7 +178,9 @@ func TestSecureRelayHidesInnerTCPMetadataFromRelay(t *testing.T) {
 		t.Fatalf("Exit did not open target: %+v", response)
 	}
 
-	payload := []byte("relay-must-not-see-this-secret-payload")
+	// Model an inner TLS ClientHello carrying a target SNI value. The Relay
+	// must see only E2EE records, not the ClientHello or its server_name.
+	payload := []byte("TLS ClientHello server_name=sensitive.example; relay-must-not-see-this-secret-payload")
 	writeDone := make(chan error, 1)
 	go func() {
 		_, writeErr := secureClient.Write(payload)
@@ -208,7 +210,7 @@ func TestSecureRelayHidesInnerTCPMetadataFromRelay(t *testing.T) {
 	}
 
 	captured := capture.captured()
-	for _, secret := range [][]byte{[]byte("127.0.0.1"), payload} {
+	for _, secret := range [][]byte{[]byte("127.0.0.1"), []byte("sensitive.example"), payload} {
 		if bytes.Contains(captured, secret) {
 			t.Fatalf("Relay-side stream capture contains plaintext secret %q", secret)
 		}

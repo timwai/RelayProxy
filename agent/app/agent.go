@@ -143,6 +143,7 @@ type AgentConfig struct {
 	TCPPort                 int
 	Mode                    string // "CLIENT", "EXIT", "BOTH"
 	TransportMode           string // "auto", "quic_only", "tcp_only"
+	E2EEMode               string // "off", "opportunistic" (default), "required"
 	BrutalUploadBPS         uint64
 	BrutalDownloadBPS       uint64
 	DisableLossCompensation bool
@@ -413,6 +414,22 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			return nil, fmt.Errorf("open E2EE peer key pin store: %w", err)
 		}
 	}
+	cfg.E2EEMode = strings.ToLower(strings.TrimSpace(cfg.E2EEMode))
+	switch cfg.E2EEMode {
+	case "":
+		cfg.E2EEMode = "opportunistic"
+	case "off", "opportunistic", "required":
+	default:
+		return nil, fmt.Errorf("unsupported E2EE mode %q", cfg.E2EEMode)
+	}
+	if cfg.E2EEMode == "required" {
+		if cfg.PlainTCP || cfg.InsecureTLS {
+			return nil, errors.New("E2EE required mode requires verified Relay TLS")
+		}
+		if cfg.P2PMode == "direct_only" || cfg.P2PMode == "p2p_only" {
+			return nil, errors.New("E2EE required mode is incompatible with direct-only routes")
+		}
+	}
 	if cfg.Identity == nil {
 		var err error
 		cfg.Identity, err = deviceidentity.Generate()
@@ -579,6 +596,7 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 		}
 		return nil, false
 	}, verifyE2EEPeerKey)
+	a.rawDialer.ConfigureE2EEMode(cfg.E2EEMode)
 	a.rawDialer.ConfigureDirectPolicy(cfg.P2PMode, cfg.IsP2PFallbackEnabled())
 	resumeClient := cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" && cfg.P2PMode != "p2p_only" && cfg.IsP2PFallbackEnabled()
 	a.rawDialer.ConfigureStreamResume(resumeClient, p2presume.DefaultReplayLimit)

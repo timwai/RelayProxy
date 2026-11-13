@@ -4,8 +4,8 @@ import (
 	"bytes"
 	"context"
 	"crypto/ed25519"
-	"errors"
 	"crypto/rand"
+	"errors"
 	"io"
 	"net"
 	"sync"
@@ -222,7 +222,6 @@ func TestSecureRelayHidesInnerTCPMetadataFromRelay(t *testing.T) {
 		t.Fatal("Relay secure stream audit was not emitted")
 	}
 }
-
 
 func TestSecureRelayHidesExitSystemDNSQuestionFromRelay(t *testing.T) {
 	clientIdentity := secureRelayTestIdentity(t, "client-device")

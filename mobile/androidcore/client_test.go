@@ -18,7 +18,7 @@ import (
 // Android must not override the shared P2P manager's default punch window:
 // the 1.2s legacy override prevented the 5s LAN/NAT rebind fix taking effect.
 
-func TestAndroidE2EEDefaultsToOpportunisticAndConfiguresExitIdentity(t *testing.T) {
+func TestAndroidE2EEDefaultsToOpportunisticAndInitializesExitHandler(t *testing.T) {
 	identityPath := filepath.Join(t.TempDir(), "relayproxy", "device-identity.json")
 	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`, identityPath)
 	if err != nil {

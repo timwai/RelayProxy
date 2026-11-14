@@ -4,11 +4,11 @@ import "testing"
 
 func TestParseServerEndpoint(t *testing.T) {
 	tests := []struct {
-		name       string
-		input      string
-		wantHost   string
-		wantPort   int
-		wantErr    bool
+		name     string
+		input    string
+		wantHost string
+		wantPort int
+		wantErr  bool
 	}{
 		{name: "hostname default port", input: "relay.example.com", wantHost: "relay.example.com", wantPort: 443},
 		{name: "IPv4 explicit port", input: "192.168.31.14:21000", wantHost: "192.168.31.14", wantPort: 21000},

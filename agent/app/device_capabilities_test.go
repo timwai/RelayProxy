@@ -17,9 +17,9 @@ func containsCapability(items []string, want string) bool {
 
 func TestRouterDeviceCapabilitiesAreExitOnlyAndNoE2EE(t *testing.T) {
 	cfg := AgentConfig{
-		RouterMode: true,
-		Mode: "EXIT",
-		P2PMode: "auto",
+		RouterMode:          true,
+		Mode:                "EXIT",
+		P2PMode:             "auto",
 		BrowserNetworkShare: true,
 	}
 	requested, transport := buildDeviceCapabilities(cfg, true, true)

@@ -78,7 +78,7 @@ func TestAndroidExitServesLatencyProbeThroughRelayAndDirect(t *testing.T) {
 				c.acceptIncomingStreams(context.Background(), sess, 1, route == "relay", nil, &workers)
 				workers.Wait()
 			case "direct":
-				c.acceptProxyP2PExitSession(context.Background(), sess, &acl.Policy{}, 1)
+				c.acceptProxyP2PExitSession(context.Background(), sess, &acl.Policy{}, "probe-client", "probe-exit", 1)
 			case "direct-unbound":
 				c.acceptProxyP2PExitSession(context.Background(), sess, nil, 1)
 			}

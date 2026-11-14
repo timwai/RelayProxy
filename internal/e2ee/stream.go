@@ -254,13 +254,17 @@ type SecureStream struct {
 	tx     cipher.AEAD
 	rx     cipher.AEAD
 
-	readMu   sync.Mutex
-	writeMu  sync.Mutex
-	readBuf  []byte
-	readEnd  bool
-	sendSeq  uint64
-	recvSeq  uint64
-	writeEnd bool
+	readMu     sync.Mutex
+	writeMu    sync.Mutex
+	readBuf    []byte
+	readOffset int
+	writeBuf   []byte
+	readEnd    bool
+	sendSeq    uint64
+	recvSeq    uint64
+	sendNonce  [12]byte
+	recvNonce  [12]byte
+	writeEnd   bool
 
 	closeOnce sync.Once
 	closeErr  error
@@ -278,7 +282,11 @@ func NewSecureStream(stream tunnel.TunnelStream, sendKey, receiveKey []byte) (*S
 	if err != nil {
 		return nil, fmt.Errorf("create E2EE receive cipher: %w", err)
 	}
-	return &SecureStream{stream: stream, tx: tx, rx: rx}, nil
+	return &SecureStream{
+		stream: stream, tx: tx, rx: rx,
+		sendNonce: [12]byte{'R', 'P', 'X', '1'},
+		recvNonce: [12]byte{'R', 'P', 'X', '1'},
+	}, nil
 }
 
 func (s *SecureStream) Read(p []byte) (int, error) {
@@ -290,7 +298,7 @@ func (s *SecureStream) Read(p []byte) (int, error) {
 	if s.readEnd {
 		return 0, io.EOF
 	}
-	if len(s.readBuf) == 0 {
+	if s.readOffset >= len(s.readBuf) {
 		plain, err := s.readRecord()
 		if err != nil {
 			return 0, err
@@ -300,9 +308,10 @@ func (s *SecureStream) Read(p []byte) (int, error) {
 			return 0, io.EOF
 		}
 		s.readBuf = plain
+		s.readOffset = 0
 	}
-	n := copy(p, s.readBuf)
-	s.readBuf = s.readBuf[n:]
+	n := copy(p, s.readBuf[s.readOffset:])
+	s.readOffset += n
 	return n, nil
 }
 
@@ -321,17 +330,25 @@ func (s *SecureStream) readRecord() ([]byte, error) {
 	if length < minimum || length > maximum {
 		return nil, ErrRecordLength
 	}
-	ciphertext := make([]byte, int(length))
+	if cap(s.readBuf) < int(length) {
+		s.readBuf = make([]byte, int(length))
+	} else {
+		s.readBuf = s.readBuf[:int(length)]
+	}
+	ciphertext := s.readBuf
 	if _, err := io.ReadFull(s.stream, ciphertext); err != nil {
 		return nil, fmt.Errorf("read E2EE record body: %w", err)
 	}
 	if s.recvSeq == ^uint64(0) {
 		return nil, ErrRecordSequence
 	}
-	plain, err := s.rx.Open(nil, recordNonce(s.recvSeq, s.rx.NonceSize()), ciphertext, header[:])
+	binary.BigEndian.PutUint64(s.recvNonce[4:], s.recvSeq)
+	plain, err := s.rx.Open(ciphertext[:0], s.recvNonce[:], ciphertext, header[:])
 	if err != nil {
+		s.readBuf = ciphertext[:0]
 		return nil, fmt.Errorf("authenticate E2EE record: %w", err)
 	}
+	s.readBuf = plain
 	s.recvSeq++
 	return plain, nil
 }
@@ -361,12 +378,17 @@ func (s *SecureStream) writeRecord(plain []byte) error {
 	length := uint32(len(plain) + s.tx.Overhead())
 	var header [4]byte
 	binary.BigEndian.PutUint32(header[:], length)
-	ciphertext := s.tx.Seal(nil, recordNonce(s.sendSeq, s.tx.NonceSize()), plain, header[:])
-	if err := writeAll(s.stream, header[:]); err != nil {
-		return fmt.Errorf("write E2EE record header: %w", err)
+	needed := len(header) + len(plain) + s.tx.Overhead()
+	if cap(s.writeBuf) < needed {
+		s.writeBuf = make([]byte, len(header), needed)
+	} else {
+		s.writeBuf = s.writeBuf[:len(header)]
 	}
-	if err := writeAll(s.stream, ciphertext); err != nil {
-		return fmt.Errorf("write E2EE record body: %w", err)
+	copy(s.writeBuf, header[:])
+	binary.BigEndian.PutUint64(s.sendNonce[4:], s.sendSeq)
+	s.writeBuf = s.tx.Seal(s.writeBuf, s.sendNonce[:], plain, header[:])
+	if err := writeAll(s.stream, s.writeBuf); err != nil {
+		return fmt.Errorf("write E2EE record: %w", err)
 	}
 	s.sendSeq++
 	return nil

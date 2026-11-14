@@ -24,19 +24,14 @@ func (s *testStream) CloseWrite() error { return nil }
 type tamperStream struct {
 	*testStream
 	enabled atomic.Bool
-	header  atomic.Bool
 }
 
 func (s *tamperStream) Write(p []byte) (int, error) {
-	if s.enabled.Load() {
-		if len(p) == 4 {
-			s.header.Store(true)
-		} else if s.header.Swap(false) {
-			copyOf := append([]byte(nil), p...)
-			copyOf[0] ^= 0x80
-			s.enabled.Store(false)
-			p = copyOf
-		}
+	if s.enabled.Load() && len(p) > 4 {
+		copyOf := append([]byte(nil), p...)
+		copyOf[4] ^= 0x80 // Preserve the length header and corrupt the AEAD ciphertext.
+		s.enabled.Store(false)
+		p = copyOf
 	}
 	return s.testStream.Write(p)
 }

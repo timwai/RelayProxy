@@ -17,6 +17,44 @@ import (
 
 // Android must not override the shared P2P manager's default punch window:
 // the 1.2s legacy override prevented the 5s LAN/NAT rebind fix taking effect.
+
+func TestAndroidE2EEDefaultsToOpportunisticAndConfiguresExitIdentity(t *testing.T) {
+	identityPath := filepath.Join(t.TempDir(), "relayproxy", "device-identity.json")
+	client, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`, identityPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = client.Stop() })
+
+	if client.cfg.E2EEMode != "opportunistic" {
+		t.Fatalf("default E2EE mode = %q, want opportunistic", client.cfg.E2EEMode)
+	}
+	if client.e2eePeerPins == nil {
+		t.Fatal("Android Client did not open persistent E2EE peer pins")
+	}
+	if !reflect.DeepEqual(client.handler.cfg.E2EEPublicKey, client.identity.PublicKey) ||
+		!reflect.DeepEqual(client.handler.cfg.E2EEPrivateKey, client.identity.PrivateKey) {
+		t.Fatal("Android Exit handler is not configured with the persistent device identity")
+	}
+}
+
+func TestAndroidE2EERequiredModeRejectsUnverifiedTransport(t *testing.T) {
+	for _, raw := range []string{
+		`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","e2eeMode":"required","tlsEnabled":false}`,
+		`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","e2eeMode":"required","tlsEnabled":true,"insecureTLS":true}`,
+	} {
+		if _, err := normalizeConfig(raw); err == nil {
+			t.Fatalf("required E2EE accepted unverified transport config: %s", raw)
+		}
+	}
+}
+
+func TestAndroidE2EEModeRejectsUnknownValue(t *testing.T) {
+	if _, err := normalizeConfig(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8","e2eeMode":"always"}`); err == nil {
+		t.Fatal("unknown E2EE mode was accepted")
+	}
+}
+
 func TestAndroidP2PManagerOptionsInheritSharedPunchTimeout(t *testing.T) {
 	allowed := true
 	cfg := clientConfig{UPnPAllowed: &allowed, DisableLossCompensation: true}

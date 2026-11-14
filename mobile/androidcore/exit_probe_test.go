@@ -72,7 +72,6 @@ type androidIncomingStream struct {
 func (s *androidIncomingStream) Write(p []byte) (int, error) { return s.output.Write(p) }
 func (s *androidIncomingStream) Close() error                { s.closed = true; return nil }
 
-
 func TestAndroidExitAcceptsE2EESecureRelayFromRelayAndP2P(t *testing.T) {
 	for _, route := range []string{"relay", "direct"} {
 		t.Run(route, func(t *testing.T) {
@@ -128,7 +127,7 @@ func TestAndroidExitAcceptsE2EESecureRelayFromRelayAndP2P(t *testing.T) {
 					return
 				}
 				secure, err := e2ee.ClientHandshake(clientStream, e2ee.ClientConfig{
-					Local: e2ee.Identity{DeviceID: clientID, PublicKey: clientPublic, PrivateKey: clientPrivate},
+					Local:        e2ee.Identity{DeviceID: clientID, PublicKey: clientPublic, PrivateKey: clientPrivate},
 					ExitDeviceID: exitID, ExitPublicKey: android.identity.PublicKey,
 				})
 				if err != nil {

@@ -3,6 +3,8 @@ package androidcore
 import (
 	"bytes"
 	"context"
+	"crypto/ed25519"
+	"crypto/rand"
 	"encoding/json"
 	"io"
 	"net"
@@ -15,6 +17,7 @@ import (
 	agentclient "relayproxy/agent/client"
 	"relayproxy/agent/exit"
 	"relayproxy/internal/acl"
+	"relayproxy/internal/e2ee"
 	"relayproxy/internal/protocol"
 	"relayproxy/internal/tunnel"
 )
@@ -35,6 +38,12 @@ func (s *androidProbeStream) CloseWrite() error {
 func (s *androidProbeStream) SetDeadline(time.Time) error      { return nil }
 func (s *androidProbeStream) SetReadDeadline(time.Time) error  { return nil }
 func (s *androidProbeStream) SetWriteDeadline(time.Time) error { return nil }
+
+type androidPipeTunnelStream struct {
+	net.Conn
+}
+
+func (s *androidPipeTunnelStream) CloseWrite() error { return s.Conn.Close() }
 
 type androidProbeSession struct {
 	opens    atomic.Int32
@@ -62,6 +71,88 @@ type androidIncomingStream struct {
 
 func (s *androidIncomingStream) Write(p []byte) (int, error) { return s.output.Write(p) }
 func (s *androidIncomingStream) Close() error                { s.closed = true; return nil }
+
+
+func TestAndroidExitAcceptsE2EESecureRelayFromRelayAndP2P(t *testing.T) {
+	for _, route := range []string{"relay", "direct"} {
+		t.Run(route, func(t *testing.T) {
+			identityPath := filepath.Join(t.TempDir(), "device-identity.json")
+			android, err := NewClient(`{"serverAddress":"relay.example.com","identityId":"a1b2c3d4e5f6g7h8"}`, identityPath)
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { _ = android.Stop() })
+
+			clientPublic, clientPrivate, err := ed25519.GenerateKey(rand.Reader)
+			if err != nil {
+				t.Fatal(err)
+			}
+			const clientID, exitID = "probe-client", "android-exit"
+			serverConn, clientConn := net.Pipe()
+			serverStream := &androidPipeTunnelStream{Conn: serverConn}
+			clientStream := &androidPipeTunnelStream{Conn: clientConn}
+			_ = serverStream.SetDeadline(time.Now().Add(10 * time.Second))
+			_ = clientStream.SetDeadline(time.Now().Add(10 * time.Second))
+			t.Cleanup(func() {
+				_ = serverStream.Close()
+				_ = clientStream.Close()
+			})
+			session := &androidProbeSession{incoming: serverStream}
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			acceptDone := make(chan struct{})
+			go func() {
+				if route == "relay" {
+					var workers sync.WaitGroup
+					android.acceptIncomingStreams(ctx, session, 1, true, nil, &workers)
+					workers.Wait()
+				} else {
+					android.acceptProxyP2PExitSession(ctx, session, &acl.Policy{}, clientID, exitID, 1)
+				}
+				close(acceptDone)
+			}()
+
+			clientDone := make(chan error, 1)
+			go func() {
+				if err := protocol.WriteStreamHeader(clientStream, &protocol.StreamHeader{
+					Type: protocol.FrameTypeSecureRelay, RequestID: "android-e2ee-probe",
+					ClientDeviceID: clientID, ExitDeviceID: exitID,
+				}); err != nil {
+					clientDone <- err
+					return
+				}
+				if err := protocol.WriteJSON(clientStream, protocol.SecureRelayMetadata{
+					Version: protocol.SecureRelayVersion, ClientPublicKey: clientPublic,
+				}); err != nil {
+					clientDone <- err
+					return
+				}
+				secure, err := e2ee.ClientHandshake(clientStream, e2ee.ClientConfig{
+					Local: e2ee.Identity{DeviceID: clientID, PublicKey: clientPublic, PrivateKey: clientPrivate},
+					ExitDeviceID: exitID, ExitPublicKey: android.identity.PublicKey,
+				})
+				if err != nil {
+					clientDone <- err
+					return
+				}
+				clientDone <- secure.Close()
+			}()
+			select {
+			case err := <-clientDone:
+				if err != nil {
+					t.Fatalf("Android Exit E2EE handshake failed on %s path: %v", route, err)
+				}
+			case <-ctx.Done():
+				t.Fatalf("Android Exit E2EE handshake timed out on %s path", route)
+			}
+			select {
+			case <-acceptDone:
+			case <-ctx.Done():
+				t.Fatalf("Android Exit did not finish SecureRelay handling on %s path", route)
+			}
+		})
+	}
+}
 
 func TestAndroidExitServesLatencyProbeThroughRelayAndDirect(t *testing.T) {
 	for _, route := range []string{"relay", "direct", "relay-unapproved", "direct-unbound"} {

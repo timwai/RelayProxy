@@ -452,7 +452,7 @@ func NewClient(configJSON, identityPath string) (*Client, error) {
 			ResumeMaxSessions: 64, ResumeReplayLimit: p2presume.DefaultReplayLimit,
 			E2EEPublicKey: identity.PublicKey, E2EEPrivateKey: identity.PrivateKey,
 		}),
-		e2eePeerPins: peerPinStore,
+		e2eePeerPins:  peerPinStore,
 		ctx:           ctx,
 		cancel:        cancel,
 		heartbeatWake: make(chan struct{}, 1),

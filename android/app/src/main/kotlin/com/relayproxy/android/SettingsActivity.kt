@@ -493,7 +493,7 @@ class SettingsActivity : Activity() {
             Toast.makeText(this, "Brutal 带宽必须在 0 到 1000000 Mbps 之间", Toast.LENGTH_SHORT).show()
             return
         }
-        if (section == SECTION_PROXY && config.e2eeMode == ExitConfig.E2EE_MODE_REQUIRED &&
+        if (config.e2eeMode == ExitConfig.E2EE_MODE_REQUIRED &&
             (!config.tlsEnabled || config.insecureTls)
         ) {
             Toast.makeText(this, "必须加密模式需要启用并验证 TLS 证书", Toast.LENGTH_SHORT).show()

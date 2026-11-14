@@ -2,6 +2,7 @@ package e2ee
 
 import (
 	"bytes"
+	"encoding/binary"
 	"io"
 	"net"
 	"testing"
@@ -56,6 +57,37 @@ func TestSecureStreamReusesRecordBuffers(t *testing.T) {
 	}
 	if &exit.readBuf[0] != readBuffer {
 		t.Fatal("E2EE read buffer was reallocated for a same-sized record")
+	}
+}
+
+func TestSecureStreamReadErrorDoesNotExposeCiphertext(t *testing.T) {
+	clientConn, exitConn := net.Pipe()
+	secure, err := NewSecureStream(&testStream{Conn: clientConn},
+		bytes.Repeat([]byte{0x31}, 32), bytes.Repeat([]byte{0x42}, 32))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = secure.Close()
+		_ = exitConn.Close()
+	})
+
+	writeDone := make(chan struct{})
+	go func() {
+		defer close(writeDone)
+		var header [4]byte
+		binary.BigEndian.PutUint32(header[:], 16+10)
+		_, _ = exitConn.Write(header[:])
+		_, _ = exitConn.Write([]byte("partial"))
+		_ = exitConn.Close()
+	}()
+	buffer := make([]byte, 32)
+	if n, readErr := secure.Read(buffer); n != 0 || readErr == nil {
+		t.Fatalf("truncated record read = (%d, %v), want (0, error)", n, readErr)
+	}
+	<-writeDone
+	if n, readErr := secure.Read(buffer); n != 0 || readErr == nil {
+		t.Fatalf("retry after truncated record exposed ciphertext: (%d, %v)", n, readErr)
 	}
 }
 

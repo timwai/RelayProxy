@@ -337,15 +337,20 @@ func (s *SecureStream) readRecord() ([]byte, error) {
 	}
 	ciphertext := s.readBuf
 	if _, err := io.ReadFull(s.stream, ciphertext); err != nil {
+		s.readBuf = ciphertext[:0]
+		s.readOffset = 0
 		return nil, fmt.Errorf("read E2EE record body: %w", err)
 	}
 	if s.recvSeq == ^uint64(0) {
+		s.readBuf = ciphertext[:0]
+		s.readOffset = 0
 		return nil, ErrRecordSequence
 	}
 	binary.BigEndian.PutUint64(s.recvNonce[4:], s.recvSeq)
 	plain, err := s.rx.Open(ciphertext[:0], s.recvNonce[:], ciphertext, header[:])
 	if err != nil {
 		s.readBuf = ciphertext[:0]
+		s.readOffset = 0
 		return nil, fmt.Errorf("authenticate E2EE record: %w", err)
 	}
 	s.readBuf = plain

@@ -241,6 +241,7 @@ data class ExitConfig(
     val proxyP2pEnabled: Boolean = true,
     val upnpAllowed: Boolean = false,
     val proxyPathMode: String = PROXY_PATH_AUTO,
+    val e2eeMode: String = E2EE_MODE_OPPORTUNISTIC,
     val vpnEnabled: Boolean = false,
     val vpnSocks5Port: Int = 1081,
     val vpnAppMode: String = VPN_APP_MODE_ALL,
@@ -283,6 +284,7 @@ data class ExitConfig(
             .put("proxyP2pEnabled", proxyP2pEnabled)
             .put("upnpAllowed", upnpAllowed)
             .put("proxyPathMode", proxyPathMode)
+            .put("e2eeMode", e2eeMode)
             .put("defaultExitId", defaultExitId.trim())
             .put("customExits", JSONArray().apply {
                 customExits.forEach { put(it.toJson(includePassword = true)) }
@@ -310,6 +312,9 @@ data class ExitConfig(
         const val PROXY_PATH_DIRECT_ONLY = "direct_only"
         const val PROXY_PATH_P2P_ONLY = "p2p_only"
         const val PROXY_PATH_RELAY_ONLY = "relay_only"
+        const val E2EE_MODE_OFF = "off"
+        const val E2EE_MODE_OPPORTUNISTIC = "opportunistic"
+        const val E2EE_MODE_REQUIRED = "required"
     }
 }
 
@@ -510,6 +515,11 @@ class ConfigStore(private val context: Context) {
                 ExitConfig.PROXY_PATH_RELAY_ONLY -> ExitConfig.PROXY_PATH_RELAY_ONLY
                 else -> ExitConfig.PROXY_PATH_AUTO
             },
+            e2eeMode = when (prefs.getString("e2eeMode", ExitConfig.E2EE_MODE_OPPORTUNISTIC)) {
+                ExitConfig.E2EE_MODE_OFF -> ExitConfig.E2EE_MODE_OFF
+                ExitConfig.E2EE_MODE_REQUIRED -> ExitConfig.E2EE_MODE_REQUIRED
+                else -> ExitConfig.E2EE_MODE_OPPORTUNISTIC
+            },
             vpnEnabled = isVpnDesiredRunning(),
             vpnSocks5Port = vpnSocks5Port,
             vpnAppMode = when (prefs.getString("vpnAppMode", ExitConfig.VPN_APP_MODE_ALL)) {
@@ -535,6 +545,11 @@ class ConfigStore(private val context: Context) {
     }
 
     fun save(config: ExitConfig) {
+        require(config.e2eeMode in setOf(
+            ExitConfig.E2EE_MODE_OFF,
+            ExitConfig.E2EE_MODE_OPPORTUNISTIC,
+            ExitConfig.E2EE_MODE_REQUIRED,
+        )) { "端到端加密模式无效" }
         validateGroups(config.routing, config.defaultExitId)
         require(config.customExits.map { it.id }.distinct().size == config.customExits.size) {
             "自定义出口 ID 重复"
@@ -600,6 +615,7 @@ class ConfigStore(private val context: Context) {
             .putBoolean("proxyP2pEnabled", config.proxyP2pEnabled)
             .putBoolean("upnpAllowed", config.upnpAllowed)
             .putString("proxyPathMode", config.proxyPathMode)
+            .putString("e2eeMode", config.e2eeMode)
             .putString("vpnAppMode", config.vpnAppMode)
             .putStringSet("vpnPackages", config.vpnPackages.toSet())
             .putBoolean("vpnIpv6Enabled", config.vpnIpv6Enabled)

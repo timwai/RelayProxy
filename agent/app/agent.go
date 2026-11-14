@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -139,6 +140,10 @@ type AgentConfig struct {
 	DeviceID                string
 	DeviceName              string
 	ServerAddress           string
+	ServerName              string // TLS certificate name; defaults to ServerAddress
+	TLSRootCAs              *x509.CertPool
+	RouterMode              bool // Restrict this runtime to the headless proxy.exit role
+	RouterMaxConnections    int  // Local safety ceiling for Router exit streams
 	QUICPort                int
 	TCPPort                 int
 	Mode                    string // "CLIENT", "EXIT", "BOTH"
@@ -400,6 +405,44 @@ func (a *Agent) setDivertStage(stage string, err error) {
 
 func NewAgent(cfg AgentConfig) (*Agent, error) {
 	cfg = cloneAgentConfig(cfg)
+	if cfg.RouterMode {
+		// Router is an exit-only appliance profile. Keep this enforcement in the
+		// runtime as well as the CLI so accidental config changes cannot enable
+		// desktop, client, file, RDP, gateway, or E2EE features.
+		disabled := false
+		cfg.Mode = "EXIT"
+		cfg.TransportMode = "tcp_only"
+		cfg.E2EEMode = "off"
+		cfg.E2EEPeerPinPath = ""
+		cfg.SOCKS5Enabled, cfg.HTTPEnabled = &disabled, &disabled
+		cfg.RDPEnabled, cfg.P2PEnabled = &disabled, &disabled
+		cfg.P2PFallback, cfg.P2PUPnPAllowed = &disabled, &disabled
+		cfg.P2PMode = "relay_only"
+		cfg.BrowserNetworkShare = false
+		cfg.BrowserLocalEnabled = false
+		cfg.PublicDirectAdvertise = ""
+		cfg.NetworkMode = ""
+		cfg.Gateway = gateway.Config{}
+		cfg.AllowInternet = true
+		cfg.AllowPrivateNet = true
+		cfg.AllowLoopback = false
+		cfg.AccessMode = ""
+		cfg.AccessDomains = nil
+		cfg.AccessCIDRs = nil
+		cfg.DefaultExitID = ""
+		cfg.CustomExits = nil
+		cfg.ExitUpstreamID = ""
+		cfg.ExitUpstream = exit.UpstreamConfig{}
+		cfg.Routing = routing.Config{}
+		enabled := true
+		cfg.ExitEnabled = &enabled
+		if cfg.RouterMaxConnections <= 0 {
+			cfg.RouterMaxConnections = 64
+		}
+	}
+	if strings.TrimSpace(cfg.ServerName) == "" {
+		cfg.ServerName = cfg.ServerAddress
+	}
 	if cfg.PlainTCP && !cfg.AllowPlainTCP {
 		return nil, errors.New("plaintext TCP transport requires explicit security.allow_plain_tcp=true (development only)")
 	}
@@ -607,6 +650,12 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 	a.dialer.Traffic, a.dialer.LookupProcess = a.traffic, divert.LookupLocalProcess
 	a.SelectExit(cfg.DefaultExitID)
 	if (cfg.Mode == "EXIT" || cfg.Mode == "BOTH") && cfg.IsExitEnabled() {
+		var handlerE2EEPublicKey ed25519.PublicKey
+		var handlerE2EEPrivateKey ed25519.PrivateKey
+		if !cfg.RouterMode {
+			handlerE2EEPublicKey = ed25519.PublicKey(cfg.Identity.PublicKey)
+			handlerE2EEPrivateKey = ed25519.PrivateKey(cfg.Identity.PrivateKey)
+		}
 		a.exitHandler = exit.NewHandler(exit.HandlerConfig{
 			ACLChecker: checker, ConnectTimeout: cfg.ConnectTimeout, Upstream: cfg.ExitUpstream,
 			UpstreamExitID: cfg.ExitUpstreamID, UpstreamDialer: a.groupUpstreamDialer(cfg.ExitUpstreamID),
@@ -614,12 +663,12 @@ func NewAgent(cfg AgentConfig) (*Agent, error) {
 			SystemDNSAllowed:    func() bool { return !engine.FakeIPEnabled() && !engine.ProxyDNSEnabled() },
 			ResumeEnabled:       cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only",
 			ResumeGrace:         15 * time.Second, ResumeMaxSessions: 128, ResumeReplayLimit: p2presume.DefaultReplayLimit,
-			E2EEPublicKey: ed25519.PublicKey(cfg.Identity.PublicKey), E2EEPrivateKey: ed25519.PrivateKey(cfg.Identity.PrivateKey),
+			E2EEPublicKey: handlerE2EEPublicKey, E2EEPrivateKey: handlerE2EEPrivateKey,
 		})
 	}
 	var tunnelTLS *tls.Config
 	if !cfg.PlainTCP {
-		tunnelTLS = &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: cfg.InsecureTLS, ServerName: cfg.ServerAddress}
+		tunnelTLS = &tls.Config{MinVersion: tls.VersionTLS13, InsecureSkipVerify: cfg.InsecureTLS, ServerName: cfg.ServerName, RootCAs: cfg.TLSRootCAs}
 	}
 	a.tunnelMgr = tunnel.NewTunnelManager(tunnel.ManagerConfig{
 		ServerAddress: cfg.ServerAddress, QUICPort: cfg.QUICPort, TCPPort: cfg.TCPPort,
@@ -881,34 +930,7 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 	}); err != nil {
 		return fmt.Errorf("write control header: %w", err)
 	}
-	transportCaps := []string{
-		"tcp", "quic", "tls", protocol.UDPModeStream, protocol.CapabilitySpeedTest,
-		protocol.CapabilityResourceInventoryPush, protocol.CapabilityE2EEV1,
-	}
-	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
-		transportCaps = append(transportCaps, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
-	}
-	if publicDirectAllowedForMode(cfg.P2PMode) {
-		transportCaps = append(transportCaps, protocol.CapabilityProxyPublicDirect)
-	}
-	if tunnel.SupportsDatagrams(sess) {
-		transportCaps = append(transportCaps, protocol.UDPModeDatagram)
-	}
-	requested := make([]string, 0, 2)
-	if cfg.Mode == "CLIENT" || cfg.Mode == "BOTH" || cfg.Gateway.Enabled || exitgroup.IsID(cfg.ExitUpstreamID) {
-		requested = append(requested, protocol.CapabilityProxyClient)
-	}
-	if handler != nil {
-		requested = append(requested, protocol.CapabilityProxyExit)
-		transportCaps = append(transportCaps, protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS)
-		if cfg.BrowserNetworkShare {
-			transportCaps = append(transportCaps, protocol.CapabilityBrowserNetworkExit)
-		}
-	}
-	if cfg.IsRDPEnabled() {
-		requested = append(requested, protocol.CapabilityRDPClient, protocol.CapabilityRDPHost, protocol.CapabilityRDPPublic)
-	}
-	requested = append(requested, protocol.CapabilityFilesClient, protocol.CapabilityFilesHost)
+	requested, transportCaps := buildDeviceCapabilities(cfg, handler != nil, tunnel.SupportsDatagrams(sess))
 	clientNonce := make([]byte, 32)
 	if _, err := rand.Read(clientNonce); err != nil {
 		return fmt.Errorf("generate client nonce: %w", err)
@@ -1064,10 +1086,14 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 
 	allowRDP := slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityRDPHost)
 	allowExit := handler != nil && slices.Contains(accepted.ApprovedCapabilities, protocol.CapabilityProxyExit)
+	maxConnections := accepted.MaxConnections
+	if cfg.RouterMode && (maxConnections <= 0 || cfg.RouterMaxConnections < maxConnections) {
+		maxConnections = cfg.RouterMaxConnections
+	}
 	stopPublicDirect := func() {}
 	publicDirectExitEnabled := allowExit && publicDirectAllowedForMode(cfg.P2PMode)
 	if publicDirectExitEnabled {
-		stop, err := a.startPublicDirectExit(ctx, sess, accepted, handler, accepted.MaxConnections)
+		stop, err := a.startPublicDirectExit(ctx, sess, accepted, handler, maxConnections)
 		if err != nil {
 			log.Printf("[PublicDirect] listener unavailable; P2P/Relay fallback remains active: %v", err)
 		} else {
@@ -1091,13 +1117,13 @@ func (a *Agent) serveSession(sess tunnel.TunnelSession, cfg AgentConfig, handler
 				return handler
 			}
 			return nil
-		}(), allowRDP, cfg.RDPAddress, accepted.MaxConnections, p2pManager, proxyP2PManager, &workers)
+		}(), allowRDP, cfg.RDPAddress, maxConnections, p2pManager, proxyP2PManager, &workers)
 	}()
 	if proxyP2PManager != nil && allowExit {
 		workers.Add(1)
 		go func() {
 			defer workers.Done()
-			a.serveProxyP2PExit(ctx, proxyP2PManager, handler, accepted.MaxConnections)
+			a.serveProxyP2PExit(ctx, proxyP2PManager, handler, maxConnections)
 		}()
 	}
 	select {

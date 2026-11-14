@@ -211,6 +211,12 @@ func TestAndroidHelloAdvertisesExitProbeCapability(t *testing.T) {
 	if !contains(hello.TransportCapabilities, protocol.CapabilitySpeedTest) {
 		t.Fatal("Android did not advertise latency probe support")
 	}
+	if !contains(hello.TransportCapabilities, protocol.CapabilityE2EEV1) {
+		t.Fatal("Android did not advertise E2EE v1 support")
+	}
+	if len(hello.PublicKey) != ed25519.PublicKeySize {
+		t.Fatalf("Android DeviceHello E2EE identity key length = %d, want %d", len(hello.PublicKey), ed25519.PublicKeySize)
+	}
 }
 func (s *androidProbeSession) Close() error                    { return nil }
 func (s *androidProbeSession) Done() <-chan struct{}           { return nil }

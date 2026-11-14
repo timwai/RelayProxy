@@ -24,6 +24,7 @@ on:
       - "internal/proxy/**"
       - "internal/tunnel/**"
       - "internal/protocol/**"
+      - "internal/e2ee/**"
       - "server/gateway/**"
       - "server/session/**"
       - "server/p2p/**"
@@ -40,6 +41,7 @@ on:
       - "internal/proxy/**"
       - "internal/tunnel/**"
       - "internal/protocol/**"
+      - "internal/e2ee/**"
       - "server/p2p/**"
       - "go.mod"
       - "go.sum"
@@ -69,7 +71,7 @@ jobs:
 
       - name: Test Android relay compatibility
         run: |
-          go test ./mobile/androidcore ./agent/client ./agent/routing ./agent/p2p ./agent/exit ./internal/p2p/... ./internal/proxy/... ./internal/tunnel ./internal/protocol ./server/p2p ./server/session ./server/gateway -count=1
+          go test ./mobile/androidcore ./agent/client ./agent/routing ./agent/p2p ./agent/exit ./internal/e2ee ./internal/p2p/... ./internal/proxy/... ./internal/tunnel ./internal/protocol ./server/p2p ./server/session ./server/gateway -count=1
 
       - name: Install gomobile
         run: |
@@ -102,7 +104,8 @@ jobs:
           gradle -p android :app:testDebugUnitTest \
             --tests 'com.relayproxy.android.PowerAwarePollPolicyTest' \
             --tests 'com.relayproxy.android.CoreDemandTest' \
-            --tests 'com.relayproxy.android.NotificationRefreshPolicyTest'
+            --tests 'com.relayproxy.android.NotificationRefreshPolicyTest' \
+            --tests 'com.relayproxy.android.E2EEConfigTest'
 
       - name: Build debug APK
         run: gradle -p android :app:assembleDebug

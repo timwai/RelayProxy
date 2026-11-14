@@ -42,6 +42,7 @@ class SettingsActivity : Activity() {
     private lateinit var proxyP2pEnabled: Switch
     private lateinit var upnpAllowed: Switch
     private lateinit var proxyPathMode: Spinner
+    private lateinit var e2eeMode: Spinner
     private lateinit var defaultExitId: EditText
     private lateinit var exitSelection: Spinner
     private lateinit var socks5Port: EditText
@@ -67,6 +68,12 @@ class SettingsActivity : Activity() {
         "仅 P2P · 不使用 Public Direct / Relay",
         "仅 Relay · 不尝试任何直连",
     )
+    private val e2eeModeValues = listOf(
+        ExitConfig.E2EE_MODE_OFF,
+        ExitConfig.E2EE_MODE_OPPORTUNISTIC,
+        ExitConfig.E2EE_MODE_REQUIRED,
+    )
+    private val e2eeModeLabels = listOf("关闭", "自动协商（推荐）", "必须加密（不满足则拒绝）")
     private val networkModeValues = listOf(
         NetworkBinder.MODE_WIFI,
         NetworkBinder.MODE_CELLULAR,
@@ -259,6 +266,19 @@ class SettingsActivity : Activity() {
             minimumHeight = dp(50)
         }
         client.addView(labeled("路径模式", proxyPathMode), topMargin(14))
+        e2eeMode = Spinner(this).apply {
+            adapter = UiKit.themedSpinnerAdapter(this@SettingsActivity, e2eeModeLabels)
+            background = rounded(inputBg, 13, line)
+            setPadding(dp(12), 0, dp(10), 0)
+            minimumHeight = dp(50)
+        }
+        client.addView(divider(), topMargin(10))
+        client.addView(labeled("端到端加密", e2eeMode), topMargin(10))
+        client.addView(TextView(this).apply {
+            text = "自动协商会在对端支持时启用 E2EE。必须加密会拒绝不支持 E2EE 的出口或路径；本机作为出口仍支持 E2EE。"
+            textSize = 12f
+            setTextColor(muted)
+        }, topMargin(6))
         client.addView(divider(), topMargin(10))
         client.addView(
             switchRow(
@@ -441,6 +461,9 @@ class SettingsActivity : Activity() {
                 proxyPathMode = proxyPathModeValues.getOrElse(proxyPathMode.selectedItemPosition) {
                     ExitConfig.PROXY_PATH_AUTO
                 },
+                e2eeMode = e2eeModeValues.getOrElse(e2eeMode.selectedItemPosition) {
+                    ExitConfig.E2EE_MODE_OPPORTUNISTIC
+                },
                 socks5Port = socks5Port.text.toString().toIntOrNull() ?: 1080,
                 httpPort = httpPort.text.toString().toIntOrNull() ?: 8080,
             )
@@ -468,6 +491,12 @@ class SettingsActivity : Activity() {
             (config.brutalUpMbps !in 0..1_000_000 || config.brutalDownMbps !in 0..1_000_000)
         ) {
             Toast.makeText(this, "Brutal 带宽必须在 0 到 1000000 Mbps 之间", Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (config.e2eeMode == ExitConfig.E2EE_MODE_REQUIRED &&
+            (!config.tlsEnabled || config.insecureTls)
+        ) {
+            Toast.makeText(this, "必须加密模式需要启用并验证 TLS 证书", Toast.LENGTH_SHORT).show()
             return
         }
         if (section == SECTION_PROXY && ((config.socks5Enabled && config.socks5Port !in 1..65535) ||
@@ -524,6 +553,7 @@ class SettingsActivity : Activity() {
         proxyP2pEnabled.isChecked = cfg.proxyP2pEnabled
         upnpAllowed.isChecked = cfg.upnpAllowed
         proxyPathMode.setSelection(proxyPathModeValues.indexOf(cfg.proxyPathMode).coerceAtLeast(0))
+        e2eeMode.setSelection(e2eeModeValues.indexOf(cfg.e2eeMode).coerceAtLeast(0))
         defaultExitId.setText(cfg.defaultExitId)
         socks5Port.setText(cfg.socks5Port.toString())
         httpPort.setText(cfg.httpPort.toString())

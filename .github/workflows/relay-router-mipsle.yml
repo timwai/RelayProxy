@@ -12,6 +12,7 @@ on:
       - "agent/app/device_capabilities.go"
       - "agent/app/device_capabilities_test.go"
       - "server/p2p/**"
+      - "server/gateway/**"
       - "cmd/relay-router/**"
       - "internal/**"
       - "scripts/build-relay-router-mipsle.sh"
@@ -33,7 +34,7 @@ jobs:
           go-version-file: go.mod
           cache: true
       - name: Test reduced Router runtime and exit handlers
-        run: go test ./agent/router ./agent/p2p ./agent/exit ./server/p2p ./cmd/relay-router -count=1
+        run: go test ./agent/router ./agent/p2p ./agent/exit ./server/p2p ./server/gateway ./cmd/relay-router -count=1
       - name: Cross-compile K2P binary
         run: |
           mkdir -p dist

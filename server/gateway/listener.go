@@ -575,6 +575,12 @@ func (g *Gateway) handleSession(sess tunnel.TunnelSession) {
 	}
 	if g.cfg.P2PEnabled {
 		capabilities = append(capabilities, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
+		// Echo the Router's stream-only P2P profile only when the ClientHello
+		// explicitly advertised it. This is the Server-side acknowledgement
+		// required before the dedicated Router starts its QUIC data listener.
+		if containsCapability(hello.TransportCapabilities, protocol.CapabilityProxyP2PStreamOnly) {
+			capabilities = append(capabilities, protocol.CapabilityProxyP2PStreamOnly)
+		}
 	}
 	if g.cfg.PublicDirectEnabled {
 		capabilities = append(capabilities, protocol.CapabilityProxyPublicDirect)

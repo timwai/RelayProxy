@@ -134,9 +134,9 @@ func TestCoordinatorAllowsNegotiatingClientForStreamOnlyRouter(t *testing.T) {
 	c := NewCoordinator(manager, func(string, string) (bool, error) { return true, nil }, time.Minute, "", 8)
 	c.send = func(*session.DeviceSession, protocol.P2PControlMessage) error { return nil }
 	response := c.connect(client, protocol.P2PControlMessage{
-		ExitDeviceID: router.DeviceID,
+		ExitDeviceID:    router.DeviceID,
 		CertFingerprint: "sha256:modern-client",
-		Candidates: []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.11:1234"}},
+		Candidates:      []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.11:1234"}},
 	})
 	if response.Type != protocol.P2PControlLeaseAck {
 		t.Fatalf("negotiating Client was rejected by stream-only Router: %#v", response)

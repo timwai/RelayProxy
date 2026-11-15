@@ -573,7 +573,7 @@ func TestWelcomeAcknowledgesRouterStreamOnlyP2PProfile(t *testing.T) {
 	control := openTestStream(t, sess)
 	writeControlHeader(t, control)
 	accepted := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
-		DeviceName: "router",
+		DeviceName:            "router",
 		RequestedCapabilities: []string{protocol.CapabilityProxyExit},
 		TransportCapabilities: []string{
 			"tcp", "quic", "tls", protocol.UDPModeStream,

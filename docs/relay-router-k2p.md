@@ -246,6 +246,30 @@ repeatable load. Then test WAN loss/recovery and a router reboot.
 
 ## Router process supervision and Padavan boot deployment
 
+The Router binary also supports native Linux daemonization independently of the Padavan launcher:
+
+```sh
+/tmp/relay-router --server 192.168.31.14:21000 \
+  --server-name www.tingjusting.fun \
+  --identity-id YOUR_SERVER_ISSUED_ID \
+  --name K2P-Router \
+  --data-dir /etc/storage/relayproxy \
+  --daemon
+
+# Optional custom log location
+/tmp/relay-router ... --daemon --log-file /tmp/relay-router-custom.log
+```
+
+`--daemon` starts a detached Linux session, redirects stdin from `/dev/null`,
+and sends stdout/stderr (including Go logs) to `/tmp/relay-router.log` by default.
+The parent command prints the child PID and exits. Send SIGTERM to that PID for
+graceful shutdown. Native daemon mode does not create a PID file or automatically
+restart after a crash.
+
+Use either native `--daemon` or the Padavan shell supervisor below, not both:
+the supervisor expects to own and wait for the Router child process, whereas
+`--daemon` immediately detaches it.
+
 The Padavan launcher now runs a lightweight shell supervisor:
 - `start` starts the supervisor, which launches the Router child.
 - Unexpected child exit causes restart with exponential backoff (2, 4, 8, ...,

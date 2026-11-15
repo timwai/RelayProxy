@@ -43,6 +43,8 @@ func run(args []string) error {
 	maxConnections := flags.Int("max-connections", 64, "Maximum concurrent exit streams (1-256)")
 	p2pUPnP := flags.Bool("p2p-upnp", false, "Allow a temporary UPnP UDP mapping for P2P (opt-in)")
 	connectTimeout := flags.Duration("connect-timeout", 10*time.Second, "Relay connection timeout")
+	daemon := flags.Bool("daemon", false, "Detach and run in the background (Linux only)")
+	logFile := flags.String("log-file", "", "Daemon log file (default /tmp/relay-router.log)")
 	showVersion := flags.Bool("version", false, "Print version and exit")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: relay-router --server host[:port] --identity-id ID --name NAME [options]")
@@ -94,6 +96,16 @@ func run(args []string) error {
 	identity, err := deviceidentity.LoadOrCreate(filepath.Join(*dataDir, "identity.json"))
 	if err != nil {
 		return fmt.Errorf("load device identity: %w", err)
+	}
+
+	if *daemon {
+		started, daemonErr := maybeDaemonize(args, *logFile)
+		if daemonErr != nil {
+			return daemonErr
+		}
+		if started {
+			return nil
+		}
 	}
 
 	client, err := router.New(router.Config{

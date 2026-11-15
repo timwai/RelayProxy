@@ -335,6 +335,14 @@ func (c *Coordinator) connect(client *session.DeviceSession, message protocol.P2
 	if !hasCapability(exit.Capabilities, protocol.CapabilityProxyP2P) {
 		return p2pError("UNSUPPORTED", "exit does not advertise proxy_p2p_v1")
 	}
+	// Older Clients assume every direct QUIC peer supports native datagrams.
+	// Do not pair them with a stream-only Router: they would send datagrams that
+	// the Router intentionally does not consume. New Clients advertise the
+	// datagram-negotiation capability and can safely fall back to QUIC streams.
+	if hasCapability(exit.Capabilities, protocol.CapabilityProxyP2PStreamOnly) &&
+		!hasCapability(client.Capabilities, protocol.CapabilityProxyP2PDatagram) {
+		return p2pError("UNSUPPORTED", "stream-only P2P exits require a Client with negotiated datagram capability support")
+	}
 	if allowed, err := c.authorizedPair(client, exit); err != nil {
 		return p2pError("AUTH_UNAVAILABLE", err.Error())
 	} else if !allowed {
@@ -824,9 +832,18 @@ func peerP2PCapabilities(device *session.DeviceSession) []string {
 	if device == nil {
 		return nil
 	}
-	caps := make([]string, 0, 1)
+	caps := make([]string, 0, 4)
+	if hasCapability(device.Capabilities, protocol.CapabilityProxyP2PDatagram) {
+		caps = append(caps, protocol.CapabilityProxyP2PDatagram)
+	}
+	if hasCapability(device.Capabilities, protocol.CapabilityProxyP2PStreamOnly) {
+		caps = append(caps, protocol.CapabilityProxyP2PStreamOnly)
+	}
 	if hasCapability(device.Capabilities, protocol.CapabilityProxyStreamResume) {
 		caps = append(caps, protocol.CapabilityProxyStreamResume)
+	}
+	if hasCapability(device.Capabilities, protocol.CapabilityExitSystemDNS) {
+		caps = append(caps, protocol.CapabilityExitSystemDNS)
 	}
 	return caps
 }

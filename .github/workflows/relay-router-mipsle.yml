@@ -1,0 +1,51 @@
+name: Relay Router MIPSLE
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "feat/relay-router-mips-20261114"
+    paths:
+      - "agent/exit/**"
+      - "agent/p2p/**"
+      - "agent/router/**"
+      - "agent/app/device_capabilities.go"
+      - "agent/app/device_capabilities_test.go"
+      - "server/p2p/**"
+      - "server/gateway/**"
+      - "cmd/relay-router/**"
+      - "internal/**"
+      - "scripts/build-relay-router-mipsle.sh"
+      - ".github/workflows/relay-router-mipsle.yml"
+      - "go.mod"
+      - "go.sum"
+
+permissions:
+  contents: read
+
+jobs:
+  build-mipsle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache: true
+      - name: Test reduced Router runtime and exit handlers
+        run: go test ./agent/router ./agent/p2p ./agent/exit ./server/p2p ./server/gateway ./cmd/relay-router -count=1
+      - name: Cross-compile K2P binary
+        run: |
+          mkdir -p dist
+          VERSION="${GITHUB_SHA::12}" ./scripts/build-relay-router-mipsle.sh
+          file dist/relay-router-mipsle
+          readelf -h dist/relay-router-mipsle
+          readelf -h dist/relay-router-mipsle | grep -q "little endian"
+          readelf -h dist/relay-router-mipsle | grep -q "MIPS"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: relay-router-linux-mipsle-softfloat
+          path: dist/relay-router-mipsle
+          if-no-files-found: error
+          retention-days: 14

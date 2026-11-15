@@ -12,7 +12,7 @@ import (
 func newTestDevice(id, owner string, grants ...string) *session.DeviceSession {
 	return &session.DeviceSession{
 		DeviceID: id, OwnerUserID: owner, Grants: grants,
-		Capabilities: []string{protocol.CapabilityProxyP2P},
+		Capabilities: []string{protocol.CapabilityProxyP2P, protocol.CapabilityProxyP2PDatagram, protocol.CapabilityExitSystemDNS},
 	}
 }
 
@@ -53,6 +53,10 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	if !hasCapability(ack.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
 		t.Fatalf("authenticated exit capability missing from client ack: %#v", ack.PeerCapabilities)
 	}
+	if !hasCapability(ack.PeerCapabilities, protocol.CapabilityProxyP2PDatagram) ||
+		!hasCapability(ack.PeerCapabilities, protocol.CapabilityExitSystemDNS) {
+		t.Fatalf("authenticated direct-path capabilities missing from client ack: %#v", ack.PeerCapabilities)
+	}
 	if ack.BrutalUploadBPS != 10_000_000 || ack.BrutalDownloadBPS != 50_000_000 {
 		t.Fatalf("client ack Brutal rates=%d/%d", ack.BrutalUploadBPS, ack.BrutalDownloadBPS)
 	}
@@ -86,6 +90,76 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	}
 	if !hasCapability(deliveries[1].msg.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
 		t.Fatalf("authenticated exit capability missing from answer: %#v", deliveries[1].msg.PeerCapabilities)
+	}
+}
+
+func TestCoordinatorRejectsLegacyClientForStreamOnlyRouter(t *testing.T) {
+	manager := session.NewManager()
+	client := newTestDevice("legacy-client", "owner", protocol.CapabilityProxyClient)
+	client.Capabilities = []string{protocol.CapabilityProxyP2P}
+	router := newTestDevice("router", "owner", protocol.CapabilityProxyExit)
+	router.Capabilities = []string{
+		protocol.CapabilityProxyP2P,
+		protocol.CapabilityProxyP2PStreamOnly,
+		protocol.CapabilityExitSystemDNS,
+	}
+	manager.Register(client)
+	manager.Register(router)
+	c := NewCoordinator(manager, func(string, string) (bool, error) { return true, nil }, time.Minute, "", 8)
+	c.send = func(*session.DeviceSession, protocol.P2PControlMessage) error {
+		t.Fatal("legacy Client must not receive a stream-only P2P offer")
+		return nil
+	}
+	response := c.connect(client, protocol.P2PControlMessage{
+		ExitDeviceID:    router.DeviceID,
+		CertFingerprint: "sha256:legacy-client",
+		Candidates:      []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:1234"}},
+	})
+	if response.Type != protocol.P2PControlError || response.ErrorCode != "UNSUPPORTED" {
+		t.Fatalf("legacy Client was not rejected safely: %#v", response)
+	}
+}
+
+func TestCoordinatorAllowsNegotiatingClientForStreamOnlyRouter(t *testing.T) {
+	manager := session.NewManager()
+	client := newTestDevice("modern-client", "owner", protocol.CapabilityProxyClient)
+	router := newTestDevice("router", "owner", protocol.CapabilityProxyExit)
+	router.Capabilities = []string{
+		protocol.CapabilityProxyP2P,
+		protocol.CapabilityProxyP2PStreamOnly,
+		protocol.CapabilityExitSystemDNS,
+	}
+	manager.Register(client)
+	manager.Register(router)
+	c := NewCoordinator(manager, func(string, string) (bool, error) { return true, nil }, time.Minute, "", 8)
+	c.send = func(*session.DeviceSession, protocol.P2PControlMessage) error { return nil }
+	response := c.connect(client, protocol.P2PControlMessage{
+		ExitDeviceID:    router.DeviceID,
+		CertFingerprint: "sha256:modern-client",
+		Candidates:      []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.11:1234"}},
+	})
+	if response.Type != protocol.P2PControlLeaseAck {
+		t.Fatalf("negotiating Client was rejected by stream-only Router: %#v", response)
+	}
+	if !hasCapability(response.PeerCapabilities, protocol.CapabilityProxyP2PStreamOnly) ||
+		hasCapability(response.PeerCapabilities, protocol.CapabilityProxyP2PDatagram) {
+		t.Fatalf("Router stream-only profile was not delivered to Client: %v", response.PeerCapabilities)
+	}
+}
+
+func TestPeerP2PCapabilitiesRespectStreamOnlyRouterProfile(t *testing.T) {
+	router := newTestDevice("router", "owner", protocol.CapabilityProxyExit)
+	router.Capabilities = []string{protocol.CapabilityProxyP2P, protocol.CapabilityProxyP2PStreamOnly, protocol.CapabilityExitSystemDNS}
+	caps := peerP2PCapabilities(router)
+	if !hasCapability(caps, protocol.CapabilityProxyP2PStreamOnly) {
+		t.Fatalf("Router stream-only capability missing: %v", caps)
+	}
+	if !hasCapability(caps, protocol.CapabilityExitSystemDNS) {
+		t.Fatalf("Router exit system DNS capability missing: %v", caps)
+	}
+	if hasCapability(caps, protocol.CapabilityProxyP2PDatagram) ||
+		hasCapability(caps, protocol.CapabilityProxyStreamResume) {
+		t.Fatalf("stream-only Router must not advertise native datagrams or TCP resume: %v", caps)
 	}
 }
 

@@ -556,6 +556,39 @@ func TestWelcomeDistributesP2PPortRange(t *testing.T) {
 	}
 }
 
+func TestWelcomeAcknowledgesRouterStreamOnlyP2PProfile(t *testing.T) {
+	gateway := testGateway(t, time.Second, nil, func(_ string, hello protocol.DeviceHello) (DeviceAuthorization, error) {
+		return DeviceAuthorization{
+			State: "approved", DeviceID: "router",
+			ApprovedCapabilities: []string{protocol.CapabilityProxyExit},
+		}, nil
+	})
+	gateway.cfg.P2PEnabled = true
+
+	identity, err := deviceidentity.Generate()
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess := dialTestGateway(t, gateway)
+	control := openTestStream(t, sess)
+	writeControlHeader(t, control)
+	accepted := authenticateTestDeviceHello(t, control, identity, protocol.DeviceHello{
+		DeviceName:            "router",
+		RequestedCapabilities: []string{protocol.CapabilityProxyExit},
+		TransportCapabilities: []string{
+			"tcp", "quic", "tls", protocol.UDPModeStream,
+			protocol.CapabilityProxyP2P, protocol.CapabilityProxyP2PStreamOnly,
+		},
+	})
+	if !accepted.Success {
+		t.Fatalf("Router device was not accepted: %+v", accepted)
+	}
+	if !containsCapability(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) ||
+		!containsCapability(accepted.TransportCapabilities, protocol.CapabilityProxyP2PStreamOnly) {
+		t.Fatalf("Server did not acknowledge the stream-only P2P profile: %v", accepted.TransportCapabilities)
+	}
+}
+
 func TestWelcomeDistributesPublicDirectPolicy(t *testing.T) {
 	gateway := testGateway(t, time.Second, nil)
 	gateway.cfg.PublicDirectEnabled = true

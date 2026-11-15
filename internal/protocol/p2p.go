@@ -16,7 +16,7 @@ const (
 	// CapabilityProxyP2PDatagram enables native UDP datagrams on authenticated P2P QUIC sessions.
 	// It is separate from relay-transport UDP support so stream-only exits can opt out.
 	CapabilityProxyP2PDatagram = "proxy_p2p_datagram_v1"
-	CapabilitySpeedTest         = "speed_test_v1"
+	CapabilitySpeedTest        = "speed_test_v1"
 
 	P2PControlConnectRequest  = "connect_request"
 	P2PControlConnectOffer    = "connect_offer"

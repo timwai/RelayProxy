@@ -238,15 +238,15 @@ func (r *Router) serveSession(parent context.Context, sess tunnel.TunnelSession)
 		p2pManager = proxyp2p.NewQUICManagerWithOptions(ctx, func(controlCtx context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
 			return r.sendP2PControlRequest(controlCtx, sess, message)
 		}, accepted.P2PRendezvousAddress, lease, proxyp2p.QUICManagerOptions{
-			PunchTimeout:            5 * time.Second,
-			KeepAlive:               10 * time.Second,
-			IdleTimeout:             120 * time.Second,
-			MaxExitSessions:         4,
-			PortStart:               accepted.P2PPortStart,
-			PortEnd:                 accepted.P2PPortEnd,
-			UPnPEnabled:             upnpEnabled,
-			BrutalUploadBPS:         accepted.BrutalUploadBPS,
-			BrutalDownloadBPS:       accepted.BrutalDownloadBPS,
+			PunchTimeout:      5 * time.Second,
+			KeepAlive:         10 * time.Second,
+			IdleTimeout:       120 * time.Second,
+			MaxExitSessions:   4,
+			PortStart:         accepted.P2PPortStart,
+			PortEnd:           accepted.P2PPortEnd,
+			UPnPEnabled:       upnpEnabled,
+			BrutalUploadBPS:   accepted.BrutalUploadBPS,
+			BrutalDownloadBPS: accepted.BrutalDownloadBPS,
 		})
 		log.Printf("[Router] P2P exit enabled rendezvous=%q udp_ports=%d-%d upnp=%v", accepted.P2PRendezvousAddress, accepted.P2PPortStart, accepted.P2PPortEnd, upnpEnabled)
 	} else if allowExit {
@@ -389,7 +389,6 @@ func (r *Router) acceptStreams(ctx context.Context, sess tunnel.TunnelSession, m
 		}()
 	}
 }
-
 
 // sendP2PControlRequest keeps authorization and rendezvous signaling on the
 // authenticated Relay TLS session. The direct QUIC path carries data only.

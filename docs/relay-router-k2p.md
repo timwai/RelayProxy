@@ -130,6 +130,29 @@ before calling the K2P profile production-ready:
 The current CI run passed Go CI, cross-platform regression, and the dedicated
 MIPSLE build workflow for the tested branch head.
 
+## K2P idle resource baseline — 2026-11-15
+
+User-provided measurements from the running K2P (MT7621, 128 MB class RAM):
+
+| Metric | Observation |
+|---|---:|
+| Process RSS | 22,280 kB (about 21.8 MiB) |
+| VmSize / VmPeak | 580,464 kB (about 566.9 MiB) |
+| VmData | 565,368 kB (about 552.1 MiB) |
+| Threads | 10 |
+| CPU in idle sample | 0.0% for relay-router |
+| System CPU idle | 98.3% in second top sample; first sample 100% |
+| Load average | 0.01 / 0.03 / 0.00 |
+
+Interpretation: VmSize and VmData are virtual-memory accounting and must not be
+treated as resident physical RAM usage. RSS is the relevant initial resident
+footprint. The supplied top output is an idle sample; it does not establish
+CPU cost or peak memory under sustained forwarding.
+
+Next acceptance run: sustained TCP transfer and concurrent UDP traffic, then
+record RSS, CPU, softirq, free/cache memory and transfer throughput during load.
+Also test WAN disconnect/reconnect and router restart before production sign-off.
+
 ## Current limitations / next gates
 
 1. Run the MIPSLE cross-compile workflow and inspect the binary size.

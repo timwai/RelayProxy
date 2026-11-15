@@ -17,7 +17,7 @@ import (
 	"syscall"
 	"time"
 
-	"relayproxy/agent/app"
+	"relayproxy/agent/router"
 	"relayproxy/internal/deviceidentity"
 )
 
@@ -45,7 +45,7 @@ func run(args []string) error {
 	showVersion := flags.Bool("version", false, "Print version and exit")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: relay-router --server host[:port] --identity-id ID --name NAME [options]")
-		fmt.Fprintln(flags.Output(), "K2P/OpenWrt headless RelayProxy exit-only client. TLS 1.3 is mandatory; E2EE is not used.")
+		fmt.Fprintln(flags.Output(), "Minimal headless exit-only client. TLS 1.3 + yamux; TCP and stream-framed UDP; no E2EE.")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -95,56 +95,26 @@ func run(args []string) error {
 		return fmt.Errorf("load device identity: %w", err)
 	}
 
-	disabled, enabled := false, true
-	agent, err := app.NewAgent(app.AgentConfig{
-		Identity:             identity,
-		IdentityID:           strings.TrimSpace(*identityID),
-		DeviceName:           strings.TrimSpace(*deviceName),
-		ServerAddress:        host,
-		ServerName:           name,
-		TLSRootCAs:           roots,
-		TCPPort:              port,
-		QUICPort:             port,
-		Mode:                 "EXIT",
-		TransportMode:        "tcp_only",
-		E2EEMode:             "off",
-		RouterMode:           true,
-		RouterMaxConnections: *maxConnections,
-		SOCKS5Enabled:        &disabled,
-		HTTPEnabled:          &disabled,
-		ExitEnabled:          &enabled,
-		RDPEnabled:           &disabled,
-		P2PEnabled:           &disabled,
-		P2PMode:              "relay_only",
-		AllowInternet:        true,
-		AllowPrivateNet:      true,
-		AllowLoopback:        false,
-		ConnectTimeout:       *connectTimeout,
+	client, err := router.New(router.Config{
+		ServerAddress: host, ServerName: name, TCPPort: port,
+		IdentityID: *identityID, DeviceName: *deviceName,
+		Identity: identity, TLSRootCAs: roots,
+		ConnectTimeout: *connectTimeout, MaxConnections: *maxConnections,
 	})
 	if err != nil {
-		return fmt.Errorf("initialize Router runtime: %w", err)
+		return fmt.Errorf("initialize Router: %w", err)
 	}
-	defer agent.Close()
+	defer client.Close()
 
 	log.Printf("[Router] RelayProxy Router %s starting", Version)
-	log.Printf("[Router] Device: %s; identity: %s", strings.TrimSpace(*deviceName), strings.TrimSpace(*identityID))
+	log.Printf("[Router] Device: %s; identity: %s", *deviceName, *identityID)
 	log.Printf("[Router] Relay endpoint: %s:%d; TLS server name: %s", host, port, name)
-	log.Printf("[Router] Profile: proxy.exit only; TLS 1.3; E2EE/P2P/QUIC disabled; TCP and UDP stream forwarding")
+	log.Printf("[Router] Features: proxy.exit, TCP, UDP-over-stream, exit system DNS; TLS 1.3; no QUIC/P2P/E2EE")
 	log.Printf("[Router] Local stream limit: %d", *maxConnections)
-
-	if err := agent.Start(); err != nil {
-		return fmt.Errorf("start Router runtime: %w", err)
-	}
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	<-ctx.Done()
-	log.Printf("[Router] Shutdown requested")
-	if err := agent.Close(); err != nil {
-		return fmt.Errorf("shutdown Router runtime: %w", err)
-	}
-	log.Printf("[Router] Stopped")
-	return nil
+	return client.Run(ctx)
 }
 
 func parseServerEndpoint(value string, defaultPort int) (string, int, error) {

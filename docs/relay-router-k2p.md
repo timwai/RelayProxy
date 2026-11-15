@@ -304,14 +304,35 @@ binary and rollback copy are also volatile and will be lost at reboot.
 
 ## Current limitations / next gates
 
-1. Run the MIPSLE cross-compile workflow and inspect the binary size.
-2. Install on the actual K2P and verify identity approval plus TLS/yamux session.
-3. Verify TCP and UDP exit traffic, including access to a LAN target.
-4. Measure idle and sustained memory/CPU use on MT7621.
-5. Only then evaluate QUIC/P2P as a separate phase.
+1. Complete the MIPSLE cross-compile after the dedicated runtime extraction and record the exact binary size.
+2. Keep K2P deployment on the existing TLS 1.3 + TCP/yamux profile; native QUIC/P2P is intentionally excluded from this build.
+3. Preserve Server approval, ACL and TCP/UDP-over-stream wire compatibility while developing remote management.
 
-The initial build reuses the existing Agent application package. Router mode removes
-desktop features from the executable entry point and disables unrelated runtime
-capabilities, but it is not yet a fully extracted minimal Go dependency graph. Binary
-size and memory measurements determine whether a later Exit-only package extraction
-is necessary.
+## Dedicated minimal Router runtime and binary reduction
+
+The Router executable no longer imports or constructs `agent/app.NewAgent`.
+The command now uses a dedicated `agent/router` runtime that owns only:
+- Device identity challenge/response authentication and approval.
+- TLS 1.3 with the existing `relayproxy-tcp` ALPN and yamux multiplexing.
+- Authenticated control heartbeat and reconnect with bounded exponential backoff.
+- Relay-origin TCP forwarding and stream-framed UDP forwarding.
+- Exit system DNS requests and the existing ACL enforcement.
+
+The Router advertises only `proxy.exit` and transport capabilities for TCP, TLS,
+stream-framed UDP, target ACL and exit system DNS. It does not advertise or initialize
+GUI, SOCKS/HTTP client listeners, transparent interception, local DNS capture, routing
+subscriptions, file sharing, RDP, browser sync, P2P/public-direct, native QUIC datagrams,
+speed-test, or E2EE. TCP resume is deliberately not advertised and is rejected if
+requested. UDP remains supported over the reliable TLS/yamux stream framing; native
+QUIC datagrams are not part of the K2P profile.
+
+The exit data plane has Router-specific TCP/UDP dispatch methods. They reuse the
+existing target ACL, DNS cache, destination dialing and stream-pipe implementation,
+but bypass E2EE, resumable TCP, and native datagram dispatch paths. The Server-side
+device approval and stream wire protocol remain unchanged.
+
+The MIPSLE build workflow now tests the dedicated runtime and exit handlers, builds
+with stripped symbols/debug tables and reports the exact artifact size. The resulting
+size must be read from the CI artifact/log; no new binary-size figure is claimed until
+that build completes. This is a genuine import-graph/runtime reduction rather than a
+claim based only on disabling features at runtime.

@@ -6,7 +6,8 @@ on:
     branches:
       - "feat/relay-router-mips-20261114"
     paths:
-      - "agent/app/**"
+      - "agent/exit/**"
+      - "agent/router/**"
       - "cmd/relay-router/**"
       - "internal/**"
       - "scripts/build-relay-router-mipsle.sh"
@@ -27,18 +28,16 @@ jobs:
         with:
           go-version-file: go.mod
           cache: true
-      - name: Test Router CLI
-        run: go test ./cmd/relay-router -count=1
+      - name: Test reduced Router runtime and exit handlers
+        run: go test ./agent/router ./agent/exit ./cmd/relay-router -count=1
       - name: Cross-compile K2P binary
         run: |
           mkdir -p dist
-          CGO_ENABLED=0 GOOS=linux GOARCH=mipsle GOMIPS=softfloat \
-            go build -trimpath -buildvcs=false \
-            -ldflags "-s -w -X main.Version=${GITHUB_SHA::12}" \
-            -o dist/relay-router-mipsle ./cmd/relay-router
+          ./scripts/build-relay-router-mipsle.sh
           file dist/relay-router-mipsle
           readelf -h dist/relay-router-mipsle
           readelf -h dist/relay-router-mipsle | grep -q "little endian"
+          readelf -h dist/relay-router-mipsle | grep -q "MIPS"
       - uses: actions/upload-artifact@v4
         with:
           name: relay-router-linux-mipsle-softfloat

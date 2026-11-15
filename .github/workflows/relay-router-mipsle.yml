@@ -33,7 +33,7 @@ jobs:
       - name: Cross-compile K2P binary
         run: |
           mkdir -p dist
-          ./scripts/build-relay-router-mipsle.sh
+          VERSION="${GITHUB_SHA::12}" ./scripts/build-relay-router-mipsle.sh
           file dist/relay-router-mipsle
           readelf -h dist/relay-router-mipsle
           readelf -h dist/relay-router-mipsle | grep -q "little endian"

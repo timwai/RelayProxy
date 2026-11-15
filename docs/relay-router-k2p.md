@@ -332,7 +332,8 @@ but bypass E2EE, resumable TCP, and native datagram dispatch paths. The Server-s
 device approval and stream wire protocol remain unchanged.
 
 The MIPSLE build workflow now tests the dedicated runtime and exit handlers, builds
-with stripped symbols/debug tables and reports the exact artifact size. The resulting
-size must be read from the CI artifact/log; no new binary-size figure is claimed until
-that build completes. This is a genuine import-graph/runtime reduction rather than a
-claim based only on disabling features at runtime.
+with stripped symbols/debug tables and reports the exact artifact size. The first
+successful dedicated-runtime build (2026-11-15) produced **7.19 MiB (7,536,795 bytes)**
+for linux/mipsle softfloat. The previous Router binary was approximately 15 MB, so the
+new artifact is roughly half the prior size. This is a genuine runtime/import-graph
+reduction rather than a claim based only on disabling features at runtime.

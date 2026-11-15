@@ -305,9 +305,13 @@ func TestPeerTunnelCapabilitiesAreServerNegotiated(t *testing.T) {
 		!slices.Contains(standard, protocol.CapabilityExitSystemDNS) {
 		t.Fatalf("standard peer capabilities were not mapped: %v", standard)
 	}
-	router := peerTunnelCapabilities([]string{protocol.CapabilityExitSystemDNS})
+	router := peerTunnelCapabilities([]string{protocol.CapabilityExitSystemDNS, protocol.CapabilityProxyP2PStreamOnly})
 	if slices.Contains(router, protocol.UDPModeDatagram) {
 		t.Fatalf("stream-only Router must not enable native UDP datagrams: %v", router)
+	}
+	legacy := peerTunnelCapabilities(nil)
+	if !slices.Contains(legacy, protocol.UDPModeDatagram) {
+		t.Fatalf("legacy peers must retain their unconditional datagram behavior: %v", legacy)
 	}
 }
 

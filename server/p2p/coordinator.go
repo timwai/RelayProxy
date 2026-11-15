@@ -832,9 +832,12 @@ func peerP2PCapabilities(device *session.DeviceSession) []string {
 	if device == nil {
 		return nil
 	}
-	caps := make([]string, 0, 3)
+	caps := make([]string, 0, 4)
 	if hasCapability(device.Capabilities, protocol.CapabilityProxyP2PDatagram) {
 		caps = append(caps, protocol.CapabilityProxyP2PDatagram)
+	}
+	if hasCapability(device.Capabilities, protocol.CapabilityProxyP2PStreamOnly) {
+		caps = append(caps, protocol.CapabilityProxyP2PStreamOnly)
 	}
 	if hasCapability(device.Capabilities, protocol.CapabilityProxyStreamResume) {
 		caps = append(caps, protocol.CapabilityProxyStreamResume)

@@ -916,7 +916,7 @@ func (s *Session) setPeerCapabilities(values []string) {
 	seen := make(map[string]struct{}, 3)
 	for _, value := range values {
 		switch value {
-		case protocol.CapabilityProxyP2PDatagram, protocol.CapabilityProxyStreamResume, protocol.CapabilityExitSystemDNS:
+		case protocol.CapabilityProxyP2PDatagram, protocol.CapabilityProxyP2PStreamOnly, protocol.CapabilityProxyStreamResume, protocol.CapabilityExitSystemDNS:
 			if _, exists := seen[value]; !exists {
 				caps = append(caps, value)
 				seen[value] = struct{}{}
@@ -938,18 +938,22 @@ func (s *Session) peerCapabilitiesSnapshot() []string {
 }
 
 // peerTunnelCapabilities maps coordinator-approved peer features onto the
-// direct QUIC session. Native datagrams are deliberately opt-in: a stream-only
-// Router can still use QUIC streams without accidentally advertising UDP
-// datagram support to the Client.
+// direct QUIC session. Legacy peers used native datagrams unconditionally;
+// the explicit stream-only marker lets a new Client safely use QUIC streams
+// with Relay Router without breaking old Client/Agent pairings.
 func peerTunnelCapabilities(values []string) []string {
-	caps := make([]string, 0, len(values))
+	caps := make([]string, 0, len(values)+1)
+	streamOnly := false
 	for _, value := range values {
 		switch value {
-		case protocol.CapabilityProxyP2PDatagram:
-			caps = append(caps, protocol.UDPModeDatagram)
+		case protocol.CapabilityProxyP2PStreamOnly:
+			streamOnly = true
 		case protocol.CapabilityProxyStreamResume, protocol.CapabilityExitSystemDNS:
 			caps = append(caps, value)
 		}
+	}
+	if !streamOnly {
+		caps = append(caps, protocol.UDPModeDatagram)
 	}
 	return caps
 }

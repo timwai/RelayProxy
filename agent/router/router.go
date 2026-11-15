@@ -230,7 +230,8 @@ func (r *Router) serveSession(parent context.Context, sess tunnel.TunnelSession)
 		maxStreams = accepted.MaxConnections
 	}
 	var p2pManager *proxyp2p.Manager
-	if allowExit && containsCapability(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) {
+	if allowExit && containsCapability(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) &&
+		containsCapability(accepted.TransportCapabilities, protocol.CapabilityProxyP2PStreamOnly) {
 		lease := time.Duration(accepted.P2PLeaseSec) * time.Second
 		if lease <= 0 {
 			lease = 60 * time.Second

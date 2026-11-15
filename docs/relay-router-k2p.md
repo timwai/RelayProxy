@@ -272,6 +272,38 @@ The launcher supervises process exit; the Go Agent runtime separately owns
 Relay session reconnect. These are complementary recovery layers. This does
 not yet verify WAN recovery or reboot recovery on the physical K2P.
 
+
+## Local binary upgrade and rollback
+
+The Padavan launcher supports checksum-verified local upgrades without replacing
+the device identity:
+
+```sh
+# Verify the SHA-256 from a trusted release channel before running this command.
+/ path/to/relay-router-padavan.sh upgrade /tmp/relay-router.new YOUR_64_CHAR_SHA256
+/ path/to/relay-router-padavan.sh status
+
+# Roll back to the previously installed executable if needed.
+/ path/to/relay-router-padavan.sh rollback
+```
+
+The actual script path should be supplied without the illustrative leading space
+shown above, for example `/etc/storage/relayproxy/relay-router-padavan.sh`.
+
+Upgrade behavior:
+- Verify the supplied SHA-256 before staging and again after copying.
+- Verify the ELF magic, 32-bit class, and little-endian encoding expected by the
+  K2P linux/mipsle target.
+- Stage beside the active binary and atomically replace it.
+- Preserve the prior executable as `<binary>.previous`.
+- If the Router was running, stop and restart the supervisor around the upgrade.
+- `rollback` restores the previous executable while keeping the same identity.
+
+The upgrade command accepts a local file only. It deliberately does not download
+or execute an arbitrary URL; artifact transport and release authenticity must be
+handled by a trusted distribution channel. If `BIN` is under `/tmp`, the new
+binary and rollback copy are also volatile and will be lost at reboot.
+
 ## Current limitations / next gates
 
 1. Run the MIPSLE cross-compile workflow and inspect the binary size.

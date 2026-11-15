@@ -53,6 +53,79 @@ watch() {
     done
 }
 
+sha256_file() {
+    if command -v sha256sum >/dev/null 2>&1; then
+        sha256sum "$1" | awk '{print tolower($1)}'
+    else
+        openssl dgst -sha256 "$1" | sed 's/^.*= //' | tr 'A-F' 'a-f'
+    fi
+}
+
+verify_router_binary() {
+    file="$1"
+    expected="$(echo "$2" | tr 'A-F' 'a-f')"
+    case "$expected" in *[!0-9a-f]*|"") echo "Invalid SHA-256 value" >&2; return 1 ;; esac
+    [ "${#expected}" -eq 64 ] || { echo "SHA-256 must contain 64 hexadecimal characters" >&2; return 1; }
+    [ -s "$file" ] || { echo "Binary is empty: $file" >&2; return 1; }
+    actual="$(sha256_file "$file")"
+    [ "$actual" = "$expected" ] || { echo "SHA-256 mismatch for $file" >&2; return 1; }
+    busybox hexdump -C -n 6 "$file" | grep -q '7f 45 4c 46 01 01' || {
+        echo "Not a 32-bit little-endian ELF binary (expected linux/mipsle)" >&2
+        return 1
+    }
+}
+
+upgrade() {
+    source_file="${2:-}"
+    expected_sha="${3:-}"
+    [ -n "$source_file" ] && [ -n "$expected_sha" ] || {
+        echo "Usage: $0 upgrade <new-binary-file> <sha256>" >&2
+        return 2
+    }
+    [ -f "$source_file" ] || { echo "Upgrade file not found: $source_file" >&2; return 1; }
+    verify_router_binary "$source_file" "$expected_sha"
+    mkdir -p "$(dirname "$BIN")"
+    staged="$BIN.new.$"
+    cp "$source_file" "$staged"
+    chmod 0755 "$staged"
+    verify_router_binary "$staged" "$expected_sha"
+    was_running=0
+    if status >/dev/null 2>&1; then was_running=1; fi
+    if [ "$was_running" -eq 1 ]; then stop; fi
+    backup="$BIN.previous"
+    [ ! -f "$BIN" ] || cp "$BIN" "$backup"
+    mv -f "$staged" "$BIN"
+    if [ "$was_running" -eq 1 ]; then
+        if ! start; then
+            echo "New binary failed to start; rolling back previous binary" >&2
+            [ ! -f "$backup" ] || cp "$backup" "$BIN"
+            start || true
+            return 1
+        fi
+    fi
+    echo "RelayProxy Router binary upgraded. Previous version: $backup"
+}
+
+rollback() {
+    backup="$BIN.previous"
+    [ -x "$backup" ] || { echo "No executable rollback binary at $backup" >&2; return 1; }
+    was_running=0
+    if status >/dev/null 2>&1; then was_running=1; fi
+    if [ "$was_running" -eq 1 ]; then stop; fi
+    current="$BIN.rollback"
+    [ ! -f "$BIN" ] || cp "$BIN" "$current"
+    cp "$backup" "$BIN"
+    chmod 0755 "$BIN"
+    if [ "$was_running" -eq 1 ]; then
+        if ! start; then
+            [ ! -f "$current" ] || cp "$current" "$BIN"
+            start || true
+            return 1
+        fi
+    fi
+    echo "RelayProxy Router rolled back to previous binary"
+}
+
 start() {
     # Validate mandatory config before creating a supervisor.
     : "${RELAY_SERVER:?Set RELAY_SERVER to host:port or host}"

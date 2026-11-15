@@ -110,6 +110,26 @@ To start automatically, append a small invocation to the existing
 until WAN/DNS/network initialization has completed. Preserve a backup of the
 startup script before editing it.
 
+## K2P field validation — 2026-11-15
+
+The first MIPSLE soft-float binary has been installed on the Phicomm K2P.
+
+User-reported results:
+- Router connected to the Relay Server successfully.
+- Device approval completed successfully.
+- Network exit tests completed without reported problems.
+
+The following hardware measurements are still outstanding and must be recorded
+before calling the K2P profile production-ready:
+- Idle process RSS, virtual memory, and thread count.
+- CPU usage while idle and during sustained TCP/UDP forwarding.
+- Peak memory during concurrent streams.
+- Reconnect behavior after WAN loss and router restart.
+- Actual binary size on the router filesystem and available /tmp headroom.
+
+The current CI run passed Go CI, cross-platform regression, and the dedicated
+MIPSLE build workflow for the tested branch head.
+
 ## Current limitations / next gates
 
 1. Run the MIPSLE cross-compile workflow and inspect the binary size.

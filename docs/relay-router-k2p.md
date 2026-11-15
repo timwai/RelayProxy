@@ -221,6 +221,57 @@ Next acceptance: record measured TCP throughput (single and parallel), UDP
 throughput/latency, exact concurrent stream count, and per-core CPU under a
 repeatable load. Then test WAN loss/recovery and a router reboot.
 
+
+## Router process supervision and Padavan boot deployment
+
+The Padavan launcher now runs a lightweight shell supervisor:
+- `start` starts the supervisor, which launches the Router child.
+- Unexpected child exit causes restart with exponential backoff (2, 4, 8, ...,
+  capped at 60 seconds by default).
+- `status` reports supervisor and child PIDs separately.
+- `stop` signals the supervisor, which gracefully terminates its child.
+- The log rotates at approximately 1 MiB, retaining one previous log.
+- The supervisor does not restart after an explicit `stop`.
+
+Example control commands:
+
+```sh
+/etc/storage/relayproxy/relay-router-padavan.sh start
+/etc/storage/relayproxy/relay-router-padavan.sh status
+/etc/storage/relayproxy/relay-router-padavan.sh restart
+/etc/storage/relayproxy/relay-router-padavan.sh stop
+```
+
+Important K2P deployment constraint: the observed Padavan Storage MTD partition
+is only 512 KiB, while the Router binary is about 15 MiB. Do not try to store
+the executable in that partition or in the small `/etc/storage` overlay.
+The default executable path `/tmp/relay-router` is RAM-backed and is lost on
+reboot. Keep the binary on a persistent USB/storage mount if available, or
+arrange a separately verified boot-time provisioning step that copies the
+binary into `/tmp` before invoking the supervisor. The identity directory
+remains `/etc/storage/relayproxy` and must be persisted using Padavan's storage
+save procedure. Never write the executable to MTD.
+
+Example addition to `started_script.sh` (replace the source path with the
+actual persistent mount path; do not replace the existing script):
+
+```sh
+(
+    sleep 15
+    cp /path/on/persistent-storage/relay-router /tmp/relay-router
+    chmod 0755 /tmp/relay-router
+    export RELAY_SERVER="192.168.31.14:21000"
+    export RELAY_SERVER_NAME="www.tingjusting.fun"
+    export RELAY_IDENTITY_ID="YOUR_SERVER_ISSUED_ID"
+    export RELAY_DEVICE_NAME="K2P-Router"
+    /etc/storage/relayproxy/relay-router-padavan.sh start
+) &
+```
+
+The launcher supervises process exit; the Go Agent runtime separately owns
+Relay session reconnect. These are complementary recovery layers. This does
+not yet verify WAN recovery or reboot recovery on the physical K2P.
+
 ## Current limitations / next gates
 
 1. Run the MIPSLE cross-compile workflow and inspect the binary size.

@@ -1,81 +1,116 @@
 #!/bin/sh
-# Padavan launcher for RelayProxy Router.
-# Configure the four RELAY_* variables in started_script.sh or export them
-# before invoking this script. The Go binary itself has no config-file mode.
+# Padavan supervisor for the headless RelayProxy Router.
+# Export RELAY_* configuration before calling this script.
 set -eu
 
 BIN="${RELAY_ROUTER_BIN:-/tmp/relay-router}"
 DATA_DIR="${RELAY_ROUTER_DATA_DIR:-/etc/storage/relayproxy}"
 PID_FILE="${RELAY_ROUTER_PID_FILE:-/tmp/relay-router.pid}"
+CHILD_PID_FILE="${RELAY_ROUTER_CHILD_PID_FILE:-/tmp/relay-router.child.pid}"
 LOG_FILE="${RELAY_ROUTER_LOG_FILE:-/tmp/relay-router.log}"
+MAX_BACKOFF="${RELAY_ROUTER_MAX_BACKOFF:-60}"
+
+log() {
+    echo "[RelayProxy Router supervisor] $(date '+%Y-%m-%d %H:%M:%S') $*" >>"$LOG_FILE"
+}
+
+rotate_log() {
+    [ -f "$LOG_FILE" ] || return 0
+    size="$(wc -c <"$LOG_FILE" | tr -d ' ')"
+    if [ "${size:-0}" -ge 1048576 ]; then
+        mv -f "$LOG_FILE" "$LOG_FILE.1"
+    fi
+}
+
+watch() {
+    # A watch process owns the PID file; the Router child has a separate PID.
+    trap 'log "stop requested"; if [ -n "${child:-}" ]; then kill -TERM "$child" 2>/dev/null || true; wait "$child" 2>/dev/null || true; fi; rm -f "$CHILD_PID_FILE" "$PID_FILE"; exit 0' INT TERM
+    backoff=2
+    while :; do
+        rotate_log
+        if [ ! -x "$BIN" ]; then
+            log "binary missing/not executable: $BIN; retrying in ${backoff}s"
+            sleep "$backoff"
+        else
+            # Build arguments in a positional-parameter-safe way.
+            set -- --server "$RELAY_SERVER" --identity-id "$RELAY_IDENTITY_ID" --name "$RELAY_DEVICE_NAME" --data-dir "$DATA_DIR" --max-connections "${RELAY_MAX_CONNECTIONS:-64}"
+            [ -z "${RELAY_SERVER_NAME:-}" ] || set -- "$@" --server-name "$RELAY_SERVER_NAME"
+            [ -z "${RELAY_CA_FILE:-}" ] || set -- "$@" --ca-file "$RELAY_CA_FILE"
+            log "starting Router child"
+            "$BIN" "$@" >>"$LOG_FILE" 2>&1 </dev/null &
+            child=$!
+            echo "$child" >"$CHILD_PID_FILE"
+            wait "$child" || rc=$?
+            rc="${rc:-0}"
+            child=""
+            rm -f "$CHILD_PID_FILE"
+            log "Router child exited (status $rc); restart in ${backoff}s"
+            unset rc
+            sleep "$backoff"
+        fi
+        backoff=$((backoff * 2))
+        [ "$backoff" -le "$MAX_BACKOFF" ] || backoff="$MAX_BACKOFF"
+    done
+}
 
 start() {
+    # Validate mandatory config before creating a supervisor.
     : "${RELAY_SERVER:?Set RELAY_SERVER to host:port or host}"
     : "${RELAY_IDENTITY_ID:?Set RELAY_IDENTITY_ID to the server-issued identity ID}"
     : "${RELAY_DEVICE_NAME:?Set RELAY_DEVICE_NAME to the router name}"
-    if [ ! -x "$BIN" ]; then
-        echo "RelayProxy Router binary is missing or not executable: $BIN" >&2
-        return 1
-    fi
     if [ -f "$PID_FILE" ]; then
         old_pid="$(cat "$PID_FILE" 2>/dev/null || true)"
         if [ -n "$old_pid" ] && kill -0 "$old_pid" 2>/dev/null; then
-            echo "RelayProxy Router already running (pid $old_pid)"
+            echo "RelayProxy Router supervisor already running (pid $old_pid)"
             return 0
         fi
-        rm -f "$PID_FILE"
+        rm -f "$PID_FILE" "$CHILD_PID_FILE"
     fi
-
+    case "$MAX_BACKOFF" in *[!0-9]*|"") echo "RELAY_ROUTER_MAX_BACKOFF must be an integer" >&2; return 1 ;; esac
+    [ "$MAX_BACKOFF" -ge 2 ] || { echo "RELAY_ROUTER_MAX_BACKOFF must be at least 2" >&2; return 1; }
     mkdir -p "$DATA_DIR"
-    set -- --server "$RELAY_SERVER" --identity-id "$RELAY_IDENTITY_ID" --name "$RELAY_DEVICE_NAME" --data-dir "$DATA_DIR" --max-connections "${RELAY_MAX_CONNECTIONS:-64}"
-    if [ -n "${RELAY_SERVER_NAME:-}" ]; then
-        set -- "$@" --server-name "$RELAY_SERVER_NAME"
-    fi
-    if [ -n "${RELAY_CA_FILE:-}" ]; then
-        set -- "$@" --ca-file "$RELAY_CA_FILE"
-    fi
-    "$BIN" "$@" >>"$LOG_FILE" 2>&1 </dev/null &
+    "$0" watch >/dev/null 2>&1 &
     pid=$!
     echo "$pid" >"$PID_FILE"
     sleep 1
     if ! kill -0 "$pid" 2>/dev/null; then
         rm -f "$PID_FILE"
-        echo "RelayProxy Router failed to start; see $LOG_FILE" >&2
+        echo "RelayProxy Router supervisor failed to start; see $LOG_FILE" >&2
         tail -n 40 "$LOG_FILE" 2>/dev/null || true
         return 1
     fi
-    echo "RelayProxy Router started (pid $pid)"
+    echo "RelayProxy Router supervisor started (pid $pid)"
 }
 
 stop() {
-    if [ ! -f "$PID_FILE" ]; then
-        echo "RelayProxy Router is not running"
-        return 0
-    fi
+    [ -f "$PID_FILE" ] || { echo "RelayProxy Router is not running"; return 0; }
     pid="$(cat "$PID_FILE" 2>/dev/null || true)"
     if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
         kill -TERM "$pid"
         n=0
-        while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 10 ]; do
+        while kill -0 "$pid" 2>/dev/null && [ "$n" -lt 15 ]; do
             sleep 1
             n=$((n + 1))
         done
         if kill -0 "$pid" 2>/dev/null; then
-            echo "RelayProxy Router did not stop within 10 seconds" >&2
+            echo "RelayProxy Router supervisor did not stop within 15 seconds" >&2
             return 1
         fi
     fi
-    rm -f "$PID_FILE"
+    rm -f "$PID_FILE" "$CHILD_PID_FILE"
     echo "RelayProxy Router stopped"
 }
 
 status() {
-    if [ -f "$PID_FILE" ]; then
-        pid="$(cat "$PID_FILE" 2>/dev/null || true)"
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            echo "RelayProxy Router running (pid $pid)"
-            return 0
+    pid="$(cat "$PID_FILE" 2>/dev/null || true)"
+    if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+        child="$(cat "$CHILD_PID_FILE" 2>/dev/null || true)"
+        if [ -n "$child" ] && kill -0 "$child" 2>/dev/null; then
+            echo "RelayProxy Router supervised and running (supervisor $pid, child $child)"
+        else
+            echo "RelayProxy Router supervisor running (pid $pid); child restarting or waiting"
         fi
+        return 0
     fi
     echo "RelayProxy Router stopped"
     return 1
@@ -86,5 +121,6 @@ case "${1:-}" in
     stop) stop ;;
     restart) stop; start ;;
     status) status ;;
+    watch) watch ;;
     *) echo "Usage: $0 {start|stop|restart|status}" >&2; exit 2 ;;
 esac

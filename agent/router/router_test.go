@@ -12,12 +12,12 @@ func TestCapabilitiesAreExitOnlyAndStreamUDP(t *testing.T) {
 		t.Fatalf("requested capabilities = %v, want only %q", requested, protocol.CapabilityProxyExit)
 	}
 	want := map[string]bool{
-		"tcp":                            true,
-		"quic":                           true,
-		"tls":                            true,
-		protocol.UDPModeStream:           true,
-		protocol.CapabilityTargetACL:     true,
-		protocol.CapabilityExitSystemDNS: true,
+		"tcp":                                 true,
+		"quic":                                true,
+		"tls":                                 true,
+		protocol.UDPModeStream:                true,
+		protocol.CapabilityTargetACL:          true,
+		protocol.CapabilityExitSystemDNS:      true,
 		protocol.CapabilityProxyP2P:           true,
 		protocol.CapabilityProxyP2PStreamOnly: true,
 	}

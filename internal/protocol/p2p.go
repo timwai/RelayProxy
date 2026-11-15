@@ -20,7 +20,7 @@ const (
 	// CapabilityProxyP2PStreamOnly marks exits that use QUIC streams but do not
 	// implement the native QUIC datagram data plane.
 	CapabilityProxyP2PStreamOnly = "proxy_p2p_stream_only_v1"
-	CapabilitySpeedTest        = "speed_test_v1"
+	CapabilitySpeedTest          = "speed_test_v1"
 
 	P2PControlConnectRequest  = "connect_request"
 	P2PControlConnectOffer    = "connect_offer"

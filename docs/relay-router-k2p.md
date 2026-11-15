@@ -183,6 +183,44 @@ Next: obtain samples 7–11 and record concurrent TCP/UDP transfer throughput,
 per-core CPU if available, and softirq. Repeat at several concurrent stream
 counts before setting a production concurrency limit.
 
+## K2P completed 12-sample forwarding observation — 2026-11-15
+
+User supplied all 12 samples at roughly 10-second intervals (about 112 seconds).
+
+| Sample | VmRSS (kB) | Router CPU | System idle | Load average (1m) |
+|---:|---:|---:|---:|---:|
+| 0 | 20,024 | 0.0% | 100.0% | 0.13 |
+| 1 | 20,024 | 0.0% | 100.0% | 0.11 |
+| 2 | 19,612 | 25.2% | 72.9% | 0.33 |
+| 3 | 19,568 | 25.4% | 70.8% | 0.58 |
+| 4 | 19,568 | 29.3% | 66.6% | 0.87 |
+| 5 | 19,568 | 0.0% | 100.0% | 0.74 |
+| 6 | 19,568 | 1.1% | 97.7% | 0.63 |
+| 7 | 20,076 | 27.5% | 68.7% | 0.92 |
+| 8 | 20,076 | 25.2% | 70.8% | 1.08 |
+| 9 | 20,076 | 25.2% | 72.9% | 1.45 |
+| 10 | 20,076 | 24.9% | 68.7% | 1.69 |
+| 11 | 20,076 | 31.2% | 64.5% | 1.73 |
+
+VmHWM stayed at 22,364 kB throughout; thread count stayed at 10. RSS ranged
+from 19,568 to 20,076 kB during the later samples (overall samples: 19,568–
+20,076 kB, with a 19,612 kB observation also reported); no monotonic growth
+was observed. CPU fell to 0–1.1% in samples 5–6, then rose to 24.9–31.2% in
+samples 7–11. System idle remained 64.5–72.9% during those active samples;
+softirq peaked at 6.2% in sample 11.
+
+Interpretation: the process has a stable resident-memory footprint in this
+short observation and CPU utilization is measurable but the system was not
+fully CPU-saturated in the shown samples. Load average reached 1.73, which
+should be treated as a trend to watch, not a direct CPU-saturation metric.
+The test does not include throughput, exact active connection count, traffic
+direction, or a confirmed workload profile, so it is not a throughput or
+64-concurrent-stream acceptance result.
+
+Next acceptance: record measured TCP throughput (single and parallel), UDP
+throughput/latency, exact concurrent stream count, and per-core CPU under a
+repeatable load. Then test WAN loss/recovery and a router reboot.
+
 ## Current limitations / next gates
 
 1. Run the MIPSLE cross-compile workflow and inspect the binary size.

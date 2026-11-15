@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"relayproxy/agent/exit"
+	proxyp2p "relayproxy/agent/p2p"
 	"relayproxy/internal/acl"
 	"relayproxy/internal/deviceidentity"
 	"relayproxy/internal/protocol"
@@ -32,6 +33,7 @@ type Config struct {
 	TLSRootCAs     *x509.CertPool
 	ConnectTimeout time.Duration
 	MaxConnections int
+	P2PUPnPAllowed bool // Explicit local opt-in for temporary UPnP UDP mapping
 }
 
 type Router struct {
@@ -84,11 +86,21 @@ func New(cfg Config) (*Router, error) {
 	return &Router{cfg: cfg, handler: handler}, nil
 }
 
+// containsCapability checks the server-negotiated transport feature set.
+func containsCapability(values []string, wanted string) bool {
+	for _, value := range values {
+		if value == wanted {
+			return true
+		}
+	}
+	return false
+}
+
 // Capabilities returns the deliberately small Router protocol profile.
 func Capabilities() (requested, transport []string) {
 	return []string{protocol.CapabilityProxyExit}, []string{
-		"tcp", "tls", protocol.UDPModeStream,
-		protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS,
+		"tcp", "quic", "tls", protocol.UDPModeStream,
+		protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS, protocol.CapabilityProxyP2P,
 	}
 }
 
@@ -134,7 +146,12 @@ func (r *Router) Run(ctx context.Context) error {
 	}
 }
 
-func (r *Router) Close() error { return nil }
+func (r *Router) Close() error {
+	if r == nil || r.handler == nil {
+		return nil
+	}
+	return r.handler.Close()
+}
 
 func (r *Router) serveSession(parent context.Context, sess tunnel.TunnelSession) error {
 	ctx, cancel := context.WithCancel(parent)
@@ -211,6 +228,30 @@ func (r *Router) serveSession(parent context.Context, sess tunnel.TunnelSession)
 	if accepted.MaxConnections > 0 && accepted.MaxConnections < maxStreams {
 		maxStreams = accepted.MaxConnections
 	}
+	var p2pManager *proxyp2p.Manager
+	if allowExit && containsCapability(accepted.TransportCapabilities, protocol.CapabilityProxyP2P) {
+		lease := time.Duration(accepted.P2PLeaseSec) * time.Second
+		if lease <= 0 {
+			lease = 60 * time.Second
+		}
+		upnpEnabled := accepted.P2PUPnPEnabled && r.cfg.P2PUPnPAllowed
+		p2pManager = proxyp2p.NewQUICManagerWithOptions(ctx, func(controlCtx context.Context, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+			return r.sendP2PControlRequest(controlCtx, sess, message)
+		}, accepted.P2PRendezvousAddress, lease, proxyp2p.QUICManagerOptions{
+			PunchTimeout:            5 * time.Second,
+			KeepAlive:               10 * time.Second,
+			IdleTimeout:             120 * time.Second,
+			MaxExitSessions:         4,
+			PortStart:               accepted.P2PPortStart,
+			PortEnd:                 accepted.P2PPortEnd,
+			UPnPEnabled:             upnpEnabled,
+			BrutalUploadBPS:         accepted.BrutalUploadBPS,
+			BrutalDownloadBPS:       accepted.BrutalDownloadBPS,
+		})
+		log.Printf("[Router] P2P exit enabled rendezvous=%q udp_ports=%d-%d upnp=%v", accepted.P2PRendezvousAddress, accepted.P2PPortStart, accepted.P2PPortEnd, upnpEnabled)
+	} else if allowExit {
+		log.Printf("[Router] P2P direct path not negotiated by the server; Relay fallback remains available")
+	}
 	if accepted.HeartbeatSec <= 0 {
 		accepted.HeartbeatSec = 15
 	}
@@ -220,13 +261,20 @@ func (r *Router) serveSession(parent context.Context, sess tunnel.TunnelSession)
 	loops.Add(2)
 	go func() {
 		defer loops.Done()
-		if err := r.acceptStreams(ctx, sess, maxStreams, allowExit, &workers); err != nil && ctx.Err() == nil {
+		if err := r.acceptStreams(ctx, sess, maxStreams, allowExit, p2pManager, &workers); err != nil && ctx.Err() == nil {
 			select {
 			case loopErrors <- err:
 			default:
 			}
 		}
 	}()
+	if p2pManager != nil {
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			r.serveProxyP2PExit(ctx, p2pManager, maxStreams)
+		}()
+	}
 	go func() {
 		defer loops.Done()
 		if err := r.heartbeat(ctx, ctrl, sess, time.Duration(accepted.HeartbeatSec)*time.Second); err != nil && ctx.Err() == nil {
@@ -244,6 +292,9 @@ func (r *Router) serveSession(parent context.Context, sess tunnel.TunnelSession)
 	case result = <-loopErrors:
 	}
 	cancel()
+	if p2pManager != nil {
+		_ = p2pManager.Close()
+	}
 	_ = sess.Close()
 	_ = ctrl.Close()
 	loops.Wait()
@@ -284,7 +335,7 @@ func (r *Router) heartbeat(ctx context.Context, ctrl tunnel.TunnelStream, sess t
 	}
 }
 
-func (r *Router) acceptStreams(ctx context.Context, sess tunnel.TunnelSession, maxStreams int, allowExit bool, workers *sync.WaitGroup) error {
+func (r *Router) acceptStreams(ctx context.Context, sess tunnel.TunnelSession, maxStreams int, allowExit bool, p2pManager *proxyp2p.Manager, workers *sync.WaitGroup) error {
 	ctx = exit.WithRelayOrigin(ctx)
 	if maxStreams <= 0 {
 		maxStreams = r.cfg.MaxConnections
@@ -310,6 +361,21 @@ func (r *Router) acceptStreams(ctx context.Context, sess tunnel.TunnelSession, m
 			_ = stream.Close()
 			continue
 		}
+		if header.Type == protocol.FrameTypeP2PControl && p2pManager != nil {
+			workers.Add(1)
+			go func() {
+				defer workers.Done()
+				defer func() { <-sem }()
+				defer stream.Close()
+				var message protocol.P2PControlMessage
+				if err := protocol.ReadJSON(stream, &message); err != nil {
+					log.Printf("[Router] invalid P2P control message: %v", err)
+					return
+				}
+				p2pManager.HandleControl(message)
+			}()
+			continue
+		}
 		if !allowExit || (header.Type != protocol.FrameTypeOpenTCP && header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeExitSystemDNS) {
 			<-sem
 			_ = stream.Close()
@@ -320,6 +386,122 @@ func (r *Router) acceptStreams(ctx context.Context, sess tunnel.TunnelSession, m
 			defer workers.Done()
 			defer func() { <-sem }()
 			r.handler.HandleRouterStreamWithHeader(ctx, stream, header)
+		}()
+	}
+}
+
+
+// sendP2PControlRequest keeps authorization and rendezvous signaling on the
+// authenticated Relay TLS session. The direct QUIC path carries data only.
+func (r *Router) sendP2PControlRequest(ctx context.Context, sess tunnel.TunnelSession, message protocol.P2PControlMessage) (protocol.P2PControlMessage, error) {
+	if sess == nil {
+		return protocol.P2PControlMessage{}, errors.New("Relay session is unavailable")
+	}
+	stream, err := sess.OpenStream(ctx)
+	if err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	defer stream.Close()
+	if deadline, ok := ctx.Deadline(); ok {
+		_ = stream.SetDeadline(deadline)
+	} else {
+		_ = stream.SetDeadline(time.Now().Add(5 * time.Second))
+	}
+	if err := protocol.WriteStreamHeader(stream, &protocol.StreamHeader{
+		Magic: protocol.MagicHeader, Version: protocol.CurrentVersion, Type: protocol.FrameTypeP2PControl,
+		RequestID: fmt.Sprintf("router_p2p_ctl_%d", time.Now().UnixNano()), ExitDeviceID: message.ExitDeviceID,
+	}); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	if err := protocol.WriteJSON(stream, message); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	var response protocol.P2PControlMessage
+	if err := protocol.ReadJSON(stream, &response); err != nil {
+		return protocol.P2PControlMessage{}, err
+	}
+	return response, nil
+}
+
+// serveProxyP2PExit consumes only authenticated, server-coordinated direct
+// sessions. The Router keeps its Relay listener active in parallel, so Client
+// routing can fall back without changing the exit or reconnecting the device.
+func (r *Router) serveProxyP2PExit(ctx context.Context, manager *proxyp2p.Manager, maxStreams int) {
+	if manager == nil || r == nil || r.handler == nil {
+		return
+	}
+	var sessions sync.WaitGroup
+	defer sessions.Wait()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case p2pSession, ok := <-manager.ReadySessions():
+			if !ok {
+				return
+			}
+			if p2pSession == nil {
+				continue
+			}
+			policy := p2pSession.RelayPolicy()
+			if policy == nil {
+				log.Printf("[Router] rejected READY P2P session=%d without server ACL policy", p2pSession.ID)
+				continue
+			}
+			direct, ready := p2pSession.Tunnel()
+			if !ready || direct == nil {
+				continue
+			}
+			clientDeviceID, exitDeviceID := p2pSession.ClientDeviceID, p2pSession.ExitDeviceID
+			sessions.Add(1)
+			go func() {
+				defer sessions.Done()
+				r.acceptProxyP2PExitSession(ctx, direct, policy, clientDeviceID, exitDeviceID, maxStreams)
+			}()
+		}
+	}
+}
+
+// acceptProxyP2PExitSession applies the same Router-only protocol profile and
+// server ACL as the Relay path. A P2P peer cannot supply or override its device
+// identities or the relay policy in an OpenTCP/OpenUDP request.
+func (r *Router) acceptProxyP2PExitSession(ctx context.Context, sess tunnel.TunnelSession, relayPolicy *acl.Policy, clientDeviceID, exitDeviceID string, maxStreams int) {
+	if r == nil || r.handler == nil || sess == nil || relayPolicy == nil || clientDeviceID == "" || exitDeviceID == "" {
+		return
+	}
+	if maxStreams <= 0 {
+		maxStreams = r.cfg.MaxConnections
+	}
+	sem := make(chan struct{}, maxStreams)
+	var workers sync.WaitGroup
+	defer workers.Wait()
+	boundCtx := exit.WithDirectP2POrigin(exit.BindRelayPolicy(ctx, relayPolicy), clientDeviceID, exitDeviceID)
+	for {
+		stream, err := sess.AcceptStream(ctx)
+		if err != nil {
+			return
+		}
+		select {
+		case sem <- struct{}{}:
+		default:
+			_ = stream.Close()
+			continue
+		}
+		_ = stream.SetDeadline(time.Now().Add(15 * time.Second))
+		stop := tunnel.InterruptOnCancel(ctx, stream)
+		header, err := protocol.ReadStreamHeader(stream)
+		stop()
+		if err != nil || (header.Type != protocol.FrameTypeOpenTCP &&
+			header.Type != protocol.FrameTypeOpenUDP && header.Type != protocol.FrameTypeExitSystemDNS) {
+			<-sem
+			_ = stream.Close()
+			continue
+		}
+		workers.Add(1)
+		go func() {
+			defer workers.Done()
+			defer func() { <-sem }()
+			r.handler.HandleRouterStreamWithHeader(boundCtx, stream, header)
 		}()
 	}
 }

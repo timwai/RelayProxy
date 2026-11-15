@@ -48,6 +48,7 @@ func TestRouterDeviceCapabilitiesAreExitOnlyAndNoE2EE(t *testing.T) {
 		"quic",
 		protocol.CapabilityE2EEV1,
 		protocol.CapabilityProxyP2P,
+		protocol.CapabilityProxyP2PDatagram,
 		protocol.CapabilityProxyStreamResume,
 		protocol.CapabilityProxyPublicDirect,
 		protocol.UDPModeDatagram,
@@ -74,7 +75,7 @@ func TestStandardAgentCapabilitiesRemainAvailable(t *testing.T) {
 			t.Fatalf("standard Agent capabilities missing %q: %v", required, requested)
 		}
 	}
-	for _, required := range []string{"quic", protocol.CapabilityE2EEV1, protocol.UDPModeDatagram, protocol.CapabilityProxyP2P} {
+	for _, required := range []string{"quic", protocol.CapabilityE2EEV1, protocol.UDPModeDatagram, protocol.CapabilityProxyP2P, protocol.CapabilityProxyP2PDatagram} {
 		if !containsCapability(transport, required) {
 			t.Fatalf("standard Agent transport capabilities missing %q: %v", required, transport)
 		}

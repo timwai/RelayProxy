@@ -27,9 +27,10 @@ func NewRouterHandler(cfg HandlerConfig) *Handler {
 	}
 }
 
-// HandleRouterStreamWithHeader exposes only the Router data plane. The Router
-// protocol profile is TLS/yamux with TCP and stream-framed UDP; SecureRelay,
-// RDP, file share, browser network, and native QUIC datagrams are not accepted.
+// HandleRouterStreamWithHeader exposes only the Router data plane. The Relay
+// path uses TLS/yamux; the optional direct path uses authenticated P2P QUIC
+// streams. Both carry TCP and stream-framed UDP. SecureRelay, RDP, file share,
+// browser network, and native QUIC datagrams are not accepted.
 func (h *Handler) HandleRouterStreamWithHeader(ctx context.Context, stream tunnel.TunnelStream, header *protocol.StreamHeader) {
 	if h == nil || stream == nil || header == nil {
 		if stream != nil {

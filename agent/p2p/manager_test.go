@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/netip"
+	"slices"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -254,6 +255,8 @@ func TestLANAgentsEstablishDirectQUICWithoutRendezvous(t *testing.T) {
 	clientSession.mu.Unlock()
 	clientSession.setPeer([]protocol.P2PCandidate{chosenExit}, exitFP)
 	exitSession.setPeer([]protocol.P2PCandidate{chosenClient}, clientFP)
+	clientSession.setPeerCapabilities([]string{protocol.CapabilityProxyP2PDatagram, protocol.CapabilityExitSystemDNS})
+	exitSession.setPeerCapabilities([]string{protocol.CapabilityProxyP2PDatagram, protocol.CapabilityExitSystemDNS})
 	go exitSession.establish(false)
 	go clientSession.establish(true)
 	select {
@@ -288,6 +291,23 @@ func TestLANAgentsEstablishDirectQUICWithoutRendezvous(t *testing.T) {
 
 	if _, ok := exitSession.Tunnel(); !ok {
 		t.Fatal("LAN exit did not retain authenticated direct QUIC")
+	}
+}
+
+func TestPeerTunnelCapabilitiesAreServerNegotiated(t *testing.T) {
+	standard := peerTunnelCapabilities([]string{
+		protocol.CapabilityProxyP2PDatagram,
+		protocol.CapabilityProxyStreamResume,
+		protocol.CapabilityExitSystemDNS,
+	})
+	if !slices.Contains(standard, protocol.UDPModeDatagram) ||
+		!slices.Contains(standard, protocol.CapabilityProxyStreamResume) ||
+		!slices.Contains(standard, protocol.CapabilityExitSystemDNS) {
+		t.Fatalf("standard peer capabilities were not mapped: %v", standard)
+	}
+	router := peerTunnelCapabilities([]string{protocol.CapabilityExitSystemDNS})
+	if slices.Contains(router, protocol.UDPModeDatagram) {
+		t.Fatalf("stream-only Router must not enable native UDP datagrams: %v", router)
 	}
 }
 

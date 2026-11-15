@@ -41,11 +41,12 @@ func run(args []string) error {
 	dataDir := flags.String("data-dir", "/etc/storage/relayproxy", "Persistent identity directory")
 	caFile := flags.String("ca-file", "", "Additional PEM CA bundle (system roots are retained)")
 	maxConnections := flags.Int("max-connections", 64, "Maximum concurrent exit streams (1-256)")
+	p2pUPnP := flags.Bool("p2p-upnp", false, "Allow a temporary UPnP UDP mapping for P2P (opt-in)")
 	connectTimeout := flags.Duration("connect-timeout", 10*time.Second, "Relay connection timeout")
 	showVersion := flags.Bool("version", false, "Print version and exit")
 	flags.Usage = func() {
 		fmt.Fprintln(flags.Output(), "Usage: relay-router --server host[:port] --identity-id ID --name NAME [options]")
-		fmt.Fprintln(flags.Output(), "Minimal headless exit-only client. TLS 1.3 + yamux; TCP and stream-framed UDP; no E2EE.")
+		fmt.Fprintln(flags.Output(), "Minimal headless exit-only client. TLS 1.3 Relay + optional P2P UDP hole-punching/QUIC streams; stream-framed UDP; no E2EE or native UDP datagrams.")
 		flags.PrintDefaults()
 	}
 	if err := flags.Parse(args); err != nil {
@@ -99,7 +100,7 @@ func run(args []string) error {
 		ServerAddress: host, ServerName: name, TCPPort: port,
 		IdentityID: *identityID, DeviceName: *deviceName,
 		Identity: identity, TLSRootCAs: roots,
-		ConnectTimeout: *connectTimeout, MaxConnections: *maxConnections,
+		ConnectTimeout: *connectTimeout, MaxConnections: *maxConnections, P2PUPnPAllowed: *p2pUPnP,
 	})
 	if err != nil {
 		return fmt.Errorf("initialize Router: %w", err)
@@ -109,7 +110,7 @@ func run(args []string) error {
 	log.Printf("[Router] RelayProxy Router %s starting", Version)
 	log.Printf("[Router] Device: %s; identity: %s", *deviceName, *identityID)
 	log.Printf("[Router] Relay endpoint: %s:%d; TLS server name: %s", host, port, name)
-	log.Printf("[Router] Features: proxy.exit, TCP, UDP-over-stream, exit system DNS; TLS 1.3; no QUIC/P2P/E2EE")
+	log.Printf("[Router] Features: proxy.exit, TCP, UDP-over-stream, exit system DNS, P2P UDP hole-punching + QUIC streams; TLS 1.3; no E2EE/native UDP datagrams")
 	log.Printf("[Router] Local stream limit: %d", *maxConnections)
 
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)

@@ -912,11 +912,15 @@ func (s *Session) setPeerCapabilities(values []string) {
 	if s == nil {
 		return
 	}
-	caps := make([]string, 0, 1)
+	caps := make([]string, 0, 3)
+	seen := make(map[string]struct{}, 3)
 	for _, value := range values {
-		if value == protocol.CapabilityProxyStreamResume {
-			caps = append(caps, value)
-			break
+		switch value {
+		case protocol.CapabilityProxyP2PDatagram, protocol.CapabilityProxyStreamResume, protocol.CapabilityExitSystemDNS:
+			if _, exists := seen[value]; !exists {
+				caps = append(caps, value)
+				seen[value] = struct{}{}
+			}
 		}
 	}
 	s.mu.Lock()
@@ -931,6 +935,23 @@ func (s *Session) peerCapabilitiesSnapshot() []string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	return append([]string(nil), s.peerCapabilities...)
+}
+
+// peerTunnelCapabilities maps coordinator-approved peer features onto the
+// direct QUIC session. Native datagrams are deliberately opt-in: a stream-only
+// Router can still use QUIC streams without accidentally advertising UDP
+// datagram support to the Client.
+func peerTunnelCapabilities(values []string) []string {
+	caps := make([]string, 0, len(values))
+	for _, value := range values {
+		switch value {
+		case protocol.CapabilityProxyP2PDatagram:
+			caps = append(caps, protocol.UDPModeDatagram)
+		case protocol.CapabilityProxyStreamResume, protocol.CapabilityExitSystemDNS:
+			caps = append(caps, value)
+		}
+	}
+	return caps
 }
 
 func (s *Session) setRelayPolicy(policy *acl.Policy) {
@@ -1049,11 +1070,10 @@ func (s *Session) establish(clientRole bool) {
 		if brutalTxBPS > 0 {
 			tunnel.UseBrutal(direct.QUICSession, brutalTxBPS, s.manager.disableLossCompensation)
 		}
-		// Native datagrams are a property of the direct QUIC transport itself.
-		// Overlay capabilities are server-authoritative and are added without
-		// clearing the already-negotiated datagram capability.
-		caps := append([]string{protocol.UDPModeDatagram}, s.peerCapabilitiesSnapshot()...)
-		tunnel.SetPeerCapabilities(direct.QUICSession, caps)
+		// The QUIC transport can carry datagrams, but use them only when the
+		// authenticated coordinator confirms that this peer's exit profile
+		// supports the native datagram data path.
+		tunnel.SetPeerCapabilities(direct.QUICSession, peerTunnelCapabilities(s.peerCapabilitiesSnapshot()))
 	}
 
 	s.mu.Lock()

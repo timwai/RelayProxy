@@ -36,6 +36,7 @@ watch() {
             set -- --server "$RELAY_SERVER" --identity-id "$RELAY_IDENTITY_ID" --name "$RELAY_DEVICE_NAME" --data-dir "$DATA_DIR" --max-connections "${RELAY_MAX_CONNECTIONS:-64}"
             [ -z "${RELAY_SERVER_NAME:-}" ] || set -- "$@" --server-name "$RELAY_SERVER_NAME"
             [ -z "${RELAY_CA_FILE:-}" ] || set -- "$@" --ca-file "$RELAY_CA_FILE"
+            [ "${RELAY_P2P_UPNP:-0}" != "1" ] || set -- "$@" --p2p-upnp
             log "starting Router child"
             "$BIN" "$@" >>"$LOG_FILE" 2>&1 </dev/null &
             child=$!

@@ -24,7 +24,7 @@ func buildDeviceCapabilities(cfg AgentConfig, hasExit, supportsDatagrams bool) (
 		protocol.CapabilityResourceInventoryPush, protocol.CapabilityE2EEV1,
 	}
 	if cfg.IsP2PEnabled() && cfg.P2PMode != "relay_only" {
-		transport = append(transport, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume)
+		transport = append(transport, protocol.CapabilityProxyP2P, protocol.CapabilityProxyStreamResume, protocol.CapabilityProxyP2PDatagram)
 	}
 	if publicDirectAllowedForMode(cfg.P2PMode) {
 		transport = append(transport, protocol.CapabilityProxyPublicDirect)

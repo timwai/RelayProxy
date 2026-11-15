@@ -12,6 +12,10 @@ const (
 	// established P2P streams. It is effective only when the authenticated Relay
 	// confirms that both Client and Exit advertise it for the concrete P2P session.
 	CapabilityProxyStreamResume = "proxy_stream_resume_v1"
+
+	// CapabilityProxyP2PDatagram enables native UDP datagrams on authenticated P2P QUIC sessions.
+	// It is separate from relay-transport UDP support so stream-only exits can opt out.
+	CapabilityProxyP2PDatagram = "proxy_p2p_datagram_v1"
 	CapabilitySpeedTest         = "speed_test_v1"
 
 	P2PControlConnectRequest  = "connect_request"

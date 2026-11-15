@@ -12,7 +12,7 @@ import (
 func newTestDevice(id, owner string, grants ...string) *session.DeviceSession {
 	return &session.DeviceSession{
 		DeviceID: id, OwnerUserID: owner, Grants: grants,
-		Capabilities: []string{protocol.CapabilityProxyP2P},
+		Capabilities: []string{protocol.CapabilityProxyP2P, protocol.CapabilityProxyP2PDatagram, protocol.CapabilityExitSystemDNS},
 	}
 }
 
@@ -53,6 +53,10 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	if !hasCapability(ack.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
 		t.Fatalf("authenticated exit capability missing from client ack: %#v", ack.PeerCapabilities)
 	}
+	if !hasCapability(ack.PeerCapabilities, protocol.CapabilityProxyP2PDatagram) ||
+		!hasCapability(ack.PeerCapabilities, protocol.CapabilityExitSystemDNS) {
+		t.Fatalf("authenticated direct-path capabilities missing from client ack: %#v", ack.PeerCapabilities)
+	}
 	if ack.BrutalUploadBPS != 10_000_000 || ack.BrutalDownloadBPS != 50_000_000 {
 		t.Fatalf("client ack Brutal rates=%d/%d", ack.BrutalUploadBPS, ack.BrutalDownloadBPS)
 	}
@@ -86,6 +90,19 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	}
 	if !hasCapability(deliveries[1].msg.PeerCapabilities, protocol.CapabilityProxyStreamResume) {
 		t.Fatalf("authenticated exit capability missing from answer: %#v", deliveries[1].msg.PeerCapabilities)
+	}
+}
+
+func TestPeerP2PCapabilitiesRespectStreamOnlyRouterProfile(t *testing.T) {
+	router := newTestDevice("router", "owner", protocol.CapabilityProxyExit)
+	router.Capabilities = []string{protocol.CapabilityProxyP2P, protocol.CapabilityExitSystemDNS}
+	caps := peerP2PCapabilities(router)
+	if !hasCapability(caps, protocol.CapabilityExitSystemDNS) {
+		t.Fatalf("Router exit system DNS capability missing: %v", caps)
+	}
+	if hasCapability(caps, protocol.CapabilityProxyP2PDatagram) ||
+		hasCapability(caps, protocol.CapabilityProxyStreamResume) {
+		t.Fatalf("stream-only Router must not advertise native datagrams or TCP resume: %v", caps)
 	}
 }
 

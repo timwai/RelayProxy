@@ -280,15 +280,13 @@ the device identity:
 
 ```sh
 # Verify the SHA-256 from a trusted release channel before running this command.
-/ path/to/relay-router-padavan.sh upgrade /tmp/relay-router.new YOUR_64_CHAR_SHA256
-/ path/to/relay-router-padavan.sh status
+/etc/storage/relayproxy/relay-router-padavan.sh upgrade /tmp/relay-router.new YOUR_64_CHAR_SHA256
+/etc/storage/relayproxy/relay-router-padavan.sh status
 
 # Roll back to the previously installed executable if needed.
-/ path/to/relay-router-padavan.sh rollback
+/etc/storage/relayproxy/relay-router-padavan.sh rollback
 ```
 
-The actual script path should be supplied without the illustrative leading space
-shown above, for example `/etc/storage/relayproxy/relay-router-padavan.sh`.
 
 Upgrade behavior:
 - Verify the supplied SHA-256 before staging and again after copying.

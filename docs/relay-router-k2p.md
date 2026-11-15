@@ -153,6 +153,36 @@ Next acceptance run: sustained TCP transfer and concurrent UDP traffic, then
 record RSS, CPU, softirq, free/cache memory and transfer throughput during load.
 Also test WAN disconnect/reconnect and router restart before production sign-off.
 
+## K2P forwarding-load sample — 2026-11-15
+
+User supplied samples 0–6 from a planned 12-sample, 10-second interval run.
+The pasted output ends at sample 6, so this is a partial load observation, not
+a completed two-minute soak test.
+
+| Sample | VmRSS | VmHWM | Router CPU | System CPU idle |
+|---:|---:|---:|---:|---:|
+| 0 | 19,900 kB | 22,364 kB | 0.0% | 100.0% |
+| 1 | 19,900 kB | 22,364 kB | 0.0% | 100.0% |
+| 2 | 19,660 kB | 22,364 kB | 0.0% | 100.0% |
+| 3 | 20,088 kB | 22,364 kB | 29.1% | 66.6% |
+| 4 | 20,088 kB | 22,364 kB | 23.2% | 75.0% |
+| 5 | 20,088 kB | 22,364 kB | 23.2% | 75.0% |
+| 6 | 20,088 kB | 22,364 kB | 25.1% | 72.9% |
+
+Threads remained at 10 in every supplied sample. RSS stayed within 19.2–19.6 MiB
+and the high-water mark remained 22,364 kB. The Router process CPU rose to
+23.2–29.1% in samples 3–6 while forwarding load was apparently present.
+
+Interpretation: no material RSS growth is visible in these samples. CPU use is
+measurable but does not by itself establish saturation. BusyBox top's SMP CPU
+percentage must be interpreted against the four logical CPUs reported by this
+MT7621 system; throughput, per-core utilization and transfer duration are not
+included in the supplied excerpt.
+
+Next: obtain samples 7–11 and record concurrent TCP/UDP transfer throughput,
+per-core CPU if available, and softirq. Repeat at several concurrent stream
+counts before setting a production concurrency limit.
+
 ## Current limitations / next gates
 
 1. Run the MIPSLE cross-compile workflow and inspect the binary size.

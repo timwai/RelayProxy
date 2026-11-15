@@ -101,6 +101,7 @@ func Capabilities() (requested, transport []string) {
 	return []string{protocol.CapabilityProxyExit}, []string{
 		"tcp", "quic", "tls", protocol.UDPModeStream,
 		protocol.CapabilityTargetACL, protocol.CapabilityExitSystemDNS, protocol.CapabilityProxyP2P,
+		protocol.CapabilityProxyP2PStreamOnly,
 	}
 }
 

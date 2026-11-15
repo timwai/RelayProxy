@@ -93,6 +93,33 @@ func TestCoordinatorOfferAnswerFlow(t *testing.T) {
 	}
 }
 
+func TestCoordinatorRejectsLegacyClientForStreamOnlyRouter(t *testing.T) {
+	manager := session.NewManager()
+	client := newTestDevice("legacy-client", "owner", protocol.CapabilityProxyClient)
+	client.Capabilities = []string{protocol.CapabilityProxyP2P}
+	router := newTestDevice("router", "owner", protocol.CapabilityProxyExit)
+	router.Capabilities = []string{
+		protocol.CapabilityProxyP2P,
+		protocol.CapabilityProxyP2PStreamOnly,
+		protocol.CapabilityExitSystemDNS,
+	}
+	manager.Register(client)
+	manager.Register(router)
+	c := NewCoordinator(manager, func(string, string) (bool, error) { return true, nil }, time.Minute, "", 8)
+	c.send = func(*session.DeviceSession, protocol.P2PControlMessage) error {
+		t.Fatal("legacy Client must not receive a stream-only P2P offer")
+		return nil
+	}
+	response := c.connect(client, protocol.P2PControlMessage{
+		ExitDeviceID: router.DeviceID,
+		CertFingerprint: "sha256:legacy-client",
+		Candidates: []protocol.P2PCandidate{{Protocol: "udp", Type: "lan", Address: "192.0.2.10:1234"}},
+	})
+	if response.Type != protocol.P2PControlError || response.ErrorCode != "UNSUPPORTED" {
+		t.Fatalf("legacy Client was not rejected safely: %#v", response)
+	}
+}
+
 func TestPeerP2PCapabilitiesRespectStreamOnlyRouterProfile(t *testing.T) {
 	router := newTestDevice("router", "owner", protocol.CapabilityProxyExit)
 	router.Capabilities = []string{protocol.CapabilityProxyP2P, protocol.CapabilityExitSystemDNS}

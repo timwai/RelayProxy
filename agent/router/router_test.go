@@ -18,7 +18,8 @@ func TestCapabilitiesAreExitOnlyAndStreamUDP(t *testing.T) {
 		protocol.UDPModeStream:           true,
 		protocol.CapabilityTargetACL:     true,
 		protocol.CapabilityExitSystemDNS: true,
-		protocol.CapabilityProxyP2P:      true,
+		protocol.CapabilityProxyP2P:           true,
+		protocol.CapabilityProxyP2PStreamOnly: true,
 	}
 	if len(transport) != len(want) {
 		t.Fatalf("transport capabilities = %v, want %d entries", transport, len(want))
